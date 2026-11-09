@@ -1,0 +1,130 @@
+{
+  "ABOUT": {
+    "description": "",
+    "message": "Om"
+  },
+  "ACKNOWLEDGEMENTS": {
+    "description": "",
+    "message": "Tack"
+  },
+  "CONTENT": {
+    "description": "",
+    "message": "Innehåll"
+  },
+  "CONTENT_CONTRIBUTION": {
+    "description": "",
+    "message": "Kollaboratörer"
+  },
+  "CONTRIBUTE": {
+    "description": "",
+    "message": "Bidra"
+  },
+  "CONTRIBUTE_BODY": {
+    "description": "",
+    "message": "Pioneer är summan av många bidrag från spelare och utvecklare. Ser du något du vill ändra, förbättra, eller har du idéer rörande nytt innehåll? (T.ex. översättning, programmering, 2D & 3D bilder och modeller, musik, nytt stjärnsystem, förbättrad dokumentation, wiki, etc.) Följ länkarna för vidare instruktioner om hur du kan bidra!"
+  },
+  "DEVELOPER_DOCUMENTATION": {
+    "description": "",
+    "message": "Dokumentation för utvecklare"
+  },
+  "DOCUMENTATION": {
+    "description": "",
+    "message": "Dokumentation"
+  },
+  "DONATE_BODY": {
+    "description": "",
+    "message": "Om du gillar att spela Pioneer och vill bidra med din tid och flit till dess fortsatta utveckling, vänligen överväg att donera - ingen donation är för liten."
+  },
+  "DONATE_OPTIONS": {
+    "description": "Sentence continues in 'DONATE_OPTIONS_CONTINUED'",
+    "message": "För andra valmöjligheter till att donera, se vår"
+  },
+  "DONATE_OPTIONS_CONTINUED": {
+    "description": "hyperlink, ending part of sentence in 'DONATE_OPTIONS'",
+    "message": "donations sida"
+  },
+  "DONATE_THANKS": {
+    "description": "",
+    "message": "Tack till er alla för ert stöd till Pioneer!"
+  },
+  "GAME_RELEASE": {
+    "description": "",
+    "message": "Stabil version släpps årligen den 3:e februari, men utvecklingen sker fortlöpande. Modiga piloter manas därmed att spela från senaste källkoden och bug-rapportera."
+  },
+  "INFO_BLURB": {
+    "description": "",
+    "message": "Pioneer är ett single player äventyrs-rymdspel som utspelar sig i Vintergatan runt 31:a århundradet."
+  },
+  "INFO_BODY": {
+    "description": "",
+    "message": "Spelet är \"open-ended\" dvs. du är fri att utforska miljontals stjärnsystem. Du kan landa på planeter, accelerera förbi gasjättar medels deras gravitation, eller rosta dig själv genom att flyga mellan två binär-stjärnor. Du kan testa livet som en pirat, bygga en förmögenhet genom handel mellan stjärnsystem, eller utföra uppdrag åt de olika stormakternas kamp för makt och självbestämmande."
+  },
+  "LICENSE": {
+    "description": "",
+    "message": "Licens"
+  },
+  "LINK_BASIC_FLIGHT": {
+    "description": "",
+    "message": "Grundläggande flygning"
+  },
+  "LINK_BUG_TRACKER": {
+    "description": "",
+    "message": "Bug-rapportering"
+  },
+  "LINK_COMMUNITY_CHAT": {
+    "description": "",
+    "message": "Community chat (Discord)"
+  },
+  "LINK_COMMUNITY_FORUM": {
+    "description": "",
+    "message": "Community forum"
+  },
+  "LINK_DEVELOPER_CHAT": {
+    "description": "",
+    "message": "Utvecklarnas chat"
+  },
+  "LINK_DEVELOPER_FORUM": {
+    "description": "",
+    "message": "Utvecklarnas forum"
+  },
+  "LINK_FAQ": {
+    "description": "",
+    "message": "FAQ"
+  },
+  "LINK_HOMEPAGE": {
+    "description": "",
+    "message": "Hemsida"
+  },
+  "LINK_MANUAL": {
+    "description": "",
+    "message": "Manual"
+  },
+  "SOFTWARE": {
+    "description": "",
+    "message": "Mjukvara"
+  },
+  "SOFTWARE_BODY": {
+    "description": "",
+    "message": "Pioneer består av följande tredje-partsmjukvara"
+  },
+  "SUPPORT_DEVELOPMENT": {
+    "description": "",
+    "message": "Stödj utvecklingen"
+  },
+  "TRANSLATIONS": {
+    "description": "",
+    "message": "Översättningar"
+  },
+  "VERSION_CURRENT": {
+    "description": "",
+    "message": "Din nuvarande version"
+  },
+  "VERSION_LATEST": {
+    "description": "This sentence continues into string VERSION_LATEST_CONTINUED, to read 'Latest version from source', referring to the source code",
+    "message": "Senaste versionen"
+  },
+  "VERSION_LATEST_CONTINUED": {
+    "description": "is continued from string VERSION_LATEST, to read 'Latest version from source'. Here, 'source' refers to the source code",
+    "message": "källkod"
+  }
+}
