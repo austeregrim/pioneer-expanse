@@ -156,7 +156,8 @@ local unserialize = function (data)
 	loaded_data = data
 end
 
-Event.Register("onCreateBB", onCreateBB)
-Event.Register("onGameStart", onGameStart)
+-- Disabled in Pioneer: Dangerous (joke / crank donation module deactivated)
+-- Event.Register("onCreateBB", onCreateBB)
+-- Event.Register("onGameStart", onGameStart)
 
 Serializer:Register("DonateToCranks", serialize, unserialize)

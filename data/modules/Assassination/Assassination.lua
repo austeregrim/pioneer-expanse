@@ -192,7 +192,7 @@ local makeAdvert = function (station)
 		nearbysystems = MissionUtils.GetNearbyStationPaths(Game.system, max_ass_dist)
 	end
 	if #nearbysystems == 0 then return end
-	local client = Character.New()
+	local client = Character.New({ role = "syndicate", title = "Covert Operations Broker" })
 	local target = Character.New({title = l["TITLE_"..Engine.rand:Integer(1, num_titles)-1]})
 	local flavour = Engine.rand:Integer(1, #flavours)
 	local location = nearbysystems[Engine.rand:Integer(1,#nearbysystems)]

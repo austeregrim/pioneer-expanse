@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bgGrad" cx="50%" cy="45%" r="60%">
+      <stop offset="0%" stop-color="#142438" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#080e17" stop-opacity="1"/>
+    </radialGradient>
+    <linearGradient id="blueGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00d2ff"/>
+      <stop offset="100%" stop-color="#3a7bd5"/>
+    </linearGradient>
+    <linearGradient id="whiteGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#a8b8c8"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="512" height="512" fill="url(#bgGrad)"/>
+
+  <!-- Omni-Product Lattice Inc. (OPLI) Interlocking Hex Lattice -->
+  <polygon points="256,56 408,144 408,320 256,408 104,320 104,144" fill="#0b1522" stroke="url(#blueGrad)" stroke-width="5"/>
+
+  <!-- Lattice Grid Lines -->
+  <line x1="256" y1="56" x2="256" y2="408" stroke="#00d2ff" stroke-width="2.5" stroke-opacity="0.5"/>
+  <line x1="104" y1="144" x2="408" y2="320" stroke="#00d2ff" stroke-width="2.5" stroke-opacity="0.5"/>
+  <line x1="408" y1="144" x2="104" y2="320" stroke="#00d2ff" stroke-width="2.5" stroke-opacity="0.5"/>
+
+  <!-- Inner Isometric Cube / Lattice Nodes -->
+  <polygon points="256,120 352,176 352,288 256,344 160,288 160,176" fill="none" stroke="url(#whiteGrad)" stroke-width="6"/>
+  <polygon points="256,164 314,198 314,266 256,300 198,266 198,198" fill="url(#blueGrad)"/>
+  <circle cx="256" cy="120" r="9" fill="#ffffff"/>
+  <circle cx="352" cy="176" r="9" fill="#ffffff"/>
+  <circle cx="352" cy="288" r="9" fill="#ffffff"/>
+  <circle cx="256" cy="344" r="9" fill="#ffffff"/>
+  <circle cx="160" cy="288" r="9" fill="#ffffff"/>
+  <circle cx="160" cy="176" r="9" fill="#ffffff"/>
+  <circle cx="256" cy="232" r="18" fill="#0b1522" stroke="#ffffff" stroke-width="4"/>
+</svg>
+

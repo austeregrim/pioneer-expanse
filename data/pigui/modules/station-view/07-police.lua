@@ -18,7 +18,7 @@ local l = Lang.GetResource("ui-core")
 
 local ModalWindow = require 'pigui.libs.modal-win'
 
-local rescaleVector = ui.rescaleUI(Vector2(1, 1), Vector2(1600, 900), true)
+local rescaleVector = ui.rescaleUI(Vector2(1, 1), Vector2(1920, 1080), true)
 
 local pionillium = ui.fonts.pionillium
 local orbiteer = ui.fonts.orbiteer
@@ -44,14 +44,14 @@ local popup = ModalWindow.New('policePopup', function(self)
 end)
 
 local widgetSizes = ui.rescaleUI({
-	itemSpacing = Vector2(4, 9),
-	faceSize = Vector2(586,565),
-	crimeRecordColumnWidth = 55,
-	buttonSize = Vector2(100,0),
-	dummySpaceSmall = Vector2(0, 10),
-	dummySpaceMedium = Vector2(0, 50),
-	tablePadding = Vector2(12, 4)
-}, Vector2(1600, 900))
+	itemSpacing = Vector2(4, 7),
+	faceSize = Vector2(460, 440),
+	crimeRecordColumnWidth = 50,
+	buttonSize = Vector2(90, 0),
+	dummySpaceSmall = Vector2(0, 8),
+	dummySpaceMedium = Vector2(0, 36),
+	tablePadding = Vector2(10, 3)
+}, Vector2(1920, 1080))
 
 
 local function payfine(fine)

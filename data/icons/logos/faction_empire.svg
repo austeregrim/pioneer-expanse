@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bgGrad" cx="50%" cy="45%" r="60%">
+      <stop offset="0%" stop-color="#22182e" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#0c0812" stop-opacity="1"/>
+    </radialGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffeaa7"/>
+      <stop offset="50%" stop-color="#e1b12c"/>
+      <stop offset="100%" stop-color="#8c640c"/>
+    </linearGradient>
+    <linearGradient id="silverGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#95a5a6"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="512" height="512" fill="url(#bgGrad)"/>
+
+  <!-- Imperial / Sovereign Outer Ring -->
+  <circle cx="256" cy="232" r="178" fill="#120d1a" stroke="url(#goldGrad)" stroke-width="5"/>
+  <circle cx="256" cy="232" r="160" fill="none" stroke="url(#silverGrad)" stroke-width="2" stroke-opacity="0.6"/>
+
+  <!-- Imperial Aquila / Swept Sovereign Wings -->
+  <polygon points="78,168 220,204 204,244 96,216" fill="url(#goldGrad)"/>
+  <polygon points="434,168 292,204 308,244 416,216" fill="url(#goldGrad)"/>
+  <polygon points="96,228 216,252 200,286 118,268" fill="url(#silverGrad)"/>
+  <polygon points="416,228 296,252 312,286 394,268" fill="url(#silverGrad)"/>
+
+  <!-- Central Crown & Scepter Spire -->
+  <polygon points="256,76 286,232 256,388 226,232" fill="url(#goldGrad)"/>
+  <polygon points="204,148 232,184 256,132 280,184 308,148 292,216 220,216" fill="#ffffff"/>
+</svg>
+

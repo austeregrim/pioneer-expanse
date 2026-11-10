@@ -240,26 +240,31 @@ void SectorView::Draw3D()
 	float currentStarSize;
 	GetPlayerPosAndStarSize(playerPos, currentStarSize);
 
-	// player location indicator
-	matrix4x4f trans = modelview * matrix4x4f::Translation(playerPos);
-	// prior to modelview transformation, rotate in the opposite direction so
-	// that the billboard is always facing the camera
-	matrix4x4f rot = modelview;
-	rot.ClearToRotOnly();
-	rot = rot.Inverse();
-	// move this disk 0.03 light years further so that it does not overlap the star, and selected indicator and hyperspace target indicator
-	m_map->AddStarBillboard(trans * rot, vector3f(0.f, 0.f, -0.03f), Color(0, 0, 204), 1.5f);
+	const vector3f selectedPos = m_map->GetSystemPosition(m_selected);
+	m_map->SetMacroMarkers(playerPos, selectedPos, true);
 
-	// selected indicator
-	trans = modelview * matrix4x4f::Translation(m_map->GetSystemPosition(m_selected));
-	// move this disk 0.01 light years further so that it does not overlap the star
-	m_map->AddStarBillboard(trans * rot, vector3f(0.f, 0.f, -0.01), Color(0, 204, 0), 1.0);
+	if (m_map->GetMacroAlpha() < 0.85f) {
+		// player location indicator
+		matrix4x4f trans = modelview * matrix4x4f::Translation(playerPos);
+		// prior to modelview transformation, rotate in the opposite direction so
+		// that the billboard is always facing the camera
+		matrix4x4f rot = modelview;
+		rot.ClearToRotOnly();
+		rot = rot.Inverse();
+		// move this disk 0.03 light years further so that it does not overlap the star, and selected indicator and hyperspace target indicator
+		m_map->AddStarBillboard(trans * rot, vector3f(0.f, 0.f, -0.03f), Color(0, 0, 204), 1.5f);
 
-	// hyperspace target indicator
-	if (m_hyperspaceTarget != m_selected && (!m_inSystem || m_hyperspaceTarget != m_current)) {
-		trans = modelview * matrix4x4f::Translation(m_map->GetSystemPosition(m_hyperspaceTarget));
-		// move this disk 0.02 light years further so that it does not overlap the star, and selected indicator
-		m_map->AddStarBillboard(trans * rot, vector3f(0.f, 0.f, -0.02), Color(77, 77, 77), 1.0);
+		// selected indicator
+		trans = modelview * matrix4x4f::Translation(selectedPos);
+		// move this disk 0.01 light years further so that it does not overlap the star
+		m_map->AddStarBillboard(trans * rot, vector3f(0.f, 0.f, -0.01), Color(0, 204, 0), 1.0);
+
+		// hyperspace target indicator
+		if (m_hyperspaceTarget != m_selected && (!m_inSystem || m_hyperspaceTarget != m_current)) {
+			trans = modelview * matrix4x4f::Translation(m_map->GetSystemPosition(m_hyperspaceTarget));
+			// move this disk 0.02 light years further so that it does not overlap the star, and selected indicator
+			m_map->AddStarBillboard(trans * rot, vector3f(0.f, 0.f, -0.02), Color(77, 77, 77), 1.0);
+		}
 	}
 
 	// all the lines
@@ -636,7 +641,7 @@ void SectorView::Update()
 		m_current = m_game.GetHyperspaceSource();
 	}
 
-	if (m_automaticSystemSelection && m_map->IsManualMove()) {
+	if (m_automaticSystemSelection && m_map->IsManualMove() && m_map->GetMacroAlpha() < 0.5f) {
 		SystemPath new_selected = m_map->NearestSystemToPos(m_map->GetPosition());
 		if (new_selected.IsSystemPath() && !m_selected.IsSameSystem(new_selected)) {
 			RefCountedPtr<StarSystem> system = m_game.GetGalaxy()->GetStarSystem(new_selected);

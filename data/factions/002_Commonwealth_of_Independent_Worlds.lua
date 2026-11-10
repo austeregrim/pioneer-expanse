@@ -3,7 +3,7 @@
 
 local f = Faction:new('Commonwealth of Independent Worlds')
 	:description_short('Socially democratic grouping of independent Star Systems')
-	:description('Socially democratic grouping of independent Star Systems, I dunno, added them because they seem hard coded into the politics.')
+	:description('A democratic confederation of frontier and core worlds founded on mutual defense and open interstellar commerce.')
 	:homeworld(1,-1,-1,0,3)
 	:foundingDate(3125)
 	:expansionRate(1)

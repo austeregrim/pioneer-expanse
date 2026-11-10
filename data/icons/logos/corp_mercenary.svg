@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bgGrad" cx="50%" cy="45%" r="60%">
+      <stop offset="0%" stop-color="#281418" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#0e080a" stop-opacity="1"/>
+    </radialGradient>
+    <linearGradient id="redGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ff5252"/>
+      <stop offset="100%" stop-color="#8b1414"/>
+    </linearGradient>
+    <linearGradient id="bladeGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#f0f4f8"/>
+      <stop offset="100%" stop-color="#7c8896"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="512" height="512" fill="url(#bgGrad)"/>
+
+  <!-- Tactical Kite Shield -->
+  <polygon points="256,56 392,110 356,310 256,412 156,310 120,110" fill="#140b0e" stroke="url(#redGrad)" stroke-width="5"/>
+  <polygon points="256,78 368,124 338,298 256,386 174,298 144,124" fill="none" stroke="#7c8896" stroke-width="2" stroke-opacity="0.6"/>
+
+  <!-- Targeting Reticle Ring -->
+  <circle cx="256" cy="224" r="92" fill="none" stroke="url(#redGrad)" stroke-width="3"/>
+
+  <!-- Twin Crossed Tactical Blades / Spears -->
+  <polygon points="152,116 176,116 360,324 336,324" fill="url(#bladeGrad)"/>
+  <polygon points="360,116 336,116 152,324 176,324" fill="url(#bladeGrad)"/>
+
+  <!-- Central Vanguard Skull/Star Crest -->
+  <polygon points="256,122 292,224 256,342 220,224" fill="url(#redGrad)" stroke="#f0f4f8" stroke-width="2.5"/>
+  <polygon points="200,204 256,184 312,204 256,244" fill="#f0f4f8"/>
+</svg>
+

@@ -19,9 +19,9 @@ local styles = ui.theme.styles
 local Vector2 = _G.Vector2
 
 local style = ui.rescaleUI {
-	iconSize = Vector2(24,24),
-	bodyIconSize = Vector2(18,18),
-	buttonSize = Vector2(32,32)
+	iconSize = Vector2(18,18),
+	bodyIconSize = Vector2(14,14),
+	buttonSize = Vector2(24,24)
 }
 
 -- Reusable widget to list the static contents of a system.

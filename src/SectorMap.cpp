@@ -13,9 +13,11 @@
 #include "galaxy/Sector.h"
 #include "galaxy/Galaxy.h"
 #include "GameConfig.h"
+#include "Random.h"
 #include "graphics/Material.h"
 #include "graphics/RenderState.h"
 #include "graphics/Renderer.h"
+#include "graphics/TextureBuilder.h"
 #include "matrix3x3.h"
 #include "matrix4x4.h"
 #include "vector3.h"
@@ -34,7 +36,11 @@ static const int DRAW_RAD = 5;
 #define OUTER_RADIUS (Sector::SIZE * float(DRAW_RAD))
 static const float FAR_THRESHOLD = 7.5f;
 static const float FAR_LIMIT = 36.f;
-static const float FAR_MAX = 46.f;
+static const float FAR_MAX = 14000.f;
+static const float ZOOM_VORONOI_START = 9.0f;
+static const float ZOOM_VORONOI_FULL = 20.0f;
+static const float ZOOM_MACRO_START = 22.0f;
+static const float ZOOM_MACRO_FULL = 65.0f;
 
 class SectorMap::Label {
 public:
@@ -254,6 +260,84 @@ public:
 		if (!factionHomeFont) factionHomeFont = ImGui::GetFont();
 		factionNameFont = host.map.GetContext().pigui->GetFont(fontName);
 		if (!factionNameFont) factionNameFont = ImGui::GetFont();
+	}
+};
+
+class SectorMap::MacroMarkerLabel : public SectorMap::Label {
+	std::string title;
+	std::string subtitle;
+	float radius;
+	vector3f worldPosLy;
+	const Faction *faction;
+	ImRect hoverBox;
+
+public:
+	MacroMarkerLabel(Labels &host, const vector3f &screenPos, const Color &color_, const std::string &title_, const std::string &subtitle_, float radius_, const vector3f &worldPosLy_, const Faction *faction_ = nullptr) :
+		Label(host, screenPos, IM_COL32(color_.r, color_.g, color_.b, color_.a)),
+		title(title_),
+		subtitle(subtitle_),
+		radius(radius_),
+		worldPosLy(worldPosLy_),
+		faction(faction_)
+	{}
+
+	bool Hovered(const ImVec2 &p) override
+	{
+		ImFont *font = host.starLabelFont ? host.starLabelFont : ImGui::GetFont();
+		float fsize = float(host.fontSize);
+		ImVec2 ts1 = font->CalcTextSizeA(fsize, FLT_MAX, -1.0f, title.c_str());
+		ImVec2 ts2 = subtitle.empty() ? ImVec2(0, 0) : font->CalcTextSizeA(fsize * 0.85f, FLT_MAX, -1.0f, subtitle.c_str());
+		float boxW = std::max(ts1.x, ts2.x) + 12.0f;
+		float boxH = ts1.y + (subtitle.empty() ? 0.0f : ts2.y + 2.0f) + 6.0f;
+		ImVec2 boxMin(pos.x + radius + 6.0f, pos.y - boxH * 0.5f);
+		ImVec2 boxMax(boxMin.x + boxW, boxMin.y + boxH);
+		hoverBox = ImRect(boxMin, boxMax);
+
+		if (indiamond(ImVec2(pos.x, pos.y), radius + 4.0f, p) || inbox(hoverBox, p)) {
+			return true;
+		}
+		return false;
+	}
+
+	void Draw(ImDrawList &dl, bool hovered = false) override
+	{
+		ImFont *font = host.starLabelFont ? host.starLabelFont : ImGui::GetFont();
+		float fsize = float(host.fontSize);
+		ImVec2 ts1 = font->CalcTextSizeA(fsize, FLT_MAX, -1.0f, title.c_str());
+		ImVec2 ts2 = subtitle.empty() ? ImVec2(0, 0) : font->CalcTextSizeA(fsize * 0.85f, FLT_MAX, -1.0f, subtitle.c_str());
+		float boxW = std::max(ts1.x, ts2.x) + 12.0f;
+		float boxH = ts1.y + (subtitle.empty() ? 0.0f : ts2.y + 2.0f) + 6.0f;
+		ImVec2 boxMin(pos.x + radius + 6.0f, pos.y - boxH * 0.5f);
+		ImVec2 boxMax(boxMin.x + boxW, boxMin.y + boxH);
+
+		const float x = pos.x;
+		const float y = pos.y;
+		ImVec2 pts[] = {
+			{ x, y - radius },
+			{ x + radius, y },
+			{ x, y + radius },
+			{ x - radius, y }
+		};
+		dl.AddQuad(pts[0], pts[1], pts[2], pts[3], color, hovered ? 2.5f : 1.5f);
+		dl.AddCircleFilled(ImVec2(x, y), hovered ? 3.5f : 2.5f, color);
+
+		ImU32 bgCol = hovered ? IM_COL32(30, 65, 95, 230) : IM_COL32(10, 18, 28, 195);
+		dl.AddRectFilled(boxMin, boxMax, bgCol, 3.0f);
+		dl.AddRect(boxMin, boxMax, color, 3.0f, 0, hovered ? 2.0f : 1.0f);
+
+		dl.AddText(font, fsize, ImVec2(boxMin.x + 6.0f, boxMin.y + 3.0f), color, title.c_str());
+		if (!subtitle.empty()) {
+			ImU32 subCol = IM_COL32(190, 210, 225, (color >> IM_COL32_A_SHIFT) & 0xFF);
+			dl.AddText(font, fsize * 0.85f, ImVec2(boxMin.x + 6.0f, boxMin.y + 3.0f + ts1.y + 1.0f), subCol, subtitle.c_str());
+		}
+	}
+
+	void OnClick() override
+	{
+		if (faction) {
+			host.map.SetSelectedFaction(faction);
+		}
+		host.map.GotoPositionLy(worldPosLy);
 	}
 };
 
@@ -518,8 +602,11 @@ void SectorMap::InitObject()
 	m_lineVerts.reset(new Graphics::VertexArray(Graphics::ATTRIB_POSITION, 500));
 	m_customLineVerts.reset(new Graphics::VertexArray(Graphics::ATTRIB_POSITION, 500));
 	m_secLineVerts.reset(new Graphics::VertexArray(Graphics::ATTRIB_POSITION, 500));
+	m_macroLineVerts.reset(new Graphics::VertexArray(Graphics::ATTRIB_POSITION, 2000));
 	m_starVerts.reset(new Graphics::VertexArray(
 		Graphics::ATTRIB_POSITION | Graphics::ATTRIB_DIFFUSE | Graphics::ATTRIB_UV0, 500));
+	m_galaxyDiscVerts.reset(new Graphics::VertexArray(
+		Graphics::ATTRIB_POSITION | Graphics::ATTRIB_DIFFUSE | Graphics::ATTRIB_UV0, 24));
 
 	Graphics::RenderStateDesc rsd{};
 	rsd.blendMode = Graphics::BLEND_ALPHA;
@@ -535,6 +622,19 @@ void SectorMap::InitObject()
 	Graphics::MaterialDescriptor starPointDesc;
 	starPointDesc.vertexColors = true;
 	m_farStarsMat.Reset(m_context.renderer->CreateMaterial("unlit", starPointDesc, rsd, m_farstarsPoints.GetVertexFormat()));
+
+	Graphics::RenderStateDesc discRsd{};
+	discRsd.blendMode = Graphics::BLEND_ALPHA_ONE;
+	discRsd.depthWrite = false;
+	discRsd.depthTest = true;
+	discRsd.cullMode = CULL_NONE;
+	Graphics::MaterialDescriptor discMatDesc;
+	discMatDesc.textures = 1;
+	discMatDesc.vertexColors = true;
+	auto discVfmt = Graphics::VertexFormatDesc::FromAttribSet(m_galaxyDiscVerts->GetAttributeSet());
+	m_galaxyDiscMat.Reset(m_context.renderer->CreateMaterial("unlit", discMatDesc, discRsd, discVfmt));
+	Graphics::Texture *galTex = Graphics::TextureBuilder::Billboard("galaxy_colour.png").GetOrCreateTexture(m_context.renderer, "billboard");
+	m_galaxyDiscMat->SetTexture("texture0"_hash, galTex);
 
 	rsd.primitiveType = Graphics::LINE_SINGLE;
 
@@ -581,10 +681,14 @@ void SectorMap::Draw3D()
 
 	float aspect = m_size.x / m_size.y;
 
-	if (m_zoomClamped <= FAR_THRESHOLD)
+	const float camDist = 10.f + 10.f * m_zoom;
+	if (m_zoom <= FAR_THRESHOLD) {
 		renderer->SetPerspectiveProjection(40.f, aspect, 1.f, 300.f);
-	else
-		renderer->SetPerspectiveProjection(40.f, aspect, 1.f, 600.f);
+	} else {
+		const float nearClip = std::max(1.f, camDist * 0.005f);
+		const float farClip = std::max(600.f, camDist * 4.5f + 150000.f);
+		renderer->SetPerspectiveProjection(40.f, aspect, nearClip, farClip);
+	}
 
 	renderer->ClearScreen();
 
@@ -598,16 +702,22 @@ void SectorMap::Draw3D()
 	sectorTrans.Translate(-FFRAC(m_pos.x) * Sector::SIZE, -FFRAC(m_pos.y) * Sector::SIZE, -FFRAC(m_pos.z) * Sector::SIZE);
 	renderer->SetTransform(sectorTrans);
 
-	if (m_zoomClamped <= FAR_THRESHOLD)
-		DrawNearSectors(sectorTrans);
-	else
-		DrawFarSectors(sectorTrans);
+	if (m_macroAlpha < 0.99f) {
+		if (m_zoomClamped <= FAR_THRESHOLD)
+			DrawNearSectors(sectorTrans);
+		else
+			DrawFarSectors(sectorTrans);
+	}
 
 	modelview.Translate(-m_pos * Sector::SIZE);
 
+	if (m_voronoiAlpha > 0.01f || m_macroAlpha > 0.01f) {
+		DrawMacroGalaxy(modelview);
+	}
+
 	//draw custom line verts in one go
 	renderer->SetTransform(modelview);
-	if (!m_customLineVerts->IsEmpty()) {
+	if (!m_customLineVerts->IsEmpty() && m_macroAlpha < 0.95f) {
 		if(m_updateCustomLines) {
 			m_customlines.SetData(m_customLineVerts->GetNumVerts(), &m_customLineVerts->position[0], &m_customLineVerts->diffuse[0]);
 			m_updateCustomLines = false;
@@ -619,24 +729,27 @@ void SectorMap::Draw3D()
 
 	//draw star billboards in one go
 	renderer->SetAmbientColor(Color(30, 30, 30));
-	renderer->DrawBuffer(m_starVerts.get(), m_starMaterial.Get());
-	m_starVerts->Clear();
+	if (!m_starVerts->IsEmpty()) {
+		renderer->DrawBuffer(m_starVerts.get(), m_starMaterial.Get());
+		m_starVerts->Clear();
+	}
 
 	//draw sector legs in one go
-	if (!m_lineVerts->IsEmpty()) {
+	if (!m_lineVerts->IsEmpty() && m_macroAlpha < 0.95f) {
 		m_lines.SetData(m_lineVerts->GetNumVerts(), &m_lineVerts->position[0], &m_lineVerts->diffuse[0]);
 		m_lines.Draw(renderer, m_lineMat.Get());
 	}
 
-	if (!m_secLineVerts->IsEmpty()) {
+	if (!m_secLineVerts->IsEmpty() && m_macroAlpha < 0.95f) {
 		m_sectorlines.SetData(m_secLineVerts->GetNumVerts(), &m_secLineVerts->position[0], &m_secLineVerts->diffuse[0]);
 		m_sectorlines.Draw(renderer, m_lineMat.Get());
 	}
 
-	if (!m_sphereParams.empty()) {
+	if (!m_sphereParams.empty() && m_macroAlpha < 0.85f) {
 		for (const auto& s : m_sphereParams) {
 			m_context.renderer->SetTransform(s.trans);
 			m_fresnelMat->diffuse = s.color;
+			m_fresnelMat->diffuse.a = Uint8(float(s.color.a) * (1.0f - m_macroAlpha));
 			m_sphere->Draw(m_context.renderer, m_fresnelMat.Get());
 		}
 	}
@@ -747,6 +860,9 @@ void SectorMap::DrawLabelsInternal(bool interactive, const ImVec2 &imagePos)
 				}
 				break;
 			}
+		}
+		if (hovered_i == NOT_FOUND && !m_rotateWithMouseButton && m_voronoiAlpha > 0.1f && m_context.input->IsMouseButtonReleased(SDL_BUTTON_LEFT)) {
+			HandleMacroClick(mpos);
 		}
 	}
 
@@ -970,7 +1086,8 @@ void SectorMap::DrawNearSector(const int sx, const int sy, const int sz, const m
 		// don't worry about looking for inhabited systems if they're
 		// unexplored (same calculation as in StarSystem.cpp) or we've
 		// already retrieved their population.
-		if (i->GetPopulation() < 0 && isqrt(1 + sx * sx + sy * sy + sz * sz) <= 90) {
+		const int64_t distSqSec = int64_t(sx) * sx + int64_t(sy) * sy + int64_t(sz) * sz;
+		if (i->GetPopulation() < 0 && distSqSec <= 90 * 90) {
 
 			// only do this once we've pretty much stopped moving.
 			vector3f diff = vector3f(
@@ -1032,13 +1149,13 @@ void SectorMap::DrawNearSector(const int sx, const int sy, const int sz, const m
 void SectorMap::DrawFarSectors(const matrix4x4f &modelview)
 {
 	PROFILE_SCOPED()
-	int buildRadius = ceilf((m_zoomClamped / FAR_THRESHOLD) * 3);
+	int buildRadius = ceilf((std::min(m_zoomClamped, 20.0f) / FAR_THRESHOLD) * 3);
 	if (buildRadius <= DRAW_RAD) buildRadius = DRAW_RAD;
 
 	const vector3f secOrigin = vector3f(int(floorf(m_pos.x)), int(floorf(m_pos.y)), int(floorf(m_pos.z)));
 
-	// build vertex and colour arrays for all the stars we want to see, if we don't already have them
-	if (m_toggledFaction || buildRadius != m_radiusFar || !secOrigin.ExactlyEqual(m_secPosFar)) {
+	// Only rebuild far sector cache when not deep into the macro transition
+	if (m_zoom < 30.0f && (m_toggledFaction || buildRadius != m_radiusFar || !secOrigin.ExactlyEqual(m_secPosFar))) {
 		m_farstars.clear();
 		m_farstarsColor.clear();
 		m_visibleFactions.clear();
@@ -1058,16 +1175,29 @@ void SectorMap::DrawFarSectors(const matrix4x4f &modelview)
 		m_toggledFaction = false;
 	}
 
-	// always draw the stars, slightly altering their size for different different resolutions, so they still look okay
-	if (m_farstars.size() > 0) {
-		// TODO: this should query screen DPI instead of platform window height
+	// always draw the stars, slightly altering their size for different resolutions, so they still look okay
+	if (m_farstars.size() > 0 && m_macroAlpha < 0.99f) {
 		float sizeFactor = 0.25f * (m_context.renderer->GetWindowHeight() / 720.f);
-		m_farstarsPoints.SetData(m_context.renderer, m_farstars.size(), &m_farstars[0], &m_farstarsColor[0], modelview, sizeFactor);
+		matrix4x4f farTrans = modelview;
+		const vector3f curSecOrigin(int(floorf(m_pos.x)), int(floorf(m_pos.y)), int(floorf(m_pos.z)));
+		farTrans.Translate((m_secPosFar - curSecOrigin) * Sector::SIZE);
+		if (m_macroAlpha > 0.01f) {
+			std::vector<Color> fadedColors = m_farstarsColor;
+			const float fade = 1.0f - m_macroAlpha;
+			for (auto &c : fadedColors) {
+				c.a = Uint8(float(c.a) * fade);
+			}
+			m_farstarsPoints.SetData(m_context.renderer, m_farstars.size(), &m_farstars[0], &fadedColors[0], farTrans, sizeFactor);
+		} else {
+			m_farstarsPoints.SetData(m_context.renderer, m_farstars.size(), &m_farstars[0], &m_farstarsColor[0], farTrans, sizeFactor);
+		}
 		m_farstarsPoints.Draw(m_context.renderer, m_farStarsMat.Get());
 	}
 
-	// also add labels for any faction homeworlds among the systems we've drawn
-	PutFactionLabels(Sector::SIZE * secOrigin);
+	// also add labels for any faction homeworlds among the systems we've drawn when not in macro mode
+	if (m_macroAlpha < 0.35f) {
+		PutFactionLabels(Sector::SIZE * secOrigin);
+	}
 }
 
 void SectorMap::BuildFarSector(RefCountedPtr<Sector> sec, const vector3f &origin, std::vector<vector3f> &points, std::vector<Color> &colors)
@@ -1111,7 +1241,7 @@ void SectorMap::Update(float frameTime)
 	matrix3x3f shiftRot = matrix3x3f::Rotate(DEG2RAD(m_rotZ), { 0, 0, 1 });
 
 	const float moveSpeed = input->GetMoveSpeedShiftModifier();
-	float move = moveSpeed * frameTime * m_zoomClamped;
+	float move = moveSpeed * frameTime * std::max(1.0f, m_zoom);
 	vector3f shift(0.0f);
 	if (m_manualMove && (m_pos - m_posMovingTo).LengthSqr() < 0.001f)
 		m_manualMove = false; // used so that when you click on a system and move there, passing systems are not selected
@@ -1129,12 +1259,15 @@ void SectorMap::Update(float frameTime)
 	}
 	m_posMovingTo += shift * shiftRot;
 
+	const float zoomScale = std::max(1.0f, m_zoomMovingTo * 0.35f);
 	int wheel = input->GetMouseWheel();
 	if (wheel != 0) {
-		m_zoomMovingTo -= wheel * ZOOM_SPEED * WHEEL_SENSITIVITY * input->GetMoveSpeedShiftModifier();
+		m_zoomMovingTo -= wheel * ZOOM_SPEED * WHEEL_SENSITIVITY * zoomScale * input->GetMoveSpeedShiftModifier();
 	}
 
-	if (InputBindings.mapViewZoom->IsActive()) m_zoomMovingTo -= move * InputBindings.mapViewZoom->GetValue();
+	if (InputBindings.mapViewZoom->IsActive()) {
+		m_zoomMovingTo -= moveSpeed * frameTime * ZOOM_SPEED * 0.25f * zoomScale * InputBindings.mapViewZoom->GetValue();
+	}
 
 	m_zoomMovingTo = Clamp(m_zoomMovingTo, 0.1f, FAR_MAX);
 
@@ -1156,7 +1289,7 @@ void SectorMap::Update(float frameTime)
 		input->SetCapturingMouse(true);
 		int motion[2];
 		input->GetMouseMotion(motion);
-		m_zoomMovingTo += ZOOM_SPEED * 0.002f * motion[1];
+		m_zoomMovingTo += ZOOM_SPEED * 0.002f * zoomScale * motion[1];
 	}
 
 	m_rotXMovingTo = Clamp(m_rotXMovingTo, -170.0f, -10.0f);
@@ -1192,7 +1325,18 @@ void SectorMap::Update(float frameTime)
 		m_zoomClamped = Clamp(m_zoom, 1.f, FAR_LIMIT);
 	}
 
-	ShrinkCache();
+	// Compute smooth cross-fade LOD alphas for Voronoi borders and Macro Galactic View
+	{
+		float tVor = Clamp((m_zoom - ZOOM_VORONOI_START) / (ZOOM_VORONOI_FULL - ZOOM_VORONOI_START), 0.0f, 1.0f);
+		m_voronoiAlpha = tVor * tVor * (3.0f - 2.0f * tVor);
+
+		float tMac = Clamp((m_zoom - ZOOM_MACRO_START) / (ZOOM_MACRO_FULL - ZOOM_MACRO_START), 0.0f, 1.0f);
+		m_macroAlpha = tMac * tMac * (3.0f - 2.0f * tMac);
+	}
+
+	if (m_macroAlpha < 0.95f) {
+		ShrinkCache();
+	}
 
 	if (!m_sphere) {
 		m_sphere.reset(new Graphics::Drawables::Sphere3D(m_context.renderer, 4, 1.0f));
@@ -1216,7 +1360,7 @@ void SectorMap::ShrinkCache()
 {
 	PROFILE_SCOPED()
 	// we're going to use these to determine if our sectors are within the range that we'll ever render
-	const int drawRadius = (m_zoomClamped <= FAR_THRESHOLD) ? DRAW_RAD : ceilf((m_zoomClamped / FAR_THRESHOLD) * DRAW_RAD);
+	const int drawRadius = (m_zoomClamped <= FAR_THRESHOLD) ? DRAW_RAD : ceilf((std::min(m_zoomClamped, 20.0f) / FAR_THRESHOLD) * DRAW_RAD);
 
 	const int xmin = int(floorf(m_pos.x)) - drawRadius;
 	const int xmax = int(floorf(m_pos.x)) + drawRadius;
@@ -1326,4 +1470,554 @@ vector3f SectorMap::GetSystemPosition(const SystemPath &path)
 {
 	const Sector::System sys = GetCached(path)->m_systems[path.systemIndex];
 	return Sector::SIZE * vector3f(float(path.sectorX), float(path.sectorY), float(path.sectorZ)) + sys.GetPosition();
+}
+
+void SectorMap::GotoPositionLy(const vector3f &posLy)
+{
+	m_posMovingTo = posLy * (1.0f / Sector::SIZE);
+}
+
+void SectorMap::GotoSol()
+{
+	m_posMovingTo = vector3f(0.0f, 0.0f, 0.0f);
+}
+
+void SectorMap::GotoGalacticCore()
+{
+	m_posMovingTo = GetGalacticCorePositionLy() * (1.0f / Sector::SIZE);
+}
+
+void SectorMap::SetMacroZoom(float zoom)
+{
+	m_zoomMovingTo = Clamp(zoom, 0.1f, FAR_MAX);
+}
+
+vector3f SectorMap::GetPositionLy() const
+{
+	return m_pos * Sector::SIZE;
+}
+
+vector3f SectorMap::GetGalacticCorePositionLy() const
+{
+	if (!m_context.galaxy) return vector3f(-25000.0f, 0.0f, 0.0f);
+	return vector3f(-m_context.galaxy->SOL_OFFSET_X, m_context.galaxy->SOL_OFFSET_Y, 0.0f);
+}
+
+float SectorMap::GetGalaxyRadiusLy() const
+{
+	if (!m_context.galaxy) return 50000.0f;
+	return m_context.galaxy->GALAXY_RADIUS;
+}
+
+void SectorMap::SetMacroMarkers(const vector3f &playerPosLy, const vector3f &selectedPosLy, bool hasSelected)
+{
+	m_playerPosLy = playerPosLy;
+	m_selectedPosLy = selectedPosLy;
+	m_hasSelectedMarker = hasSelected;
+}
+
+const Faction *SectorMap::GetFactionAtPositionLy(const vector3f &posLy) const
+{
+	if (!m_context.galaxy) return nullptr;
+	FactionsDatabase *factionsDb = m_context.galaxy->GetFactions();
+	if (!factionsDb) return nullptr;
+
+	const Faction *bestFaction = nullptr;
+	float bestDist = FLT_MAX;
+
+	if (!m_factionSites.empty()) {
+		for (const auto &site : m_factionSites) {
+			const float dx = posLy.x - site.homePosLy.x;
+			const float dy = posLy.y - site.homePosLy.y;
+			const float dist2D = std::sqrt(dx * dx + dy * dy);
+			if (dist2D <= site.radiusLy && dist2D < bestDist) {
+				bestDist = dist2D;
+				bestFaction = site.faction;
+			}
+		}
+	} else {
+		const Uint32 numFactions = factionsDb->GetNumFactions();
+		for (Uint32 i = 0; i < numFactions; ++i) {
+			const Faction *f = factionsDb->GetFaction(i);
+			if (!f || !f->hasHomeworld || f->Radius() <= 0.0) continue;
+			const vector3f fpos = Sector::SIZE * vector3f(float(f->homeworld.sectorX), float(f->homeworld.sectorY), float(f->homeworld.sectorZ));
+			const float dx = posLy.x - fpos.x;
+			const float dy = posLy.y - fpos.y;
+			const float dist2D = std::sqrt(dx * dx + dy * dy);
+			if (dist2D <= float(f->Radius()) && dist2D < bestDist) {
+				bestDist = dist2D;
+				bestFaction = f;
+			}
+		}
+	}
+
+	if (!bestFaction) {
+		bestFaction = factionsDb->GetFaction("Independent");
+	}
+	return bestFaction;
+}
+
+void SectorMap::InitMacroGalaxy()
+{
+	if (m_macroInitialized) return;
+	m_macroInitialized = true;
+
+	if (!m_context.galaxy) return;
+
+	// 1. Gather faction sites and compute Voronoi territorial boundaries
+	m_factionSites.clear();
+	m_voronoiEdges.clear();
+
+	FactionsDatabase *factionsDb = m_context.galaxy->GetFactions();
+	if (factionsDb) {
+		const Uint32 numFactions = factionsDb->GetNumFactions();
+		m_factionSites.reserve(numFactions);
+		for (Uint32 i = 0; i < numFactions; ++i) {
+			const Faction *f = factionsDb->GetFaction(i);
+			if (!f || !f->hasHomeworld || f->Radius() <= 0.0) continue;
+			RefCountedPtr<Sector> sec = GetCached(f->homeworld);
+			vector3f homePos = Sector::SIZE * vector3f(float(f->homeworld.sectorX), float(f->homeworld.sectorY), float(f->homeworld.sectorZ));
+			if (f->homeworld.systemIndex < sec->m_systems.size()) {
+				homePos += sec->m_systems[f->homeworld.systemIndex].GetPosition();
+			}
+			m_factionSites.push_back({ f, homePos, float(f->Radius()) });
+		}
+
+		const size_t nSites = m_factionSites.size();
+		// Pass 1: Straight internal Voronoi bisectors between pairs of factions
+		for (size_t i = 0; i < nSites; ++i) {
+			const vector2f pi(m_factionSites[i].homePosLy.x, m_factionSites[i].homePosLy.y);
+			const float ri = m_factionSites[i].radiusLy;
+
+			for (size_t j = i + 1; j < nSites; ++j) {
+				const vector2f pj(m_factionSites[j].homePosLy.x, m_factionSites[j].homePosLy.y);
+				const float rj = m_factionSites[j].radiusLy;
+				const vector2f diff = pj - pi;
+				const float dist = diff.Length();
+				const float rMin = std::min(ri, rj);
+				if (dist < 0.1f || dist * 0.5f >= rMin) continue;
+
+				const vector2f mid = (pi + pj) * 0.5f;
+				const vector2f tang(-diff.y / dist, diff.x / dist);
+				const float halfChord = std::sqrt(rMin * rMin - (dist * 0.5f) * (dist * 0.5f));
+
+				const int steps = 28;
+				for (int s = 0; s < steps; ++s) {
+					const float t0 = -halfChord + (2.0f * halfChord * float(s)) / float(steps);
+					const float t1 = -halfChord + (2.0f * halfChord * float(s + 1)) / float(steps);
+					const float tMid = 0.5f * (t0 + t1);
+					const vector2f qMid = mid + tang * tMid;
+					const float d_ij = std::sqrt((dist * 0.5f) * (dist * 0.5f) + tMid * tMid);
+
+					bool occluded = false;
+					for (size_t k = 0; k < nSites; ++k) {
+						if (k == i || k == j) continue;
+						const vector2f pk(m_factionSites[k].homePosLy.x, m_factionSites[k].homePosLy.y);
+						const float rk = m_factionSites[k].radiusLy;
+						const float dk = (qMid - pk).Length();
+						if (dk < rk && dk < d_ij - 0.05f) {
+							occluded = true;
+							break;
+						}
+					}
+					if (!occluded) {
+						const vector2f q0 = mid + tang * t0;
+						const vector2f q1 = mid + tang * t1;
+						m_voronoiEdges.push_back({
+							vector3f(q0.x, q0.y, 0.0f),
+							vector3f(q1.x, q1.y, 0.0f),
+							m_factionSites[i].faction,
+							m_factionSites[j].faction
+						});
+					}
+				}
+			}
+		}
+
+		// Pass 2: Outer circular claim boundary arcs for each faction
+		for (size_t i = 0; i < nSites; ++i) {
+			const vector2f pi(m_factionSites[i].homePosLy.x, m_factionSites[i].homePosLy.y);
+			const float ri = m_factionSites[i].radiusLy;
+			const int arcSteps = 64;
+
+			for (int s = 0; s < arcSteps; ++s) {
+				const float a0 = (2.0f * float(M_PI) * float(s)) / float(arcSteps);
+				const float a1 = (2.0f * float(M_PI) * float(s + 1)) / float(arcSteps);
+				const float aMid = 0.5f * (a0 + a1);
+				const vector2f qMid = pi + vector2f(std::cos(aMid), std::sin(aMid)) * ri;
+
+				bool occluded = false;
+				for (size_t k = 0; k < nSites; ++k) {
+					if (k == i) continue;
+					const vector2f pk(m_factionSites[k].homePosLy.x, m_factionSites[k].homePosLy.y);
+					const float rk = m_factionSites[k].radiusLy;
+					const float dk = (qMid - pk).Length();
+					if (dk < rk && dk < ri - 0.05f) {
+						occluded = true;
+						break;
+					}
+				}
+				if (!occluded) {
+					const vector2f q0 = pi + vector2f(std::cos(a0), std::sin(a0)) * ri;
+					const vector2f q1 = pi + vector2f(std::cos(a1), std::sin(a1)) * ri;
+					m_voronoiEdges.push_back({
+						vector3f(q0.x, q0.y, 0.0f),
+						vector3f(q1.x, q1.y, 0.0f),
+						m_factionSites[i].faction,
+						nullptr
+					});
+				}
+			}
+		}
+	}
+
+	// 2. Generate 3D Volumetric Galactic Star Cloud from Galaxy Density Map
+	m_galaxyCloudPos.clear();
+	m_galaxyCloudBaseColor.clear();
+	const vector3f corePos = GetGalacticCorePositionLy();
+	const float galRad = GetGalaxyRadiusLy();
+
+	Random rng(0x50104E34);
+	const int targetParticles = 9500;
+	m_galaxyCloudPos.reserve(targetParticles);
+	m_galaxyCloudBaseColor.reserve(targetParticles);
+
+	for (int attempt = 0; attempt < targetParticles * 5 && int(m_galaxyCloudPos.size()) < targetParticles; ++attempt) {
+		const float u = float(rng.Double());
+		// Bias slightly toward inner and mid disc while covering outer arms
+		const float r = galRad * std::pow(u, 0.65f);
+		const float theta = float(rng.Double()) * 2.0f * float(M_PI);
+
+		const float wx = corePos.x + r * std::cos(theta);
+		const float wy = corePos.y + r * std::sin(theta);
+		const int sx = int(std::floor(wx / Sector::SIZE));
+		const int sy = int(std::floor(wy / Sector::SIZE));
+
+		const Uint8 density = m_context.galaxy->GetSectorDensity(sx, sy, 0);
+		const float normDens = float(density) / 255.0f;
+		const float bulgeBoost = std::exp(-(r * r) / (8500.0f * 8500.0f)) * 0.45f;
+
+		if (float(rng.Double()) > (normDens * 0.85f + bulgeBoost)) continue;
+
+		// 3D vertical thickness: thicker central bulge (~1500 ly), thinner spiral disc (~280 ly)
+		const float sigmaZ = 260.0f + 1350.0f * std::exp(-(r * r) / (8000.0f * 8000.0f));
+		const float g1 = float(rng.Double()) + float(rng.Double()) + float(rng.Double()) - 1.5f;
+		const float wz = g1 * sigmaZ;
+
+		m_galaxyCloudPos.push_back(vector3f(wx, wy, wz));
+
+		// Color temperature gradient: warm golden-amber core to crisp blue-white spiral arms
+		const float coreFactor = std::exp(-(r * r) / (11000.0f * 11000.0f));
+		const float armFactor = Clamp((normDens - 0.35f) * 1.6f, 0.0f, 1.0f) * (1.0f - coreFactor);
+		const Uint8 cr = Uint8(Clamp(175.0f + 80.0f * coreFactor - 25.0f * armFactor + float(rng.Int32(-12, 12)), 120.0f, 255.0f));
+		const Uint8 cg = Uint8(Clamp(185.0f + 35.0f * coreFactor + 15.0f * armFactor + float(rng.Int32(-10, 10)), 140.0f, 255.0f));
+		const Uint8 cb = Uint8(Clamp(210.0f - 55.0f * coreFactor + 45.0f * armFactor + float(rng.Int32(-10, 10)), 135.0f, 255.0f));
+		const Uint8 ca = Uint8(Clamp(95.0f + 115.0f * normDens + 40.0f * coreFactor, 65.0f, 225.0f));
+
+		m_galaxyCloudBaseColor.push_back(Color(cr, cg, cb, ca));
+	}
+	m_galaxyCloudDrawColor = m_galaxyCloudBaseColor;
+}
+
+void SectorMap::DrawMacroGalaxy(const matrix4x4f &modelview)
+{
+	PROFILE_SCOPED()
+	InitMacroGalaxy();
+
+	auto &renderer = m_context.renderer;
+	const vector3f corePos = GetGalacticCorePositionLy();
+	const float galRad = GetGalaxyRadiusLy();
+
+	// 1. Render Textured Galactic Disc & Multi-Plane Parallax Layers + 3D Particle Cloud
+	if (m_macroAlpha > 0.01f) {
+		m_galaxyDiscVerts->Clear();
+		const float xMin = corePos.x - galRad;
+		const float xMax = corePos.x + galRad;
+		const float yMin = corePos.y - galRad;
+		const float yMax = corePos.y + galRad;
+
+		auto addDiscLayer = [&](float zOffset, float alphaScale) {
+			const Uint8 a = Uint8(Clamp(m_macroAlpha * alphaScale * 255.0f, 0.0f, 255.0f));
+			const Color c(255, 255, 255, a);
+			const vector3f pTL(xMin, yMax, zOffset);
+			const vector3f pBL(xMin, yMin, zOffset);
+			const vector3f pBR(xMax, yMin, zOffset);
+			const vector3f pTR(xMax, yMax, zOffset);
+
+			m_galaxyDiscVerts->Add(pTL, c, vector2f(0.0f, 0.0f));
+			m_galaxyDiscVerts->Add(pBL, c, vector2f(0.0f, 1.0f));
+			m_galaxyDiscVerts->Add(pBR, c, vector2f(1.0f, 1.0f));
+
+			m_galaxyDiscVerts->Add(pTL, c, vector2f(0.0f, 0.0f));
+			m_galaxyDiscVerts->Add(pBR, c, vector2f(1.0f, 1.0f));
+			m_galaxyDiscVerts->Add(pTR, c, vector2f(1.0f, 0.0f));
+		};
+
+		addDiscLayer(0.0f, 0.82f);
+		addDiscLayer(320.0f, 0.22f);
+		addDiscLayer(-320.0f, 0.22f);
+
+		renderer->SetTransform(modelview);
+		renderer->DrawBuffer(m_galaxyDiscVerts.get(), m_galaxyDiscMat.Get());
+
+		// Draw 3D volumetric star particle cloud
+		if (!m_galaxyCloudPos.empty()) {
+			for (size_t i = 0; i < m_galaxyCloudBaseColor.size(); ++i) {
+				m_galaxyCloudDrawColor[i] = m_galaxyCloudBaseColor[i];
+				m_galaxyCloudDrawColor[i].a = Uint8(float(m_galaxyCloudBaseColor[i].a) * m_macroAlpha);
+			}
+			const float ptSize = Clamp(0.32f * (renderer->GetWindowHeight() / 720.0f), 0.2f, 1.0f);
+			m_galaxyCloudPoints.SetData(renderer, m_galaxyCloudPos.size(), &m_galaxyCloudPos[0], &m_galaxyCloudDrawColor[0], modelview, ptSize);
+			m_galaxyCloudPoints.Draw(renderer, m_farStarsMat.Get());
+		}
+
+		// Volumetric Galactic Core Glow Billboards at Sagittarius A*
+		matrix4x4f rot = modelview;
+		rot.ClearToRotOnly();
+		rot = rot.Inverse();
+		matrix4x4f coreTrans = modelview * matrix4x4f::Translation(corePos) * rot;
+		const Uint8 coreA1 = Uint8(190.0f * m_macroAlpha);
+		const Uint8 coreA2 = Uint8(110.0f * m_macroAlpha);
+		AddStarBillboard(coreTrans, vector3f(0.0f, 0.0f, 0.0f), Color(255, 235, 185, coreA1), 5500.0f);
+		AddStarBillboard(coreTrans, vector3f(0.0f, 0.0f, -5.0f), Color(255, 195, 115, coreA2), 13000.0f);
+	}
+
+	// 2. Build 3D Galactic Plane Grid, Range Rings, Voronoi Borders & 3D Beacons
+	m_macroLineVerts->Clear();
+
+	auto addCircleXY = [&](const vector3f &center, float radius, int segments, const Color &col) {
+		for (int s = 0; s < segments; ++s) {
+			const float a0 = (2.0f * float(M_PI) * float(s)) / float(segments);
+			const float a1 = (2.0f * float(M_PI) * float(s + 1)) / float(segments);
+			m_macroLineVerts->Add(center + vector3f(std::cos(a0) * radius, std::sin(a0) * radius, 0.0f), col);
+			m_macroLineVerts->Add(center + vector3f(std::cos(a1) * radius, std::sin(a1) * radius, 0.0f), col);
+		}
+	};
+
+	// A. Galactic Core Polar Coordinate Grid & Light-Year Range Rings
+	if (m_macroAlpha > 0.01f) {
+		const Uint8 gridAlpha = Uint8(95.0f * m_macroAlpha);
+		const Uint8 solOrbitAlpha = Uint8(150.0f * m_macroAlpha);
+		const Color gridCol(50, 110, 155, gridAlpha);
+		const Color cardinalCol(75, 155, 210, Uint8(135.0f * m_macroAlpha));
+		const Color solOrbitCol(70, 185, 220, solOrbitAlpha);
+
+		const float coreRings[] = { 10000.0f, 20000.0f, 30000.0f, 40000.0f, 50000.0f };
+		for (float r : coreRings) {
+			addCircleXY(corePos, r, 128, gridCol);
+		}
+		// Sol's 25,000 ly Galactic Orbit Ring
+		addCircleXY(corePos, 25000.0f, 144, solOrbitCol);
+
+		// 12 Polar Radial Azimuth Spokes every 30 degrees
+		for (int i = 0; i < 12; ++i) {
+			const float ang = DEG2RAD(float(i * 30));
+			const vector3f dir(std::cos(ang), std::sin(ang), 0.0f);
+			const Color &c = (i % 3 == 0) ? cardinalCol : gridCol;
+			m_macroLineVerts->Add(corePos + dir * 2500.0f, c);
+			m_macroLineVerts->Add(corePos + dir * 50000.0f, c);
+		}
+	}
+
+	// B. Sol / Human Bubble Range Rings (100 ly, 250 ly, 500 ly, 1000 ly, 2500 ly)
+	if (m_voronoiAlpha > 0.01f) {
+		const float bubbleFade = Clamp(1.0f - (m_zoom - 600.0f) / 1800.0f, 0.15f, 1.0f);
+		const Uint8 bAlpha = Uint8(120.0f * m_voronoiAlpha * bubbleFade);
+		const Color bubbleRingCol(65, 155, 145, bAlpha);
+		const Color bubbleOuterCol(95, 200, 185, Uint8(165.0f * m_voronoiAlpha));
+
+		addCircleXY(vector3f(0.0f), 100.0f, 64, bubbleRingCol);
+		addCircleXY(vector3f(0.0f), 250.0f, 72, bubbleRingCol);
+		addCircleXY(vector3f(0.0f), 500.0f, 96, bubbleOuterCol);
+		if (m_macroAlpha > 0.05f) {
+			addCircleXY(vector3f(0.0f), 1000.0f, 96, bubbleRingCol);
+			addCircleXY(vector3f(0.0f), 2500.0f, 96, bubbleRingCol);
+		}
+	}
+
+	// C. Sharp Voronoi Faction Territory Boundary Outlines
+	if (m_voronoiAlpha > 0.01f) {
+		for (const auto &edge : m_voronoiEdges) {
+			if (m_hiddenFactions.find(edge.factionA) != m_hiddenFactions.end()) continue;
+
+			const bool isSelected = (m_selectedFaction != nullptr) &&
+				(edge.factionA == m_selectedFaction || edge.factionB == m_selectedFaction);
+
+			Color col = edge.factionA->colour;
+			if (edge.factionB && !isSelected) {
+				col.r = Uint8((int(edge.factionA->colour.r) + int(edge.factionB->colour.r)) / 2);
+				col.g = Uint8((int(edge.factionA->colour.g) + int(edge.factionB->colour.g)) / 2);
+				col.b = Uint8((int(edge.factionA->colour.b) + int(edge.factionB->colour.b)) / 2);
+			}
+			if (isSelected) {
+				col = m_selectedFaction->colour;
+				col.r = Uint8( std::min(255, int(col.r) + 55) );
+				col.g = Uint8( std::min(255, int(col.g) + 55) );
+				col.b = Uint8( std::min(255, int(col.b) + 55) );
+				col.a = Uint8(255.0f * m_voronoiAlpha);
+			} else {
+				col.a = Uint8(195.0f * m_voronoiAlpha);
+			}
+
+			m_macroLineVerts->Add(edge.p0, col);
+			m_macroLineVerts->Add(edge.p1, col);
+		}
+
+		// Draw 3D vertical stem for currently selected faction's homeworld
+		if (m_selectedFaction && m_selectedFaction->hasHomeworld) {
+			for (const auto &site : m_factionSites) {
+				if (site.faction == m_selectedFaction) {
+					Color hCol = m_selectedFaction->colour;
+					hCol.a = Uint8(235.0f * m_voronoiAlpha);
+					const vector3f planePt(site.homePosLy.x, site.homePosLy.y, 0.0f);
+					m_macroLineVerts->Add(planePt, hCol);
+					m_macroLineVerts->Add(site.homePosLy, hCol);
+					const float rRet = std::max(8.0f, m_zoom * 0.12f);
+					addCircleXY(planePt, rRet, 24, hCol);
+					break;
+				}
+			}
+		}
+	}
+
+	// D. 3D Scale-Adaptive Reticles & Stems for Player ("YOU ARE HERE"), Sol, and Selected System
+	if (m_voronoiAlpha > 0.01f) {
+		const float markerScale = std::max(4.0f, m_zoom * 0.14f);
+		const Color playerCol(65, 225, 255, Uint8(245.0f * m_voronoiAlpha));
+		const vector3f playerPlane(m_playerPosLy.x, m_playerPosLy.y, 0.0f);
+
+		// Vertical stem from galactic plane to player's 3D position + elevated beacon stem
+		const float beaconHeight = std::max(20.0f, m_zoom * 0.35f);
+		m_macroLineVerts->Add(playerPlane, playerCol);
+		m_macroLineVerts->Add(m_playerPosLy + vector3f(0.0f, 0.0f, beaconHeight), playerCol);
+
+		// Concentric reticle rings on the galactic plane around Player position
+		addCircleXY(playerPlane, markerScale, 32, playerCol);
+		addCircleXY(playerPlane, markerScale * 1.8f, 32, Color(65, 225, 255, Uint8(140.0f * m_voronoiAlpha)));
+
+		if (m_hasSelectedMarker && (m_selectedPosLy - m_playerPosLy).Length() > 1.0f) {
+			const Color selCol(80, 255, 130, Uint8(220.0f * m_voronoiAlpha));
+			const vector3f selPlane(m_selectedPosLy.x, m_selectedPosLy.y, 0.0f);
+			m_macroLineVerts->Add(selPlane, selCol);
+			m_macroLineVerts->Add(m_selectedPosLy + vector3f(0.0f, 0.0f, beaconHeight * 0.75f), selCol);
+			addCircleXY(selPlane, markerScale * 0.85f, 24, selCol);
+			// Direct navigation line from Player to Selected target
+			m_macroLineVerts->Add(m_playerPosLy, playerCol);
+			m_macroLineVerts->Add(m_selectedPosLy, selCol);
+		}
+	}
+
+	if (!m_macroLineVerts->IsEmpty()) {
+		renderer->SetTransform(modelview);
+		m_macroLines.SetData(m_macroLineVerts->GetNumVerts(), &m_macroLineVerts->position[0], &m_macroLineVerts->diffuse[0]);
+		m_macroLines.Draw(renderer, m_lineMat.Get());
+	}
+
+	PutMacroLabels(modelview);
+}
+
+void SectorMap::PutMacroLabels(const matrix4x4f &modelview)
+{
+	PROFILE_SCOPED()
+	if (m_voronoiAlpha < 0.25f) return;
+
+	auto &renderer = m_context.renderer;
+	renderer->SetTransform(modelview);
+
+	auto addMarker = [&](const vector3f &worldPosLy, const Color &col, const std::string &title, const std::string &subtitle, float radius, const Faction *fac = nullptr) {
+		vector3d sp = Graphics::ProjectToScreen(renderer, vector3d(worldPosLy));
+		if (sp.z < 0.0 && sp.x >= -100.0 && sp.x <= m_size.x + 100.0 && sp.y >= -100.0 && sp.y <= m_size.y + 100.0) {
+			sp.y = m_size.y - sp.y;
+			m_labels.array.emplace_back(std::make_unique<MacroMarkerLabel>(
+				m_labels, vector3f(sp), col, title, subtitle, radius, worldPosLy, fac));
+		}
+	};
+
+	const Uint8 alpha = Uint8(Clamp(m_voronoiAlpha * 255.0f, 0.0f, 255.0f));
+	const float distPlayerToSol = m_playerPosLy.Length();
+
+	// 1. YOU ARE HERE (Player Marker)
+	char coordBuf[96];
+	snprintf(coordBuf, sizeof(coordBuf), "Sol Dist: %.0f ly  |  XYZ: (%.0f, %.0f, %.0f)",
+		distPlayerToSol, m_playerPosLy.x, m_playerPosLy.y, m_playerPosLy.z);
+	if (distPlayerToSol < 4.0f) {
+		addMarker(m_playerPosLy, Color(75, 230, 255, alpha), "YOU ARE HERE [SOL]", coordBuf, 9.0f);
+	} else {
+		addMarker(m_playerPosLy, Color(75, 230, 255, alpha), "YOU ARE HERE", coordBuf, 9.0f);
+		if (m_zoom > 18.0f) {
+			addMarker(vector3f(0.0f, 0.0f, 0.0f), Color(255, 215, 95, alpha), "SOL [EARTH / MARS]", "Humanity Birthplace (0, 0, 0)", 7.5f);
+		}
+	}
+
+	// 2. SAGITTARIUS A* (Galactic Core)
+	if (m_macroAlpha > 0.15f) {
+		const vector3f corePos = GetGalacticCorePositionLy();
+		const float distToCore = (m_playerPosLy - corePos).Length();
+		char coreBuf[96];
+		snprintf(coreBuf, sizeof(coreBuf), "Galactic Center  |  %.0f ly from Ship", distToCore);
+		const Uint8 coreAlpha = Uint8(Clamp(m_macroAlpha * 255.0f, 0.0f, 255.0f));
+		addMarker(corePos, Color(255, 205, 115, coreAlpha), "SAGITTARIUS A*", coreBuf, 10.0f);
+	}
+
+	// 3. Major Superpowers & Selected Faction Labels at Bubble/Regional Scale
+	if (m_zoom < 600.0f) {
+		for (const auto &site : m_factionSites) {
+			const Faction *f = site.faction;
+			if (m_hiddenFactions.find(f) != m_hiddenFactions.end()) continue;
+
+			const bool isSelected = (f == m_selectedFaction);
+			const bool isMajor = (f->name == "Solar Federation" ||
+				f->name == "Commonwealth of Independent Worlds" ||
+				f->name == "Haber Corporation");
+
+			if (!isSelected && !isMajor) continue;
+			// Avoid overlapping YOU ARE HERE right on Sol unless specifically selected
+			if (!isSelected && (site.homePosLy - m_playerPosLy).Length() < m_zoom * 0.45f) continue;
+
+			Color fCol = f->colour;
+			fCol.a = alpha;
+			std::string sub = isSelected ? "Selected Faction Territory" : f->description_short;
+			addMarker(site.homePosLy, fCol, f->name, sub, isSelected ? 8.5f : 6.5f, f);
+		}
+	}
+}
+
+void SectorMap::HandleMacroClick(const ImVec2 &mpos)
+{
+	if (m_size.x <= 1.0f || m_size.y <= 1.0f) return;
+
+	const float aspect = m_size.x / m_size.y;
+	const float tanHalfFov = std::tan(DEG2RAD(20.0f)); // 40 deg vertical FOV
+	const float ndcX = (2.0f * mpos.x) / m_size.x - 1.0f;
+	const float ndcY = 1.0f - (2.0f * mpos.y) / m_size.y;
+
+	vector3f rayCam(ndcX * aspect * tanHalfFov, ndcY * tanHalfFov, -1.0f);
+	rayCam = rayCam.Normalized();
+
+	const float camDist = 10.0f + 10.0f * m_zoom;
+	matrix4x4f invRot = matrix4x4f::Identity;
+	invRot.Rotate(DEG2RAD(-m_rotZ), 0.0f, 0.0f, 1.0f);
+	invRot.Rotate(DEG2RAD(-m_rotX), 1.0f, 0.0f, 0.0f);
+
+	const vector3f targetLy = m_pos * Sector::SIZE;
+	const vector3f camOriginLy = targetLy + invRot * vector3f(0.0f, 0.0f, camDist);
+	const vector3f rayDirLy = invRot * rayCam;
+
+	if (std::fabs(rayDirLy.z) < 1e-4f) return;
+	const float t = -camOriginLy.z / rayDirLy.z;
+	if (t <= 0.0f) return;
+
+	const vector3f hitLy = camOriginLy + rayDirLy * t;
+	const vector3f corePos = GetGalacticCorePositionLy();
+	const float maxGalDist = GetGalaxyRadiusLy() * 1.15f;
+	if ((hitLy - corePos).Length() > maxGalDist) return;
+
+	const Faction *clickedFaction = GetFactionAtPositionLy(hitLy);
+	if (clickedFaction && clickedFaction->hasHomeworld) {
+		m_selectedFaction = clickedFaction;
+	} else {
+		m_selectedFaction = nullptr;
+	}
+
+	GotoPositionLy(vector3f(hitLy.x, hitLy.y, 0.0f));
 }

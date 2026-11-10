@@ -9,10 +9,11 @@ Welcome to the **Pioneer: Dangerous** workspace. This repository is an independe
 The authoritative implementation roadmap is maintained in [`PIONEER_DANGEROUS_PLAN.md`](./PIONEER_DANGEROUS_PLAN.md).
 Always consult this plan when implementing features across any phase:
 * **Phase 1: Dev Environment & Native Build** — Completed.
-* **Phase 2: Navigation & Map Quality of Life (QoL)** — Direct list targeting, station filters, cross-system destination retention.
-* **Phase 3: Mission Overhaul & Aesthetic Polish** — Removal of joke missions, rebalancing mission payouts for real time, corporate/faction insignias replacing composite facegen, station "Pass Time" service.
-* **Phase 4: Macro Galactic View** — 3D Milky Way disk/spiral arms overview with "You Are Here" indicator.
+* **Phase 2: UI Density, Aesthetic Polish, Content Curation & Start Profiles** — Completed (`1920x1080` UI scale baseline, tighter typography/padding, procedural `facegen` and sliders replaced with non-customizable corporate/faction/authority SVG logos, Allegiance + Career Role new game starts, joke modules removed).
+* **Phase 3: Navigation & Map Quality of Life (QoL)** — Next Up (direct list targeting, station filters, cross-system destination retention across hyperspace jumps).
+* **Phase 4: Macro Galactic View** — Completed (Continuous 3D zoom out to $100,000\text{ ly}$ Milky Way disc + 3D volumetric star cloud/core glow, polar coordinate grid rings, sharp Voronoi faction boundaries, interactive raycast panning, and contextual adaptive faction dossier sidebar).
 * **Phase 5: In-System FTL Supercruise Flight Mechanics** — Elite-style Supercruise mode ($30\text{ km/s}$ to $2,001c$), mass lock/drag, safe disengage dropout.
+* **Phase 6: Real-Time Mission Economy & Station "Pass Time" Service** — Rebalance mission deadlines/payouts for Supercruise real-time play, station "Pass Time" service.
 
 ---
 
@@ -28,7 +29,7 @@ Always consult this plan when implementing features across any phase:
    * Station-docked time advancement ("Wait / Pass Time") is provided for missions requiring scheduled rendezvous.
 3. **Aesthetics & Tone**:
    * Tone is serious space exploration, commercial trading, and tactical combat.
-   * No procedural composite faces (`facegen`). Use clean faction emblems (Federation, Empire, Alliance, Independents), corporate logos, and starport seals.
+   * Procedural composite faces (`facegen`) and `<< >>` face sliders are disabled. Contact/character boxes render non-customizable high-resolution SVG corporate logos, faction crests, authority badges, and syndicate insignias (`data/icons/logos/`) with an organization header and Name/Title banner.
 
 ---
 

@@ -11,13 +11,13 @@ local logWarning = _G.logWarning
 
 local colors = ui.theme.colors
 
-local bigButtonSize = ui.rescaleUI(Vector2(48, 48))
-local bigButtonFramePadding = ui.rescaleUI(Vector2(4, 4))
-local bigButtonWindowPadding = ui.rescaleUI(Vector2(6, 6))
-local bigButtonItemSpacing = ui.rescaleUI(Vector2(6, 6))
+local bigButtonSize = ui.rescaleUI(Vector2(36, 36))
+local bigButtonFramePadding = ui.rescaleUI(Vector2(3, 3))
+local bigButtonWindowPadding = ui.rescaleUI(Vector2(4, 4))
+local bigButtonItemSpacing = ui.rescaleUI(Vector2(4, 4))
 local bottomUiMargin = require 'pigui.modules.time-window'.window_height
 local buttonWindowPos = Vector2(0, 0)
-local viewWindowPadding = ui.rescaleUI(Vector2(4, 8))
+local viewWindowPadding = ui.rescaleUI(Vector2(4, 6))
 
 local PiGuiTabView = {}
 
@@ -155,12 +155,12 @@ function PiGuiTabView.renderTabView(self, refresh)
 		end)
 	end
 
-	ui.withFont(orbiteer.xlarge, function()
-		local text_window_padding = 12
+	ui.withFont(orbiteer.large, function()
+		local text_window_padding = 8
 		local text_window_size = Vector2(
 			ui.calcTextSize(tab.name).x + text_window_padding * 2,
-			self.buttonWindowSize.y + 6)
-		local text_window_pos = Vector2(ui.screenWidth - text_window_size.x, 3)
+			self.buttonWindowSize.y + 4)
+		local text_window_pos = Vector2(ui.screenWidth - text_window_size.x, 2)
 
 		ui.setNextWindowPos(text_window_pos, "Always")
 		ui.setNextWindowSize(text_window_size, "Always")

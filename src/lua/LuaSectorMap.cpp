@@ -86,6 +86,87 @@ void LuaObject<SectorMap>::RegisterClass()
 		.AddFunction("SetLabelParams", &SectorMap::SetLabelParams)
 		.AddFunction("SetLabelsVisibility", &SectorMap::SetLabelsVisibility)
 		.AddFunction("SetSize", &SectorMap::SetSize)
+		.AddFunction("GetMacroZoom", &SectorMap::GetMacroZoom)
+		.AddFunction("SetMacroZoom", &SectorMap::SetMacroZoom)
+		.AddFunction("GetMacroAlpha", &SectorMap::GetMacroAlpha)
+		.AddFunction("GetVoronoiAlpha", &SectorMap::GetVoronoiAlpha)
+		.AddFunction("GotoSol", &SectorMap::GotoSol)
+		.AddFunction("GotoGalacticCore", &SectorMap::GotoGalacticCore)
+		.AddFunction("GotoPositionLy", [](lua_State *l, SectorMap *sm) -> int {
+			vector3d pos = LuaPull<vector3d>(l, 2);
+			sm->GotoPositionLy(vector3f(pos));
+			return 0;
+		})
+		.AddFunction("GetPositionLy", [](lua_State *l, SectorMap *sm) -> int {
+			LuaPush<vector3d>(l, vector3d(sm->GetPositionLy()));
+			return 1;
+		})
+		.AddFunction("GetPlayerPositionLy", [](lua_State *l, SectorMap *sm) -> int {
+			LuaPush<vector3d>(l, vector3d(sm->GetPlayerPositionLy()));
+			return 1;
+		})
+		.AddFunction("GetGalacticCorePositionLy", [](lua_State *l, SectorMap *sm) -> int {
+			LuaPush<vector3d>(l, vector3d(sm->GetGalacticCorePositionLy()));
+			return 1;
+		})
+		.AddFunction("GetGalaxyRadiusLy", &SectorMap::GetGalaxyRadiusLy)
+		.AddFunction("GetSelectedFaction", [](lua_State *l, SectorMap *sm) -> int {
+			const Faction *f = sm->GetSelectedFaction();
+			if (f && f->IsValid()) {
+				LuaObject<Faction>::PushToLua(const_cast<Faction *>(f));
+			} else {
+				lua_pushnil(l);
+			}
+			return 1;
+		})
+		.AddFunction("SetSelectedFaction", [](lua_State *l, SectorMap *sm) -> int {
+			if (lua_isnil(l, 2) || lua_gettop(l) < 2) {
+				sm->SetSelectedFaction(nullptr);
+			} else {
+				Faction *f = LuaObject<Faction>::CheckFromLua(2);
+				sm->SetSelectedFaction(f);
+			}
+			return 0;
+		})
+		.AddFunction("GetFactionAtCenter", [](lua_State *l, SectorMap *sm) -> int {
+			const Faction *f = sm->GetFactionAtPositionLy(sm->GetPositionLy());
+			if (f && f->IsValid()) {
+				LuaObject<Faction>::PushToLua(const_cast<Faction *>(f));
+			} else {
+				lua_pushnil(l);
+			}
+			return 1;
+		})
+		.AddFunction("GetFactionAtPlayer", [](lua_State *l, SectorMap *sm) -> int {
+			const Faction *f = sm->GetFactionAtPositionLy(sm->GetPlayerPositionLy());
+			if (f && f->IsValid()) {
+				LuaObject<Faction>::PushToLua(const_cast<Faction *>(f));
+			} else {
+				lua_pushnil(l);
+			}
+			return 1;
+		})
+		.AddFunction("GetAllMajorFactions", [](lua_State *l, SectorMap *sm) -> int {
+			lua_newtable(l);
+			if (!sm->GetContext().galaxy) return 1;
+			FactionsDatabase *db = sm->GetContext().galaxy->GetFactions();
+			if (!db) return 1;
+			const std::set<const Faction *> &hidden = sm->GetHiddenFactions();
+			int idx = 1;
+			const Uint32 count = db->GetNumFactions();
+			for (Uint32 i = 0; i < count; ++i) {
+				const Faction *f = db->GetFaction(i);
+				if (!f || !f->IsValid() || !f->hasHomeworld) continue;
+				lua_pushnumber(l, idx++);
+				lua_newtable(l);
+				LuaObject<Faction>::PushToLua(const_cast<Faction *>(f));
+				lua_setfield(l, -2, "faction");
+				lua_pushboolean(l, hidden.count(f) == 0);
+				lua_setfield(l, -2, "visible");
+				lua_settable(l, -3);
+			}
+			return 1;
+		})
 		.AddFunction("GetGalaxy", [](lua_State *l, SectorMap *sm) {
 				LuaPush(l, sm->GetContext().galaxy);
 				return 1;

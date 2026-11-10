@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bgGrad" cx="50%" cy="45%" r="60%">
+      <stop offset="0%" stop-color="#142848" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#08101e" stop-opacity="1"/>
+    </radialGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f5d27a"/>
+      <stop offset="50%" stop-color="#d4a238"/>
+      <stop offset="100%" stop-color="#9e7118"/>
+    </linearGradient>
+    <linearGradient id="blueGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#4ea4ff"/>
+      <stop offset="100%" stop-color="#1a5fb4"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background Panel -->
+  <rect x="0" y="0" width="512" height="512" fill="url(#bgGrad)"/>
+
+  <!-- Subtle Grid / Radial Rings -->
+  <circle cx="256" cy="232" r="195" fill="none" stroke="#22467a" stroke-width="1.5" stroke-opacity="0.45"/>
+  <circle cx="256" cy="232" r="168" fill="none" stroke="url(#goldGrad)" stroke-width="3" stroke-opacity="0.85"/>
+  <circle cx="256" cy="232" r="156" fill="none" stroke="#4ea4ff" stroke-width="1.5" stroke-opacity="0.5"/>
+
+  <!-- Outer Laurel / Federal Wing Segments -->
+  <path d="M 96,245 C 88,175 128,110 192,82 L 202,98 C 148,124 114,180 120,242 Z" fill="url(#goldGrad)" fill-opacity="0.9"/>
+  <path d="M 416,245 C 424,175 384,110 320,82 L 310,98 C 364,124 398,180 392,242 Z" fill="url(#goldGrad)" fill-opacity="0.9"/>
+  <path d="M 106,272 C 122,326 168,368 228,382 L 232,364 C 180,352 142,316 128,266 Z" fill="url(#goldGrad)" fill-opacity="0.75"/>
+  <path d="M 406,272 C 390,326 344,368 284,382 L 280,364 C 332,352 370,316 384,266 Z" fill="url(#goldGrad)" fill-opacity="0.75"/>
+
+  <!-- Inner Shield Circle -->
+  <circle cx="256" cy="232" r="128" fill="#0b1930" stroke="url(#blueGrad)" stroke-width="4"/>
+
+  <!-- Orbital Ellipses -->
+  <ellipse cx="256" cy="232" rx="112" ry="42" transform="rotate(-28 256 232)" fill="none" stroke="#62b4ff" stroke-width="2.5" stroke-opacity="0.75"/>
+  <ellipse cx="256" cy="232" rx="112" ry="42" transform="rotate(28 256 232)" fill="none" stroke="#62b4ff" stroke-width="2.5" stroke-opacity="0.75"/>
+
+  <!-- Sol Sunburst Rays (8-point Star) -->
+  <polygon points="256,112 274,198 360,180 290,232 360,284 274,266 256,352 238,266 152,284 222,232 152,180 238,198" fill="url(#goldGrad)" fill-opacity="0.35"/>
+  <polygon points="256,120 270,206 352,232 270,258 256,344 242,258 160,232 242,206" fill="url(#goldGrad)"/>
+
+  <!-- Central Sol / Earth Core -->
+  <circle cx="256" cy="232" r="38" fill="url(#blueGrad)" stroke="#f5d27a" stroke-width="4"/>
+  <circle cx="256" cy="232" r="16" fill="#f5d27a"/>
+
+  <!-- Federal Chevron Crest at Top -->
+  <polygon points="256,48 278,76 256,66 234,76" fill="url(#goldGrad)"/>
+</svg>
+

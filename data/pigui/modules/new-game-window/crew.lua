@@ -294,8 +294,7 @@ function Crew:drawMember(memberEntry)
 
 	self:initMemberFace(memberEntry)
 
-	local faceGenButtonsSize = PiGuiFace.getFaceGenButtonsSize()
-	local crewPictureSize = faceGenButtonsSize.y
+	local crewPictureSize = Defs.mainFont.size * 10
 
 	-- common lock for the whole crew except for the player
 	local lock
@@ -305,14 +304,6 @@ function Crew:drawMember(memberEntry)
 		lock = self.lock
 	end
 
-	if not lock then
-		memberEntry.face:renderFaceGenButtons(true)
-	else
-		ui.dummy(faceGenButtonsSize)
-	end
-
-	ui.sameLine()
-
 	ui.child("Face", Vector2(crewPictureSize, crewPictureSize), function()
 		memberEntry.face:renderFaceDisplay()
 	end)
@@ -321,7 +312,7 @@ function Crew:drawMember(memberEntry)
 
 	local margin = Defs.gap.x * 3
 	self.layout.width = ui.getContentRegion().x - margin * 2
-	self.layout.height = faceGenButtonsSize.y
+	self.layout.height = crewPictureSize
 	PlayerReputation.layout.width = self.layout.width
 	ui.sameLine(0, margin + ui.getWindowPadding().x)
 	ui.child("character_params", Vector2(0, crewPictureSize), function()

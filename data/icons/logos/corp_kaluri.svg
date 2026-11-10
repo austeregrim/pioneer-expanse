@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bgGrad" cx="50%" cy="45%" r="60%">
+      <stop offset="0%" stop-color="#14293a" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#07111a" stop-opacity="1"/>
+    </radialGradient>
+    <linearGradient id="tealGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38ef7d"/>
+      <stop offset="100%" stop-color="#11998e"/>
+    </linearGradient>
+    <linearGradient id="steelGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#f0f6fc"/>
+      <stop offset="100%" stop-color="#8b9eb0"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="512" height="512" fill="url(#bgGrad)"/>
+
+  <!-- Kaluri Heavy Industries Diamond Frame -->
+  <polygon points="256,52 436,232 256,412 76,232" fill="#0b1822" stroke="url(#tealGrad)" stroke-width="5"/>
+  <polygon points="256,78 410,232 256,386 102,232" fill="none" stroke="#8b9eb0" stroke-width="2" stroke-opacity="0.5"/>
+
+  <!-- Stylized Kaluri 'K' Wing & Heavy Hull Chevron -->
+  <polygon points="168,128 216,128 216,336 168,336" fill="url(#steelGrad)"/>
+  <polygon points="224,224 324,128 368,128 268,224 368,336 320,336" fill="url(#tealGrad)"/>
+  <polygon points="200,212 256,212 240,252 200,252" fill="#ffffff"/>
+</svg>
+

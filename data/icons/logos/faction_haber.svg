@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bgGrad" cx="50%" cy="45%" r="60%">
+      <stop offset="0%" stop-color="#2c1216" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#11080a" stop-opacity="1"/>
+    </radialGradient>
+    <linearGradient id="crimsonGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ff4757"/>
+      <stop offset="50%" stop-color="#c02030"/>
+      <stop offset="100%" stop-color="#7a0e18"/>
+    </linearGradient>
+    <linearGradient id="steelGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#e8eef5"/>
+      <stop offset="100%" stop-color="#8b97a8"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="512" height="512" fill="url(#bgGrad)"/>
+
+  <!-- Outer Corporate Hexagon -->
+  <polygon points="256,52 412,142 412,322 256,412 100,322 100,142" fill="#160a0d" stroke="url(#crimsonGrad)" stroke-width="5"/>
+  <polygon points="256,70 396,151 396,313 256,394 116,313 116,151" fill="none" stroke="#8b97a8" stroke-width="1.5" stroke-opacity="0.5"/>
+
+  <!-- Monolithic Haber 'H' / Tri-Prism Architecture -->
+  <!-- Left Pillar -->
+  <polygon points="154,132 204,112 204,352 154,332" fill="url(#crimsonGrad)"/>
+  <!-- Right Pillar -->
+  <polygon points="358,132 308,112 308,352 358,332" fill="url(#crimsonGrad)"/>
+  <!-- Central Interlocking Chevron Bridge -->
+  <polygon points="196,210 256,174 316,210 316,256 256,220 196,256" fill="url(#steelGrad)"/>
+  <!-- Central Apex Diamond -->
+  <polygon points="256,104 286,152 256,200 226,152" fill="url(#steelGrad)"/>
+  <!-- Lower Corporate Wedge -->
+  <polygon points="226,274 256,256 286,274 256,364" fill="url(#crimsonGrad)"/>
+
+  <!-- Corner Accent Ticks -->
+  <circle cx="256" cy="52" r="5" fill="#e8eef5"/>
+  <circle cx="256" cy="412" r="5" fill="#e8eef5"/>
+</svg>
+

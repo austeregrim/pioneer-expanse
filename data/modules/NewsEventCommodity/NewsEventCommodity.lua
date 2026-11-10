@@ -26,6 +26,7 @@ local Event = require 'Event'
 local Format = require 'Format'
 local Serializer = require 'Serializer'
 local Commodities = require 'Commodities'
+local Character = require 'Character'
 
 local l = Lang.GetResource("module-newseventcommodity")
 
@@ -158,6 +159,15 @@ local onChat = function (form, ref, option)
 	})
 
 	form:SetTitle(title)
+	form:SetFace(Character.New({
+		firstname = newspaper,
+		surname = "",
+		culture = "English",
+		title = "Galactic News Network",
+		role = "news",
+		org = string.upper(newspaper),
+		seed = math.floor(ad.n.date or 1),
+	}))
 
 	local newsbody = string.interp(flavours[ad.n.flavour].newsbody, {
 		system   = ad.n.syspath:GetStarSystem().name,

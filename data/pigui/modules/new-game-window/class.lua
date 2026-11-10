@@ -22,74 +22,173 @@ local StartVariants = require 'pigui.modules.new-game-window.start-variants'
 local FlightLogParam = require 'pigui.modules.new-game-window.flight-log'
 local Game = require 'Game'
 
-local profileCombo = { items = {}, selected = 0 }
+local allegianceCombo = { items = {}, selected = 0 }
+local roleCombo = { items = {}, actions = {}, selected = 0 }
 
-StartVariants.register({
-	name       = lui.START_AT_MARS,
-	desc       = lui.START_AT_MARS_DESC,
-	location   = SystemPath.New(0,0,0,0,18),
-	logmsg     = lui.START_LOG_ENTRY_1,
-	shipType   = 'coronatrix',
-	money      = 600,
-	equipment = {
-		computer_1     = "misc.autopilot",
-		laser_front_s2 = "laser.pulsecannon_1mw",
-		shield_s1_1    = "shield.basic_s1",
-		shield_s1_2    = "shield.basic_s1",
-		sensor         = "sensor.radar",
-		hull_mod       = "hull.atmospheric_shielding_s1",
-		hyperdrive     = "hyperspace.hyperdrive_2",
-		thruster       = "thruster.default_s1",
-		missile_bay_1  = "missile_bay.opli_internal_s2",
-		missile_bay_2  = "missile_bay.opli_internal_s2",
+local ALLEGIANCES = {
+	{
+		id       = "solfed",
+		name     = "Solar Federation (Sol — Mars)",
+		faction  = "Solar Federation",
+		location = SystemPath.New(0, 0, 0, 0, 18), -- Cydonia, Mars
+		desc     = "ALLEGIANCE: Solar Federation (Sol System — Cydonia, Mars)\nThe historical cradle of humanity and seat of Federal power. Sol features dense orbital infrastructure, reliable commodity markets, and strictSolFed Military & Police patrols. Ideal for pilots who prefer high-security core worlds.",
+		logPrefix = "Commissioned at Cydonia Spaceport, Mars (Sol) under Solar Federation registry.",
+		trimColor = Color('3A7BD5'),
 	},
-	cargo      = {
+	{
+		id       = "ciw",
+		name     = "Commonwealth of Independent Worlds (New Hope)",
+		faction  = "Commonwealth of Independent Worlds",
+		location = SystemPath.New(1, -1, -1, 0, 4), -- New Hope, Epsilon Eridani
+		desc     = "ALLEGIANCE: Commonwealth of Independent Worlds (Epsilon Eridani — New Hope)\nA prosperous democratic confederation of frontier and core worlds. Epsilon Eridani is a major commercial crossroads with open trade laws, high-tech shipyards, and balanced Confederal Police security.",
+		logPrefix = "Commissioned at New Hope Spaceport (Epsilon Eridani) within the Commonwealth of Independent Worlds.",
+		trimColor = Color('2ECC71'),
 	},
-	pattern    = 1,
-	colors     = { Color('000000'), Color('000000'), Color('000000') }
-})
+	{
+		id       = "haber",
+		name     = "Haber Corporation (Zekonbur — Fort Gaillard)",
+		faction  = "Haber Corporation",
+		location = SystemPath.New(4, -9, -17, 0, 28), -- Fort Gaillard, Zekonbur
+		desc     = "ALLEGIANCE: Haber Corporation (Zekonbur System — Fort Gaillard)\nA heavily industrialized corporate conglomerate governed by a board of directors. Corporate space prioritizes mineral extraction, heavy freight logistics, and private security enforcement.",
+		logPrefix = "Cleared from Fort Gaillard Corporate Port (Zekonbur) under Haber Corporation charter.",
+		trimColor = Color('E67E22'),
+	},
+	{
+		id       = "independent",
+		name     = "Independent Frontier (Barnard's Star — Orbital)",
+		faction  = "Independent",
+		location = SystemPath.New(-1, 0, 0, 0, 16), -- System Administration Resting, Barnard's Star
+		desc     = "ALLEGIANCE: Independent Frontier (Barnard's Star — System Admin. Resting)\nAn orbital frontier staging post surrounded by resource-rich asteroid bodies and nearby interstellar jump routes. Suited for independent operators, prospectors, and deep-space couriers.",
+		logPrefix = "Departing System Administration Resting orbital station (Barnard's Star) as an independent operator.",
+		trimColor = Color('D4AC0D'),
+	},
+}
 
-StartVariants.register({
-	name       = lui.START_AT_NEW_HOPE,
-	desc       = lui.START_AT_NEW_HOPE_DESC,
-	location   = SystemPath.New(1,-1,-1,0,4),
-	logmsg     = lui.START_LOG_ENTRY_2,
-	shipType   = 'pumpkinseed',
-	money      = 400,
-	hyperdrive = true,
-	equipment = {
-		computer_1     = "misc.autopilot",
-		laser_front_s1 = "laser.pulsecannon_1mw",
-		sensor         = "sensor.radar",
-		hull_mod       = "hull.atmospheric_shielding_s1",
-		hyperdrive     = "hyperspace.hyperdrive_1",
-		thruster       = "thruster.default_s1",
+local CAREER_ROLES = {
+	{
+		id       = "trader",
+		name     = "Trader / Hauler (Sinonatrix)",
+		shipType = "sinonatrix",
+		money    = 1000,
+		desc     = "CAREER BUILDOUT: Commercial Trader & Hauler\nOutfitted with a medium OPLI Sinonatrix freighter/courier (32t total cargo capacity with auxiliary rack), Class 2 Hyperdrive, Trade Computer, Autopilot, and Class 2 Shielding, plus 1,000 Cr working capital for immediate commodity trading.",
+		logRole  = "Vessel outfitted for commercial freight and interstellar commodity trade.",
+		equipment = {
+			computer       = "misc.autopilot",
+			computer_2     = "misc.trade_computer",
+			weapon_s2_1    = "laser.pulsecannon_1mw",
+			shield_s2_1    = "shield.basic_s2",
+			sensor         = "sensor.radar",
+			hull_1         = "hull.atmospheric_shielding_s2",
+			hyperdrive     = "hyperspace.hyperdrive_2",
+			thruster       = "thruster.default_s2",
+			cabin_s1_1     = "misc.cabin_hold_s1",
+		},
+		cargo   = {},
+		pattern = 1,
+		colors  = { Color('1C2833'), Color('ABB2B9'), Color('3A7BD5') },
 	},
-	cargo      = {
+	{
+		id       = "miner",
+		name     = "Miner / Prospector (Coronatrix)",
+		shipType = "coronatrix",
+		money    = 600,
+		desc     = "CAREER BUILDOUT: Asteroid Miner & Prospector\nEquipped with an OPLI Coronatrix hull mounting a heavy 5MW Mining Cannon, Cargo Scoop for ore recovery, Fuel Scoop, Trade Computer, Autopilot, and a Class 2 Hyperdrive.",
+		logRole  = "Vessel configured for asteroid extraction and mineral prospecting.",
+		equipment = {
+			[1]            = "misc.cargo_scoop",
+			computer_1     = "misc.autopilot",
+			computer_2     = "misc.trade_computer",
+			laser_front_s2 = "laser.miningcannon_5mw",
+			shield_s1_1    = "shield.basic_s1",
+			fuel_scoop_s1  = "misc.fuel_scoop_s1",
+			sensor         = "sensor.radar",
+			hull_1         = "hull.atmospheric_shielding_s1",
+			hyperdrive     = "hyperspace.hyperdrive_2",
+			thruster       = "thruster.default_s1",
+		},
+		cargo   = {},
+		pattern = 2,
+		colors  = { Color('2C3E50'), Color('D35400'), Color('F39C12') },
 	},
-	pattern    = 1,
-	colors     = { Color('000000'), Color('000000'), Color('FFFF00') }
-})
+	{
+		id       = "explorer",
+		name     = "Explorer / Pathfinder (Coronatrix)",
+		shipType = "coronatrix",
+		money    = 600,
+		desc     = "CAREER BUILDOUT: Deep-Space Explorer & Survey Vessel\nEquipped with a long-range Class 2 Hyperdrive, Fuel Scoop for stellar refueling, Orbital & Surface Planet Scanners for survey contracts, Autopilot, and defensive pulse laser.",
+		logRole  = "Vessel equipped with orbital/surface survey scanners and fuel scoop for deep-space exploration.",
+		equipment = {
+			computer_1     = "misc.autopilot",
+			laser_front_s2 = "laser.pulsecannon_1mw",
+			shield_s1_1    = "shield.basic_s1",
+			utility_s1_1   = "misc.orbitscanner",
+			utility_s1_2   = "misc.planetscanner",
+			fuel_scoop_s1  = "misc.fuel_scoop_s1",
+			sensor         = "sensor.radar",
+			hull_1         = "hull.atmospheric_shielding_s1",
+			hyperdrive     = "hyperspace.hyperdrive_2",
+			thruster       = "thruster.default_s1",
+		},
+		cargo   = {},
+		pattern = 1,
+		colors  = { Color('1B2631'), Color('EAECEE'), Color('48C9B0') },
+	},
+	{
+		id       = "mercenary",
+		name     = "Mercenary / Escort (Coronatrix)",
+		shipType = "coronatrix",
+		money    = 500,
+		desc     = "CAREER BUILDOUT: Tactical Mercenary & Combat Escort\nCombat-ready OPLI Coronatrix armed with a 2MW Pulse Cannon, Laser Cooling Booster, dual S1 Shield Generators, Target Scanner, Basic ECM, internal missile bays, and a Class 2 Hyperdrive.",
+		logRole  = "Vessel armed and shielded for security escort, patrol, and bounty operations.",
+		equipment = {
+			[1]            = "misc.laser_cooling_booster",
+			computer_1     = "misc.autopilot",
+			laser_front_s2 = "laser.pulsecannon_2mw",
+			shield_s1_1    = "shield.basic_s1",
+			shield_s1_2    = "shield.basic_s1",
+			utility_s1_1   = "misc.target_scanner",
+			utility_s1_2   = "misc.ecm_basic",
+			sensor         = "sensor.radar",
+			hull_1         = "hull.atmospheric_shielding_s1",
+			hyperdrive     = "hyperspace.hyperdrive_2",
+			thruster       = "thruster.default_s1",
+			missile_bay_1  = "missile_bay.opli_internal_s2",
+			missile_bay_2  = "missile_bay.opli_internal_s2",
+		},
+		cargo   = {},
+		pattern = 1,
+		colors  = { Color('17202A'), Color('7B241C'), Color('E74C3C') },
+	},
+}
 
-StartVariants.register({
-	name       = lui.START_AT_BARNARDS_STAR,
-	desc           = lui.START_AT_BARNARDS_STAR_DESC,
-	location       = SystemPath.New(-1,0,0,0,16),
-	logmsg         = lui.START_LOG_ENTRY_3,
-	shipType       = 'xylophis',
-	money          = 100,
-	hyperdrive     = false,
-	equipment = {
-		computer_1     = "misc.autopilot",
-		sensor         = "sensor.radar",
-		hull_mod       = "hull.atmospheric_shielding_s0",
-		thruster       = "thruster.default_s1",
-	},
-	cargo          = {
-	},
-	pattern    = 6,
-	colors     = { Color('E17F00'), Color('FFFFFF'), Color('FF7F00') }
-})
+local function composeStartVariant(allegianceIdx, roleIdx)
+	local allegiance = ALLEGIANCES[allegianceIdx] or ALLEGIANCES[1]
+	local role = CAREER_ROLES[roleIdx] or CAREER_ROLES[1]
+	local colors = {
+		role.colors[1],
+		role.colors[2],
+		allegiance.trimColor or role.colors[3],
+	}
+	return {
+		name      = allegiance.name .. " — " .. role.name,
+		desc      = allegiance.desc .. "\n\n" .. role.desc,
+		location  = allegiance.location,
+		logmsg    = allegiance.logPrefix .. " " .. role.logRole,
+		shipType  = role.shipType,
+		money     = role.money,
+		equipment = table.deepcopy(role.equipment),
+		cargo     = table.deepcopy(role.cargo),
+		pattern   = role.pattern,
+		colors    = colors,
+	}
+end
+
+-- Register all Allegiance x Career Role combinations in StartVariants for compatibility
+for aIdx = 1, #ALLEGIANCES do
+	for rIdx = 1, #CAREER_ROLES do
+		StartVariants.register(composeStartVariant(aIdx, rIdx))
+	end
+end
 
 -- synchronize parameter views with updated values
 local function updateParams()
@@ -302,6 +401,16 @@ end
 -- wait a few frames, and then calculate the static layout (updateLayout)
 local initFrames = 2
 
+local function applySelectedStartProfile()
+	local action = roleCombo.actions[roleCombo.selected + 1]
+	if action == 'DO_UNLOCK' then
+		unlockAll()
+	else
+		setStartVariant(composeStartVariant(allegianceCombo.selected + 1, roleCombo.selected + 1))
+	end
+	updateParams()
+end
+
 NewGameWindow = ModalWindow.New("New Game", function()
 
 	ui.withFont(Defs.mainFont, function()
@@ -310,18 +419,24 @@ NewGameWindow = ModalWindow.New("New Game", function()
 		if NewGameWindow.mode == 'RECOVER' then
 			ui.text(lui.RECOVER_SAVEGAME)
 		else
-			ui.text(lui.SELECT_START_PROFILE)
+			local comboWidth = math.floor(Defs.winSize.x * 0.34)
+			ui.text((lui.ALLEGIANCE or "Allegiance") .. ":")
 			ui.sameLine()
-			local changed, ret = ui.combo("##starttype", profileCombo.selected, profileCombo.items)
-			if changed then
-				profileCombo.selected = ret
-				local action = profileCombo.actions[ret + 1]
-				if action == 'DO_UNLOCK' then
-					unlockAll()
-				else
-					setStartVariant(StartVariants.item(ret + 1))
-				end
-				updateParams()
+			ui.nextItemWidth(comboWidth)
+			local changedAllegiance, retAllegiance = ui.combo("##allegiance_select", allegianceCombo.selected, allegianceCombo.items)
+			if changedAllegiance then
+				allegianceCombo.selected = retAllegiance
+				applySelectedStartProfile()
+			end
+
+			ui.sameLine(0, ui.getItemSpacing().x * 2)
+			ui.text("Career Role:")
+			ui.sameLine()
+			ui.nextItemWidth(comboWidth)
+			local changedRole, retRole = ui.combo("##role_select", roleCombo.selected, roleCombo.items)
+			if changedRole then
+				roleCombo.selected = retRole
+				applySelectedStartProfile()
 			end
 		end
 
@@ -364,7 +479,7 @@ function NewGameWindow.restoreSaveGame(selectedSave)
 
 		local report = lui.ATTEMPTING_TO_RECOVER_GAME_PROGRESS_FROM_SAVE_X:interp{ save = selectedSave }
 		-- first variant as default value
-		setStartVariant(StartVariants.item(1))
+		setStartVariant(composeStartVariant(1, 1))
 		-- except for clearing the log
 		FlightLogParam:fromStartVariant({})
 		report = report .. "\n\n" .. string.format(lui.FILE_SAVEGAME_VERSION, tostring(saveGame.version))
@@ -406,14 +521,19 @@ function NewGameWindow.restoreSaveGame(selectedSave)
 end
 
 function NewGameWindow:buildProfileCombo()
-	profileCombo.items = {}
-	profileCombo.actions = {}
-	for _, var in ipairs(StartVariants.list()) do
-		table.insert(profileCombo.items, var.name)
+	allegianceCombo.items = {}
+	for _, a in ipairs(ALLEGIANCES) do
+		table.insert(allegianceCombo.items, a.name)
+	end
+
+	roleCombo.items = {}
+	roleCombo.actions = {}
+	for _, r in ipairs(CAREER_ROLES) do
+		table.insert(roleCombo.items, r.name)
 	end
 	if self.debugMode then
-		table.insert(profileCombo.items, "Custom start")
-		profileCombo.actions[#profileCombo.items] = 'DO_UNLOCK'
+		table.insert(roleCombo.items, "Custom Start (Unlocked)")
+		roleCombo.actions[#roleCombo.items] = 'DO_UNLOCK'
 	end
 end
 
@@ -428,12 +548,13 @@ local firstOpen = true
 function NewGameWindow:open()
 	if (firstOpen or not self.debugMode) and self.mode ~= 'RECOVER' then
 		firstOpen = false
-		setStartVariant(StartVariants.item(1))
+		allegianceCombo.selected = 0
+		roleCombo.selected = 0
+		setStartVariant(composeStartVariant(1, 1))
 		updateParams()
-		profileCombo.selected = 0
 	end
 	if self.debugMode then
-		profileCombo.selected = #profileCombo.items - 1
+		roleCombo.selected = #roleCombo.items - 1
 		unlockAll()
 	end
 	ModalWindow.open(self)

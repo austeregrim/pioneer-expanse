@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bgGrad" cx="50%" cy="45%" r="60%">
+      <stop offset="0%" stop-color="#282214" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#110f0a" stop-opacity="1"/>
+    </radialGradient>
+    <linearGradient id="amberGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffd166"/>
+      <stop offset="100%" stop-color="#c88a1b"/>
+    </linearGradient>
+    <linearGradient id="slateGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#d0d8e4"/>
+      <stop offset="100%" stop-color="#6e7a8a"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="512" height="512" fill="url(#bgGrad)"/>
+
+  <!-- Outer Frontier Ring -->
+  <circle cx="256" cy="232" r="172" fill="#15130d" stroke="url(#amberGrad)" stroke-width="3.5"/>
+  <circle cx="256" cy="232" r="156" fill="none" stroke="#6e7a8a" stroke-width="1.5" stroke-opacity="0.6"/>
+
+  <!-- Twin Frontier Wing Chevrons -->
+  <polygon points="94,250 184,188 184,224 114,272" fill="url(#slateGrad)"/>
+  <polygon points="418,250 328,188 328,224 398,272" fill="url(#slateGrad)"/>
+  <polygon points="116,294 196,238 196,268 136,310" fill="url(#amberGrad)"/>
+  <polygon points="396,294 316,238 316,268 376,310" fill="url(#amberGrad)"/>
+
+  <!-- Central Rising Pathfinder Star -->
+  <polygon points="256,78 282,198 372,216 282,246 256,374 230,246 140,216 230,198" fill="url(#amberGrad)"/>
+  <polygon points="256,118 270,204 332,216 270,236 256,326 242,236 180,216 242,204" fill="#fff3d1"/>
+  <circle cx="256" cy="218" r="16" fill="#15130d" stroke="url(#amberGrad)" stroke-width="3"/>
+</svg>
+

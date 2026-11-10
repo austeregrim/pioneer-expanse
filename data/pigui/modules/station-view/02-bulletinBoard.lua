@@ -21,15 +21,15 @@ local colors = ui.theme.colors
 local icons = ui.theme.icons
 
 local widgetSizes = ui.rescaleUI({
-	chatButtonBase = Vector2(0, 24),
-	chatButtonSize = Vector2(0, 24),
-	itemSpacing = Vector2(18, 4),
-	itemInnerSpacing = Vector2(8, 4),
-	rowVerticalSpacing = Vector2(0, 6),
-	popupSize = Vector2(1200, 0),
-	popupBig = Vector2(1200, 0),
-	popupSmall = Vector2(500, 0),
-}, Vector2(1600, 900))
+	chatButtonBase = Vector2(0, 22),
+	chatButtonSize = Vector2(0, 22),
+	itemSpacing = Vector2(14, 3),
+	itemInnerSpacing = Vector2(6, 3),
+	rowVerticalSpacing = Vector2(0, 3),
+	popupSize = Vector2(1100, 0),
+	popupBig = Vector2(1100, 0),
+	popupSmall = Vector2(520, 0),
+}, Vector2(1920, 1080))
 
 local bulletinBoard
 local chatForm
@@ -91,17 +91,17 @@ bulletinBoard = Table.New("BulletinBoardTable", false, {
 
 		local adTextColor = active and colors.font or colors.fontDisabled
 
-		ui.withFont(pionillium.title, function()
+		ui.withFont(pionillium.heading, function()
 			images[icon]:Draw(Vector2(ui.getTextLineHeight()))
 		end)
 		ui.sameLine(0, widgetSizes.itemInnerSpacing.x)
 
 		ui.withStyleColorsAndVars({Text = adTextColor}, {ItemSpacing = widgetSizes.rowVerticalSpacing}, function()
-			ui.withFont(pionillium.title, function()
+			ui.withFont(pionillium.heading, function()
 				ui.text(item.title)
 			end)
 
-			ui.withFont(pionillium.body, function()
+			ui.withFont(pionillium.details, function()
 				local textHeight = ui.getTextLineHeight()
 				local iconSize = Vector2(textHeight)
 
@@ -141,7 +141,7 @@ bulletinBoard = Table.New("BulletinBoardTable", false, {
 				end
 			end)
 
-			ui.withFont(pionillium.heading, function()
+			ui.withFont(pionillium.body, function()
 				ui.textWrapped(item.description)
 				-- add a little bit of extra vertical space between rows
 				ui.dummy(widgetSizes.rowVerticalSpacing)
@@ -228,13 +228,13 @@ bulletinBoard = Table.New("BulletinBoardTable", false, {
 })
 
 local function renderBulletinBoard()
-	ui.withFont(pionillium.title, function()
-		bulletinBoard.style.size = ui.getContentRegion() * Vector2(1 / 1.6, 0)
+	ui.withFont(pionillium.body, function()
+		bulletinBoard.style.size = ui.getContentRegion() * Vector2(1 / 1.45, 0)
 		bulletinBoard:render()
 		ui.sameLine()
 
 		ui.child("BulletinBoardSearch", Vector2(0, 0), function()
-			ui.withFont(orbiteer.title, function()
+			ui.withFont(orbiteer.heading, function()
 				ui.text(l.SEARCH)
 			end)
 			ui.pushItemWidth(ui.getContentRegion().x)

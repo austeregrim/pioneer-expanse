@@ -51,6 +51,21 @@ public:
 	void SetLabelsVisibility(bool hideLabels) { m_hideLabels = hideLabels; }
 	void GotoSector(const SystemPath &path);
 	void GotoSystem(const SystemPath &path);
+	void GotoPositionLy(const vector3f &posLy);
+	void GotoSol();
+	void GotoGalacticCore();
+	void SetMacroZoom(float zoom);
+	float GetMacroZoom() const { return m_zoom; }
+	float GetMacroAlpha() const { return m_macroAlpha; }
+	float GetVoronoiAlpha() const { return m_voronoiAlpha; }
+	vector3f GetPositionLy() const;
+	vector3f GetPlayerPositionLy() const { return m_playerPosLy; }
+	vector3f GetGalacticCorePositionLy() const;
+	float GetGalaxyRadiusLy() const;
+	const Faction *GetSelectedFaction() const { return m_selectedFaction; }
+	void SetSelectedFaction(const Faction *faction) { m_selectedFaction = faction; }
+	const Faction *GetFactionAtPositionLy(const vector3f &posLy) const;
+	void SetMacroMarkers(const vector3f &playerPosLy, const vector3f &selectedPosLy, bool hasSelected);
 	void ZoomIn();
 	void ZoomOut();
 	void ResetView();
@@ -101,6 +116,11 @@ private:
 	void DrawFarSectors(const matrix4x4f &modelview);
 	void BuildFarSector(RefCountedPtr<Sector> sec, const vector3f &origin, std::vector<vector3f> &points, std::vector<Color> &colors);
 	void PutFactionLabels(const vector3f &secPos);
+
+	void InitMacroGalaxy();
+	void DrawMacroGalaxy(const matrix4x4f &modelview);
+	void PutMacroLabels(const matrix4x4f &modelview);
+	void HandleMacroClick(const ImVec2 &mpos);
 
 	void OnClickLabel(const SystemPath &path);
 
@@ -187,6 +207,7 @@ private:
 	class Label;
 	class StarLabel;
 	class FactionLabel;
+	class MacroMarkerLabel;
 	struct Labels {
 		// the constructor can only be defined after defining the Label class
 		Labels(SectorMap &map);
@@ -210,6 +231,38 @@ private:
 	};
 	Labels m_labels;
 	bool m_hideLabels = false;
+
+	// Macro Galactic View state & geometry
+	bool m_macroInitialized = false;
+	float m_macroAlpha = 0.0f;
+	float m_voronoiAlpha = 0.0f;
+	vector3f m_playerPosLy = vector3f(0.0f);
+	vector3f m_selectedPosLy = vector3f(0.0f);
+	bool m_hasSelectedMarker = false;
+	const Faction *m_selectedFaction = nullptr;
+
+	struct VoronoiEdge {
+		vector3f p0;
+		vector3f p1;
+		const Faction *factionA;
+		const Faction *factionB;
+	};
+	struct FactionSite {
+		const Faction *faction;
+		vector3f homePosLy;
+		float radiusLy;
+	};
+	std::vector<VoronoiEdge> m_voronoiEdges;
+	std::vector<FactionSite> m_factionSites;
+
+	std::unique_ptr<Graphics::VertexArray> m_galaxyDiscVerts;
+	std::unique_ptr<Graphics::VertexArray> m_macroLineVerts;
+	RefCountedPtr<Graphics::Material> m_galaxyDiscMat;
+	Graphics::Drawables::Lines m_macroLines;
+	Graphics::Drawables::Points m_galaxyCloudPoints;
+	std::vector<vector3f> m_galaxyCloudPos;
+	std::vector<Color> m_galaxyCloudBaseColor;
+	std::vector<Color> m_galaxyCloudDrawColor;
 };
 
 #endif /* _SECTORMAP_H */

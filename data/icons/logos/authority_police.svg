@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bgGrad" cx="50%" cy="45%" r="60%">
+      <stop offset="0%" stop-color="#122244" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#080e1c" stop-opacity="1"/>
+    </radialGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffe082"/>
+      <stop offset="50%" stop-color="#d4a024"/>
+      <stop offset="100%" stop-color="#8c620a"/>
+    </linearGradient>
+    <linearGradient id="shieldGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#224488"/>
+      <stop offset="100%" stop-color="#0d1d3a"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="512" height="512" fill="url(#bgGrad)"/>
+
+  <!-- Outer Law Enforcement Shield -->
+  <path d="M 256,52 L 404,104 L 404,236 C 404,328 338,392 256,424 C 174,392 108,328 108,236 L 108,104 Z" fill="url(#shieldGrad)" stroke="url(#goldGrad)" stroke-width="6"/>
+  <path d="M 256,72 L 384,118 L 384,234 C 384,314 326,372 256,400 C 186,372 128,314 128,234 L 128,118 Z" fill="none" stroke="#64a0ff" stroke-width="2" stroke-opacity="0.6"/>
+
+  <!-- 6-Pointed Constabulary Star -->
+  <polygon points="256,116 286,184 360,184 302,230 326,300 256,258 186,300 210,230 152,184 226,184" fill="url(#goldGrad)"/>
+
+  <!-- Central Sword & Scales Emblem -->
+  <polygon points="256,100 264,344 256,368 248,344" fill="#ffffff"/>
+  <rect x="216" y="196" width="80" height="10" rx="3" fill="#ffffff"/>
+  <circle cx="256" cy="224" r="24" fill="#122244" stroke="url(#goldGrad)" stroke-width="4"/>
+  <circle cx="256" cy="224" r="9" fill="#ffe082"/>
+</svg>
+

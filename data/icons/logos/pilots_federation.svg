@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bgGrad" cx="50%" cy="45%" r="60%">
+      <stop offset="0%" stop-color="#1e222d" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#0b0d13" stop-opacity="1"/>
+    </radialGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fae19c"/>
+      <stop offset="50%" stop-color="#d8a638"/>
+      <stop offset="100%" stop-color="#8f6310"/>
+    </linearGradient>
+    <linearGradient id="platGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#9aa8b8"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="512" height="512" fill="url(#bgGrad)"/>
+
+  <!-- Outer Commander Ring -->
+  <circle cx="256" cy="232" r="182" fill="none" stroke="url(#goldGrad)" stroke-width="3"/>
+  <circle cx="256" cy="232" r="168" fill="none" stroke="#9aa8b8" stroke-width="1" stroke-opacity="0.5"/>
+
+  <!-- Elite-Inspired Pilots Federation Swept Wings -->
+  <!-- Top Wing Pair -->
+  <polygon points="62,176 206,176 190,204 86,204" fill="url(#goldGrad)"/>
+  <polygon points="450,176 306,176 322,204 426,204" fill="url(#goldGrad)"/>
+  <!-- Middle Wing Pair -->
+  <polygon points="82,216 198,216 184,242 104,242" fill="url(#goldGrad)"/>
+  <polygon points="430,216 314,216 328,242 408,242" fill="url(#goldGrad)"/>
+  <!-- Lower Wing Pair -->
+  <polygon points="108,254 190,254 176,278 128,278" fill="url(#goldGrad)"/>
+  <polygon points="404,254 322,254 336,278 384,278" fill="url(#goldGrad)"/>
+
+  <!-- Central Shield & Cobra/Delta Ship Crest -->
+  <polygon points="256,96 318,144 296,312 256,368 216,312 194,144" fill="#10141d" stroke="url(#goldGrad)" stroke-width="4"/>
+  <polygon points="256,126 302,252 256,226 210,252" fill="url(#platGrad)"/>
+  <polygon points="256,72 272,112 256,102 240,112" fill="url(#goldGrad)"/>
+  <polygon points="224,278 256,298 288,278 288,296 256,316 224,296" fill="url(#goldGrad)"/>
+</svg>
+

@@ -5,8 +5,8 @@
 local ui = require 'pigui.baseui'
 local Vector2 = _G.Vector2
 
-ui.gauge_height = ui.rescaleUI(25, Vector2(1600, 900))
-ui.gauge_width = ui.rescaleUI(275, Vector2(1600, 900))
+ui.gauge_height = ui.rescaleUI(20, Vector2(1920, 1080))
+ui.gauge_width = ui.rescaleUI(240, Vector2(1920, 1080))
 
 --
 -- Function: ui.gauge

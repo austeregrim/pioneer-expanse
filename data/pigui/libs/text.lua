@@ -27,42 +27,42 @@ end
 ui.fonts = {
 	-- dummy font, actually renders icons
 	pionicons = {
-		small	= { name = "icons", size = fontScale(14), offset = fontScale(12) },
-		medium= { name = "icons", size = fontScale(18), offset = fontScale(14) },
-		large	= { name = "icons", size = fontScale(30), offset = fontScale(23.5) }
+		small	= { name = "icons", size = fontScale(13), offset = fontScale(11) },
+		medium	= { name = "icons", size = fontScale(16), offset = fontScale(13) },
+		large	= { name = "icons", size = fontScale(24), offset = fontScale(19) }
 	},
 	pionillium = {
-		xlarge	= { name = "pionillium", size = fontScale(36) },
-		large	= { name = "pionillium", size = fontScale(30) },
-		medlarge = { name = "pionillium", size = fontScale(22) },
-		medium	= { name = "pionillium", size = fontScale(18) },
+		xlarge	= { name = "pionillium", size = fontScale(28) },
+		large	= { name = "pionillium", size = fontScale(22) },
+		medlarge = { name = "pionillium", size = fontScale(18) },
+		medium	= { name = "pionillium", size = fontScale(15) },
 		-- 		medsmall = { name = "pionillium", size = 15 },
-		small	= { name = "pionillium", size = fontScale(14) },
+		small	= { name = "pionillium", size = fontScale(13) },
 		tiny	= { name = "pionillium", size = fontScale(10) },
 
 		-- alternate font breakpoints
-		title    = { name = "pionillium", size = fontScale(30) },
-		heading  = { name = "pionillium", size = fontScale(22) },
-		body     = { name = "pionillium", size = fontScale(19) },
-		details  = { name = "pionillium", size = fontScale(16) },
+		title    = { name = "pionillium", size = fontScale(22) },
+		heading  = { name = "pionillium", size = fontScale(18) },
+		body     = { name = "pionillium", size = fontScale(15) },
+		details  = { name = "pionillium", size = fontScale(13) },
 
 		-- application-specific fonts
-		reticle_md  = { name = "pionillium", size = fontScale(17) },
-		reticle_sm  = { name = "pionillium", size = fontScale(14) },
+		reticle_md  = { name = "pionillium", size = fontScale(15) },
+		reticle_sm  = { name = "pionillium", size = fontScale(13) },
 	},
 	orbiteer = {
-		xlarge	= { name = "orbiteer", size = fontScale(36) },
-		large	= { name = "orbiteer", size = fontScale(30) },
-		medlarge = { name = "orbiteer", size = fontScale(24) },
-		medium	= { name = "orbiteer", size = fontScale(20) },
-		small	= { name = "orbiteer", size = fontScale(14) },
+		xlarge	= { name = "orbiteer", size = fontScale(28) },
+		large	= { name = "orbiteer", size = fontScale(22) },
+		medlarge = { name = "orbiteer", size = fontScale(19) },
+		medium	= { name = "orbiteer", size = fontScale(16) },
+		small	= { name = "orbiteer", size = fontScale(13) },
 		tiny	= { name = "orbiteer", size = fontScale(10) },
 
 		-- alternate font breakpoints
-		title   = { name = "orbiteer", size = fontScale(30) },
-		heading = { name = "orbiteer", size = fontScale(24) },
-		body    = { name = "orbiteer", size = fontScale(20) },
-		details = { name = "orbiteer", size = fontScale(16) },
+		title   = { name = "orbiteer", size = fontScale(22) },
+		heading = { name = "orbiteer", size = fontScale(18) },
+		body    = { name = "orbiteer", size = fontScale(16) },
+		details = { name = "orbiteer", size = fontScale(13) },
 	},
 }
 

@@ -4,7 +4,7 @@
 local pigui = require 'Engine'.pigui
 local Vector2 = Vector2
 
-local defaultBaseResolution = Vector2(1600, 900)
+local defaultBaseResolution = Vector2(1920, 1080)
 
 --
 -- Function: ui.rescaleUI

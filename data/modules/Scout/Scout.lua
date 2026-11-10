@@ -536,7 +536,7 @@ local makeAdvert = function (station)
 	local dist = MissionCalc:CalcDistance(station, location)
 
 	reward = utils.round(reward, 5)
-	local client = Character.New()
+	local client = Character.New({ role = "science", title = "Cartographic Survey Director" })
 
 	local ad = {
 		station    = station,

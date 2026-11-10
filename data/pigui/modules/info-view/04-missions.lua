@@ -15,10 +15,10 @@ local pionillium = ui.fonts.pionillium
 local orbiteer = ui.fonts.orbiteer
 local l = Lang.GetResource("ui-core")
 
-local columnPadding = ui.rescaleUI(Vector2(18, 18), Vector2(1600, 900))
-local itemSpacing = ui.rescaleUI(Vector2(6, 12), Vector2(1600, 900))
-local detailsSpacing = ui.rescaleUI(Vector2(6, 10), Vector2(1600, 900))
-local framePadding = ui.rescaleUI(Vector2(8, 4), Vector2(1600, 900))
+local columnPadding = ui.rescaleUI(Vector2(14, 14), Vector2(1920, 1080))
+local itemSpacing = ui.rescaleUI(Vector2(5, 8), Vector2(1920, 1080))
+local detailsSpacing = ui.rescaleUI(Vector2(5, 7), Vector2(1920, 1080))
+local framePadding = ui.rescaleUI(Vector2(6, 3), Vector2(1920, 1080))
 local face = nil
 
 local activeMission = nil

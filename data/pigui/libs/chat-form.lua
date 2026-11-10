@@ -37,19 +37,19 @@ function ChatForm.New (chatFunc, removeFunc, closeFunc, resizeFunc, ref, tabGrou
 		navButton = function() end,
 		style = {
 			face = {
-				size = style.face.size or ui.rescaleUI(Vector2(96, 96), Vector2(1600, 900)),
-				windowPadding = style.face.windowPadding or ui.rescaleUI(Vector2(4, 4), Vector2(1600, 900)),
-				itemSpacing = style.face.itemSpacing or ui.rescaleUI(Vector2(4, 4), Vector2(1600, 900)),
-				showCharInfo = style.face.showCharInfo or false,
-				charInfoPadding = style.face.charInfoPadding or ui.rescaleUI(Vector2(4,4), Vector2(1600, 900)),
-				charInfoBgColor = style.face.bgColor or Color(0,0,0,160),
+				size = style.face.size or ui.rescaleUI(Vector2(136, 136), Vector2(1920, 1080)),
+				windowPadding = style.face.windowPadding or ui.rescaleUI(Vector2(4, 4), Vector2(1920, 1080)),
+				itemSpacing = style.face.itemSpacing or ui.rescaleUI(Vector2(4, 4), Vector2(1920, 1080)),
+				showCharInfo = style.face.showCharInfo == nil and true or style.face.showCharInfo,
+				charInfoPadding = style.face.charInfoPadding or ui.rescaleUI(Vector2(6, 4), Vector2(1920, 1080)),
+				charInfoBgColor = style.face.bgColor or Color(8, 11, 16, 225),
 				nameFont = style.face.nameFont or orbiteer.small,
-				titleFont = style.face.titleFont or orbiteer.tiny,
+				titleFont = style.face.titleFont or pionillium.tiny,
 			},
-			buttonSize = style.buttonSize or ui.rescaleUI(Vector2(256, 24), Vector2(1600, 900)),
-			titleFont = style.titleFont or orbiteer.large,
-			font = style.font or pionillium.medlarge,
-			marketSize = style.marketSize or ui.rescaleUI(Vector2(1200, 450), Vector2(1600, 900))
+			buttonSize = style.buttonSize or ui.rescaleUI(Vector2(240, 22), Vector2(1920, 1080)),
+			titleFont = style.titleFont or orbiteer.heading,
+			font = style.font or pionillium.body,
+			marketSize = style.marketSize or ui.rescaleUI(Vector2(1080, 420), Vector2(1920, 1080))
 		},
 	}
 	-- So that the font at least fits in the button in height

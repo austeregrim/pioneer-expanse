@@ -10,6 +10,7 @@ local Lang = require 'Lang'
 local Event = require 'Event'
 local Rand = require 'Rand'
 local Serializer = require 'Serializer'
+local Character = require 'Character'
 
 local l = Lang.GetResource("module-advice")
 
@@ -77,6 +78,12 @@ local onChat = function (form, ref, option)
 	local ad = ads[ref]
 	form:Clear()
 	form:SetTitle(flavours[ad.n].ID)
+	form:SetFace(Character.New({
+		title = flavours[ad.n].ID,
+		role = "pilots_federation",
+		org = "PILOTS FEDERATION — LOUNGE",
+		seed = (ad.station and ad.station.seed or 0) + ad.n,
+	}))
 	form:SetMessage(flavours[ad.n].bodytext)
 end
 

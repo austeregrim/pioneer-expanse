@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bgGrad" cx="50%" cy="45%" r="60%">
+      <stop offset="0%" stop-color="#1c2430" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#0b0e14" stop-opacity="1"/>
+    </radialGradient>
+    <linearGradient id="platGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#7f8fa6"/>
+    </linearGradient>
+    <linearGradient id="orangeGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ff793f"/>
+      <stop offset="100%" stop-color="#cd6133"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="512" height="512" fill="url(#bgGrad)"/>
+
+  <!-- Albr Heavy Aerospace Shield -->
+  <polygon points="140,72 372,72 420,232 256,412 92,232" fill="#121820" stroke="url(#platGrad)" stroke-width="5"/>
+
+  <!-- Twin Heavy Lifting Boosters & Central Venture Star -->
+  <polygon points="164,120 208,120 228,312 184,312" fill="url(#platGrad)"/>
+  <polygon points="348,120 304,120 284,312 328,312" fill="url(#platGrad)"/>
+  <polygon points="256,96 296,264 256,236 216,264" fill="url(#orangeGrad)"/>
+  <polygon points="256,268 276,356 256,336 236,356" fill="#ffffff"/>
+</svg>
+

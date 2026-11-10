@@ -396,7 +396,7 @@ local function N_equilibrium(station) -- This function is included unchanged fro
 end
 
 local newCrew = function()
-	local hopefulCrew = Character.New()
+	local hopefulCrew = Character.New({ role = "crew", title = "Licensed Flight Crew" })
 	-- Roll new stats, with a 1/3 chance that they're utterly inexperienced
 	hopefulCrew:RollNew(Engine.rand:Integer(0, 2) > 0)
 	-- Make them a title if they're good at anything

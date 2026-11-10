@@ -188,7 +188,7 @@ end
 local onCreateBB = function (station)
 	local rand = Rand.New(station.seed + seedbump)
 	local n = rand:Integer(1,#flavours)
-	local mechanic = Character.New({seed=rand:Integer()})
+	local mechanic = Character.New({seed=rand:Integer(), role="engineering"})
 
 	local ad = {
 		mechanic = mechanic,
@@ -209,6 +209,7 @@ local onCreateBB = function (station)
 		baseprice = flavours[n].baseprice *rand:Number(0.8,1.2), -- A little per-station flavouring
 		n         = n
 	}
+	mechanic.title = ad.title
 
 	local ref = station:AddAdvert({
 		title       = flavours[n].adtitle,

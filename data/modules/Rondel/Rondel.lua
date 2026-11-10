@@ -55,6 +55,9 @@ local onChat = function (form, ref, option)
 	form:Clear()
 
 	form:SetTitle(l_rondel.SOLFED_INTEL)
+	if ad.character then
+		form:SetFace(ad.character)
+	end
 
 	if option == -1 then
 		form:Close()
@@ -90,10 +93,10 @@ local onCreateBB = function (station)
 	if rondel_prize or not rondel_victory then return end
 
 	local ad = {
-		title    = l_rondel.HEY_OVER_HERE,
+		title     = l_rondel.HEY_OVER_HERE,
 		--message  = "",
-		station  = station,
-		--character = Character.New({armour=false}),
+		station   = station,
+		character = Character.New({ title = l_rondel.SOLFED_INTEL, role = "solfed_intel", armour = false }),
 	}
 
 	local ref = station:AddAdvert({

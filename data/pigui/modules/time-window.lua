@@ -8,7 +8,7 @@ local lui = Lang.GetResource("ui-core");
 local ui = require 'pigui'
 local icons = ui.theme.icons
 local Vector2 = _G.Vector2
-local timefont = ui.fonts.pionillium.large
+local timefont = ui.fonts.pionillium.medlarge
 local button_size = ui.theme.styles.MainButtonSize
 -- names of the keys in lang/core/
 local months = {"MONTH_JAN", "MONTH_FEB", "MONTH_MAR", "MONTH_APR", "MONTH_MAY", "MONTH_JUN", "MONTH_JUL", "MONTH_AUG", "MONTH_SEP", "MONTH_OCT", "MONTH_NOV", "MONTH_DEC"}

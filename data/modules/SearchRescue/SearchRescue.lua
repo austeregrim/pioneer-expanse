@@ -291,7 +291,7 @@ local getAircontrolChar = function (station)
 	if aircontrol_chars[station.path] then
 		return aircontrol_chars[station.path]
 	else
-		local char = Character.New()
+		local char = Character.New({ role = "rescue", title = "Search & Rescue Control" })
 		aircontrol_chars[station.path] = char
 		return char
 	end
@@ -1245,7 +1245,7 @@ local makeAdvert = function (station, manualFlavour, closestplanets)
 
 	-- select appropriate posting client, entity, problem
 	if flavour.id == 6 then
-		client = Character.New()
+		client = Character.New({ role = "rescue", title = "Emergency Coordinator" })
 
 		-- select posting entity
 		local entity_types = {"ENTITY_RESEARCH", "ENTITY_GENERAL"}
@@ -1261,7 +1261,7 @@ local makeAdvert = function (station, manualFlavour, closestplanets)
 			{ locality = localities_target[Engine.rand:Integer(1,#localities_target)] })
 
 	elseif flavour.id == 7 then
-		client = Character.New()
+		client = Character.New({ role = "rescue", title = "Distress Operations" })
 		local surname = string.gsub(client.surname, "^%l", string.upper)
 
 		-- select posting entity

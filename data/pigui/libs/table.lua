@@ -34,9 +34,9 @@ local TableWidget = {}
 
 function TableWidget.New(id, title, config)
     local defaultSizes = ui.rescaleUI({
-        itemPadding = Vector2(14, 14),
-        itemSpacing = Vector2(4, 9),
-    }, Vector2(1600, 900))
+        itemPadding = Vector2(8, 6),
+        itemSpacing = Vector2(4, 4),
+    }, Vector2(1920, 1080))
 
     local self
     self = {

@@ -114,31 +114,37 @@ debugView.registerTab('debug-trade-ships', {
 				property("Total bodies in space", Space.GetNumBodies())
 			end
 
-			if ui.collapsingHeader("Stations") then
+			if ui.collapsingHeader("Stations") and Core.params.port_params then
 				local totals = {docks = 0, busy_s = 0, landed = 0, flow = 0}
 				-- count the inbound ships
 				local inbound = {}
 				for _, trader in pairs(Core.ships) do
 					local s = trader.status == 'inbound' and trader.starport
-					if s then
+					if s and s:exists() then
 						if inbound[s] then inbound[s] = inbound[s] + 1
 						else inbound[s] = 1
 						end
 					end
 				end
-				totals.label = "Total for " .. utils.count(Core.params.port_params) .. " ports"
+				local valid_ports = {}
+				for port, params in pairs(Core.params.port_params) do
+					if port and port:exists() then
+						valid_ports[port] = params
+					end
+				end
+				totals.label = "Total for " .. utils.count(valid_ports) .. " ports"
 				local obj = Game.systemView:GetSelectedObject()
 				local sb_selected = obj.type == Engine.GetEnumValue("ProjectableTypes", "OBJECT") and obj.base == Engine.GetEnumValue("ProjectableBases", "SYSTEMBODY")
-				arrayTable.draw("tradeships_stationinfo2", Core.params.port_params, arrayTable.addKeys(pairs, {
+				arrayTable.draw("tradeships_stationinfo2", valid_ports, arrayTable.addKeys(pairs, {
 					port =    function(k,_) return k end,
-					label =   function(k,_) return k:GetLabel() end,
-					parent =  function(k,_) return k:GetSystemBody().parent.name end,
-					dist =    function(k,_) return k:DistanceTo(k:GetSystemBody().nearestJumpable.body) end,
-					docks =   function(k,_) totals.docks = totals.docks + k.numDocks return k.numDocks end,
-					busy_s =  function(k,_) totals.busy_s = totals.busy_s + k.numShipsDocked return k.numShipsDocked end,
+					label =   function(k,_) return (k and k:exists()) and k:GetLabel() or "N/A" end,
+					parent =  function(k,_) return (k and k:exists() and k:GetSystemBody() and k:GetSystemBody().parent) and k:GetSystemBody().parent.name or "N/A" end,
+					dist =    function(k,_) return (k and k:exists() and k:GetSystemBody() and k:GetSystemBody().nearestJumpable and k:GetSystemBody().nearestJumpable.body) and k:DistanceTo(k:GetSystemBody().nearestJumpable.body) or 0 end,
+					docks =   function(k,_) if k and k:exists() then totals.docks = totals.docks + k.numDocks return k.numDocks else return 0 end end,
+					busy_s =  function(k,_) if k and k:exists() then totals.busy_s = totals.busy_s + k.numShipsDocked return k.numShipsDocked else return 0 end end,
 					inbound = function(k,_) return inbound[k] end,
-					landed =  function(_,v) totals.landed = totals.landed + v.landed return v.landed end,
-					flow =    function(_,v) totals.flow = totals.flow + v.flow return v.flow end
+					landed =  function(_,v) totals.landed = totals.landed + (v.landed or 0) return v.landed end,
+					flow =    function(_,v) totals.flow = totals.flow + (v.flow or 0) return v.flow end
 				}),{
 					{ name = "Port",       key = "label",  string = true               },
 					{ name = "Parent",     key = "parent", string = true               },
@@ -154,23 +160,25 @@ debugView.registerTab('debug-trade-ships', {
 					totals = { totals },
 					callbacks = {
 						onClick = function(row)
-							Game.systemView:SetSelectedObject(Engine.GetEnumValue("ProjectableTypes", "OBJECT"),
-								Engine.GetEnumValue("ProjectableBases", "SYSTEMBODY"), row.port:GetSystemBody())
+							if row.port and row.port:exists() then
+								Game.systemView:SetSelectedObject(Engine.GetEnumValue("ProjectableTypes", "OBJECT"),
+									Engine.GetEnumValue("ProjectableBases", "SYSTEMBODY"), row.port:GetSystemBody())
+							end
 						end,
 						isSelected = function(row)
-							return sb_selected and Game.systemView:GetSelectedObject().ref == row.port:GetSystemBody()
+							return sb_selected and row.port and row.port:exists() and Game.systemView:GetSelectedObject().ref == row.port:GetSystemBody()
 						end
 					}})
 			end
 
-			if ui.collapsingHeader("Local routes") then
+			if ui.collapsingHeader("Local routes") and Core.params.local_routes then
 				for shipname, params in pairs(Core.params.local_routes) do
 					ui.text("  ")
 					ui.sameLine()
 					if ui.treeNode(shipname .. " (" .. #params .. ")") then
 						arrayTable.draw("tradeships_" .. shipname .. "_info", params, ipairs, {
-							{ name = "From",     key = "from",     fnc = method("GetLabel"), string = true },
-							{ name = "To",       key = "to",       fnc = method("GetLabel"), string = true },
+							{ name = "From",     key = "from",     fnc = function(v) return (v and v:exists()) and v:GetLabel() or "N/A" end, string = true },
+							{ name = "To",       key = "to",       fnc = function(v) return (v and v:exists()) and v:GetLabel() or "N/A" end, string = true },
 							{ name = "Duration", key = "duration", fnc = ui.Format.Duration                },
 							{ name = "Distance", key = "distance", fnc = distanceInAU                      }
 						})
@@ -179,7 +187,7 @@ debugView.registerTab('debug-trade-ships', {
 				end
 			end
 
-			if ui.collapsingHeader("Hyperspace routes") then
+			if ui.collapsingHeader("Hyperspace routes") and Core.params.hyper_routes then
 				local function sysName(path)
 					return path:GetStarSystem().name
 				end
@@ -219,7 +227,7 @@ debugView.registerTab('debug-trade-ships', {
 							cargo = ship.usedCargo,
 							ai = ship:GetCurrentAICommand(),
 							model = ship.shipId,
-							port = trader.starport and trader.starport:GetLabel()
+							port = trader.starport and trader.starport:exists() and trader.starport:GetLabel() or nil
 						})
 					end
 				end
@@ -281,7 +289,7 @@ debugView.registerTab('debug-trade-ships', {
 
 		infosize = ui.getCursorScreenPos().y
 		local obj = Game.systemView:GetSelectedObject()
-		if obj.type ~= Engine.GetEnumValue("ProjectableTypes", "NONE") and Core.ships[obj.ref] then
+		if obj.type ~= Engine.GetEnumValue("ProjectableTypes", "NONE") and obj.ref and obj.ref:exists() and Core.ships[obj.ref] then
 			local ship = obj.ref ---@type Ship
 			local trader = Core.ships[ship]
 
@@ -290,10 +298,15 @@ debugView.registerTab('debug-trade-ships', {
 
 				local status = trader.status
 				if status == "docked" then
-					status = status .. " (" .. trader.starport:GetLabel() .. ")"
+					local portName = trader.starport and trader.starport:exists() and trader.starport:GetLabel() or "Unknown"
+					status = status .. " (" .. portName .. ")"
 				elseif status == "inbound" then
-					local d = ui.Format.Distance(ship:DistanceTo(trader.starport))
-					status = status .. " (" .. trader.starport:GetLabel() .. " - " .. d .. ")"
+					if trader.starport and trader.starport:exists() then
+						local d = ui.Format.Distance(ship:DistanceTo(trader.starport))
+						status = status .. " (" .. trader.starport:GetLabel() .. " - " .. d .. ")"
+					else
+						status = status .. " (Unknown)"
+					end
 				end
 				property("Status: ", status)
 

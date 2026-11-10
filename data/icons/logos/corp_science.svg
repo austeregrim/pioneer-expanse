@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bgGrad" cx="50%" cy="45%" r="60%">
+      <stop offset="0%" stop-color="#181c3a" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#090b18" stop-opacity="1"/>
+    </radialGradient>
+    <linearGradient id="cyanGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#64ffda"/>
+      <stop offset="100%" stop-color="#00b4d8"/>
+    </linearGradient>
+    <linearGradient id="purpleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a29bfe"/>
+      <stop offset="100%" stop-color="#6c5ce7"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="512" height="512" fill="url(#bgGrad)"/>
+
+  <!-- Outer Celestial Astrolabe Ring -->
+  <circle cx="256" cy="232" r="172" fill="#0d1024" stroke="url(#purpleGrad)" stroke-width="3"/>
+  <circle cx="256" cy="232" r="154" fill="none" stroke="url(#cyanGrad)" stroke-width="1.5" stroke-opacity="0.6"/>
+
+  <!-- 3-Axis Gyroscopic Orbital Rings -->
+  <ellipse cx="256" cy="232" rx="136" ry="48" fill="none" stroke="url(#cyanGrad)" stroke-width="3"/>
+  <ellipse cx="256" cy="232" rx="136" ry="48" transform="rotate(60 256 232)" fill="none" stroke="url(#purpleGrad)" stroke-width="3"/>
+  <ellipse cx="256" cy="232" rx="136" ry="48" transform="rotate(-60 256 232)" fill="none" stroke="url(#purpleGrad)" stroke-width="3"/>
+
+  <!-- Central Pulsar Star -->
+  <polygon points="256,112 272,216 376,232 272,248 256,352 240,248 136,232 240,216" fill="#ffffff"/>
+  <circle cx="256" cy="232" r="24" fill="url(#cyanGrad)"/>
+  <circle cx="256" cy="232" r="10" fill="#ffffff"/>
+</svg>
+

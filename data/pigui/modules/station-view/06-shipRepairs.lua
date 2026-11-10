@@ -17,7 +17,7 @@ local Lang = require 'Lang'
 local PlayerState = require 'PlayerState'
 local l = Lang.GetResource("ui-core")
 
-local rescaleVector = ui.rescaleUI(Vector2(1, 1), Vector2(1600, 900), true)
+local rescaleVector = ui.rescaleUI(Vector2(1, 1), Vector2(1920, 1080), true)
 
 local colors = ui.theme.colors
 local icons = ui.theme.icons
@@ -44,12 +44,12 @@ local textColorWarning = Color(255, 255, 0)
 local activeTab = 0
 
 local widgetSizes = ui.rescaleUI({
-	itemSpacing = Vector2(4, 9),
-	faceSize = Vector2(586,565),
-	buttonSize = Vector2(100, 0),
-	verticalDummy = Vector2(0, 50),
-	gaugeWidth = 600,
-}, Vector2(1600, 900))
+	itemSpacing = Vector2(4, 7),
+	faceSize = Vector2(460, 440),
+	buttonSize = Vector2(90, 0),
+	verticalDummy = Vector2(0, 36),
+	gaugeWidth = 520,
+}, Vector2(1920, 1080))
 
 
 local popup = ModalWindow.New('ChiefMechanicPopup', function(self)

@@ -19,7 +19,7 @@ local pionillium = ui.fonts.pionillium
 local orbiteer = ui.fonts.orbiteer
 local colors = ui.theme.colors
 
-local itemSpacing = ui.rescaleUI(Vector2(6, 12), Vector2(1600, 900))
+local itemSpacing = ui.rescaleUI(Vector2(5, 8), Vector2(1920, 1080))
 
 -- Anti-abuse feature - this locks out the piloting commands based on a timer.
 -- It knows when the crew were last checked for a piloting skill, and prevents

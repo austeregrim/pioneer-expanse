@@ -27,11 +27,11 @@ local Vector2 = _G.Vector2
 
 local vZero = Vector2(0,0)
 local widgetSizes = ui.rescaleUI({
-	iconSize = Vector2(64, 64),
-	buyButton = Vector2(96, 36),
-	confirmButtonSize = Vector2(384, 48),
-	itemSpacing = Vector2(18, 4),
-}, Vector2(1600, 900))
+	iconSize = Vector2(52, 52),
+	buyButton = Vector2(88, 32),
+	confirmButtonSize = Vector2(320, 40),
+	itemSpacing = Vector2(14, 4),
+}, Vector2(1920, 1080))
 widgetSizes.iconSpacer = (widgetSizes.buyButton - widgetSizes.iconSize)/2
 
 local shipMarket

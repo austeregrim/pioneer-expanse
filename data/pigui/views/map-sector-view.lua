@@ -273,7 +273,149 @@ local function drawJumpableList(jumpables, path)
 	end
 end
 
--- System Information bar
+-- Helper to draw the Contextual Macro Galactic Navigation & Faction Dossier
+local function drawMacroGalacticDossier()
+	local map = sectorView:GetMap()
+	local playerPosLy = map:GetPlayerPositionLy()
+	local focusPosLy = map:GetPositionLy()
+	local corePosLy = map:GetGalacticCorePositionLy()
+	local distSol = playerPosLy:length()
+	local distCore = (playerPosLy - corePosLy):length()
+	local focusDistCore = (focusPosLy - corePosLy):length()
+
+	sidebarStyle:push()
+
+	ui.separatorText("GALACTIC ASTROMETRY")
+
+	ui.withFont(pionillium.details, function()
+		textIcon(icons.ship, "Ship Galactic Coordinates (Sol Origin)")
+		ui.text(string.format("Ship XYZ: (%.0f, %.0f, %.0f) ly", playerPosLy.x, playerPosLy.y, playerPosLy.z))
+
+		textIcon(icons.sun, "Distance from Sol (Humanity Birthplace)")
+		ui.text(string.format("Sol Distance: %.1f ly", distSol))
+
+		textIcon(icons.galaxy_map, "Distance to Galactic Center (Sagittarius A*)")
+		ui.text(string.format("Core Distance: %.0f ly", distCore))
+
+		textIcon(icons.maneuver, "Current Viewport Focus Coordinates")
+		ui.text(string.format("Focus XYZ: (%.0f, %.0f, %.0f) ly  [%.0f ly to Core]",
+			focusPosLy.x, focusPosLy.y, focusPosLy.z, focusDistCore))
+	end)
+
+	ui.spacing()
+	ui.separatorText("QUICK NAVIGATION")
+
+	ui.withFont(pionillium.details, function()
+		local btnW = (ui.getContentRegion().x - ui.theme.styles.ItemSpacing.x * 2) / 3
+		local btnSz = Vector2(btnW, 0)
+		if ui.button("Ship", btnSz) then
+			sectorView:SwitchToPath(sectorView:GetCurrentSystemPath())
+		end
+		ui.sameLine()
+		if ui.button("Sol (0,0,0)", btnSz) then
+			map:GotoSol()
+		end
+		ui.sameLine()
+		if ui.button("Galactic Core", btnSz) then
+			map:GotoGalacticCore()
+			if map:GetMacroZoom() < 800.0 then
+				map:SetMacroZoom(1800.0)
+			end
+		end
+
+		if ui.button("Local Sector", btnSz) then
+			map:SetMacroZoom(2.5)
+		end
+		ui.sameLine()
+		if ui.button("Human Bubble", btnSz) then
+			map:GotoSol()
+			map:SetMacroZoom(85.0)
+		end
+		ui.sameLine()
+		if ui.button("Full Galaxy", btnSz) then
+			map:GotoGalacticCore()
+			map:SetMacroZoom(9500.0)
+		end
+	end)
+
+	ui.spacing()
+	ui.separatorText("TERRITORIAL DOSSIER")
+
+	local activeFaction = map:GetSelectedFaction() or map:GetFactionAtCenter()
+	if activeFaction then
+		local fcol = Color(activeFaction.colour.r, activeFaction.colour.g, activeFaction.colour.b)
+		ui.withFont(orbiteer.body, function()
+			ui.textColored(fcol, activeFaction.name)
+		end)
+
+		if activeFaction.descriptionShort and #activeFaction.descriptionShort > 0 then
+			ui.withFont(pionillium.details, function()
+				ui.textWrapped(activeFaction.descriptionShort)
+			end)
+		end
+
+		ui.spacing()
+
+		ui.withFont(pionillium.details, function()
+			if activeFaction.hasHomeworld then
+				local hw = activeFaction.homeworld
+				local hwSys = hw:GetStarSystem()
+				textIcon(icons.starport, "Capital System")
+				ui.text(string.format("Capital: %s (%d, %d, %d)", hwSys.name, hw.sectorX, hw.sectorY, hw.sectorZ))
+
+				textIcon(icons.route_dist, "Territorial Claim Radius")
+				ui.text(string.format("Influence Radius: %.1f ly", activeFaction.radius))
+			else
+				textIcon(icons.galaxy_map, "Unclaimed / Independent Frontier")
+				ui.text("Unaligned / Independent Frontier Space")
+			end
+
+			if activeFaction.foundingDate then
+				textIcon(icons.clock, "Founding Year")
+				ui.text(string.format("Established: %.0f CE", activeFaction.foundingDate))
+			end
+
+			if activeFaction.militaryName and #activeFaction.militaryName > 0 then
+				textIcon(icons.shield, "Military Wing")
+				ui.text("Military: " .. activeFaction.militaryName)
+			end
+
+			if activeFaction.policeName and #activeFaction.policeName > 0 then
+				textIcon(icons.gavel, "Law Enforcement")
+				ui.text("Security: " .. activeFaction.policeName)
+			end
+		end)
+
+		if activeFaction.description and #activeFaction.description > 0 then
+			ui.spacing()
+			ui.withFont(pionillium.details, function()
+				ui.setNextWindowSizeConstraints(Vector2(0), Vector2(-1, ui.getTextLineHeight() * 5 + ui.getWindowPadding().y * 2))
+				ui.child("##factionDescription", Vector2(0), nil, childFlags, function()
+					ui.textWrapped(activeFaction.description)
+				end)
+			end)
+		end
+
+		if activeFaction.hasHomeworld then
+			ui.spacing()
+			if ui.button("Center & Select Capital System", Vector2(ui.getContentRegion().x, 0)) then
+				sectorView:SwitchToPath(activeFaction.homeworld)
+				map:GotoSystemPath(activeFaction.homeworld)
+				if map:GetMacroZoom() > 25.0 then
+					map:SetMacroZoom(12.0)
+				end
+			end
+		end
+	else
+		ui.withFont(pionillium.details, function()
+			ui.textWrapped("Deep Uncharted Galactic Space. Click inside any faction territory in the Human Bubble to inspect its dossier, or click anywhere on the galactic disc to pan the camera.")
+		end)
+	end
+
+	sidebarStyle:pop()
+end
+
+-- System Information bar (Contextually adapts to Macro Galactic View when zoomed out)
 ---@type UI.Sidebar.Module
 local infoView = {
 	active = true,
@@ -281,6 +423,11 @@ local infoView = {
 	tooltip = lui.SYSTEM_INFORMATION,
 
 	drawTitle = function(self)
+		local map = sectorView:GetMap()
+		if map:GetMacroAlpha() >= 0.45 then
+			ui.text("GALACTIC OVERVIEW")
+			return
+		end
 
 		local iconSize = Vector2(ui.getButtonHeight())
 		local path = sectorView:GetSelectedSystemPath() ---@type SystemPath
@@ -307,6 +454,11 @@ local infoView = {
 	end,
 
 	drawBody = function(self)
+		local map = sectorView:GetMap()
+		if map:GetMacroAlpha() >= 0.45 then
+			drawMacroGalacticDossier()
+			return
+		end
 
 		local path = sectorView:GetSelectedSystemPath()
 		if not path then return end
@@ -712,16 +864,37 @@ local factionView = {
 	drawBody = function(self)
 		sidebarStyle:push()
 
-		local factions = sectorView:GetMap():GetFactions()
-		for _,f in pairs(factions) do
-			local changed, value
-			ui.withStyleColors({ Text = Color(f.faction.colour.r, f.faction.colour.g, f.faction.colour.b) }, function()
-				changed, value = ui.checkbox(f.faction.name, f.visible)
+		local map = sectorView:GetMap()
+		local isMacro = map:GetVoronoiAlpha() > 0.25
+		local factions = isMacro and map:GetAllMajorFactions() or map:GetFactions()
+
+		if isMacro then
+			ui.withFont(pionillium.details, function()
+				ui.textWrapped("Toggle faction visibility or click a faction to inspect its territory and center on its capital world:")
 			end)
-			if changed then
-				sectorView:GetMap():SetFactionVisible(f.faction, value)
-			end
+			ui.spacing()
 		end
+
+		ui.setNextWindowSizeConstraints(Vector2(0), Vector2(-1, ui.getTextLineHeight() * 16 + ui.getWindowPadding().y * 2))
+		ui.child("##factionsList", Vector2(0), nil, childFlags, function()
+			for _, f in pairs(factions) do
+				local changed, value
+				local fcol = Color(f.faction.colour.r, f.faction.colour.g, f.faction.colour.b)
+				ui.withStyleColors({ Text = fcol }, function()
+					changed, value = ui.checkbox("##vis_" .. f.faction.name, f.visible)
+					ui.sameLine()
+					if ui.selectable(f.faction.name, map:GetSelectedFaction() == f.faction) then
+						map:SetSelectedFaction(f.faction)
+						if f.faction.hasHomeworld then
+							map:GotoSystemPath(f.faction.homeworld)
+						end
+					end
+				end)
+				if changed then
+					map:SetFactionVisible(f.faction, value)
+				end
+			end
+		end)
 
 		sidebarStyle:pop()
 	end
@@ -768,16 +941,53 @@ table.insert(rightSidebar.modules, routeView)
 table.insert(rightSidebar.modules, searchBar)
 table.insert(rightSidebar.modules, bookmarkView)
 
--- Renders the current system banner
+-- Renders the current system & Macro Galactic Position Info Banner
 local function drawCurrentSystemName()
 	local window_offset_y = ui.theme.styles.MainButtonSize.y + ui.getWindowPadding().y * 2 + ui.theme.styles.ItemSpacing.y
 	ui.setNextWindowPos(Vector2(ui.screenWidth / 2, window_offset_y), "Always", Vector2(0.5, 0))
 
+	local map = sectorView:GetMap()
+	local vorAlpha = map:GetVoronoiAlpha()
+
 	ui.window("##CurrentSystem", { "NoDecoration", "NoMove", "NoBackground", "AlwaysAutoResize" }, function()
 		local path = sectorView:GetCurrentSystemPath()
-		ui.withFont(orbiteer.body, function()
-			bannerText(ui.getCursorScreenPos(), ui.get_icon_glyph(icons.navtarget) .. " " .. ui.Format.SystemPath(path), colors.lightBlackBackground)
-		end)
+		local playerPosLy = map:GetPlayerPositionLy()
+		local corePosLy = map:GetGalacticCorePositionLy()
+		local distSol = playerPosLy:length()
+		local distCore = (playerPosLy - corePosLy):length()
+		local activeFaction = map:GetSelectedFaction() or map:GetFactionAtCenter() or map:GetFactionAtPlayer()
+		local territoryName = activeFaction and activeFaction.name or "Uncharted Space"
+
+		if vorAlpha < 0.25 then
+			ui.withFont(orbiteer.body, function()
+				bannerText(ui.getCursorScreenPos(),
+					ui.get_icon_glyph(icons.navtarget) .. " " .. ui.Format.SystemPath(path) ..
+					string.format("   |   Sol: %.1f ly   |   %s", distSol, territoryName),
+					colors.lightBlackBackground)
+			end)
+		else
+			local focusPosLy = map:GetPositionLy()
+			local headerLine = string.format(
+				"%s %s   |   GALACTIC XYZ: (%.0f, %.0f, %.0f) ly   |   SOL: %.0f ly   |   SAGITTARIUS A*: %.0f ly",
+				ui.get_icon_glyph(icons.galaxy_map),
+				ui.Format.SystemPath(path),
+				playerPosLy.x, playerPosLy.y, playerPosLy.z,
+				distSol, distCore
+			)
+			ui.withFont(orbiteer.body, function()
+				bannerText(ui.getCursorScreenPos(), headerLine, colors.lightBlackBackground)
+			end)
+
+			local subLine = string.format(
+				"TERRITORY: %s   |   FOCUS XYZ: (%.0f, %.0f, %.0f) ly   |   SCALE: %.0f ly",
+				territoryName,
+				focusPosLy.x, focusPosLy.y, focusPosLy.z,
+				map:GetMacroZoom() * 10.0
+			)
+			ui.withFont(pionillium.details, function()
+				bannerText(ui.getCursorScreenPos(), subLine, colors.lightBlackBackground)
+			end)
+		end
 	end)
 end
 
@@ -788,6 +998,7 @@ local function drawEdgeButtons()
 
 	local windowPos = Vector2(ui.screenWidth / 2, ui.screenHeight)
 	ui.setNextWindowPos(windowPos, "Always", wnd_pivot_bottom)
+	local map = sectorView:GetMap()
 
 	ui.window("##EdgeButtons", button_wnd_flags, function()
 		ui.horizontalGroup(function()
@@ -795,6 +1006,23 @@ local function drawEdgeButtons()
 			-- view control buttons
 			if ui.mainMenuButton(icons.navtarget, lui.CENTER_ON_CURRENT_SYSTEM) then
 				sectorView:SwitchToPath(sectorView:GetCurrentSystemPath())
+			end
+
+			if ui.mainMenuButton(icons.sun, "Center on Sol (0, 0, 0)") then
+				map:GotoSol()
+			end
+
+			if ui.mainMenuButton(icons.galaxy_map, "Toggle Macro Galactic Overview / Sagittarius A*") then
+				if map:GetMacroAlpha() < 0.5 then
+					map:GotoGalacticCore()
+					map:SetMacroZoom(9500.0)
+					if not leftSidebar.active and not infoView.active then
+						leftSidebar:MakeActive(infoView)
+					end
+				else
+					sectorView:SwitchToPath(sectorView:GetCurrentSystemPath())
+					map:SetMacroZoom(2.5)
+				end
 			end
 
 			if ui.mainMenuButton(icons.reset_view, lui.RESET_ORIENTATION_AND_ZOOM) then

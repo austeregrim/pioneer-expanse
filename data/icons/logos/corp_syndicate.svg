@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bgGrad" cx="50%" cy="45%" r="60%">
+      <stop offset="0%" stop-color="#24122e" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#0d0712" stop-opacity="1"/>
+    </radialGradient>
+    <linearGradient id="syndicateGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#e056fd"/>
+      <stop offset="50%" stop-color="#9b26b6"/>
+      <stop offset="100%" stop-color="#4a0e5c"/>
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#f9ca24"/>
+      <stop offset="100%" stop-color="#b37d14"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="512" height="512" fill="url(#bgGrad)"/>
+
+  <!-- Eclipsed Outer Crescent -->
+  <circle cx="256" cy="232" r="168" fill="url(#syndicateGrad)"/>
+  <circle cx="282" cy="212" r="142" fill="#0d0712"/>
+
+  <!-- Razor Star & Twin Syndicate Talons -->
+  <polygon points="256,76 278,196 396,232 278,268 256,388 234,268 116,232 234,196" fill="url(#goldGrad)"/>
+  <polygon points="256,120 268,208 356,232 268,256 256,344 244,256 156,232 244,208" fill="#1a0d24"/>
+  <circle cx="256" cy="232" r="20" fill="url(#goldGrad)"/>
+</svg>
+

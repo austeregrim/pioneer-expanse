@@ -39,13 +39,17 @@ end
 Event.Register("onGameStart", onGameStart)
 
 local onShipEnterSystem = function (ship)
-	-- dont crash when entering unexplored systems
-	if Game.system.explored == false then
-		return
-	end
-
 	-- clearing the cache of ships that attacked traders, but are no longer relevant
 	Core.attackers.clean()
+
+	-- dont crash when entering unexplored systems
+	if Game.system.explored == false then
+		if ship:IsPlayer() then
+			Core.params = nil
+			Flow.updateTradeShipsTable()
+		end
+		return
+	end
 
 	-- if the player is following a ship through hyperspace that ship may enter first
 	-- so update the system when the first ship enters (see Space::DoHyperspaceTo)
@@ -74,6 +78,7 @@ Event.Register("onShipEnterSystem", onShipEnterSystem)
 
 local onShipLeaveSystem = function (ship)
 	if ship:IsPlayer() then
+		Core.params = nil
 		-- the next onEnterSystem will be in a new system
 		local total, removed = 0, 0
 		for t_ship, trader in pairs(Core.ships) do

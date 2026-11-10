@@ -3,7 +3,7 @@
 
 local f = Faction:new('Solar Federation')
 	:description_short('The historical birthplace of humankind')
-	:description('Sol is a fine joint')
+	:description('A centralized interstellar superpower governing Earth, Mars, and the core worlds of the Sol sector.')
 	:homeworld(0,0,0,0,16) --Mars
 	:foundingDate(3050)
 	:expansionRate(1)

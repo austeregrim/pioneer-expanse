@@ -23,12 +23,12 @@ if not stationView then
 	stationView = TabView.New("StationView")
 	-- stationView.windowPadding = ui.rescaleUI(Vector2(18, 18))
 	stationView.style = ui.rescaleUI({
-		windowPadding = Vector2(18, 18),
-		itemSpacing = Vector2(4,9),
-		inventoryPadding = Vector2(20, 10),
-		fontSize = 22,
-		height = 22 + 10 + 10 + 9
-	}, Vector2(1600, 900))
+		windowPadding = Vector2(12, 12),
+		itemSpacing = Vector2(4, 6),
+		inventoryPadding = Vector2(14, 6),
+		fontSize = 16,
+		height = 16 + 6 + 6 + 6
+	}, Vector2(1920, 1080))
 
 	function stationView:renderTab(tabFn)
 		ui.withStyleVars({WindowPadding = self.style.windowPadding}, function()

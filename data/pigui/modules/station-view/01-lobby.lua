@@ -30,12 +30,12 @@ local Lang = require 'Lang'
 local l = Lang.GetResource("ui-core")
 local Vector2 = _G.Vector2
 
-local rescaleVector = ui.rescaleUI(Vector2(1, 1), Vector2(1600, 900), true)
+local rescaleVector = ui.rescaleUI(Vector2(1, 1), Vector2(1920, 1080), true)
 local widgetSizes = ui.rescaleUI({
-	itemSpacing = Vector2(4, 9),
-	faceSize = Vector2(586,565),
-	buttonSizeBase = Vector2(72, 48),
-}, Vector2(1600, 900))
+	itemSpacing = Vector2(4, 7),
+	faceSize = Vector2(460, 440),
+	buttonSizeBase = Vector2(64, 40),
+}, Vector2(1920, 1080))
 
 widgetSizes.itemSpacing = Vector2(math.ceil(widgetSizes.itemSpacing.x), math.ceil(widgetSizes.itemSpacing.y))
 widgetSizes.buttonFullRefuelSize = Vector2(widgetSizes.buttonSizeBase.x*2 + widgetSizes.itemSpacing.x, widgetSizes.buttonSizeBase.y)

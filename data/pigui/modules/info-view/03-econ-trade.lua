@@ -22,7 +22,7 @@ local Vector2 = _G.Vector2
 
 -- FIXME: need to manually set itemSpacing to be able to properly size columns
 -- Need a style-var query system for best effect
-local itemSpacing = ui.rescaleUI(Vector2(6, 12), Vector2(1600, 900))
+local itemSpacing = ui.rescaleUI(Vector2(5, 8), Vector2(1920, 1080))
 
 local jettison = function (item)
 	local enabled = Game.player.flightState == "FLYING"
