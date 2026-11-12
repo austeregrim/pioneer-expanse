@@ -189,6 +189,8 @@ private:
 
 	RefCountedPtr<Graphics::Material> m_starMaterial;
 	RefCountedPtr<Graphics::Material> m_fresnelMat;
+	RefCountedPtr<Graphics::Material> m_bubbleMat;
+	RefCountedPtr<Graphics::Material> m_bubbleGlowMat;
 	RefCountedPtr<Graphics::Material> m_lineMat;
 	RefCountedPtr<Graphics::Material> m_farStarsMat;
 
@@ -252,17 +254,33 @@ private:
 		vector3f homePosLy;
 		float radiusLy;
 	};
+	struct GlowBillboard {
+		vector3f posLy;
+		float radiusLy;
+		Color color;
+	};
 	std::vector<VoronoiEdge> m_voronoiEdges;
 	std::vector<FactionSite> m_factionSites;
+	std::vector<GlowBillboard> m_galaxyGlowBillboards;
 
 	std::unique_ptr<Graphics::VertexArray> m_galaxyDiscVerts;
+	std::unique_ptr<Graphics::VertexArray> m_galaxyGlowVerts;
 	std::unique_ptr<Graphics::VertexArray> m_macroLineVerts;
 	RefCountedPtr<Graphics::Material> m_galaxyDiscMat;
+	RefCountedPtr<Graphics::Material> m_galaxyGlowMat;
 	Graphics::Drawables::Lines m_macroLines;
 	Graphics::Drawables::Points m_galaxyCloudPoints;
 	std::vector<vector3f> m_galaxyCloudPos;
 	std::vector<Color> m_galaxyCloudBaseColor;
 	std::vector<Color> m_galaxyCloudDrawColor;
+
+	void UpdateRegionalStarField(const vector3f &centerLy);
+	Graphics::Drawables::Points m_regionalStarPoints;
+	std::vector<vector3f> m_regionalStarPos;
+	std::vector<Color> m_regionalStarBaseColor;
+	std::vector<Color> m_regionalStarDrawColor;
+	vector3f m_lastRegionalCenterLy{ 1e9f, 1e9f, 1e9f };
+	float m_regionalAlpha = 0.0f;
 };
 
 #endif /* _SECTORMAP_H */

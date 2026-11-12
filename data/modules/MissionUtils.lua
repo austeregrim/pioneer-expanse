@@ -5,6 +5,7 @@ local Game   = require "Game"
 local Engine = require "Engine"
 local Timer  = require "Timer"
 local utils  = require "utils"
+local FactionStanding = require "FactionStanding"
 
 local AU = 149598000000
 local AU_sqrt = math.sqrt(AU)
@@ -263,6 +264,45 @@ function MissionUtils.getNumberOfFlavours(l, str)
 		num = num + 1
 	end
 	return num - 1
+end
+
+--- Returns the governing faction name for a StarSystem, SystemPath, or the current system.
+---@param sysOrPath StarSystem|SystemPath|nil
+---@return string|nil
+function MissionUtils.GetSystemFactionName(sysOrPath)
+	local sys = nil
+	if sysOrPath == nil then
+		sys = Game.system
+	elseif type(sysOrPath.GetStarSystem) == "function" then
+		sys = sysOrPath:GetStarSystem()
+	else
+		sys = sysOrPath
+	end
+	if sys and sys.faction and type(sys.faction.name) == "string" and sys.faction.name ~= "" then
+		return sys.faction.name
+	end
+	return nil
+end
+
+--- Checks whether the given system (or current system) belongs to `factionName`.
+---@param factionName string
+---@param sysOrPath StarSystem|SystemPath|nil
+---@return boolean
+function MissionUtils.IsSystemFaction(factionName, sysOrPath)
+	return MissionUtils.GetSystemFactionName(sysOrPath) == factionName
+end
+
+--- Scales a base mission payout by the player's standing with `factionOrName`, rounded to $5 or $1.
+---@param baseReward number
+---@param factionOrName Faction|string|nil
+---@return number
+function MissionUtils.ApplyFactionReward(baseReward, factionOrName)
+	local mult = FactionStanding.GetRewardMultiplier(factionOrName)
+	local scaled = baseReward * mult
+	if scaled >= 50 then
+		return math.max(10, math.floor(scaled / 5 + 0.5) * 5)
+	end
+	return math.max(1, math.floor(scaled + 0.5))
 end
 
 return MissionUtils

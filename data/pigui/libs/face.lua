@@ -116,7 +116,7 @@ local function resolveSystemFactionProfile(faction)
 	}
 end
 
--- Canonical Pioneer megacorporations & commercial/tactical guilds for general mission clients
+-- Canonical commercial corporations for general un-roled business clients
 local CORP_POOL = {
 	{
 		svg = "corp_kaluri",
@@ -144,39 +144,9 @@ local CORP_POOL = {
 		border = Color(255, 121, 63, 205),
 	},
 	{
-		svg = "faction_haber",
-		org = "HABER CORPORATION",
-		border = Color(255, 71, 87, 205),
-	},
-	{
 		svg = "corp_logistics",
 		org = "ASTRA INTERSTELLAR LOGISTICS",
 		border = Color(86, 204, 242, 205),
-	},
-	{
-		svg = "corp_mining",
-		org = "DEEP CORE EXTRACTION GUILD",
-		border = Color(246, 185, 59, 205),
-	},
-	{
-		svg = "corp_mercenary",
-		org = "VANGUARD TACTICAL SECURITY",
-		border = Color(255, 82, 82, 205),
-	},
-	{
-		svg = "corp_science",
-		org = "UNIVERSAL CARTOGRAPHICS",
-		border = Color(100, 255, 218, 205),
-	},
-	{
-		svg = "corp_syndicate",
-		org = "OUTER RIM SYNDICATE",
-		border = Color(224, 86, 253, 205),
-	},
-	{
-		svg = "authority_starport",
-		org = "ORBITAL PORT AUTHORITY",
-		border = Color(92, 225, 230, 205),
 	},
 }
 
@@ -185,6 +155,11 @@ local ROLE_PROFILES = {
 		svg = "pilots_federation",
 		org = "PILOTS FEDERATION",
 		border = Color(216, 166, 56, 215),
+	},
+	civilian = {
+		svg = "civilian_citizen",
+		org = "PRIVATE CITIZEN",
+		border = Color(165, 190, 220, 210),
 	},
 	crew = {
 		svg = "pilots_federation",
@@ -196,6 +171,11 @@ local ROLE_PROFILES = {
 		org = "ORBITAL ENGINEERING CORPS",
 		border = Color(255, 159, 67, 215),
 	},
+	starport = {
+		svg = "authority_starport",
+		org = "STARPORT AUTHORITY",
+		border = Color(92, 225, 230, 215),
+	},
 	rescue = {
 		svg = "corp_rescue",
 		org = "INTERSTELLAR SEARCH & RESCUE",
@@ -205,6 +185,21 @@ local ROLE_PROFILES = {
 		svg = "corp_science",
 		org = "UNIVERSAL CARTOGRAPHICS",
 		border = Color(100, 255, 218, 215),
+	},
+	logistics = {
+		svg = "corp_logistics",
+		org = "ASTRA INTERSTELLAR LOGISTICS",
+		border = Color(86, 204, 242, 215),
+	},
+	broker = {
+		svg = "corp_opli",
+		org = "COMMERCIAL EXCHANGE",
+		border = Color(0, 210, 255, 215),
+	},
+	haber = {
+		svg = "faction_haber",
+		org = "HABER CORPORATION",
+		border = Color(255, 71, 87, 215),
 	},
 	syndicate = {
 		svg = "corp_syndicate",
@@ -231,6 +226,11 @@ local ROLE_PROFILES = {
 		org = "GALACTIC NEWS NETWORK",
 		border = Color(72, 219, 251, 215),
 	},
+	journalist = {
+		svg = "corp_news",
+		org = "INDEPENDENT PRESS",
+		border = Color(72, 219, 251, 215),
+	},
 	solfed_intel = {
 		svg = "faction_solfed",
 		org = "SOLFED NAVAL INTELLIGENCE",
@@ -239,7 +239,8 @@ local ROLE_PROFILES = {
 }
 
 local TITLE_TEXT_COLOR = Color(185, 205, 230, 240)
-local ORG_BANNER_BG = Color(6, 10, 16, 215)
+local ORG_BANNER_BG = Color(6, 10, 16, 225)
+local CARD_BG = Color(9, 11, 24, 255)
 
 local PiGuiFace = {}
 
@@ -260,13 +261,15 @@ function PiGuiFace.New (character, style, drawButtons)
 			showCharInfo = style.showCharInfo == nil and true or style.showCharInfo,
 			charInfoPadding = style.charInfoPadding or ui.rescaleUI(Vector2(10, 6), Vector2(1920, 1080)),
 			charInfoBgColor = style.bgColor or Color(8, 11, 16, 230),
+			orgFont = style.orgFont or nil,
 			nameFont = style.nameFont or orbiteer.heading,
 			titleFont = style.titleFont or pionillium.details,
 		}
 	}
 
+	local hasSubtitle = (character.title ~= nil) or true
 	piguiFace.style.charInfoHeight = math.ceil(
-		piguiFace.style.nameFont.size + (character.title and (piguiFace.style.titleFont.size + 4) or 0)
+		piguiFace.style.nameFont.size + (hasSubtitle and (piguiFace.style.titleFont.size + 6) or 0)
 		+ piguiFace.style.charInfoPadding.y * 2
 	)
 
@@ -306,13 +309,51 @@ function PiGuiFace:resolveLogoProfile()
 		return ROLE_PROFILES.pilots_federation
 	end
 
-	-- 2. Explicit role tag on Character (set by BBS / comms modules)
-	if char.role and ROLE_PROFILES[char.role] then
+	-- 2. Explicit faction or role tag on Character (set by BBS / comms modules)
+	local explicitFactionProfile = char.factionName and resolveSystemFactionProfile({ name = char.factionName }) or factionProfile
+	if char.role == "police" then
+		local policeOrg = char.org and string.upper(char.org)
+			or ((sysFaction and sysFaction.policeName and #sysFaction.policeName > 0) and string.upper(sysFaction.policeName))
+			or "SYSTEM CONSTABULARY"
+		return {
+			svg = "authority_police",
+			org = policeOrg,
+			border = Color(212, 160, 36, 215),
+		}
+	elseif char.role == "military" then
+		local milOrg = char.org and string.upper(char.org)
+			or ((sysFaction and sysFaction.militaryName and #sysFaction.militaryName > 0) and string.upper(sysFaction.militaryName))
+			or (explicitFactionProfile and explicitFactionProfile.org or "SECTOR DEFENSE COMMAND")
+		return {
+			svg = explicitFactionProfile and explicitFactionProfile.svg or "corp_mercenary",
+			org = milOrg,
+			border = explicitFactionProfile and explicitFactionProfile.border or Color(255, 82, 82, 215),
+		}
+	elseif char.role == "government" then
+		if explicitFactionProfile then
+			return {
+				svg = explicitFactionProfile.svg,
+				org = char.org and string.upper(char.org) or explicitFactionProfile.org,
+				border = explicitFactionProfile.border,
+			}
+		end
+		return {
+			svg = "authority_starport",
+			org = char.org and string.upper(char.org) or "SYSTEM ADMINISTRATION",
+			border = Color(92, 225, 230, 215),
+		}
+	elseif char.role and ROLE_PROFILES[char.role] then
 		local p = ROLE_PROFILES[char.role]
 		if char.org then
 			return { svg = p.svg, org = string.upper(char.org), border = p.border }
 		end
 		return p
+	elseif char.factionName and explicitFactionProfile then
+		return {
+			svg = explicitFactionProfile.svg,
+			org = char.org and string.upper(char.org) or explicitFactionProfile.org,
+			border = explicitFactionProfile.border,
+		}
 	end
 
 	local titleUpper = string.upper(char.title or "")
@@ -401,44 +442,99 @@ function PiGuiFace:resolveLogoProfile()
 	return CORP_POOL[idx]
 end
 
+local function wrapOrgLines(text, maxWidth)
+	if ui.calcTextSize(text).x <= maxWidth then
+		return { text }
+	end
+	local lines = {}
+	local current = ""
+	for word in string.gmatch(text, "%S+") do
+		local candidate = (current == "") and word or (current .. " " .. word)
+		if current ~= "" and ui.calcTextSize(candidate).x > maxWidth then
+			lines[#lines + 1] = current
+			current = word
+		else
+			current = candidate
+		end
+	end
+	if current ~= "" then
+		lines[#lines + 1] = current
+	end
+	return lines
+end
+
 function PiGuiFace:renderFaceDisplay ()
 	local lastPos = ui.getCursorPos()
 	local screenPos = ui.getCursorScreenPos()
-	local region = self.style.size or ui.getContentRegion()
-	local size = math.max(48, math.min(region.x, region.y))
+	local avail = ui.getContentRegion()
+	local cardW, cardH
+	if self.style.size then
+		cardW = math.max(48, avail.x > 48 and math.min(self.style.size.x, avail.x) or self.style.size.x)
+		cardH = math.max(48, self.style.size.y)
+	else
+		local s = math.max(48, math.min(avail.x, avail.y))
+		cardW, cardH = s, s
+	end
 
 	local profile = self:resolveLogoProfile()
 	local tex = getLogoTexture(profile.svg)
 
 	-- Reserve space in ImGui layout
-	ui.dummy(Vector2(size, size))
+	ui.dummy(Vector2(cardW, cardH))
 
 	local tl = screenPos
-	local br = screenPos + Vector2(size, size)
+	local br = screenPos + Vector2(cardW, cardH)
 
-	-- Render high-resolution SVG corporate / faction logo
-	ui.addImage(tex, tl, br, Vector2(0.0, 0.0), Vector2(1.0, 1.0), colors.white)
+	-- Card background matching SVG radial outer edge
+	ui.addRectFilled(tl, br, CARD_BG, 3, ui.RoundCornersAll)
 
-	-- Top organization header strip on cards >= 110px
-	if size >= 110 and profile.org then
-		local orgFont = pionillium.tiny
-		local bannerH = math.ceil(orgFont.size + 8)
-		ui.addRectFilled(tl, tl + Vector2(size, bannerH), ORG_BANNER_BG, 3, ui.RoundCornersTop)
+	-- Top organization header strip on cards >= 110px (never overlaps the logo)
+	local bannerH = 0
+	if cardW >= 110 and profile.org then
+		local padX = 8
+		local padY = 6
+		local maxTextW = math.max(20, cardW - padX * 2)
+		local orgFont = self.style.orgFont or (cardW >= 220 and pionillium.medium or pionillium.details)
+		if orgFont.size > pionillium.details.size then
+			ui.withFont(orgFont.name, orgFont.size, function()
+				if ui.calcTextSize(profile.org).x > maxTextW then
+					orgFont = pionillium.details
+				end
+			end)
+		end
+
 		ui.withFont(orgFont.name, orgFont.size, function()
-			local textSize = ui.calcTextSize(profile.org)
-			local textPos = tl + Vector2(math.max(4, (size - textSize.x) * 0.5), (bannerH - textSize.y) * 0.5)
-			ui.addText(textPos, profile.border, profile.org)
+			local lines = wrapOrgLines(profile.org, maxTextW)
+			local lineH = ui.getTextLineHeight()
+			bannerH = math.ceil(#lines * lineH + padY * 2)
+			ui.addRectFilled(tl, tl + Vector2(cardW, bannerH), ORG_BANNER_BG, 3, ui.RoundCornersTop)
+			for i, line in ipairs(lines) do
+				local textSize = ui.calcTextSize(line)
+				local textPos = tl + Vector2(math.max(padX, (cardW - textSize.x) * 0.5), padY + (i - 1) * lineH)
+				ui.addText(textPos, profile.border, line)
+			end
 		end)
 	end
 
-	-- Character / Contact Nameplate Banner at bottom
-	local infoHeight = (self.style.showCharInfo and size >= 110) and math.min(self.style.charInfoHeight, size * 0.28) or 0
+	-- Character / Contact Nameplate Banner at bottom (never overlaps the logo)
+	local infoHeight = (self.style.showCharInfo and cardW >= 110) and math.min(self.style.charInfoHeight, cardH * 0.34) or 0
+
+	-- Center 1:1 SVG logo inside the open middle region between header and footer
+	local midH = math.max(16, cardH - bannerH - infoHeight)
+	local innerPad = (cardW >= 110) and math.max(4, math.floor(cardW * 0.03)) or 0
+	local logoSize = math.max(16, math.min(cardW - innerPad * 2, midH - innerPad * 2))
+	local logoTL = Vector2(
+		tl.x + (cardW - logoSize) * 0.5,
+		tl.y + bannerH + (midH - logoSize) * 0.5
+	)
+	ui.addImage(tex, logoTL, logoTL + Vector2(logoSize, logoSize), Vector2(0.0, 0.0), Vector2(1.0, 1.0), colors.white)
+
 	if self.style.showCharInfo and infoHeight > 0 then
-		ui.setCursorPos(lastPos + Vector2(0.0, size - infoHeight))
+		ui.setCursorPos(lastPos + Vector2(0.0, cardH - infoHeight))
 		local styles = {WindowPadding = self.style.charInfoPadding, ItemSpacing = Vector2(4, 2)}
 
 		ui.withStyleColorsAndVars({ChildBg = self.style.charInfoBgColor}, styles, function ()
-			ui.child("PlayerInfoDetails", Vector2(size, infoHeight), charInfoFlags, useWindowPadding, function ()
+			ui.child("PlayerInfoDetails", Vector2(cardW, infoHeight), charInfoFlags, useWindowPadding, function ()
 				ui.withFont(self.style.nameFont.name, self.style.nameFont.size, function()
 					ui.textColored(colors.white, self.character.name)
 				end)

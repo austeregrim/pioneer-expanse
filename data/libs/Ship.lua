@@ -183,8 +183,9 @@ Ship.HyperjumpTo = function (self, path, is_legal)
 
 	-- only jump from safe distance
 	local is_allowed, distance = self:IsHyperjumpAllowed()
+	local is_obscured = self.GetHyperspaceTargetObscuredBy and self:GetHyperspaceTargetObscuredBy(path)
 
-	if is_legal and self.frameBody and not is_allowed then
+	if is_legal and self.frameBody and not is_allowed and not is_obscured and self:GetFlightState() ~= "SUPERCRUISE" then
 		print("---> Engage AI for safe distance of hyperjump")
 		self:AIEnterLowOrbit(self.frameBody)
 	end

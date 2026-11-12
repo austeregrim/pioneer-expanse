@@ -15,6 +15,7 @@ local Character = require 'Character'
 local NameGen = require 'NameGen'
 local utils = require 'utils'
 local PlayerState = require 'PlayerState'
+local FactionStanding = require 'FactionStanding'
 
 local MissionUtils = require 'modules.MissionUtils'
 local ShipBuilder = require 'modules.MissionUtils.ShipBuilder'
@@ -62,6 +63,11 @@ local ads = {}
 local missions = {}
 
 local isQualifiedFor = function(reputation, killcount, ad)
+	if ad.flavour and ad.flavour.id == "POLICE" and not FactionStanding.MeetsMinimum(ad.factionName, -14) then
+		return false
+	elseif ad.flavour and ad.flavour.id == "MILITARY" and not FactionStanding.MeetsMinimum(ad.factionName, 15) then
+		return false
+	end
 	return reputation >= 16 and (
 		killcount >= 8 or
 		killcount >= 4 and ad.dedication <= ARMEDRECON or
@@ -229,13 +235,19 @@ local makeAdvert = function (station)
 	end
 	if #flavour.planets == 0 then return end
 
-	org = flavour.id == "POLICE" and Game.system.faction.policeName or
-		flavour.id == "MILITARY" and Game.system.faction.militaryName or
-		string.interp(l["CORPORATION_" .. Engine.rand:Integer(1, MissionUtils.getNumberOfFlavours(l, "CORPORATION"))], { name = NameGen.Surname() } )
+	local factionName = MissionUtils.GetSystemFactionName()
+	if flavour.id == "POLICE" then
+		org = (Game.system.faction.policeName ~= "" and Game.system.faction.policeName) or (Game.system.name .. " Security")
+	elseif flavour.id == "MILITARY" then
+		org = (Game.system.faction.militaryName ~= "" and Game.system.faction.militaryName) or (Game.system.name .. " Defense Force")
+	else
+		org = string.interp(l["CORPORATION_" .. Engine.rand:Integer(1, MissionUtils.getNumberOfFlavours(l, "CORPORATION"))], { name = NameGen.Surname() } )
+	end
 
 	location = flavour.planets[Engine.rand:Integer(1, #flavour.planets)]
 	dist = location:DistanceTo(Game.system)
 	reward = math.ceil(dist * typical_reward * (1 + dedication)^2 * (1 + risk) * (1 + urgency) * Engine.rand:Number(0.8, 1.2))
+	reward = MissionUtils.ApplyFactionReward(reward, factionName)
 	reward = utils.round(reward, 100)
 	time = Engine.rand:Number(21*24*60*60, 28*24*60*60)
 	due = time + MissionUtils.TravelTime(dist, location) * 2 * (1.5 - urgency)
@@ -251,14 +263,22 @@ local makeAdvert = function (station)
 
 	local titleNum = Engine.rand:Integer(1, MissionUtils.getNumberOfFlavours(l, "ADTEXT"))
 	local introtext = l["GREETING_" .. Engine.rand:Integer(1, MissionUtils.getNumberOfFlavours(l, "GREETING"))] .. " " .. l[flavour.id .. "_" .. Engine.rand:Integer(1, MissionUtils.getNumberOfFlavours(l, flavour.id))]
+	local roleMap = { POLICE = "police", MILITARY = "military", MINING = "mining", HARVESTING = "logistics" }
+	local client = Character.New({
+		role = roleMap[flavour.id] or "broker",
+		org = org,
+		factionName = (flavour.id == "POLICE" or flavour.id == "MILITARY") and factionName or nil,
+		title = l[flavour.client_title],
+	})
 
 	local ad = {
 		station     = station,
 		titleId     = titleNum,
 		introtext   = introtext,
 		flavour     = flavour,
-		client      = Character.New( { title = l[flavour.client_title] } ),
+		client      = client,
 		org         = org,
+		factionName = factionName,
 		location    = location,
 		rendezvous  = rendezvous and rendezvous.path,
 		dist        = dist,
@@ -404,13 +424,16 @@ end
 
 local finishMission = function (ref, mission)
 	local delta_reputation = 0
+	local standingDelta = (mission.flavour and (mission.flavour.id == "POLICE" or mission.flavour.id == "MILITARY")) and 8 or 4
 	if Game.time > mission.due then
 		Comms.ImportantMessage(l["FAILUREMSG_" .. Engine.rand:Integer(1, MissionUtils.getNumberOfFlavours(l, "FAILUREMSG"))], mission.client.name)
 		delta_reputation = -2.5
+		FactionStanding.Adjust(mission.factionName, -standingDelta, "Combat contract failed")
 	elseif mission.complete then
 		Comms.ImportantMessage(l["SUCCESSMSG_" .. Engine.rand:Integer(1, MissionUtils.getNumberOfFlavours(l, "SUCCESSMSG"))], mission.client.name)
 		delta_reputation = 2.5
 		PlayerState.AddMoney(mission.reward)
+		FactionStanding.ApplyMissionOutcome(mission.factionName, standingDelta, nil, "Combat contract completed")
 		if mission.bonus > 0 then
 			local bonus = math.ceil(mission.reward/5 * mission.bonus)
 			local addition = string.interp(l["BONUS_" .. Engine.rand:Integer(1, MissionUtils.getNumberOfFlavours(l, "BONUS"))], { cash = Format.Money(bonus, false) })

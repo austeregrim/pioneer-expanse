@@ -21,11 +21,11 @@
   },
   "ADTEXT_1_INTRO": {
     "description": "GGS=Galactic Geographical Society",
-    "message": "Hello! \nMy name is {name}, and I'm with the GGS. We are interested in updating the map for {systembody} in {system}, ({dist}) for which we will pay {cash}."
+    "message": "Hello!\nMy name is {name}, and I'm with the GGS. We are interested in updating the map for {systembody} in {system}, {dist} away, for which we will pay {cash}."
   },
   "ADTEXT_1_SUCCESSMSG": {
     "description": "",
-    "message": "Thanks for the information. Agreed amount was transferred to your account."
+    "message": "Thanks for the information. The agreed amount has been transferred to your account."
   },
   "ADTEXT_1_WHYSOMUCH": {
     "description": "",
@@ -41,7 +41,7 @@
   },
   "ADTEXT_2_INTRO": {
     "description": "",
-    "message": "Hello! \nI'm {name}. I'll pay {cash} for the mapping of {systembody} in {system}, {dist} distant."
+    "message": "Hello!\nI'm {name}. I'll pay {cash} for the mapping of {systembody} in {system}, {dist} away."
   },
   "ADTEXT_2_SUCCESSMSG": {
     "description": "",
@@ -49,7 +49,7 @@
   },
   "ADTEXT_2_WHYSOMUCH": {
     "description": "",
-    "message": "High quality maps must be generated from low altitude. Payment is accordingly."
+    "message": "High-quality maps must be generated from low altitude, and payment reflects that."
   },
   "ADTEXT_3": {
     "description": "",
@@ -61,11 +61,11 @@
   },
   "ADTEXT_3_INTRO": {
     "description": "",
-    "message": "Greetings. You may call me {name}. I am willing to pay {cash} for a thorough scan of {systembody} in {system} located some {dist} from here. It is imperative the data must be delivered to a privately-disclosed location."
+    "message": "Greetings. You may call me {name}. I am willing to pay {cash} for a thorough scan of {systembody} in {system}, located some {dist} from here. It is imperative that the data be delivered to a privately disclosed location."
   },
   "ADTEXT_3_SUCCESSMSG": {
     "description": "",
-    "message": "Map has been received, and is being processed. Your payment has been transferred."
+    "message": "The map has been received and is being processed. Your payment has been transferred."
   },
   "ADTEXT_3_WHYSOMUCH": {
     "description": "",
@@ -81,7 +81,7 @@
   },
   "ADTEXT_4_INTRO": {
     "description": "",
-    "message": "Hi! \nMy name is {name}, and I'm doing some research for my PhD on the {system} system, {dist} from here. I need to get some additional data for {systembody} in form of updated maps, or my supervisor will kill me. I will pay {cash} to any pilot that can deliver this information to me in time, preferably yesterday, as I'm stressed out of my mind."
+    "message": "Hi!\nMy name is {name}, and I'm doing some research for my PhD on the {system} system, {dist} from here. I need to get some additional data for {systembody} in the form of updated maps, or my supervisor will kill me. I will pay {cash} to any pilot who can deliver this information to me in time, preferably yesterday, as I'm stressed out of my mind."
   },
   "ADTEXT_4_SUCCESSMSG": {
     "description": "",
@@ -89,7 +89,7 @@
   },
   "ADTEXT_4_WHYSOMUCH": {
     "description": "'High impact journals' is a recognized term for journals like Nature and Science, yielding many citations.",
-    "message": "I'm hoping this new data, with pretty pictures and maps, will increase my chances of getting my article published in some high impact journal."
+    "message": "I'm hoping this new data, with pretty pictures and maps, will increase my chances of getting my article published in some high-impact journal."
   },
   "ADTEXT_5": {
     "description": "",
@@ -101,7 +101,7 @@
   },
   "ADTEXT_5_INTRO": {
     "description": "",
-    "message": "Hello! \nMy name is {name}. Information is my business and I'll pay {cash} for a mapping of {systembody} in {system} which is {dist} from our present location."
+    "message": "Hello!\nMy name is {name}. Information is my business, and I'll pay {cash} for a mapping of {systembody} in {system}, which is {dist} from our present location."
   },
   "ADTEXT_5_SUCCESSMSG": {
     "description": "",
@@ -109,15 +109,15 @@
   },
   "ADTEXT_5_WHYSOMUCH": {
     "description": "",
-    "message": "You can not put a high enough price on information these days"
+    "message": "You cannot put a high enough price on information these days."
   },
   "ADTEXT_6": {
     "description": "",
-    "message": "Our system administration need help to update the maps for {systembody}"
+    "message": "Our system administration needs help updating the maps for {systembody}"
   },
   "ADTEXT_6_FAILMSG": {
     "description": "",
-    "message": "We will make note of your much too late arrival in our records."
+    "message": "We will make a note of your late arrival in our records."
   },
   "ADTEXT_6_INTRO": {
     "description": "",
@@ -137,11 +137,11 @@
   },
   "ADTEXT_7_FAILMSG": {
     "description": "",
-    "message": "You show up first now? You have failed my family, and you will be responsible for what happens to us next!"
+    "message": "You only show up now? You have failed my family, and you will be responsible for what happens to us next!"
   },
   "ADTEXT_7_INTRO": {
     "description": "",
-    "message": "Hello! \nI am {name}, and my family is in urgent need to find more land, before we're kicked out of our current prospecting territory. We will pay {cash} for good survey data on {systembody}."
+    "message": "Hello!\nI am {name}, and my family urgently needs to find more land before we're kicked out of our current prospecting territory. We will pay {cash} for good survey data on {systembody}."
   },
   "ADTEXT_7_SUCCESSMSG": {
     "description": "",
@@ -157,11 +157,11 @@
   },
   "ADTEXT_8_FAILMSG": {
     "description": "",
-    "message": "You fail to appreciate the fine art of maps, and timely delivery of agreed upon date!"
+    "message": "You fail to appreciate the fine art of maps and timely delivery on the agreed-upon date!"
   },
   "ADTEXT_8_INTRO": {
     "description": "",
-    "message": "Hi! \nI'm with the geographical society, and we need to update our maps of {systembody}. We are willing to pay {cash} for a pilot willing to fly lower than our previous."
+    "message": "Hi!\nI'm with the geographical society, and we need to update our maps of {systembody}. We are willing to pay {cash} for a pilot willing to fly lower than our previous one."
   },
   "ADTEXT_8_SUCCESSMSG": {
     "description": "",
@@ -181,15 +181,15 @@
   },
   "ADTEXT_9_INTRO": {
     "description": "",
-    "message": "Hi! \nI'm {name}. Me and my family need a detailed survey of {systembody} in {system}, before anyone else claims it. We will pay {cash} for a fast pilot. We'll message you with the delivery location once you have the data."
+    "message": "Hi!\nI'm {name}. My family and I need a detailed survey of {systembody} in {system} before anyone else claims it. We will pay {cash} for a fast pilot. We'll message you with the delivery location once you have the data."
   },
   "ADTEXT_9_SUCCESSMSG": {
     "description": "",
-    "message": "Your punctuality and discretion is appreciated."
+    "message": "Your punctuality and discretion are appreciated."
   },
   "ADTEXT_9_WHYSOMUCH": {
     "description": "'scooped' as in missing an exclusive unique opportunity, before someone else gets to it first",
-    "message": "We do not want to be scooped on this possible acquisition"
+    "message": "We do not want to be scooped on this possible acquisition."
   },
   "ADTITLE_1": {
     "description": "",
@@ -285,7 +285,7 @@
   },
   "DROP_OFF_DATA": {
     "description": "",
-    "message": "Drop off data at {location} before {date}"
+    "message": "Drop off data at {location} before {date}."
   },
   "EXCELLENT_I_AWAIT_YOUR_REPORT": {
     "description": "",
@@ -361,7 +361,7 @@
   },
   "PLEASE_HAVE_THE_DATA_BACK_BEFORE": {
     "description": "",
-    "message": "Please have the data back before {date}"
+    "message": "Please have the data back before {date}."
   },
   "REPEAT_THE_ORIGINAL_REQUEST": {
     "description": "",
@@ -453,6 +453,6 @@
   },
   "YOU_WILL_BE_PAID_ON_MY_BEHALF_AT_NEW_DESTINATION": {
     "description": "",
-    "message": "You will be paid on my behalf at the NEW DESTINATION"
+    "message": "You will be paid on my behalf at the new destination. Check your mission log for the drop-off location."
   }
 }

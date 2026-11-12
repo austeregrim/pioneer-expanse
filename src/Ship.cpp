@@ -41,6 +41,7 @@
 #include "scenegraph/StaticGeometry.h"
 #include "ship/GunManager.h"
 #include "ship/PlayerShipController.h"
+#include "ship/SupercruiseController.h"
 
 #include <algorithm>
 #include <cmath>
@@ -178,6 +179,7 @@ Ship::Ship(const ShipType::Id &shipId) :
 
 	m_hyperspace.countdown = 0;
 	m_hyperspace.now = false;
+	m_hyperspace.waitingForAlign = false;
 	m_ecmRecharge = 0;
 	m_shieldCooldown = 0.0f;
 	m_curAICmd = 0;
@@ -291,6 +293,8 @@ Ship::Ship(const Json &jsonObj, Space *space) :
 		m_controller->LoadFromJson(shipObj);
 
 		m_navLights->LoadFromJson(shipObj);
+		if (m_supercruise)
+			m_supercruise->LoadFromJson(shipObj);
 
 		m_shields->LoadFromJson(shipObj["shields"]);
 
@@ -315,6 +319,7 @@ void Ship::Init()
 
 	m_navLights.reset(new NavLights(GetModel()));
 	m_navLights->SetEnabled(true);
+	m_supercruise.reset(new SupercruiseController(this));
 
 	SetMassDistributionFromModel();
 	UpdateEquipStats();
@@ -336,6 +341,7 @@ void Ship::Init()
 	p.Set("shipName", m_shipName);
 
 	m_hyperspace.now = false; // TODO: move this on next savegame change, maybe
+	m_hyperspace.waitingForAlign = false;
 	m_hyperspaceCloud = 0;
 
 	m_landingGearAnimation = GetModel()->FindAnimation("gear_down");
@@ -404,6 +410,8 @@ void Ship::SaveToJson(Json &jsonObj, Space *space)
 	m_controller->SaveToJson(shipObj, space);
 
 	m_navLights->SaveToJson(shipObj);
+	if (m_supercruise)
+		m_supercruise->SaveToJson(shipObj);
 
 	m_shields->SaveToJson(shipObj["shields"]);
 
@@ -779,7 +787,7 @@ Ship::HyperjumpStatus Ship::CheckHyperjumpCapability() const
 	if (GetFlightState() == HYPERSPACE)
 		return HYPERJUMP_DRIVE_ACTIVE;
 
-	if (GetFlightState() != FLYING && GetFlightState() != JUMPING)
+	if (GetFlightState() != FLYING && GetFlightState() != JUMPING && GetFlightState() != SUPERCRUISE)
 		return HYPERJUMP_SAFETY_LOCKOUT;
 
 	return HYPERJUMP_OK;
@@ -787,7 +795,7 @@ Ship::HyperjumpStatus Ship::CheckHyperjumpCapability() const
 
 Ship::HyperjumpStatus Ship::InitiateHyperjumpTo(const SystemPath &dest, int warmup_time, double duration, const HyperdriveSoundsTable &sounds, LuaRef checks)
 {
-	if (!dest.HasValidSystem() || GetFlightState() != FLYING || warmup_time < 1)
+	if (!dest.HasValidSystem() || (GetFlightState() != FLYING && GetFlightState() != SUPERCRUISE) || warmup_time < 1)
 		return HYPERJUMP_SAFETY_LOCKOUT;
 	StarSystem *s = Pi::game->GetSpace()->GetStarSystem().Get();
 	if (s && s->GetPath().IsSameSystem(dest))
@@ -796,6 +804,7 @@ Ship::HyperjumpStatus Ship::InitiateHyperjumpTo(const SystemPath &dest, int warm
 	m_hyperspace.dest = dest;
 	m_hyperspace.countdown = warmup_time;
 	m_hyperspace.now = false;
+	m_hyperspace.waitingForAlign = false;
 	m_hyperspace.duration = duration;
 	m_hyperspace.checks = checks;
 	m_hyperspace.sounds = sounds;
@@ -807,8 +816,64 @@ void Ship::AbortHyperjump()
 {
 	m_hyperspace.countdown = 0;
 	m_hyperspace.now = false;
+	m_hyperspace.waitingForAlign = false;
 	m_hyperspace.duration = 0;
 	m_hyperspace.checks = LuaRef();
+}
+
+bool Ship::GetHyperspaceTargetDirection(const SystemPath &dest, vector3d &outDirInShipFrame) const
+{
+	if (!Pi::game || !Pi::game->GetSpace())
+		return false;
+
+	Space *space = Pi::game->GetSpace();
+	vector3d dirRoot;
+	if (!space->GetHyperspaceTargetDirection(dest, dirRoot))
+		return false;
+
+	Frame *rootFrame = Frame::GetFrame(space->GetRootFrame());
+	if (!rootFrame || !GetFrame().valid()) {
+		outDirInShipFrame = dirRoot;
+		return true;
+	}
+
+	outDirInShipFrame = (rootFrame->GetInterpOrientRelTo(GetFrame()) * dirRoot).NormalizedSafe();
+	return true;
+}
+
+bool Ship::IsHyperspaceTargetAligned(const SystemPath &dest, double *outAngleDeg) const
+{
+	if (outAngleDeg)
+		*outAngleDeg = 180.0;
+
+	if (!Pi::game || !Pi::game->GetSpace())
+		return false;
+
+	Space *space = Pi::game->GetSpace();
+	vector3d dirRoot;
+	if (!space->GetHyperspaceTargetDirection(dest, dirRoot))
+		return false;
+
+	const vector3d shipFwdRoot = -GetOrientRelTo(space->GetRootFrame()).VectorZ();
+	const double dot = Clamp(shipFwdRoot.Dot(dirRoot), -1.0, 1.0);
+	const double angleDeg = RAD2DEG(std::acos(dot));
+	if (outAngleDeg)
+		*outAngleDeg = angleDeg;
+
+	return angleDeg <= HYPERJUMP_ALIGN_MAX_ANGLE_DEG;
+}
+
+const Body *Ship::GetHyperspaceTargetObscuredBy(const SystemPath &dest) const
+{
+	if (!Pi::game || !Pi::game->GetSpace())
+		return nullptr;
+
+	Space *space = Pi::game->GetSpace();
+	vector3d dirRoot;
+	if (!space->GetHyperspaceTargetDirection(dest, dirRoot))
+		return nullptr;
+
+	return space->CheckHyperspaceTargetObstructed(this, dirRoot);
 }
 
 float Ship::GetECMRechargeTime()
@@ -876,7 +941,7 @@ Missile *Ship::SpawnMissile(const MissileDef &missileStats, Body *target)
 void Ship::SetFlightState(Ship::FlightState newState)
 {
 	if (m_flightState == newState) return;
-	if (IsHyperspaceActive() && (newState != FLYING))
+	if (IsHyperspaceActive() && (newState != FLYING) && (newState != SUPERCRUISE))
 		AbortHyperjump();
 
 	if (newState == FLYING) {
@@ -884,12 +949,17 @@ void Ship::SetFlightState(Ship::FlightState newState)
 		if (m_flightState == DOCKING || m_flightState == DOCKED)
 			onUndock.emit();
 
+		const bool wasDockedOrUndocking = (m_flightState == DOCKING || m_flightState == DOCKED || m_flightState == UNDOCKING);
 		m_dockedWith = nullptr;
 
-		// lock thrusters on for amount of time needed to push us out of station
-		static const double MASS_LOCK_REFERENCE(40000.0); // based purely on experimentation
-		// limit the time to between 2.0 and 20.0 seconds of thrust, the player can override
-		m_launchLockTimeout = std::min(std::max(2.0, 2.0 * (GetMass() / MASS_LOCK_REFERENCE)), 20.0);
+		if (wasDockedOrUndocking) {
+			// lock thrusters on for amount of time needed to push us out of station
+			static const double MASS_LOCK_REFERENCE(40000.0); // based purely on experimentation
+			// limit the time to between 2.0 and 20.0 seconds of thrust, the player can override
+			m_launchLockTimeout = std::min(std::max(2.0, 2.0 * (GetMass() / MASS_LOCK_REFERENCE)), 20.0);
+		} else {
+			m_launchLockTimeout = 0.0;
+		}
 	}
 
 	if (newState == DOCKED) {
@@ -935,6 +1005,11 @@ void Ship::SetFlightState(Ship::FlightState newState)
 		break;
 	case HYPERSPACE:
 		SetMoving(false);
+		SetColliding(false);
+		SetStatic(false);
+		break;
+	case SUPERCRUISE:
+		SetMoving(true);
 		SetColliding(false);
 		SetStatic(false);
 		break;
@@ -1042,15 +1117,21 @@ void Ship::TimeStepUpdate(const float timeStep)
 
 	m_lastDamageSound += timeStep;
 
-	// If docked, station is responsible for updating position/orient of ship
-	// but we call this crap anyway and hope it doesn't do anything bad
+	if (m_flightState == SUPERCRUISE) {
+		// In Supercruise, cancel Newtonian forces/torques so DynamicBody integrates kinematic FSD velocity cleanly
+		SetForce(-GetExternalForce());
+		SetTorque(vector3d(0.0));
+		ClearThrusterState();
+	} else {
+		// If docked, station is responsible for updating position/orient of ship
+		// but we call this crap anyway and hope it doesn't do anything bad
+		const vector3d thrust = m_propulsion->GetActualLinThrust();
+		AddRelForce(thrust);
+		AddRelTorque(m_propulsion->GetActualAngThrust());
 
-	const vector3d thrust = m_propulsion->GetActualLinThrust();
-	AddRelForce(thrust);
-	AddRelTorque(m_propulsion->GetActualAngThrust());
-
-	//apply extra atmospheric flight forces
-	AddTorque(CalcAtmoTorque());
+		//apply extra atmospheric flight forces
+		AddTorque(CalcAtmoTorque());
+	}
 
 	if (m_landingGearAnimation) {
 		m_landingGearAnimation->SetProgress(m_wheelState);
@@ -1068,7 +1149,9 @@ void Ship::TimeStepUpdate(const float timeStep)
 	DynamicBody::TimeStepUpdate(timeStep);
 
 	// fuel use decreases mass, so do this as the last thing in the frame
-	UpdateFuel(timeStep);
+	if (m_flightState != SUPERCRUISE) {
+		UpdateFuel(timeStep);
+	}
 
 	m_navLights->SetEnabled(m_wheelState > 0.01f);
 	m_navLights->Update(timeStep);
@@ -1125,6 +1208,24 @@ void Ship::TimeAccelAdjust(const float timeStep)
 	SetVelocity(GetVelocity() + vdiff);
 }
 
+void Ship::DepleteShieldsForEmergencyDrop(float cooldownTime)
+{
+	if (m_invulnerable || IsDead())
+		return;
+
+	if (m_stats.shield_mass > 0.0f && m_stats.shield_mass_left > 0.01f) {
+		m_stats.shield_mass_left = 0.0f;
+		m_shieldCooldown = cooldownTime;
+		Properties().Set("shieldMassLeft", m_stats.shield_mass_left);
+		Sound::BodyMakeNoise(this, "Shieldhit", 1.0f);
+	} else {
+		// No shields or shields already down: emergency drop shock damages hull by 10%
+		const float newHullPct = std::max(1.0f, GetPercentHull() - 10.0f);
+		SetPercentHull(newHullPct);
+		Sound::BodyMakeNoise(this, "Hull_hit_Small", 1.0f);
+	}
+}
+
 double Ship::GetHullTemperature() const
 {
 	// TODO: fix this to calculate appropriate skin friction and heating.
@@ -1133,7 +1234,10 @@ double Ship::GetHullTemperature() const
 	//return dragGs / 25.0;
 	// TODO: fix this to properly account for heating due to air friction instead of G-force.
 	double dragGs = GetAtmosForce().Length() / (GetMass() * 9.81);
-	return dragGs / (15.0 * (1.0 + m_stats.atmo_shield_cap + (2.0 * (1.0 - m_wheelState))));
+	double atmoTemp = dragGs / (15.0 * (1.0 + m_stats.atmo_shield_cap + (2.0 * (1.0 - m_wheelState))));
+	if (m_supercruise)
+		return std::max(atmoTemp, m_supercruise->GetHeatSpike());
+	return atmoTemp;
 }
 
 void Ship::SetAlertState(AlertState as)
@@ -1285,6 +1389,7 @@ void Ship::StaticUpdate(const float timeStep)
 
 	if (IsDead()) return;
 
+	if (m_supercruise) m_supercruise->StaticUpdate(timeStep);
 	if (m_controller) m_controller->StaticUpdate(timeStep);
 
 	const double hullTemp = GetHullTemperature();
@@ -1452,6 +1557,34 @@ void Ship::StaticUpdate(const float timeStep)
 		}
 		if (abort) {
 			AbortHyperjump();
+		} else if (this->IsType(ObjectType::PLAYER)) {
+			if (!is_equal_exact(m_wheelState, 0.0f)) {
+				AbortHyperjump();
+				Sound::BodyMakeNoise(this, "Missile_Inbound", 1.0f);
+			} else if (const Body *blocker = GetHyperspaceTargetObscuredBy(m_hyperspace.dest)) {
+				AbortHyperjump();
+				if (m_supercruise)
+					m_supercruise->ShowStatusMessage("HYPERJUMP ABORTED: TARGET OBSCURED BY " + blocker->GetLabel(), 4.5f);
+			} else {
+				m_hyperspace.countdown = std::max(0.0f, m_hyperspace.countdown - timeStep);
+				if (m_hyperspace.countdown <= 0.0f) {
+					if (!IsHyperspaceTargetAligned(m_hyperspace.dest)) {
+						// Hold FSD at full charge until the ship aligns with the target system vector
+						m_hyperspace.countdown = 0.001f;
+						m_hyperspace.waitingForAlign = true;
+					} else {
+						m_hyperspace.countdown = 0;
+						m_hyperspace.waitingForAlign = false;
+						m_hyperspace.now = true;
+						SetFlightState(JUMPING);
+
+						// We have to fire it here, because the event isn't actually fired until
+						// after the whole physics update, which means the flight state on next
+						// step would be HYPERSPACE, thus breaking quite a few things.
+						OnBeforeEnterHyperspace();
+					}
+				}
+			}
 		} else {
 			m_hyperspace.countdown = m_hyperspace.countdown - timeStep;
 			if (!abort && m_hyperspace.countdown <= 0.0f && (is_equal_exact(m_wheelState, 0.0f))) {
@@ -1463,9 +1596,6 @@ void Ship::StaticUpdate(const float timeStep)
 				// after the whole physics update, which means the flight state on next
 				// step would be HYPERSPACE, thus breaking quite a few things.
 				OnBeforeEnterHyperspace();
-			} else if (!(is_equal_exact(m_wheelState, 0.0f)) && this->IsType(ObjectType::PLAYER)) {
-				AbortHyperjump();
-				Sound::BodyMakeNoise(this, "Missile_Inbound", 1.0f);
 			}
 		}
 	}
@@ -1750,6 +1880,8 @@ void Ship::EnterHyperspace()
 			SetFlightState(FLYING);
 		return;
 	}
+	if (m_supercruise)
+		m_supercruise->OnEnterHyperspace();
 	AIClearInstructions();
 	SetFlightState(Ship::HYPERSPACE);
 

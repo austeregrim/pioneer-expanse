@@ -862,6 +862,13 @@ end
 
 local loaded_data
 
+Event.Register("_ensureDockedBB", function (station)
+	if station:exists() and not SpaceStation.adverts[station] then
+		SpaceStation.adverts[station] = {}
+		Event.Queue("onCreateBB", station)
+	end
+end)
+
 Event.Register("onGameStart", function ()
 	if (loaded_data) then
 		equipmentStock = loaded_data.equipmentStock
@@ -897,8 +904,13 @@ Event.Register("onGameStart", function ()
 
 	local station = Game.player:GetDockedWith()
 
-	if station and station:isa("SpaceStation") and not visited[station] then
-		createStationData(station)
+	if station and station:isa("SpaceStation") then
+		if not visited[station] then
+			createStationData(station)
+		else
+			-- Defer until all modules finish onGameStart before checking if adverts were restored
+			Event.Queue("_ensureDockedBB", station)
+		end
 	end
 
 	Timer:CallEvery(3600, updateSystem)
@@ -910,7 +922,7 @@ Event.Register("onPlayerDocked", function (ship, station)
 	else
 		Economy.UpdateStationMarket(assert(station:GetSystemBody()), station:GetCommodityMarket())
 	end
-end)
+end, true)
 
 Event.Register("onEnterSystem", function(ship)
 	if ship ~= Game.player then return end

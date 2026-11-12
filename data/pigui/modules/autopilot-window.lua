@@ -52,12 +52,42 @@ local function button_hyperspace()
 			icon = icons.hyperspace
 			tooltip = lui.HUD_BUTTON_INITIATE_HYPERJUMP
 		end
+		local blocker = player.GetHyperspaceTargetObscuredBy and player:GetHyperspaceTargetObscuredBy(targetpath)
+		if blocker then
+			tooltip = tooltip .. " — OBSCURED BY " .. blocker:GetLabel()
+		end
 		if ui.mainMenuButton(icon, tooltip) or ui.isKeyReleased(ui.keys.f7)  then
 			if player:IsHyperspaceActive() then
 				player:AbortHyperjump()
 			else
 				player:HyperjumpTo(player:GetHyperspaceTarget())
 			end
+		end
+	end
+	return true
+end
+
+local function button_supercruise()
+	if player:IsDocked() or player:IsLanded() then
+		return false
+	end
+	local scActive = player:IsSupercruiseActive()
+	local scCharging = player:IsSupercruiseCharging()
+	local scStatus, scReason = player:GetSupercruiseStatus()
+	local state = scActive or scCharging
+	if scStatus ~= "READY" and not scActive and not scCharging then
+		state = ui.theme.buttonColors.disabled
+	end
+	local tooltip = scActive and "Disengage Supercruise [J]" or ("Frameshift Drive Supercruise [J] — " .. (scReason or "FSD Ready"))
+	if ui.mainMenuButton(icons.ManualControl or icons.hyperspace, tooltip .. "##fsd_supercruise", state) then
+		player:ToggleSupercruise()
+	end
+	if player:HasSupercruiseAssist() then
+		ui.sameLine()
+		local assistActive = player:IsSupercruiseAssistActive()
+		local assistTip = assistActive and "Disengage Supercruise Assist (Autopilot Mk 2)" or "Engage Supercruise Assist (75% Blue Zone & Auto-Drop)"
+		if ui.mainMenuButton(icons.autopilot_fly_to, assistTip .. "##sc_assist", assistActive) then
+			player:ToggleSupercruiseAssist()
 		end
 	end
 	return true
@@ -260,9 +290,12 @@ local function displayAutoPilotWindow()
 		function()
 			if current_view == "WorldView" then
 				ui.addCursorPos(Vector2(0, shift))
+				if button_supercruise() then ui.sameLine() end
 				if button_hyperspace() then ui.sameLine() end
 				if button_undock() then ui.sameLine() end
-				speed_limiter.show()
+				if not player:IsSupercruiseActive() then
+					speed_limiter.show()
+				end
 			end -- current_view == "WorldView"
 		end)
 end

@@ -606,7 +606,9 @@ void SectorMap::InitObject()
 	m_starVerts.reset(new Graphics::VertexArray(
 		Graphics::ATTRIB_POSITION | Graphics::ATTRIB_DIFFUSE | Graphics::ATTRIB_UV0, 500));
 	m_galaxyDiscVerts.reset(new Graphics::VertexArray(
-		Graphics::ATTRIB_POSITION | Graphics::ATTRIB_DIFFUSE | Graphics::ATTRIB_UV0, 24));
+		Graphics::ATTRIB_POSITION | Graphics::ATTRIB_DIFFUSE | Graphics::ATTRIB_UV0, 64));
+	m_galaxyGlowVerts.reset(new Graphics::VertexArray(
+		Graphics::ATTRIB_POSITION | Graphics::ATTRIB_DIFFUSE | Graphics::ATTRIB_UV0, 2400));
 
 	Graphics::RenderStateDesc rsd{};
 	rsd.blendMode = Graphics::BLEND_ALPHA;
@@ -633,8 +635,13 @@ void SectorMap::InitObject()
 	discMatDesc.vertexColors = true;
 	auto discVfmt = Graphics::VertexFormatDesc::FromAttribSet(m_galaxyDiscVerts->GetAttributeSet());
 	m_galaxyDiscMat.Reset(m_context.renderer->CreateMaterial("unlit", discMatDesc, discRsd, discVfmt));
-	Graphics::Texture *galTex = Graphics::TextureBuilder::Billboard("galaxy_colour.png").GetOrCreateTexture(m_context.renderer, "billboard");
+	Graphics::TextureBuilder tb("galaxy_4k.png", Graphics::LINEAR_CLAMP, true, false, false, false, true);
+	Graphics::Texture *galTex = tb.GetOrCreateTexture(m_context.renderer, "galaxy_4k");
 	m_galaxyDiscMat->SetTexture("texture0"_hash, galTex);
+
+	m_galaxyGlowMat.Reset(m_context.renderer->CreateMaterial("unlit", discMatDesc, discRsd, discVfmt));
+	Graphics::Texture *glowTex = Graphics::TextureBuilder::Billboard("textures/halo.dds").GetOrCreateTexture(m_context.renderer, "billboard");
+	m_galaxyGlowMat->SetTexture("texture0"_hash, glowTex);
 
 	rsd.primitiveType = Graphics::LINE_SINGLE;
 
@@ -711,7 +718,7 @@ void SectorMap::Draw3D()
 
 	modelview.Translate(-m_pos * Sector::SIZE);
 
-	if (m_voronoiAlpha > 0.01f || m_macroAlpha > 0.01f) {
+	if (m_voronoiAlpha > 0.01f || m_macroAlpha > 0.01f || m_regionalAlpha > 0.01f) {
 		DrawMacroGalaxy(modelview);
 	}
 
@@ -1325,13 +1332,18 @@ void SectorMap::Update(float frameTime)
 		m_zoomClamped = Clamp(m_zoom, 1.f, FAR_LIMIT);
 	}
 
-	// Compute smooth cross-fade LOD alphas for Voronoi borders and Macro Galactic View
+	// Compute smooth cross-fade LOD alphas for Voronoi borders, Regional Star Field, and Macro Galactic View
 	{
 		float tVor = Clamp((m_zoom - ZOOM_VORONOI_START) / (ZOOM_VORONOI_FULL - ZOOM_VORONOI_START), 0.0f, 1.0f);
 		m_voronoiAlpha = tVor * tVor * (3.0f - 2.0f * tVor);
 
 		float tMac = Clamp((m_zoom - ZOOM_MACRO_START) / (ZOOM_MACRO_FULL - ZOOM_MACRO_START), 0.0f, 1.0f);
 		m_macroAlpha = tMac * tMac * (3.0f - 2.0f * tMac);
+
+		// Regional Star Field LOD: smoothly fades in as camera zooms from macro toward regional clusters (15 ly to 500 ly)
+		const float regIn = Clamp((m_zoom - 14.0f) / 10.0f, 0.0f, 1.0f);
+		const float regOut = Clamp((550.0f - m_zoom) / 380.0f, 0.0f, 1.0f);
+		m_regionalAlpha = (regIn * regIn * (3.0f - 2.0f * regIn)) * (regOut * regOut * (3.0f - 2.0f * regOut));
 	}
 
 	if (m_macroAlpha < 0.95f) {
@@ -1351,6 +1363,19 @@ void SectorMap::Update(float frameTime)
 
 		m_fresnelMat.Reset(m_context.renderer->CreateMaterial("fresnel_sphere", matdesc, rsd, m_sphere->GetVertexFormat()));
 		m_fresnelMat->diffuse = Color::WHITE;
+
+		Graphics::RenderStateDesc bubbleRsd;
+		bubbleRsd.blendMode = Graphics::BLEND_ALPHA;
+		bubbleRsd.depthTest = true;
+		bubbleRsd.depthWrite = false;
+		bubbleRsd.cullMode = Graphics::CULL_BACK;
+		m_bubbleMat.Reset(m_context.renderer->CreateMaterial("fresnel_sphere", matdesc, bubbleRsd, m_sphere->GetVertexFormat()));
+		m_bubbleMat->diffuse = Color::WHITE;
+
+		Graphics::RenderStateDesc bubbleGlowRsd = bubbleRsd;
+		bubbleGlowRsd.blendMode = Graphics::BLEND_ALPHA_ONE;
+		m_bubbleGlowMat.Reset(m_context.renderer->CreateMaterial("fresnel_sphere", matdesc, bubbleGlowRsd, m_sphere->GetVertexFormat()));
+		m_bubbleGlowMat->diffuse = Color::WHITE;
 	}
 	m_sphereParams.clear();
 	m_lineVerts->Clear();
@@ -1527,11 +1552,9 @@ const Faction *SectorMap::GetFactionAtPositionLy(const vector3f &posLy) const
 
 	if (!m_factionSites.empty()) {
 		for (const auto &site : m_factionSites) {
-			const float dx = posLy.x - site.homePosLy.x;
-			const float dy = posLy.y - site.homePosLy.y;
-			const float dist2D = std::sqrt(dx * dx + dy * dy);
-			if (dist2D <= site.radiusLy && dist2D < bestDist) {
-				bestDist = dist2D;
+			const float dist3D = (posLy - site.homePosLy).Length();
+			if (dist3D <= site.radiusLy && dist3D < bestDist) {
+				bestDist = dist3D;
 				bestFaction = site.faction;
 			}
 		}
@@ -1541,11 +1564,9 @@ const Faction *SectorMap::GetFactionAtPositionLy(const vector3f &posLy) const
 			const Faction *f = factionsDb->GetFaction(i);
 			if (!f || !f->hasHomeworld || f->Radius() <= 0.0) continue;
 			const vector3f fpos = Sector::SIZE * vector3f(float(f->homeworld.sectorX), float(f->homeworld.sectorY), float(f->homeworld.sectorZ));
-			const float dx = posLy.x - fpos.x;
-			const float dy = posLy.y - fpos.y;
-			const float dist2D = std::sqrt(dx * dx + dy * dy);
-			if (dist2D <= float(f->Radius()) && dist2D < bestDist) {
-				bestDist = dist2D;
+			const float dist3D = (posLy - fpos).Length();
+			if (dist3D <= float(f->Radius()) && dist3D < bestDist) {
+				bestDist = dist3D;
 				bestFaction = f;
 			}
 		}
@@ -1564,7 +1585,7 @@ void SectorMap::InitMacroGalaxy()
 
 	if (!m_context.galaxy) return;
 
-	// 1. Gather faction sites and compute Voronoi territorial boundaries
+	// 1. Gather faction sites and compute 3D Bubble territorial shells & 3D intersection rings
 	m_factionSites.clear();
 	m_voronoiEdges.clear();
 
@@ -1584,48 +1605,53 @@ void SectorMap::InitMacroGalaxy()
 		}
 
 		const size_t nSites = m_factionSites.size();
-		// Pass 1: Straight internal Voronoi bisectors between pairs of factions
+
+		// Pass 1: 3D Sphere-Sphere Intersection Rings where two faction bubbles meet in 3D space
 		for (size_t i = 0; i < nSites; ++i) {
-			const vector2f pi(m_factionSites[i].homePosLy.x, m_factionSites[i].homePosLy.y);
+			const vector3f pi = m_factionSites[i].homePosLy;
 			const float ri = m_factionSites[i].radiusLy;
 
 			for (size_t j = i + 1; j < nSites; ++j) {
-				const vector2f pj(m_factionSites[j].homePosLy.x, m_factionSites[j].homePosLy.y);
+				const vector3f pj = m_factionSites[j].homePosLy;
 				const float rj = m_factionSites[j].radiusLy;
-				const vector2f diff = pj - pi;
+				const vector3f diff = pj - pi;
 				const float dist = diff.Length();
 				const float rMin = std::min(ri, rj);
 				if (dist < 0.1f || dist * 0.5f >= rMin) continue;
 
-				const vector2f mid = (pi + pj) * 0.5f;
-				const vector2f tang(-diff.y / dist, diff.x / dist);
-				const float halfChord = std::sqrt(rMin * rMin - (dist * 0.5f) * (dist * 0.5f));
+				// 3D Voronoi bisector plane between pi and pj
+				const vector3f mid = (pi + pj) * 0.5f;
+				const vector3f normal = diff * (1.0f / dist);
+				const float ringRadius = std::sqrt(rMin * rMin - (dist * 0.5f) * (dist * 0.5f));
 
-				const int steps = 28;
+				// Orthonormal basis (uAxis, vAxis) in the 3D bisector plane
+				vector3f refUp = (std::fabs(normal.z) < 0.85f) ? vector3f(0.0f, 0.0f, 1.0f) : vector3f(1.0f, 0.0f, 0.0f);
+				const vector3f uAxis = normal.Cross(refUp).Normalized();
+				const vector3f vAxis = normal.Cross(uAxis).Normalized();
+
+				const int steps = 36;
 				for (int s = 0; s < steps; ++s) {
-					const float t0 = -halfChord + (2.0f * halfChord * float(s)) / float(steps);
-					const float t1 = -halfChord + (2.0f * halfChord * float(s + 1)) / float(steps);
-					const float tMid = 0.5f * (t0 + t1);
-					const vector2f qMid = mid + tang * tMid;
-					const float d_ij = std::sqrt((dist * 0.5f) * (dist * 0.5f) + tMid * tMid);
+					const float a0 = (2.0f * float(M_PI) * float(s)) / float(steps);
+					const float a1 = (2.0f * float(M_PI) * float(s + 1)) / float(steps);
+					const float aMid = 0.5f * (a0 + a1);
+					const vector3f qMid = mid + (uAxis * std::cos(aMid) + vAxis * std::sin(aMid)) * ringRadius;
+					const float d_ij = (qMid - pi).Length();
 
 					bool occluded = false;
 					for (size_t k = 0; k < nSites; ++k) {
 						if (k == i || k == j) continue;
-						const vector2f pk(m_factionSites[k].homePosLy.x, m_factionSites[k].homePosLy.y);
-						const float rk = m_factionSites[k].radiusLy;
-						const float dk = (qMid - pk).Length();
-						if (dk < rk && dk < d_ij - 0.05f) {
+						const float dk = (qMid - m_factionSites[k].homePosLy).Length();
+						if (dk < m_factionSites[k].radiusLy && dk < d_ij - 0.05f) {
 							occluded = true;
 							break;
 						}
 					}
 					if (!occluded) {
-						const vector2f q0 = mid + tang * t0;
-						const vector2f q1 = mid + tang * t1;
+						const vector3f q0 = mid + (uAxis * std::cos(a0) + vAxis * std::sin(a0)) * ringRadius;
+						const vector3f q1 = mid + (uAxis * std::cos(a1) + vAxis * std::sin(a1)) * ringRadius;
 						m_voronoiEdges.push_back({
-							vector3f(q0.x, q0.y, 0.0f),
-							vector3f(q1.x, q1.y, 0.0f),
+							q0,
+							q1,
 							m_factionSites[i].faction,
 							m_factionSites[j].faction
 						});
@@ -1634,51 +1660,58 @@ void SectorMap::InitMacroGalaxy()
 			}
 		}
 
-		// Pass 2: Outer circular claim boundary arcs for each faction
+		// Pass 2: 3D Spherical Bubble Contour Rings (Equatorial, Orthogonal Meridians & Latitude Rings)
 		for (size_t i = 0; i < nSites; ++i) {
-			const vector2f pi(m_factionSites[i].homePosLy.x, m_factionSites[i].homePosLy.y);
+			const vector3f pi = m_factionSites[i].homePosLy;
 			const float ri = m_factionSites[i].radiusLy;
-			const int arcSteps = 64;
+			const Faction *fac = m_factionSites[i].faction;
 
-			for (int s = 0; s < arcSteps; ++s) {
-				const float a0 = (2.0f * float(M_PI) * float(s)) / float(arcSteps);
-				const float a1 = (2.0f * float(M_PI) * float(s + 1)) / float(arcSteps);
-				const float aMid = 0.5f * (a0 + a1);
-				const vector2f qMid = pi + vector2f(std::cos(aMid), std::sin(aMid)) * ri;
+			auto addClippedRing3D = [&](const vector3f &ringCenter, const vector3f &uAxis, const vector3f &vAxis, float ringRad, int arcSteps) {
+				for (int s = 0; s < arcSteps; ++s) {
+					const float a0 = (2.0f * float(M_PI) * float(s)) / float(arcSteps);
+					const float a1 = (2.0f * float(M_PI) * float(s + 1)) / float(arcSteps);
+					const float aMid = 0.5f * (a0 + a1);
+					const vector3f qMid = ringCenter + (uAxis * std::cos(aMid) + vAxis * std::sin(aMid)) * ringRad;
 
-				bool occluded = false;
-				for (size_t k = 0; k < nSites; ++k) {
-					if (k == i) continue;
-					const vector2f pk(m_factionSites[k].homePosLy.x, m_factionSites[k].homePosLy.y);
-					const float rk = m_factionSites[k].radiusLy;
-					const float dk = (qMid - pk).Length();
-					if (dk < rk && dk < ri - 0.05f) {
-						occluded = true;
-						break;
+					bool occluded = false;
+					for (size_t k = 0; k < nSites; ++k) {
+						if (k == i) continue;
+						const float dk = (qMid - m_factionSites[k].homePosLy).Length();
+						if (dk < m_factionSites[k].radiusLy && dk < ri - 0.05f) {
+							occluded = true;
+							break;
+						}
+					}
+					if (!occluded) {
+						const vector3f q0 = ringCenter + (uAxis * std::cos(a0) + vAxis * std::sin(a0)) * ringRad;
+						const vector3f q1 = ringCenter + (uAxis * std::cos(a1) + vAxis * std::sin(a1)) * ringRad;
+						m_voronoiEdges.push_back({ q0, q1, fac, nullptr });
 					}
 				}
-				if (!occluded) {
-					const vector2f q0 = pi + vector2f(std::cos(a0), std::sin(a0)) * ri;
-					const vector2f q1 = pi + vector2f(std::cos(a1), std::sin(a1)) * ri;
-					m_voronoiEdges.push_back({
-						vector3f(q0.x, q0.y, 0.0f),
-						vector3f(q1.x, q1.y, 0.0f),
-						m_factionSites[i].faction,
-						nullptr
-					});
-				}
-			}
+			};
+
+			// Equatorial ring (XY plane at faction homeworld Z)
+			addClippedRing3D(pi, vector3f(1.0f, 0.0f, 0.0f), vector3f(0.0f, 1.0f, 0.0f), ri, 48);
+			// Meridian ring 1 (XZ plane)
+			addClippedRing3D(pi, vector3f(1.0f, 0.0f, 0.0f), vector3f(0.0f, 0.0f, 1.0f), ri, 40);
+			// Meridian ring 2 (YZ plane)
+			addClippedRing3D(pi, vector3f(0.0f, 1.0f, 0.0f), vector3f(0.0f, 0.0f, 1.0f), ri, 40);
+			// Upper & lower latitude rings (+/- 42 degrees) for clear 3D spherical curvature
+			const float latSin = std::sin(DEG2RAD(42.0f));
+			const float latCos = std::cos(DEG2RAD(42.0f));
+			addClippedRing3D(pi + vector3f(0.0f, 0.0f, ri * latSin), vector3f(1.0f, 0.0f, 0.0f), vector3f(0.0f, 1.0f, 0.0f), ri * latCos, 36);
+			addClippedRing3D(pi - vector3f(0.0f, 0.0f, ri * latSin), vector3f(1.0f, 0.0f, 0.0f), vector3f(0.0f, 1.0f, 0.0f), ri * latCos, 36);
 		}
 	}
 
-	// 2. Generate 3D Volumetric Galactic Star Cloud from Galaxy Density Map
+	// 2. Generate 3D Volumetric Galactic Star Cloud from Galaxy Density Map (45,000 points)
 	m_galaxyCloudPos.clear();
 	m_galaxyCloudBaseColor.clear();
 	const vector3f corePos = GetGalacticCorePositionLy();
 	const float galRad = GetGalaxyRadiusLy();
 
 	Random rng(0x50104E34);
-	const int targetParticles = 9500;
+	const int targetParticles = 45000;
 	m_galaxyCloudPos.reserve(targetParticles);
 	m_galaxyCloudBaseColor.reserve(targetParticles);
 
@@ -1717,6 +1750,148 @@ void SectorMap::InitMacroGalaxy()
 		m_galaxyCloudBaseColor.push_back(Color(cr, cg, cb, ca));
 	}
 	m_galaxyCloudDrawColor = m_galaxyCloudBaseColor;
+
+	// 3. Generate 3D Volumetric Galactic Glow Billboards (Central Bulge, Sagittarius A* & Spiral Arm Nebulae)
+	m_galaxyGlowBillboards.clear();
+	m_galaxyGlowBillboards.reserve(360);
+
+	// A. Multi-layer Sagittarius A* & Central Galactic Core Glow
+	m_galaxyGlowBillboards.push_back({ corePos, 18500.0f, Color(255, 190, 110, 85) });
+	m_galaxyGlowBillboards.push_back({ corePos, 11000.0f, Color(255, 220, 155, 135) });
+	m_galaxyGlowBillboards.push_back({ corePos, 5200.0f,  Color(255, 245, 215, 195) });
+	m_galaxyGlowBillboards.push_back({ corePos + vector3f(0.0f, 0.0f, 950.0f),  9200.0f, Color(255, 200, 130, 75) });
+	m_galaxyGlowBillboards.push_back({ corePos + vector3f(0.0f, 0.0f, -950.0f), 9200.0f, Color(255, 200, 130, 75) });
+
+	// B. 3D Ellipsoidal Galactic Bulge Glow Cloud (rising +/- 2,400 ly above and below the plane)
+	Random glowRng(0x610A9E4B);
+	for (int i = 0; i < 70; ++i) {
+		const float u = float(glowRng.Double());
+		const float rXY = 9500.0f * std::pow(u, 0.7f);
+		const float theta = float(glowRng.Double()) * 2.0f * float(M_PI);
+		const float gZ = float(glowRng.Double()) + float(glowRng.Double()) + float(glowRng.Double()) - 1.5f;
+		const float sigmaZ = 1450.0f * std::exp(-(rXY * rXY) / (7500.0f * 7500.0f)) + 350.0f;
+		const vector3f pos(
+			corePos.x + rXY * std::cos(theta),
+			corePos.y + rXY * std::sin(theta),
+			gZ * sigmaZ);
+		const float puffRad = 3600.0f + float(glowRng.Double()) * 4600.0f;
+		const float warm = std::exp(-(rXY * rXY) / (8000.0f * 8000.0f));
+		const Uint8 cr = Uint8(Clamp(225.0f + 30.0f * warm, 200.0f, 255.0f));
+		const Uint8 cg = Uint8(Clamp(175.0f + 45.0f * warm, 150.0f, 235.0f));
+		const Uint8 cb = Uint8(Clamp(125.0f + 35.0f * warm, 100.0f, 190.0f));
+		const Uint8 ca = Uint8(Clamp(26.0f + 36.0f * warm, 18.0f, 68.0f));
+		m_galaxyGlowBillboards.push_back({ pos, puffRad, Color(cr, cg, cb, ca) });
+	}
+
+	// C. 3D Spiral Arm & Star-Forming Nebula Glow Puffs distributed in 3D across the disc
+	const int targetArmGlows = 280;
+	for (int attempt = 0; attempt < targetArmGlows * 8 && int(m_galaxyGlowBillboards.size()) < 75 + targetArmGlows; ++attempt) {
+		const float u = float(glowRng.Double());
+		const float r = 4500.0f + (galRad * 0.92f - 4500.0f) * std::pow(u, 0.62f);
+		const float theta = float(glowRng.Double()) * 2.0f * float(M_PI);
+		const float wx = corePos.x + r * std::cos(theta);
+		const float wy = corePos.y + r * std::sin(theta);
+		const int sx = int(std::floor(wx / Sector::SIZE));
+		const int sy = int(std::floor(wy / Sector::SIZE));
+
+		const Uint8 density = m_context.galaxy->GetSectorDensity(sx, sy, 0);
+		const float normDens = float(density) / 255.0f;
+		if (normDens < 0.34f || float(glowRng.Double()) > normDens * 0.95f) continue;
+
+		const float sigmaZ = 340.0f + 780.0f * std::exp(-(r * r) / (15000.0f * 15000.0f));
+		const float gZ = float(glowRng.Double()) + float(glowRng.Double()) - 1.0f;
+		const float wz = gZ * sigmaZ;
+		const float puffRad = 2600.0f + float(glowRng.Double()) * 3600.0f;
+
+		const float coreBlend = std::exp(-(r * r) / (14000.0f * 14000.0f));
+		const bool isNebulaKnot = (glowRng.Double() < 0.22);
+		Uint8 cr, cg, cb;
+		if (isNebulaKnot) {
+			// Luminous rose-violet / magenta H-II star-forming nebula glow
+			cr = Uint8(Clamp(210.0f + 35.0f * normDens, 180.0f, 255.0f));
+			cg = Uint8(Clamp(115.0f + 45.0f * coreBlend, 95.0f, 180.0f));
+			cb = Uint8(Clamp(220.0f - 30.0f * coreBlend, 165.0f, 255.0f));
+		} else {
+			// Cool sapphire-cyan spiral arm starlight glow blending to golden inner arms
+			cr = Uint8(Clamp(125.0f + 115.0f * coreBlend, 110.0f, 245.0f));
+			cg = Uint8(Clamp(170.0f + 40.0f * coreBlend + 25.0f * normDens, 145.0f, 240.0f));
+			cb = Uint8(Clamp(245.0f - 75.0f * coreBlend, 155.0f, 255.0f));
+		}
+		const Uint8 ca = Uint8(Clamp(18.0f + 34.0f * normDens, 14.0f, 52.0f));
+		m_galaxyGlowBillboards.push_back({ vector3f(wx, wy, wz), puffRad, Color(cr, cg, cb, ca) });
+	}
+}
+
+void SectorMap::UpdateRegionalStarField(const vector3f &centerLy)
+{
+	m_regionalStarPos.clear();
+	m_regionalStarBaseColor.clear();
+	m_lastRegionalCenterLy = centerLy;
+
+	if (!m_context.galaxy)
+		return;
+
+	const int targetRegionalStars = 24000;
+	m_regionalStarPos.reserve(targetRegionalStars);
+	m_regionalStarBaseColor.reserve(targetRegionalStars);
+
+	Random rng(0x7A1F2C5B);
+	const float maxRadiusLy = 2800.0f;
+
+	for (int attempt = 0; attempt < targetRegionalStars * 5 && int(m_regionalStarPos.size()) < targetRegionalStars; ++attempt) {
+		const float u = float(rng.Double());
+		// Bias slightly toward the focal center for crisp regional star density
+		const float r = maxRadiusLy * std::pow(u, 0.45f);
+		const float theta = float(rng.Double()) * 2.0f * float(M_PI);
+		const float phi = std::acos(2.0f * float(rng.Double()) - 1.0f);
+
+		const float x = centerLy.x + r * std::sin(phi) * std::cos(theta);
+		const float y = centerLy.y + r * std::sin(phi) * std::sin(theta);
+		// Flatten vertically to match realistic galactic disc scale height (~320 ly)
+		const float z = (centerLy.z + r * std::cos(phi)) * 0.35f;
+
+		const int sx = int(std::floor(x / Sector::SIZE));
+		const int sy = int(std::floor(y / Sector::SIZE));
+		const int sz = int(std::floor(z / Sector::SIZE));
+
+		const Uint8 dens = m_context.galaxy->GetSectorDensity(sx, sy, sz);
+		if (dens == 0)
+			continue;
+
+		const float normDens = float(dens) / 255.0f;
+		if (float(rng.Double()) > normDens * 1.15f)
+			continue;
+
+		// Exact star position with sub-sector jitter
+		const float ox = float(rng.Double() * Sector::SIZE);
+		const float oy = float(rng.Double() * Sector::SIZE);
+		const float oz = float(rng.Double() * Sector::SIZE);
+		m_regionalStarPos.push_back(vector3f(float(sx) * Sector::SIZE + ox, float(sy) * Sector::SIZE + oy, float(sz) * Sector::SIZE + oz));
+
+		// Spectral type determination matching stellar population distribution
+		const double stRoll = rng.Double();
+		Uint8 cr, cg, cb, ca;
+		if (stRoll < 0.05) {
+			// Type O/B: luminous blue giant
+			cr = 180; cg = 210; cb = 255; ca = 240;
+		} else if (stRoll < 0.18) {
+			// Type A: bright white star
+			cr = 225; cg = 235; cb = 255; ca = 220;
+		} else if (stRoll < 0.38) {
+			// Type F/G: yellow-white / solar type
+			cr = 255; cg = 245; cb = 195; ca = 205;
+		} else if (stRoll < 0.68) {
+			// Type K: orange star
+			cr = 255; cg = 190; cb = 115; ca = 185;
+		} else {
+			// Type M: red dwarf
+			cr = 255; cg = 135; cb = 90; ca = 160;
+		}
+
+		m_regionalStarBaseColor.push_back(Color(cr, cg, cb, ca));
+	}
+
+	m_regionalStarDrawColor = m_regionalStarBaseColor;
 }
 
 void SectorMap::DrawMacroGalaxy(const matrix4x4f &modelview)
@@ -1728,17 +1903,39 @@ void SectorMap::DrawMacroGalaxy(const matrix4x4f &modelview)
 	const vector3f corePos = GetGalacticCorePositionLy();
 	const float galRad = GetGalaxyRadiusLy();
 
-	// 1. Render Textured Galactic Disc & Multi-Plane Parallax Layers + 3D Particle Cloud
+	// 1. Render Multi-Layered 3D Textured Galactic Disc Stack, 3D Volumetric Glow Cloud & Global Star Cloud
+	const matrix3x3f camOrient = modelview.GetOrient().Transpose();
+	const vector3f camRight = camOrient * vector3f(1.0f, 0.0f, 0.0f);
+	const vector3f camUp    = camOrient * vector3f(0.0f, 1.0f, 0.0f);
+
+	auto addGlowQuad = [&](const vector3f &centerLy, float radiusLy, const Color &col) {
+		if (col.a == 0) return;
+		const vector3f r1 = (camRight - camUp) * radiusLy;
+		const vector3f r2 = (camRight + camUp) * radiusLy;
+		m_galaxyGlowVerts->Add(centerLy - r1, col, vector2f(0.0f, 0.0f));
+		m_galaxyGlowVerts->Add(centerLy - r2, col, vector2f(0.0f, 1.0f));
+		m_galaxyGlowVerts->Add(centerLy + r2, col, vector2f(1.0f, 0.0f));
+
+		m_galaxyGlowVerts->Add(centerLy + r2, col, vector2f(1.0f, 0.0f));
+		m_galaxyGlowVerts->Add(centerLy - r2, col, vector2f(0.0f, 1.0f));
+		m_galaxyGlowVerts->Add(centerLy + r1, col, vector2f(1.0f, 1.0f));
+	};
+
+	m_galaxyGlowVerts->Clear();
+
 	if (m_macroAlpha > 0.01f) {
 		m_galaxyDiscVerts->Clear();
-		const float xMin = corePos.x - galRad;
-		const float xMax = corePos.x + galRad;
-		const float yMin = corePos.y - galRad;
-		const float yMax = corePos.y + galRad;
 
-		auto addDiscLayer = [&](float zOffset, float alphaScale) {
+		auto addDiscLayer = [&](float zOffset, float radialScale, const Color &tint, float alphaScale) {
 			const Uint8 a = Uint8(Clamp(m_macroAlpha * alphaScale * 255.0f, 0.0f, 255.0f));
-			const Color c(255, 255, 255, a);
+			if (a == 0) return;
+			const Color c(tint.r, tint.g, tint.b, a);
+			const float rScaled = galRad * radialScale;
+			const float xMin = corePos.x - rScaled;
+			const float xMax = corePos.x + rScaled;
+			const float yMin = corePos.y - rScaled;
+			const float yMax = corePos.y + rScaled;
+
 			const vector3f pTL(xMin, yMax, zOffset);
 			const vector3f pBL(xMin, yMin, zOffset);
 			const vector3f pBR(xMax, yMin, zOffset);
@@ -1753,14 +1950,31 @@ void SectorMap::DrawMacroGalaxy(const matrix4x4f &modelview)
 			m_galaxyDiscVerts->Add(pTR, c, vector2f(1.0f, 0.0f));
 		};
 
-		addDiscLayer(0.0f, 0.82f);
-		addDiscLayer(320.0f, 0.22f);
-		addDiscLayer(-320.0f, 0.22f);
+		// Fade disc smoothly when zooming into regional scale so 3D stars take over
+		const float discAlphaScale = 0.85f * Clamp((m_zoom - 35.0f) / 120.0f, 0.15f, 1.0f);
+		// Multi-plane 3D vertical stack so the galactic disc has true 3D thickness and glow when tilted
+		addDiscLayer(0.0f,     1.00f, Color(255, 255, 255), discAlphaScale * 0.62f);
+		addDiscLayer(180.0f,   0.99f, Color(245, 240, 255), discAlphaScale * 0.16f);
+		addDiscLayer(-180.0f,  0.99f, Color(245, 240, 255), discAlphaScale * 0.16f);
+		addDiscLayer(420.0f,   0.95f, Color(235, 220, 250), discAlphaScale * 0.10f);
+		addDiscLayer(-420.0f,  0.95f, Color(235, 220, 250), discAlphaScale * 0.10f);
+		addDiscLayer(780.0f,   0.86f, Color(255, 205, 175), discAlphaScale * 0.06f);
+		addDiscLayer(-780.0f,  0.86f, Color(255, 205, 175), discAlphaScale * 0.06f);
+		addDiscLayer(1250.0f,  0.70f, Color(255, 190, 140), discAlphaScale * 0.035f);
+		addDiscLayer(-1250.0f, 0.70f, Color(255, 190, 140), discAlphaScale * 0.035f);
 
 		renderer->SetTransform(modelview);
 		renderer->DrawBuffer(m_galaxyDiscVerts.get(), m_galaxyDiscMat.Get());
 
-		// Draw 3D volumetric star particle cloud
+		// Populate 3D volumetric glow billboards for Galactic Core, 3D Bulge & Spiral Arm Nebulae
+		const float glowFade = Clamp((m_zoom - 25.0f) / 90.0f, 0.2f, 1.0f) * m_macroAlpha;
+		for (const auto &gb : m_galaxyGlowBillboards) {
+			Color gc = gb.color;
+			gc.a = Uint8(Clamp(float(gb.color.a) * glowFade, 0.0f, 255.0f));
+			addGlowQuad(gb.posLy, gb.radiusLy, gc);
+		}
+
+		// Draw 3D volumetric star particle cloud (Global Milky Way Cloud - 45,000 points)
 		if (!m_galaxyCloudPos.empty()) {
 			for (size_t i = 0; i < m_galaxyCloudBaseColor.size(); ++i) {
 				m_galaxyCloudDrawColor[i] = m_galaxyCloudBaseColor[i];
@@ -1770,16 +1984,43 @@ void SectorMap::DrawMacroGalaxy(const matrix4x4f &modelview)
 			m_galaxyCloudPoints.SetData(renderer, m_galaxyCloudPos.size(), &m_galaxyCloudPos[0], &m_galaxyCloudDrawColor[0], modelview, ptSize);
 			m_galaxyCloudPoints.Draw(renderer, m_farStarsMat.Get());
 		}
+	}
 
-		// Volumetric Galactic Core Glow Billboards at Sagittarius A*
-		matrix4x4f rot = modelview;
-		rot.ClearToRotOnly();
-		rot = rot.Inverse();
-		matrix4x4f coreTrans = modelview * matrix4x4f::Translation(corePos) * rot;
-		const Uint8 coreA1 = Uint8(190.0f * m_macroAlpha);
-		const Uint8 coreA2 = Uint8(110.0f * m_macroAlpha);
-		AddStarBillboard(coreTrans, vector3f(0.0f, 0.0f, 0.0f), Color(255, 235, 185, coreA1), 5500.0f);
-		AddStarBillboard(coreTrans, vector3f(0.0f, 0.0f, -5.0f), Color(255, 195, 115, coreA2), 13000.0f);
+	// Add 3D interior glow for visible Faction Bubbles & Sol so regional space has warm 3D volume
+	if (m_voronoiAlpha > 0.01f) {
+		const float bubbleScaleFade = Clamp(1.0f - (m_zoom - 750.0f) / 1600.0f, 0.0f, 1.0f);
+		const float fGlowAlpha = m_voronoiAlpha * bubbleScaleFade;
+		if (fGlowAlpha > 0.01f) {
+			for (const auto &site : m_factionSites) {
+				if (m_hiddenFactions.find(site.faction) != m_hiddenFactions.end()) continue;
+				const bool isSelected = (site.faction == m_selectedFaction);
+				Color gc = site.faction->colour;
+				gc.a = Uint8(Clamp((isSelected ? 75.0f : 32.0f) * fGlowAlpha, 0.0f, 255.0f));
+				addGlowQuad(site.homePosLy, site.radiusLy * (isSelected ? 1.85f : 1.45f), gc);
+			}
+		}
+	}
+
+	if (!m_galaxyGlowVerts->IsEmpty()) {
+		renderer->SetTransform(modelview);
+		renderer->DrawBuffer(m_galaxyGlowVerts.get(), m_galaxyGlowMat.Get());
+	}
+
+	// 2. Render Regional 3D Star Cloud (LOD 1 - 200 to 5,000 ly)
+	if (m_regionalAlpha > 0.01f) {
+		const vector3f curCenterLy = m_pos * Sector::SIZE;
+		if ((curCenterLy - m_lastRegionalCenterLy).Length() > 75.0f || m_regionalStarPos.empty()) {
+			UpdateRegionalStarField(curCenterLy);
+		}
+		if (!m_regionalStarPos.empty()) {
+			for (size_t i = 0; i < m_regionalStarBaseColor.size(); ++i) {
+				m_regionalStarDrawColor[i] = m_regionalStarBaseColor[i];
+				m_regionalStarDrawColor[i].a = Uint8(float(m_regionalStarBaseColor[i].a) * m_regionalAlpha);
+			}
+			const float ptSize = Clamp(0.38f * (renderer->GetWindowHeight() / 720.0f), 0.25f, 1.2f);
+			m_regionalStarPoints.SetData(renderer, m_regionalStarPos.size(), &m_regionalStarPos[0], &m_regionalStarDrawColor[0], modelview, ptSize);
+			m_regionalStarPoints.Draw(renderer, m_farStarsMat.Get());
+		}
 	}
 
 	// 2. Build 3D Galactic Plane Grid, Range Rings, Voronoi Borders & 3D Beacons
@@ -1835,47 +2076,110 @@ void SectorMap::DrawMacroGalaxy(const matrix4x4f &modelview)
 		}
 	}
 
-	// C. Sharp Voronoi Faction Territory Boundary Outlines
+	// C. 3D Faction Territory Bubbles (Translucent Fresnel 3D Spheres + 3D Spherical Contours & Anchor Stems)
 	if (m_voronoiAlpha > 0.01f) {
+		const float bubbleZoomFade = Clamp(1.0f - (m_zoom - 900.0f) / 1800.0f, 0.10f, 1.0f);
+		const float effBubbleAlpha = m_voronoiAlpha * bubbleZoomFade;
+
+		// 1) Render 3D Translucent Fresnel Spheres at each faction's 3D Homeworld coordinates
+		if (m_sphere && m_bubbleMat && effBubbleAlpha > 0.02f) {
+			struct SortedBubble {
+				const FactionSite *site;
+				float eyeZ;
+			};
+			std::vector<SortedBubble> sortedBubbles;
+			sortedBubbles.reserve(m_factionSites.size());
+			for (const auto &site : m_factionSites) {
+				if (m_hiddenFactions.find(site.faction) != m_hiddenFactions.end()) continue;
+				const vector3f eyePos = modelview * site.homePosLy;
+				sortedBubbles.push_back({ &site, eyePos.z });
+			}
+			// Sort back-to-front in camera space (more negative Z is farther from camera)
+			std::sort(sortedBubbles.begin(), sortedBubbles.end(), [](const SortedBubble &a, const SortedBubble &b) {
+				return a.eyeZ < b.eyeZ;
+			});
+
+			for (const auto &sb : sortedBubbles) {
+				const FactionSite &site = *sb.site;
+				const bool isSelected = (site.faction == m_selectedFaction);
+				const bool isMajor = (site.faction->name == "Solar Federation" ||
+					site.faction->name == "Commonwealth of Independent Worlds" ||
+					site.faction->name == "Haber Corporation");
+
+				const matrix4x4f bubbleTrans = modelview * matrix4x4f::Translation(site.homePosLy) * matrix4x4f::ScaleMatrix(site.radiusLy);
+				renderer->SetTransform(bubbleTrans);
+
+				Color bCol = site.faction->colour;
+				if (isSelected) {
+					bCol.r = Uint8(std::min(255, int(bCol.r) + 50));
+					bCol.g = Uint8(std::min(255, int(bCol.g) + 50));
+					bCol.b = Uint8(std::min(255, int(bCol.b) + 50));
+					bCol.a = Uint8(Clamp(225.0f * effBubbleAlpha, 0.0f, 255.0f));
+				} else if (isMajor) {
+					bCol.a = Uint8(Clamp(165.0f * effBubbleAlpha, 0.0f, 255.0f));
+				} else {
+					bCol.a = Uint8(Clamp(120.0f * effBubbleAlpha, 0.0f, 255.0f));
+				}
+
+				m_bubbleMat->diffuse = bCol;
+				m_sphere->Draw(renderer, m_bubbleMat.Get());
+
+				// Additive rim glow pass for selected or major superpower bubbles
+				if (m_bubbleGlowMat && (isSelected || isMajor)) {
+					Color gCol = bCol;
+					gCol.a = Uint8(Clamp((isSelected ? 150.0f : 65.0f) * effBubbleAlpha, 0.0f, 255.0f));
+					m_bubbleGlowMat->diffuse = gCol;
+					m_sphere->Draw(renderer, m_bubbleGlowMat.Get());
+				}
+			}
+		}
+
+		// 2) Render 3D Spherical Bubble Contours & 3D Intersection Rings
 		for (const auto &edge : m_voronoiEdges) {
 			if (m_hiddenFactions.find(edge.factionA) != m_hiddenFactions.end()) continue;
+			if (edge.factionB && m_hiddenFactions.find(edge.factionB) != m_hiddenFactions.end()) continue;
 
 			const bool isSelected = (m_selectedFaction != nullptr) &&
 				(edge.factionA == m_selectedFaction || edge.factionB == m_selectedFaction);
+			const bool isIntersection = (edge.factionB != nullptr);
 
 			Color col = edge.factionA->colour;
-			if (edge.factionB && !isSelected) {
+			if (isIntersection && !isSelected) {
 				col.r = Uint8((int(edge.factionA->colour.r) + int(edge.factionB->colour.r)) / 2);
 				col.g = Uint8((int(edge.factionA->colour.g) + int(edge.factionB->colour.g)) / 2);
 				col.b = Uint8((int(edge.factionA->colour.b) + int(edge.factionB->colour.b)) / 2);
 			}
 			if (isSelected) {
 				col = m_selectedFaction->colour;
-				col.r = Uint8( std::min(255, int(col.r) + 55) );
-				col.g = Uint8( std::min(255, int(col.g) + 55) );
-				col.b = Uint8( std::min(255, int(col.b) + 55) );
-				col.a = Uint8(255.0f * m_voronoiAlpha);
+				col.r = Uint8(std::min(255, int(col.r) + 65));
+				col.g = Uint8(std::min(255, int(col.g) + 65));
+				col.b = Uint8(std::min(255, int(col.b) + 65));
+				col.a = Uint8(Clamp((isIntersection ? 255.0f : 220.0f) * effBubbleAlpha, 0.0f, 255.0f));
 			} else {
-				col.a = Uint8(195.0f * m_voronoiAlpha);
+				col.a = Uint8(Clamp((isIntersection ? 195.0f : 125.0f) * effBubbleAlpha, 0.0f, 255.0f));
 			}
 
 			m_macroLineVerts->Add(edge.p0, col);
 			m_macroLineVerts->Add(edge.p1, col);
 		}
 
-		// Draw 3D vertical stem for currently selected faction's homeworld
-		if (m_selectedFaction && m_selectedFaction->hasHomeworld) {
-			for (const auto &site : m_factionSites) {
-				if (site.faction == m_selectedFaction) {
-					Color hCol = m_selectedFaction->colour;
-					hCol.a = Uint8(235.0f * m_voronoiAlpha);
-					const vector3f planePt(site.homePosLy.x, site.homePosLy.y, 0.0f);
-					m_macroLineVerts->Add(planePt, hCol);
-					m_macroLineVerts->Add(site.homePosLy, hCol);
-					const float rRet = std::max(8.0f, m_zoom * 0.12f);
-					addCircleXY(planePt, rRet, 24, hCol);
-					break;
-				}
+		// 3) Draw 3D vertical reference stems from faction bubble centers to the Z=0 galactic plane
+		for (const auto &site : m_factionSites) {
+			if (m_hiddenFactions.find(site.faction) != m_hiddenFactions.end()) continue;
+			const bool isSelected = (site.faction == m_selectedFaction);
+			const bool isMajor = (site.faction->name == "Solar Federation" ||
+				site.faction->name == "Commonwealth of Independent Worlds" ||
+				site.faction->name == "Haber Corporation");
+			if (!isSelected && !isMajor && std::fabs(site.homePosLy.z) < 15.0f) continue;
+
+			Color hCol = site.faction->colour;
+			hCol.a = Uint8(Clamp((isSelected ? 235.0f : (isMajor ? 140.0f : 65.0f)) * effBubbleAlpha, 0.0f, 255.0f));
+			const vector3f planePt(site.homePosLy.x, site.homePosLy.y, 0.0f);
+			m_macroLineVerts->Add(planePt, hCol);
+			m_macroLineVerts->Add(site.homePosLy, hCol);
+			if (isSelected || isMajor) {
+				const float rRet = std::max(6.0f, m_zoom * (isSelected ? 0.12f : 0.07f));
+				addCircleXY(planePt, rRet, 24, hCol);
 			}
 		}
 	}
@@ -2001,8 +2305,43 @@ void SectorMap::HandleMacroClick(const ImVec2 &mpos)
 
 	const vector3f targetLy = m_pos * Sector::SIZE;
 	const vector3f camOriginLy = targetLy + invRot * vector3f(0.0f, 0.0f, camDist);
-	const vector3f rayDirLy = invRot * rayCam;
+	const vector3f rayDirLy = (invRot * rayCam).Normalized();
 
+	// 1. Raycast against 3D Faction Bubbles in 3D space when viewing regional/bubble scale
+	if (m_zoom < 1200.0f && !m_factionSites.empty()) {
+		const FactionSite *bestSite = nullptr;
+		float bestT = FLT_MAX;
+
+		for (const auto &site : m_factionSites) {
+			if (m_hiddenFactions.find(site.faction) != m_hiddenFactions.end()) continue;
+			const vector3f oc = camOriginLy - site.homePosLy;
+			const float b = oc.Dot(rayDirLy);
+			const float c = oc.Dot(oc) - site.radiusLy * site.radiusLy;
+			const float disc = b * b - c;
+			if (disc < 0.0f) continue;
+
+			const float sqrtDisc = std::sqrt(disc);
+			float tHit = -b - sqrtDisc;
+			if (tHit <= 0.0f) tHit = -b + sqrtDisc;
+			if (tHit > 0.0f && tHit < bestT) {
+				// Check if the 3D entry point is actually claimed by a closer overlapping bubble
+				const vector3f hitPt = camOriginLy + rayDirLy * tHit;
+				const Faction *owner = GetFactionAtPositionLy(hitPt);
+				if (owner == site.faction) {
+					bestT = tHit;
+					bestSite = &site;
+				}
+			}
+		}
+
+		if (bestSite) {
+			m_selectedFaction = bestSite->faction;
+			GotoPositionLy(bestSite->homePosLy);
+			return;
+		}
+	}
+
+	// 2. Fallback: Raycast onto the Z=0 Galactic Plane
 	if (std::fabs(rayDirLy.z) < 1e-4f) return;
 	const float t = -camOriginLy.z / rayDirLy.z;
 	if (t <= 0.0f) return;

@@ -16,8 +16,8 @@ void main(void)
 	vec3 eyenorm = normalize(-varyingEyepos);
 
 	float fresnel = 1.0 - abs(dot(eyenorm, varyingNormal)); // Calculate fresnel.
-	fresnel = pow(fresnel, 10.0);
-	fresnel += 0.05 * (1.0 - fresnel);
-	color.a = color.a * clamp(fresnel * 0.5, 0.0, 1.0);
+	float rim = pow(fresnel, 3.0) * 0.65 + pow(fresnel, 8.0) * 0.45;
+	float fill = 0.14;
+	color.a = color.a * clamp(fill + rim, 0.0, 1.0);
 	frag_color = color;
 }

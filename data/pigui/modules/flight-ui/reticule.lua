@@ -883,48 +883,52 @@ local function displayReticule()
 	-- reticule circle
 	ui.addCircle(center, reticuleCircleRadius, colors.reticuleCircle, ui.circleSegments(reticuleCircleRadius), reticuleCircleThickness)
 
-	local frame = player.frameBody
-	local frameLabel = player.frameLabel
-	local navTarget = player:GetNavTarget()
-	local combatTarget = player:GetCombatTarget()
-	local radius = reticuleCircleRadius * 1.2
+	local inSupercruise = player:IsSupercruiseActive()
+	if not inSupercruise then
+		local frame = player.frameBody
+		local frameLabel = player.frameLabel
+		local navTarget = player:GetNavTarget()
+		local combatTarget = player:GetCombatTarget()
+		local radius = reticuleCircleRadius * 1.2
 
-	if reticuleTarget == "frame" and (navTarget or combatTarget) then
-		reticuleTarget = (combatTarget and "combatTarget") or (navTarget and "navTarget") --[[@as string]]
+		if reticuleTarget == "frame" and (navTarget or combatTarget) then
+			reticuleTarget = (combatTarget and "combatTarget") or (navTarget and "navTarget") --[[@as string]]
+		end
+
+		if frame then
+			displayFrameData(frame, radius, lui.HUD_CURRENT_FRAME)
+		else
+			displayFrameLabel(frameLabel, radius, lui.HUD_CURRENT_FRAME)
+		end
+
+		local targetData = nil
+
+		if reticuleTarget == "navTarget" and navTarget then
+			targetData = makeTargetData(navTarget)
+			displayDetailData(navTarget, targetData, radius, lui.HUD_CURRENT_NAV_TARGET)
+		elseif reticuleTarget == "combatTarget" and combatTarget then
+			targetData = makeTargetData(combatTarget)
+			displayDetailData(combatTarget, targetData, radius, lui.HUD_CURRENT_COMBAT_TARGET)
+		end
+
+		if not targetData and frame then
+			targetData = makeTargetData(frame)
+		end
+
+		-- current speed of approach
+		if targetData and targetData.approach_speed > 0 and player:GetFlightState() == "FLYING" then
+			displayReticuleBrakeGauge(
+				targetData.brake_distance / targetData.distance,
+				targetData.brake_distance_retro / targetData.distance)
+		end
+
+		displayFlightAssist(radius)
+		displayManeuverData(radius)
+		displayReticuleLandingAssist()
+		displayReticuleDeltaV()
 	end
 
-	if frame then
-		displayFrameData(frame, radius, lui.HUD_CURRENT_FRAME)
-	else
-		displayFrameLabel(frameLabel, radius, lui.HUD_CURRENT_FRAME)
-	end
-
-	local targetData = nil
-
-	if reticuleTarget == "navTarget" and navTarget then
-		targetData = makeTargetData(navTarget)
-		displayDetailData(navTarget, targetData, radius, lui.HUD_CURRENT_NAV_TARGET)
-	elseif reticuleTarget == "combatTarget" and combatTarget then
-		targetData = makeTargetData(combatTarget)
-		displayDetailData(combatTarget, targetData, radius, lui.HUD_CURRENT_COMBAT_TARGET)
-	end
-
-	if not targetData and frame then
-		targetData = makeTargetData(frame)
-	end
-
-	-- current speed of approach
-	if targetData and targetData.approach_speed > 0 and player:GetFlightState() == "FLYING" then
-		displayReticuleBrakeGauge(
-			targetData.brake_distance / targetData.distance,
-			targetData.brake_distance_retro / targetData.distance)
-	end
-
-	displayFlightAssist(radius)
-	displayManeuverData(radius)
 	displayReticulePitchHorizonCompass()
-	displayReticuleLandingAssist()
-	displayReticuleDeltaV()
 	displayAlertMarker()
 end
 

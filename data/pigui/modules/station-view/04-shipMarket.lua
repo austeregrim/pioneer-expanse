@@ -8,6 +8,7 @@ local ShipDef = require 'ShipDef'
 local Equipment = require 'Equipment'
 local StationView = require 'pigui.views.station-view'
 local Table = require 'pigui.libs.table'
+local StationSig = require 'pigui.libs.station-sig'
 local PiImage = require 'pigui.libs.image'
 local ModelSpinner = require 'PiGui.Modules.ModelSpinner'
 local EquipSet = require 'EquipSet'
@@ -579,24 +580,30 @@ shipMarket = Table.New("shipMarketWidget", false, {
 	end
 })
 
+local stationSig = StationSig.New("shipMarket")
+
 StationView:registerView({
 	id = "shipMarketView",
 	name = l.SHIP_MARKET,
 	icon = ui.theme.icons.ship,
 	showView = true,
 	draw = function()
-		ui.withFont(pionillium.heading, function()
-			shipMarket:render()
-		end)
+		stationSig:render(function()
+			ui.withFont(pionillium.heading, function()
+				shipMarket:render()
+			end)
 
-		ui.sameLine(0, widgetSizes.itemSpacing.x)
-		tradeMenu()
+			ui.sameLine(0, widgetSizes.itemSpacing.x)
+			tradeMenu()
+		end)
 	end,
 	refresh = function()
+		stationSig:reset()
 		refreshShipMarket()
 		shipMarket.scrollReset = true
 	end,
 	debugReload = function()
+		package.reimport('pigui.libs.station-sig')
 		package.reimport()
 	end
 })

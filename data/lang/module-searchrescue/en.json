@@ -1,7 +1,7 @@
 {
   "ACCIDENT_DESTROYED_TARGET": {
     "description": "",
-    "message": "The sad news has reached us that {shiplabel} has been destroyed. We will pay half of the agreed price for you efforts."
+    "message": "The sad news has reached us that {shiplabel} has been destroyed. We will pay half of the agreed price for your efforts."
   },
   "AU": {
     "description": "",
@@ -217,7 +217,7 @@
   },
   "FLAVOUR_2_INTROTEXT": {
     "description": "",
-    "message": "{starport} air traffic control just received notice that incoming flight {shiplabel} has run out of fuel and had to emergency land. The pilot is willing to pay {cash} for refueling services."
+    "message": "{starport} air traffic control just received notice that incoming flight {shiplabel} has run out of fuel and had to make an emergency landing. The pilot is willing to pay {cash} for refueling services."
   },
   "FLAVOUR_2_LOCATIONTEXT": {
     "description": "",
@@ -257,7 +257,7 @@
   },
   "FLAVOUR_3_LOCATIONTEXT": {
     "description": "",
-    "message": "The ship had to emergency land at the coordinates: {lat} / {long}. "
+    "message": "The ship had to make an emergency landing at the coordinates: {lat} / {long}."
   },
   "FLAVOUR_3_SUCCESSMSG": {
     "description": "",
@@ -325,7 +325,7 @@
   },
   "FLAVOUR_5_INTROTEXT": {
     "description": "",
-    "message": "{starport} air traffic control has identified a starship with ID {shiplabel} drifting without fuel close-by. We will pay {cash} to anyone who will refuel the ship so they can vacate {starport} vicinity."
+    "message": "{starport} air traffic control has identified a starship with ID {shiplabel} drifting without fuel nearby. We will pay {cash} to anyone who will refuel the ship so it can vacate the {starport} vicinity."
   },
   "FLAVOUR_5_LOCATIONTEXT": {
     "description": "",
@@ -333,7 +333,7 @@
   },
   "FLAVOUR_5_SUCCESSMSG": {
     "description": "",
-    "message": "We will make record of your timely completion of the task."
+    "message": "We will make a record of your timely completion of the task."
   },
   "FLAVOUR_5_TRANSFERMSG": {
     "description": "",
@@ -549,7 +549,7 @@
   },
   "PROBLEM_CREW_4": {
     "description": "",
-    "message": "what it seems like a {locality} scorpion got into the crew quarters at night"
+    "message": "what seems like a {locality} scorpion getting into the crew quarters at night"
   },
   "PROBLEM_CREW_5": {
     "description": "",
@@ -565,7 +565,7 @@
   },
   "PROBLEM_CREW_8": {
     "description": "",
-    "message": "a terrible accident that lead to the ejection of the others into space"
+    "message": "a terrible accident that led to the ejection of the others into space"
   },
   "PROBLEM_CREW_9": {
     "description": "",
@@ -601,7 +601,7 @@
   },
   "PROBLEM_GENERAL_7": {
     "description": "",
-    "message": "contact with an unidentified flight object"
+    "message": "contact with an unidentified flying object"
   },
   "PROBLEM_GENERAL_8": {
     "description": "",

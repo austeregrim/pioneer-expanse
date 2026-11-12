@@ -1,7 +1,7 @@
 {
   "ACCEPTED_1": {
     "description": "",
-    "message": "Excellent. I'll load the goods on to your ship."
+    "message": "Excellent. I'll load the goods onto your ship."
   },
   "ACCEPTED_2": {
     "description": "",
@@ -37,7 +37,7 @@
   },
   "ADTEXT_LOCAL_1": {
     "description": "",
-    "message": "Haulers wanted for in-system transport. Move of goods to {starport}."
+    "message": "Haulers wanted for in-system transport. Transport of goods to {starport}."
   },
   "ADTEXT_LOCAL_2": {
     "description": "",
@@ -53,7 +53,7 @@
   },
   "ADTEXT_PICKUP_LOCAL_1": {
     "description": "",
-    "message": "Cargo relocation service needed. Move of cargo to this starport from {starport} required."
+    "message": "Cargo relocation service needed. Transport of cargo to this starport from {starport} required."
   },
   "ADTEXT_WHOLESALER_1": {
     "description": "",
@@ -117,7 +117,7 @@
   },
   "ART_OBJECTS_RISK_MESSAGE_3": {
     "description": "Answer to question: Will I be in any danger?",
-    "message": "The only danger of 25th century impressionism was to the original artist, you should be safe."
+    "message": "The only danger of 25th century impressionism was to the original artist; you should be safe."
   },
   "CARGO": {
     "description": "",
@@ -189,7 +189,7 @@
   },
   "DENY_AGAIN_2": {
     "description": "",
-    "message": "Excuse me sir, please complete our existing contract first. Then we can negotiate another delivery."
+    "message": "Excuse me, sir, please complete our existing contract first. Then we can negotiate another delivery."
   },
   "DENY_AGAIN_3": {
     "description": "",
@@ -245,7 +245,7 @@
   },
   "FAILUREMSG_2": {
     "description": "",
-    "message": "You are too late! What should I do with this now, it's worthless!"
+    "message": "You are too late! What should I do with this now? It's worthless!"
   },
   "FAILUREMSG_3": {
     "description": "",
@@ -257,7 +257,7 @@
   },
   "FAILUREMSG_FLUFFY_1": {
     "description": "",
-    "message": "You monster! You've waited too long for this delivery. All my fluffy pets are starved!"
+    "message": "You monster! You've waited too long for this delivery. All my fluffy pets have starved!"
   },
   "FURNITURE": {
     "description": "custom cargo",
@@ -329,7 +329,7 @@
   },
   "INTROTEXT_3": {
     "description": "",
-    "message": "Good day. I'm {name}, founder of the {name} Ltd. I need someone trustworthy to deliver {cargoname} to {starport} in the {system} ({sectorx}, {sectory}, {sectorz}) system. I will pay {cash} for the {dist} ly long flight."
+    "message": "Good day. I'm {name}, founder of {name} Ltd. I need someone trustworthy to deliver {cargoname} to {starport} in the {system} ({sectorx}, {sectory}, {sectorz}) system. I will pay {cash} for the {dist} ly flight."
   },
   "INTROTEXT_EXPENSIVE_1": {
     "description": "",
@@ -361,11 +361,11 @@
   },
   "INTROTEXT_PICKUP_1": {
     "description": "",
-    "message": "How do you do? My name is {name}, and I need a ship that is able to fly to {starport} in the {system} ({sectorx}, {sectory}, {sectorz}) system, to pickup {cargoname} and return to {dom_starport} in the {dom_system} ({dom_sectorx}, {dom_sectory}, {dom_sectorz}) system for {cash}. The distance to {system} is {dist} ly."
+    "message": "How do you do? My name is {name}, and I need a ship that is able to fly to {starport} in the {system} ({sectorx}, {sectory}, {sectorz}) system to pick up {cargoname} and return to {dom_starport} in the {dom_system} ({dom_sectorx}, {dom_sectory}, {dom_sectorz}) system for {cash}. The distance to {system} is {dist} ly."
   },
   "INTROTEXT_PICKUP_2": {
     "description": "",
-    "message": "How are you? I'm {name}. One of my clients wants to import {cargoname} from {starport} in the {system} ({sectorx}, {sectory}, {sectorz}) system, {dist} ly distant. He pays {cash} for this cargo run. Return here to {dom_starport} in the {dom_system} ({dom_sectorx}, {dom_sectory}, {dom_sectorz}) system to unload the cargo."
+    "message": "How are you? I'm {name}. One of my clients wants to import {cargoname} from {starport} in the {system} ({sectorx}, {sectory}, {sectorz}) system, {dist} ly away. He pays {cash} for this cargo run. Return here to {dom_starport} in the {dom_system} ({dom_sectorx}, {dom_sectory}, {dom_sectorz}) system to unload the cargo."
   },
   "INTROTEXT_PICKUP_LOCAL_1": {
     "description": "",
@@ -377,11 +377,11 @@
   },
   "INTROTEXT_WEDDING_1": {
     "description": "",
-    "message": "Greetings. Have you heard of the wedding season of {starport} in the {system} ({sectorx}, {sectory}, {sectorz}) system? We want to transport {cargoname} there. It's {dist} ly away. The pay is {cash}. How about it?"
+    "message": "Greetings. Have you heard of the wedding season at {starport} in the {system} ({sectorx}, {sectory}, {sectorz}) system? We want to transport {cargoname} there. It's {dist} ly away. The pay is {cash}. How about it?"
   },
   "INTROTEXT_WHOLESALER_1": {
     "description": "",
-    "message": "Hello, my name is {name} and I'm a wholesale dealer in the {system} system. I pay {cash} for the run to {starport} in the {system} ({sectorx}, {sectory}, {sectorz}) system, {dist} ly."
+    "message": "Hello, my name is {name} and I'm a wholesale dealer in the {system} system. I pay {cash} for the run to {starport} in the {system} ({sectorx}, {sectory}, {sectorz}) system, {dist} ly away."
   },
   "INTROTEXT_WHOLESALER_2": {
     "description": "",
@@ -425,11 +425,11 @@
   },
   "NEGOTIABLE_NO_1": {
     "description": "regarding mass, always more than 1t",
-    "message": "No, sorry. It is not possible to split the cargo. You have to transport the whole {amount} tons at once."
+    "message": "No, sorry. It is not possible to split the cargo. You have to transport all {amount} tons at once."
   },
   "NEGOTIABLE_SINGULAR_1": {
     "description": "This string is only used for 1 metric ton (singular)",
-    "message": "No it is not. It's only {amount} t."
+    "message": "No, it is not. It's only {amount} t."
   },
   "NEPTUNIUM": {
     "description": "custom cargo",
@@ -625,7 +625,7 @@
   },
   "URGENCY_2": {
     "description": "",
-    "message": "It must necessarily be delivered by {date}."
+    "message": "It must be delivered by {date}."
   },
   "URGENCY_3": {
     "description": "",
@@ -637,15 +637,15 @@
   },
   "URGENCY_5": {
     "description": "",
-    "message": "It is essential that the goods have been delivered before {date}."
+    "message": "It is essential that the goods be delivered before {date}."
   },
   "URGENCY_FLUFFY_1": {
     "description": "",
-    "message": "Because of the reproduction rate of the little animals and the limited food in the container, the delivery must be completed until {date}."
+    "message": "Because of the reproduction rate of the little animals and the limited food in the container, the delivery must be completed by {date}."
   },
   "URGENCY_RADIOACTIVE_1": {
     "description": "",
-    "message": "Because of the half-life period of this isotope, delivery must be completed by {date}."
+    "message": "Because of the half-life of this isotope, delivery must be completed by {date}."
   },
   "WEDDING_DRESSES": {
     "description": "custom cargo",

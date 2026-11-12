@@ -18,6 +18,7 @@
 #include "SpaceStation.h"
 #include "Star.h"
 #include "SystemView.h"
+#include "ship/SupercruiseController.h"
 #include "collider/CollisionContact.h"
 #include "collider/CollisionSpace.h"
 #include "core/Log.h"
@@ -28,6 +29,7 @@
 #include "profiler/Profiler.h"
 
 #include <algorithm>
+#include <limits>
 
 //#define DEBUG_CACHE
 
@@ -551,6 +553,72 @@ void Space::GetHyperspaceExitParams(const SystemPath &source, const SystemPath &
 	pos += primary->GetPositionRelTo(GetRootFrame());
 }
 
+bool Space::GetHyperspaceTargetDirection(const SystemPath &dest, vector3d &outDirRoot) const
+{
+	if (!m_starSystem || !dest.HasValidSystem() || !m_sectorCache)
+		return false;
+
+	const SystemPath &source = m_starSystem->GetPath();
+	if (source.IsSameSystem(dest))
+		return false;
+
+	RefCountedPtr<const Sector> sourceSec = m_sectorCache->GetCached(source);
+	RefCountedPtr<const Sector> destSec = m_sectorCache->GetCached(dest);
+	if (!sourceSec || !destSec)
+		return false;
+	if (source.systemIndex >= sourceSec->m_systems.size() || dest.systemIndex >= destSec->m_systems.size())
+		return false;
+
+	const Sector::System &sourceSys = sourceSec->m_systems[source.systemIndex];
+	const Sector::System &destSys = destSec->m_systems[dest.systemIndex];
+
+	const vector3d deltaGal = vector3d(destSys.GetFullPosition() - sourceSys.GetFullPosition());
+	// Transform galactic Z-up coordinates (X, Y, Z) to Space Y-up coordinates (Y, Z, X),
+	// matching Background::Container::Draw's Zup_to_Yup orientation.
+	const vector3d dirSpace(deltaGal.y, deltaGal.z, deltaGal.x);
+	const double len = dirSpace.Length();
+	if (len <= 1e-9)
+		return false;
+
+	outDirRoot = dirSpace / len;
+	return true;
+}
+
+const Body *Space::CheckHyperspaceTargetObstructed(const Body *fromBody, const vector3d &dirRoot) const
+{
+	if (!fromBody || dirRoot.LengthSqr() < 0.5)
+		return nullptr;
+
+	const vector3d shipPos = fromBody->GetPositionRelTo(m_rootFrameId);
+	const Body *closestBlocker = nullptr;
+	double closestProj = std::numeric_limits<double>::max();
+
+	for (Body *b : m_bodies) {
+		if (!b || b == fromBody || !b->IsType(ObjectType::TERRAINBODY))
+			continue;
+
+		const SystemBody *sb = b->GetSystemBody();
+		double radius = sb ? sb->GetRadius() : b->GetPhysRadius();
+		radius = std::max(radius, SupercruiseController::GetExclusionZoneRadius(b));
+		if (radius <= 0.0)
+			continue;
+
+		const vector3d bodyPos = b->GetPositionRelTo(m_rootFrameId);
+		const vector3d toBody = bodyPos - shipPos;
+		const double proj = toBody.Dot(dirRoot);
+		if (proj <= 0.0)
+			continue;
+
+		const double perpDistSq = toBody.LengthSqr() - proj * proj;
+		if (perpDistSq <= radius * radius && proj < closestProj) {
+			closestProj = proj;
+			closestBlocker = b;
+		}
+	}
+
+	return closestBlocker;
+}
+
 Body *Space::FindNearestTo(const Body *b, ObjectType t) const
 {
 	Body *nearest = 0;
@@ -1033,6 +1101,8 @@ static void CollideWithTerrain(Body *body, float timeStep)
 {
 	PROFILE_SCOPED()
 	if (!body->IsType(ObjectType::DYNAMICBODY))
+		return;
+	if (body->IsType(ObjectType::SHIP) && static_cast<Ship *>(body)->GetFlightState() == Ship::SUPERCRUISE)
 		return;
 	DynamicBody *dynBody = static_cast<DynamicBody *>(body);
 	if (!dynBody->IsMoving())

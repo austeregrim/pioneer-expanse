@@ -9,7 +9,7 @@
   },
   "ACCEPTED_EVACUATION": {
     "description": "",
-    "message": "Excellent. Take care of you!"
+    "message": "Excellent. Take care of yourself!"
   },
   "ACCEPTED_PRIVATEER": {
     "description": "",
@@ -89,7 +89,7 @@
   },
   "DENY_1": {
     "description": "",
-    "message": "Excuse me Sir, but I need a pilot who has more experience."
+    "message": "Excuse me, sir, but I need a pilot who has more experience."
   },
   "DISTANCE": {
     "description": "Distance in space, between two locations",
@@ -117,7 +117,7 @@
   },
   "GREETING_EVACUATION": {
     "description": "",
-    "message": "Heaven, it's nice to see you! We can take off immediately. There's nothing keeping me here anymore."
+    "message": "Heavens, it's nice to see you! We can take off immediately. There's nothing keeping me here anymore."
   },
   "GREETING_PRIVATEER": {
     "description": "",
@@ -193,7 +193,7 @@
   },
   "HOW_TO_PRIVATEER_FEMALE": {
     "description": "",
-    "message": "She very often scraps her ship through dangerous missions. A spaceship workshop would be a good place to start."
+    "message": "She very often damages her ship on dangerous missions. A spaceship workshop would be a good place to start."
   },
   "HOW_TO_PRIVATEER_MALE": {
     "description": "",
@@ -293,7 +293,7 @@
   },
   "INTROTEXT_EVACUATION_FEMALE_2": {
     "description": "",
-    "message": "Hello. Call me {client}. I'm employed by the {company}. Our sales representative, {wanted}, in the {system} ({sectorx}, {sectory}, {sectorz}) system, distance {dist} ly, has come into conflict with some dangerous crooks. She doesn't trust the local authorities, so she's gone into hiding. We pay {cash} if you can find her and bring her back to {domicile} safely."
+    "message": "Hello. Call me {client}. I'm employed by the {company}. Our sales representative, {wanted}, in the {system} ({sectorx}, {sectory}, {sectorz}) system, {dist} ly away, has come into conflict with some dangerous crooks. She doesn't trust the local authorities, so she's gone into hiding. We pay {cash} if you can find her and bring her back to {domicile} safely."
   },
   "INTROTEXT_EVACUATION_FEMALE_3": {
     "description": "",
@@ -301,7 +301,7 @@
   },
   "INTROTEXT_EVACUATION_FEMALE_4": {
     "description": "",
-    "message": "Hello! My name is {client}. I have been reached by the news that {relative}, {wanted}, have been targeted by criminals and had to leave her home in a hurry. She is hiding somewhere in the {system} ({sectorx}, {sectory}, {sectorz}) system, distance {dist} ly. The family wants to solve this discretely. We will pay {cash} if you can find her and bring her back to {domicile}."
+    "message": "Hello! My name is {client}. News has reached me that {relative}, {wanted}, has been targeted by criminals and had to leave her home in a hurry. She is hiding somewhere in the {system} ({sectorx}, {sectory}, {sectorz}) system, {dist} ly away. The family wants to resolve this discreetly. We will pay {cash} if you can find her and bring her back to {domicile}."
   },
   "INTROTEXT_EVACUATION_MALE_1": {
     "description": "",
@@ -309,7 +309,7 @@
   },
   "INTROTEXT_EVACUATION_MALE_2": {
     "description": "",
-    "message": "Hello. Call me {client}. I'm employed by the {company}. Our sales representative, {wanted}, in the {system} ({sectorx}, {sectory}, {sectorz}) system, distance {dist} ly, has come into conflict with some dangerous crooks. He doesn't trust the local authorities, so he's gone into hiding. We pay {cash} if you can find him and bring him back to {domicile} safely."
+    "message": "Hello. Call me {client}. I'm employed by the {company}. Our sales representative, {wanted}, in the {system} ({sectorx}, {sectory}, {sectorz}) system, {dist} ly away, has come into conflict with some dangerous crooks. He doesn't trust the local authorities, so he's gone into hiding. We pay {cash} if you can find him and bring him back to {domicile} safely."
   },
   "INTROTEXT_EVACUATION_MALE_3": {
     "description": "",
@@ -317,7 +317,7 @@
   },
   "INTROTEXT_EVACUATION_MALE_4": {
     "description": "",
-    "message": "Hello! My name is {client}. I have been reached by the news that {relative}, {wanted}, have been targeted by criminals and had to leave his home in a hurry. He is hiding somewhere in the {system} ({sectorx}, {sectory}, {sectorz}) system, distance {dist} ly. The family wants to solve this discretely. We will pay {cash} if you can find him and bring him back to {domicile}."
+    "message": "Hello! My name is {client}. News has reached me that {relative}, {wanted}, has been targeted by criminals and had to leave his home in a hurry. He is hiding somewhere in the {system} ({sectorx}, {sectory}, {sectorz}) system, {dist} ly away. The family wants to resolve this discreetly. We will pay {cash} if you can find him and bring him back to {domicile}."
   },
   "INTROTEXT_PRIVATEER_FEMALE_1": {
     "description": "",
@@ -325,7 +325,7 @@
   },
   "INTROTEXT_PRIVATEER_FEMALE_2": {
     "description": "",
-    "message": "How are you. I'm Private Investigator {client}. I have to find privateer {wanted} in the {system} ({sectorx}, {sectory}, {sectorz}) system and ask her a few questions. Her ship has registration number {shipid}. I can't leave {domicile} right now because of another criminal case. So I would like to outsource this task. I will pay {cash} for this mission."
+    "message": "How are you? I'm Private Investigator {client}. I have to find privateer {wanted} in the {system} ({sectorx}, {sectory}, {sectorz}) system and ask her a few questions. Her ship has registration number {shipid}. I can't leave {domicile} right now because of another criminal case. So I would like to outsource this task. I will pay {cash} for this mission."
   },
   "INTROTEXT_PRIVATEER_FEMALE_3": {
     "description": "",
@@ -337,7 +337,7 @@
   },
   "INTROTEXT_PRIVATEER_MALE_2": {
     "description": "",
-    "message": "How are you. I'm Private Investigator {client}. I have to find privateer {wanted} in the {system} ({sectorx}, {sectory}, {sectorz}) system and ask him a few questions. His ship has registration number {shipid}. I can't leave {domicile} right now because of another criminal case. So I would like to outsource this task. I will pay {cash} for this mission."
+    "message": "How are you? I'm Private Investigator {client}. I have to find privateer {wanted} in the {system} ({sectorx}, {sectory}, {sectorz}) system and ask him a few questions. His ship has registration number {shipid}. I can't leave {domicile} right now because of another criminal case. So I would like to outsource this task. I will pay {cash} for this mission."
   },
   "INTROTEXT_PRIVATEER_MALE_3": {
     "description": "",
@@ -349,7 +349,7 @@
   },
   "INTROTEXT_TAXI_FEMALE_2": {
     "description": "",
-    "message": "Good day. I'm Insurance Assessor {client}. A high speed delivery drone failed to set a proper course, broke through a window and damaged the antique wooden furniture inside an apartment seriously. Fortunately no one was injured. But we couldn't locate the owner of the apartment in the {system} ({sectorx}, {sectory}, {sectorz}) system so far. So I will pay you {cash} if you can find her. Her personal presence is necessary to clarify the claim."
+    "message": "Good day. I'm Insurance Assessor {client}. A high-speed delivery drone failed to set a proper course, broke through a window and seriously damaged the antique wooden furniture inside an apartment. Fortunately no one was injured. But we couldn't locate the owner of the apartment in the {system} ({sectorx}, {sectory}, {sectorz}) system so far. So I will pay you {cash} if you can find her. Her personal presence is necessary to clarify the claim."
   },
   "INTROTEXT_TAXI_FEMALE_3": {
     "description": "",
@@ -361,7 +361,7 @@
   },
   "INTROTEXT_TAXI_MALE_2": {
     "description": "",
-    "message": "Good day. I'm Insurance Assessor {client}. A high speed delivery drone failed to set a proper course, broke through a window and damaged the antique wooden furniture inside an apartment seriously. Fortunately no one was injured. But we couldn't locate the owner of the apartment in the {system} ({sectorx}, {sectory}, {sectorz}) system so far. So I will pay you {cash} if you can find him. His personal presence is necessary to clarify the claim."
+    "message": "Good day. I'm Insurance Assessor {client}. A high-speed delivery drone failed to set a proper course, broke through a window and seriously damaged the antique wooden furniture inside an apartment. Fortunately no one was injured. But we couldn't locate the owner of the apartment in the {system} ({sectorx}, {sectory}, {sectorz}) system so far. So I will pay you {cash} if you can find him. His personal presence is necessary to clarify the claim."
   },
   "INTROTEXT_TAXI_MALE_3": {
     "description": "",
@@ -369,27 +369,27 @@
   },
   "INTROTEXT_TRAITOR_FEMALE_1": {
     "description": "",
-    "message": "Hello, my name is {client}. {wanted} didn't return from a holiday trip to her workplace at the {company}. She was last seen in the {system} ({sectorx}, {sectory}, {sectorz}) system. {wanted} has knowledge of some vital business secrets. So we need someone who can get a few answers from her about her ongoing absence. We pay {cash} for this mission. {system} is in a distance of {dist} ly."
+    "message": "Hello, my name is {client}. {wanted} didn't return from a holiday trip to her workplace at the {company}. She was last seen in the {system} ({sectorx}, {sectory}, {sectorz}) system. {wanted} has knowledge of some vital business secrets. So we need someone who can get a few answers from her about her ongoing absence. We pay {cash} for this mission. {system} is {dist} ly away."
   },
   "INTROTEXT_TRAITOR_FEMALE_2": {
     "description": "",
-    "message": "Good day. The {company} is searching for an employee who stole some classified documents. Her name is {wanted}. Management calls her a traitor, but wants to give her the opportunity to reconsider and repent. We pay {cash} if you can find her in the {system} ({sectorx}, {sectory}, {sectorz}) system, {dist} ly distance, and deliver a message to her."
+    "message": "Good day. The {company} is searching for an employee who stole some classified documents. Her name is {wanted}. Management calls her a traitor, but wants to give her the opportunity to reconsider and repent. We pay {cash} if you can find her in the {system} ({sectorx}, {sectory}, {sectorz}) system, {dist} ly away, and deliver a message to her."
   },
   "INTROTEXT_TRAITOR_FEMALE_3": {
     "description": "",
-    "message": "Good day. I'm {client} of {company}. We're trying to find a former employee, {employee}, who worked on one of our latest projects. Her name is {wanted}. We pay {cash} if you can find her in the {system} ({sectorx}, {sectory}, {sectorz}) system, {dist} ly distance, and deliver a message. Please be aware that she will not like this message."
+    "message": "Good day. I'm {client} of {company}. We're trying to find a former employee, {employee}, who worked on one of our latest projects. Her name is {wanted}. We pay {cash} if you can find her in the {system} ({sectorx}, {sectory}, {sectorz}) system, {dist} ly away, and deliver a message. Please be aware that she will not like this message."
   },
   "INTROTEXT_TRAITOR_MALE_1": {
     "description": "",
-    "message": "Hello, my name is {client}. {wanted} didn't return from a holiday trip to his workplace at the {company}. He was last seen in the {system} ({sectorx}, {sectory}, {sectorz}) system. {wanted} has knowledge of some vital business secrets. So we need someone who can get a few answers from him about his ongoing absence. We pay {cash} for this mission. {system} is in a distance of {dist} ly."
+    "message": "Hello, my name is {client}. {wanted} didn't return from a holiday trip to his workplace at the {company}. He was last seen in the {system} ({sectorx}, {sectory}, {sectorz}) system. {wanted} has knowledge of some vital business secrets. So we need someone who can get a few answers from him about his ongoing absence. We pay {cash} for this mission. {system} is {dist} ly away."
   },
   "INTROTEXT_TRAITOR_MALE_2": {
     "description": "",
-    "message": "Good day. The {company} is searching for an employee who stole some classified documents. His name is {wanted}. Management calls him a traitor, but wants to give him the opportunity to reconsider and repent. We pay {cash} if you can find him in the {system} ({sectorx}, {sectory}, {sectorz}) system, {dist} ly distance, and deliver a message to him."
+    "message": "Good day. The {company} is searching for an employee who stole some classified documents. His name is {wanted}. Management calls him a traitor, but wants to give him the opportunity to reconsider and repent. We pay {cash} if you can find him in the {system} ({sectorx}, {sectory}, {sectorz}) system, {dist} ly away, and deliver a message to him."
   },
   "INTROTEXT_TRAITOR_MALE_3": {
     "description": "",
-    "message": "Good day. I'm {client} of {company}. We're trying to find a former employee, {employee}, who worked on one of our latest projects. His name is {wanted}. We pay {cash} if you can find him in the {system} ({sectorx}, {sectory}, {sectorz}) system, {dist} ly distance, and deliver a message. Please be aware that he will not like this message."
+    "message": "Good day. I'm {client} of {company}. We're trying to find a former employee, {employee}, who worked on one of our latest projects. His name is {wanted}. We pay {cash} if you can find him in the {system} ({sectorx}, {sectory}, {sectorz}) system, {dist} ly away, and deliver a message. Please be aware that he will not like this message."
   },
   "IS_THERE_A_RISK": {
     "description": "",
@@ -437,7 +437,7 @@
   },
   "PIRATE_ANSWER_3": {
     "description": "",
-    "message": "Haha, Please tell this {client} I've nothing to say. Have a nice day."
+    "message": "Haha, please tell {client} I've nothing to say. Have a nice day."
   },
   "PIRATE_GREETING_1": {
     "description": "",
@@ -609,7 +609,7 @@
   },
   "TIP_MALE_3": {
     "description": "",
-    "message": "You are looking for {wanted}?. He is currently at {station}."
+    "message": "You are looking for {wanted}? He is currently at {station}."
   },
   "TIP_MALE_4": {
     "description": "",

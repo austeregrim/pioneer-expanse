@@ -94,6 +94,7 @@ private:
 
 	void DrawCombatTargetIndicator(const Indicator &target, const Indicator &lead, const Color &c);
 	void DrawEdgeMarker(const Indicator &marker, const Color &c);
+	void DrawSupercruiseOverlays();
 
 	/// Handler for "requestTimeAccelerationInc" event
 	void OnRequestTimeAccelInc();

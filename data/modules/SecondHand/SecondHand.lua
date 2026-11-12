@@ -171,7 +171,7 @@ local postAdvert = function(station, ad)
 end
 
 local makeAdvert = function(station)
-	local character = Character.New()
+	local character = Character.New({ role = "engineering", org = "Salvage & Refurbishment" })
 	local flavour = Engine.rand:Integer(1, #flavours)
 
 	-- Get all non-cargo or engines

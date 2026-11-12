@@ -57,7 +57,7 @@
   },
   "FLAVOUR_0_FAILUREMSG": {
     "description": "",
-    "message": "I am most displeased to find that {target} is still alive. Needless to say you will receive no payment."
+    "message": "I am most displeased to find that {target} is still alive. Needless to say, you will receive no payment."
   },
   "FLAVOUR_0_FAILUREMSG2": {
     "description": "",
@@ -133,7 +133,7 @@
   },
   "FLAVOUR_3_FAILUREMSG2": {
     "description": "",
-    "message": "Are you asking money for a job done by someone else? Get lost."
+    "message": "Are you asking for money for a job done by someone else? Get lost."
   },
   "FLAVOUR_3_INTROTEXT": {
     "description": "",
@@ -349,14 +349,14 @@
   },
   "X_WILL_BE_LEAVING": {
     "description": "{ship_indef} is translated in /data/lang/ships/",
-    "message": "{target} will be leaving {spaceport} in the {system} system ({sectorX}, {sectorY}, {sectorZ}), distance {dist} ly, at {date}. The ship is {ship_indef} and has registration id {shipregid}."
+    "message": "{target} will be leaving {spaceport} in the {system} system ({sectorX}, {sectorY}, {sectorZ}), {dist} ly away, at {date}. The ship is {ship_indef} and has registration ID {shipregid}."
   },
   "X_WILL_BE_LEAVING_FEMALE": {
     "description": "{ship_indef} is translated in /data/lang/ships/",
-    "message": "{target} will be leaving {spaceport} in the {system} system ({sectorX}, {sectorY}, {sectorZ}), distance {dist} ly, at {date}. Her ship is {ship_indef} and has registration id {shipregid}."
+    "message": "{target} will be leaving {spaceport} in the {system} system ({sectorX}, {sectorY}, {sectorZ}), {dist} ly away, at {date}. Her ship is {ship_indef} and has registration ID {shipregid}."
   },
   "X_WILL_BE_LEAVING_MALE": {
     "description": "{ship_indef} is translated in /data/lang/ships/",
-    "message": "{target} will be leaving {spaceport} in the {system} system ({sectorX}, {sectorY}, {sectorZ}), distance {dist} ly, at {date}. His ship is {ship_indef} and has registration id {shipregid}."
+    "message": "{target} will be leaving {spaceport} in the {system} system ({sectorX}, {sectorY}, {sectorZ}), {dist} ly away, at {date}. His ship is {ship_indef} and has registration ID {shipregid}."
   }
 }

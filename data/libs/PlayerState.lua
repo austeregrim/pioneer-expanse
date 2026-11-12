@@ -1,10 +1,11 @@
 -- Copyright © 2008-2026 Pioneer Developers. See AUTHORS.txt for details
 -- Licensed under the terms of the GPL v3. See licenses/GPL-3.txt
 
-local Event      = require 'Event'
-local Game       = require 'Game'
-local Serializer = require 'Serializer'
-local utils      = require 'utils'
+local Event           = require 'Event'
+local Game            = require 'Game'
+local Serializer      = require 'Serializer'
+local FactionStanding = require 'FactionStanding'
+local utils           = require 'utils'
 
 --
 -- Interface: Event
@@ -185,12 +186,27 @@ end
 --   faction - optional argument, defaults to the faction id of the system
 --             the player is currently in
 --
+local CRIME_STANDING_PENALTY = {
+	MURDER                = -18,
+	PIRACY                = -10,
+	TRADING_ILLEGAL_GOODS = -6,
+	CONTRACT_FRAUD        = -5,
+	DUMPING               = -4,
+	ILLEGAL_JUMP          = -2,
+	WEAPONS_DISCHARGE     = -2,
+	ECM_DISCHARGE         = -2,
+}
+
 function PlayerState.AddCrime (crime, fine, faction)
-	local forFaction = (faction and faction.id) or Game.system.faction.id
+	local targetFaction = faction or (Game.system and Game.system.faction)
+	local forFaction = targetFaction.id
 	local record = crime_record[forFaction]
 
 	record.crimetype[crime].count = record.crimetype[crime].count + 1
 	record.fine = record.fine + fine
+
+	local penalty = CRIME_STANDING_PENALTY[crime] or -3
+	FactionStanding.Adjust(targetFaction, penalty, crime)
 end
 
 --

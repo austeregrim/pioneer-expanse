@@ -12,6 +12,7 @@
 #include "LuaVector.h"
 #include "Missile.h"
 #include "Pi.h"
+#include "SectorView.h"
 #include "Ship.h"
 #include "ShipAICmd.h"
 #include "ShipType.h"
@@ -20,6 +21,7 @@
 #include "ship/GunManager.h"
 #include "ship/PlayerShipController.h"
 #include "ship/PrecalcPath.h"
+#include "ship/SupercruiseController.h"
 #include "lua.h"
 
 /*
@@ -1432,6 +1434,278 @@ static int l_ship_update_equip_stats(lua_State *l)
 	return 0;
 }
 
+static int l_ship_is_supercruise_active(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushboolean(l, s->GetSupercruise() && s->GetSupercruise()->IsActive());
+	return 1;
+}
+
+static int l_ship_is_supercruise_charging(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushboolean(l, s->GetSupercruise() && s->GetSupercruise()->IsCharging());
+	return 1;
+}
+
+static int l_ship_get_supercruise_charge_progress(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	LuaPush(l, s->GetSupercruise() ? s->GetSupercruise()->GetChargeProgress() : 0.0f);
+	return 1;
+}
+
+static int l_ship_get_supercruise_charge_countdown(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	LuaPush(l, s->GetSupercruise() ? s->GetSupercruise()->GetChargeCountdown() : 0.0f);
+	return 1;
+}
+
+static int l_ship_get_supercruise_cooldown(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	LuaPush(l, s->GetSupercruise() ? s->GetSupercruise()->GetCooldown() : 0.0f);
+	return 1;
+}
+
+static int l_ship_is_mass_locked(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	std::string reason;
+	const bool locked = s->GetSupercruise() && s->GetSupercruise()->IsMassLocked(&reason);
+	lua_pushboolean(l, locked);
+	LuaPush(l, reason);
+	return 2;
+}
+
+static int l_ship_get_supercruise_status(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	if (!s->GetSupercruise()) {
+		LuaPush(l, "NOT_FLYING");
+		LuaPush(l, "");
+		return 2;
+	}
+	std::string reason;
+	SupercruiseController::Status st = s->GetSupercruise()->GetStatus(&reason);
+	const char *stName = "READY";
+	switch (st) {
+	case SupercruiseController::SC_READY: stName = "READY"; break;
+	case SupercruiseController::SC_CHARGING: stName = "CHARGING"; break;
+	case SupercruiseController::SC_ACTIVE: stName = "ACTIVE"; break;
+	case SupercruiseController::SC_COOLDOWN: stName = "COOLDOWN"; break;
+	case SupercruiseController::SC_MASS_LOCKED: stName = "MASS_LOCKED"; break;
+	case SupercruiseController::SC_GEAR_DOWN: stName = "GEAR_DOWN"; break;
+	case SupercruiseController::SC_TOO_SLOW: stName = "TOO_SLOW"; break;
+	case SupercruiseController::SC_NOT_FLYING: stName = "NOT_FLYING"; break;
+	}
+	LuaPush(l, stName);
+	LuaPush(l, reason);
+	return 2;
+}
+
+static int l_ship_get_supercruise_throttle(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	LuaPush(l, s->GetSupercruise() ? s->GetSupercruise()->GetThrottle() : 0.0);
+	return 1;
+}
+
+static int l_ship_set_supercruise_throttle(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	double val = luaL_checknumber(l, 2);
+	if (s->GetSupercruise())
+		s->GetSupercruise()->SetThrottle(val);
+	return 0;
+}
+
+static int l_ship_get_supercruise_speed(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	LuaPush(l, s->GetSupercruise() ? s->GetSupercruise()->GetSpeed() : 0.0);
+	return 1;
+}
+
+static int l_ship_get_supercruise_max_env_speed(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	LuaPush(l, s->GetSupercruise() ? s->GetSupercruise()->GetMaxEnvSpeed() : SupercruiseController::MAX_SPEED);
+	return 1;
+}
+
+static int l_ship_get_supercruise_desired_speed(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	LuaPush(l, s->GetSupercruise() ? s->GetSupercruise()->GetDesiredSpeed() : 0.0);
+	return 1;
+}
+
+static int l_ship_get_supercruise_gravity_strain(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	LuaPush(l, s->GetSupercruise() ? s->GetSupercruise()->GetGravityStrain() : 0.0);
+	return 1;
+}
+
+static int l_ship_is_safe_disengage_ready(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushboolean(l, s->GetSupercruise() && s->GetSupercruise()->IsSafeDisengageReady());
+	return 1;
+}
+
+static int l_ship_is_slow_down_warning(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushboolean(l, s->GetSupercruise() && s->GetSupercruise()->IsSlowDownWarning());
+	return 1;
+}
+
+static int l_ship_get_supercruise_target_distance(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	LuaPush(l, s->GetSupercruise() ? s->GetSupercruise()->GetTargetDistance() : 0.0);
+	return 1;
+}
+
+static int l_ship_get_supercruise_target_eta(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	LuaPush(l, s->GetSupercruise() ? s->GetSupercruise()->GetTargetETA() : 0.0);
+	return 1;
+}
+
+static int l_ship_has_supercruise_assist(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushboolean(l, s->GetSupercruise() && s->GetSupercruise()->HasAssistModule());
+	return 1;
+}
+
+static int l_ship_is_supercruise_assist_active(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushboolean(l, s->GetSupercruise() && s->GetSupercruise()->IsAssistActive());
+	return 1;
+}
+
+static int l_ship_set_supercruise_assist(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	bool active = lua_toboolean(l, 2);
+	bool dockOnArrival = lua_gettop(l) >= 3 ? lua_toboolean(l, 3) : false;
+	if (s->GetSupercruise())
+		s->GetSupercruise()->SetAssistActive(active, dockOnArrival);
+	return 0;
+}
+
+static int l_ship_toggle_supercruise_assist(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	if (s->GetSupercruise())
+		s->GetSupercruise()->ToggleAssist();
+	return 0;
+}
+
+static int l_ship_toggle_supercruise(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	bool res = s->GetSupercruise() ? s->GetSupercruise()->Toggle() : false;
+	lua_pushboolean(l, res);
+	return 1;
+}
+
+static int l_ship_safe_disengage(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	if (s->GetSupercruise() && s->GetSupercruise()->IsActive()) {
+		s->GetSupercruise()->SafeDisengage();
+	}
+	return 0;
+}
+
+static int l_ship_get_supercruise_status_message(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	if (s->GetSupercruise() && s->GetSupercruise()->GetStatusMessageTimer() > 0.0f) {
+		LuaPush(l, s->GetSupercruise()->GetStatusMessage());
+	} else {
+		LuaPush(l, "");
+	}
+	return 1;
+}
+
+static bool resolve_hyperspace_dest(lua_State *l, Ship *s, SystemPath &outDest)
+{
+	if (lua_gettop(l) >= 2 && !lua_isnil(l, 2)) {
+		SystemPath *dest = LuaObject<SystemPath>::CheckFromLua(2);
+		outDest = *dest;
+		return outDest.HasValidSystem();
+	}
+	if (s->IsHyperspaceActive()) {
+		outDest = s->GetHyperspaceDest();
+		return outDest.HasValidSystem();
+	}
+	if (s->IsType(ObjectType::PLAYER) && Pi::game && Pi::game->GetSectorView()) {
+		outDest = Pi::game->GetSectorView()->GetHyperspaceTarget();
+		return outDest.HasValidSystem();
+	}
+	return false;
+}
+
+static int l_ship_is_hyperspace_waiting_for_align(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushboolean(l, s->IsHyperspaceWaitingForAlign());
+	return 1;
+}
+
+static int l_ship_get_hyperspace_target_direction(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	SystemPath dest;
+	vector3d dir;
+	if (!resolve_hyperspace_dest(l, s, dest) || !s->GetHyperspaceTargetDirection(dest, dir)) {
+		lua_pushnil(l);
+		return 1;
+	}
+	LuaPush(l, dir);
+	return 1;
+}
+
+static int l_ship_is_hyperspace_target_aligned(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	SystemPath dest;
+	double angleDeg = 180.0;
+	bool aligned = false;
+	if (resolve_hyperspace_dest(l, s, dest)) {
+		aligned = s->IsHyperspaceTargetAligned(dest, &angleDeg);
+	}
+	lua_pushboolean(l, aligned);
+	lua_pushnumber(l, angleDeg);
+	return 2;
+}
+
+static int l_ship_get_hyperspace_target_obscured_by(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	SystemPath dest;
+	if (!resolve_hyperspace_dest(l, s, dest)) {
+		lua_pushnil(l);
+		return 1;
+	}
+	const Body *blocker = s->GetHyperspaceTargetObscuredBy(dest);
+	if (blocker) {
+		LuaObject<Body>::PushToLua(const_cast<Body *>(blocker));
+	} else {
+		lua_pushnil(l);
+	}
+	return 1;
+}
+
 template <>
 const char *LuaObject<Ship>::s_type = "Ship";
 
@@ -1508,6 +1782,10 @@ void LuaObject<Ship>::RegisterClass()
 
 		{ "GetHyperspaceCountdown", l_ship_get_hyperspace_countdown },
 		{ "IsHyperspaceActive", l_ship_is_hyperspace_active },
+		{ "IsHyperspaceWaitingForAlign", l_ship_is_hyperspace_waiting_for_align },
+		{ "GetHyperspaceTargetDirection", l_ship_get_hyperspace_target_direction },
+		{ "IsHyperspaceTargetAligned", l_ship_is_hyperspace_target_aligned },
+		{ "GetHyperspaceTargetObscuredBy", l_ship_get_hyperspace_target_obscured_by },
 
 		{ "GetHullTemperature", l_ship_get_hull_temperature },
 		{ "GetGunTemperature", l_ship_get_gun_temperature },
@@ -1517,6 +1795,31 @@ void LuaObject<Ship>::RegisterClass()
 		{ "GetFlightControlState", l_ship_get_flight_control_state },
 		{ "SetFlightControlState", l_ship_set_flight_control_state },
 		{ "GetCurrentAICommand", l_ship_get_current_ai_command },
+
+		{ "IsSupercruiseActive", l_ship_is_supercruise_active },
+		{ "IsSupercruiseCharging", l_ship_is_supercruise_charging },
+		{ "GetSupercruiseChargeProgress", l_ship_get_supercruise_charge_progress },
+		{ "GetSupercruiseChargeCountdown", l_ship_get_supercruise_charge_countdown },
+		{ "GetSupercruiseCooldown", l_ship_get_supercruise_cooldown },
+		{ "IsMassLocked", l_ship_is_mass_locked },
+		{ "GetSupercruiseStatus", l_ship_get_supercruise_status },
+		{ "GetSupercruiseThrottle", l_ship_get_supercruise_throttle },
+		{ "SetSupercruiseThrottle", l_ship_set_supercruise_throttle },
+		{ "GetSupercruiseSpeed", l_ship_get_supercruise_speed },
+		{ "GetSupercruiseMaxEnvSpeed", l_ship_get_supercruise_max_env_speed },
+		{ "GetSupercruiseDesiredSpeed", l_ship_get_supercruise_desired_speed },
+		{ "GetSupercruiseGravityStrain", l_ship_get_supercruise_gravity_strain },
+		{ "IsSafeDisengageReady", l_ship_is_safe_disengage_ready },
+		{ "IsSlowDownWarning", l_ship_is_slow_down_warning },
+		{ "GetSupercruiseTargetDistance", l_ship_get_supercruise_target_distance },
+		{ "GetSupercruiseTargetETA", l_ship_get_supercruise_target_eta },
+		{ "HasSupercruiseAssist", l_ship_has_supercruise_assist },
+		{ "IsSupercruiseAssistActive", l_ship_is_supercruise_assist_active },
+		{ "SetSupercruiseAssist", l_ship_set_supercruise_assist },
+		{ "ToggleSupercruiseAssist", l_ship_toggle_supercruise_assist },
+		{ "ToggleSupercruise", l_ship_toggle_supercruise },
+		{ "SafeDisengage", l_ship_safe_disengage },
+		{ "GetSupercruiseStatusMessage", l_ship_get_supercruise_status_message },
 
 		{ 0, 0 }
 	};

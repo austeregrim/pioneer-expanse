@@ -215,6 +215,10 @@
     "description": "Descriptive name for the action binding.",
     "message": "Toggle Speed Limiter"
   },
+  "BIND_TOGGLE_SUPERCRUISE": {
+    "description": "Toggle Frame Shift Drive / Supercruise",
+    "message": "Toggle Frame Shift Drive / Supercruise"
+  },
   "BIND_TOP_CAMERA": {
     "description": "Descriptive name for the TopCamera action.",
     "message": "Switch to Top Camera"

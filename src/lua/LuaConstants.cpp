@@ -329,6 +329,7 @@ void LuaConstants::Register(lua_State *l)
 	 *                     enough fuel
 	 * SAFETY_LOCKOUT - drive locked out for safety reasons
 	 *                  (currently this happens if landed, docked or docking)
+	 * OBSCURED - target system vector is obstructed by a local stellar body
 	 */
 
 	/*

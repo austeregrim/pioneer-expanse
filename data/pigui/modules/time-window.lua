@@ -64,12 +64,36 @@ local function displayTimeWindow()
 		ui.withFont(timefont.name, timefont.size, function()
 			ui.textShadowed(date)
 		end)
+		local player = Game.player
+		local inFlight = player and not player:IsDocked() and not player:IsLanded()
 		accelButton("paused", ui.keys.escape)
 		accelButton("1x", ui.keys.f1)
-		accelButton("10x", ui.keys.f2)
-		accelButton("100x", ui.keys.f3)
-		accelButton("1000x", ui.keys.f4)
-		accelButton("10000x", ui.keys.f5)
+		if inFlight then
+			local scActive = player:IsSupercruiseActive()
+			local scCharging = player:IsSupercruiseCharging()
+			local scStatus, scReason = player:GetSupercruiseStatus()
+			local btnState = scActive or scCharging
+			if scStatus ~= "READY" and not scActive and not scCharging then
+				btnState = ui.theme.buttonColors.disabled
+			end
+			local scTooltip = scActive and "Disengage Supercruise [J]" or ("Frameshift Drive Supercruise [J] — " .. (scReason or "FSD Ready"))
+			if ui.mainMenuButton(icons.hyperspace, scTooltip, btnState) then
+				player:ToggleSupercruise()
+			end
+			if player:HasSupercruiseAssist() then
+				ui.sameLine()
+				local assistActive = player:IsSupercruiseAssistActive()
+				local assistTip = assistActive and "Disengage Supercruise Assist (Autopilot Mk 2)" or "Engage Supercruise Assist (75% Blue Zone & Auto-Drop)"
+				if ui.mainMenuButton(icons.autopilot_fly_to, assistTip, assistActive) then
+					player:ToggleSupercruiseAssist()
+				end
+			end
+		else
+			accelButton("10x", ui.keys.f2)
+			accelButton("100x", ui.keys.f3)
+			accelButton("1000x", ui.keys.f4)
+			accelButton("10000x", ui.keys.f5)
+		end
 	end)
 end
 

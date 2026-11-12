@@ -9,7 +9,7 @@
 #include "SpaceStationType.h"
 
 #define MAX_DOCKING_PORTS 240 //256-(0x10), 0x10 is used because the collision surfaces use it as an identifying flag
-#define DOCKING_CLEARANCE_TIMEOUT (10.0 * 60.0)  // (10 min)
+#define DOCKING_CLEARANCE_TIMEOUT (20.0 * 60.0)  // (20 min approach clearance window)
 
 class Body;
 class Camera;

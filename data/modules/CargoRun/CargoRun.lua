@@ -13,6 +13,7 @@ local Serializer = require 'Serializer'
 local Character = require 'Character'
 local utils = require 'utils'
 local PlayerState = require 'PlayerState'
+local FactionStanding = require 'FactionStanding'
 
 local MissionUtils = require 'modules.MissionUtils'
 local ShipBuilder = require 'modules.MissionUtils.ShipBuilder'
@@ -223,7 +224,7 @@ onChat = function (form, ref, option)
 
 		form:RemoveAdvertOnClose()
 		ads[ref] = nil
-		local mission = {
+		mission = {
 			type            = "CargoRun",
 			domicile        = ad.domicile,
 			client          = ad.client,
@@ -240,6 +241,8 @@ onChat = function (form, ref, option)
 			amount          = ad.negotiated_amount,
 			branch          = ad.branch,
 			cargotype       = ad.cargotype,
+			factionName     = ad.factionName,
+			destFactionName = ad.destFactionName,
 			status          = cargo_picked_up and "ACTIVE" or "TO_PICK_UP",
 		}
 
@@ -353,10 +356,10 @@ local nearbysystems
 local makeAdvert = function (station)
 	local reward, due, location, dist, nearbystations, amount
 	local risk, wholesaler, pickup, branch, cargotype, missiontype, timeout
-	local client = Character.New()
 	local urgency = Engine.rand:Number(0, 1)
 	local localdelivery = Engine.rand:Number(0, 1) > 0.5 and true or false
 	local negotiable = Engine.rand:Number(0, 1) > 0.25 and true or false
+	local issuingFaction = MissionUtils.GetSystemFactionName()
 
 	branch, cargotype = randomCargo()
 	if localdelivery then
@@ -415,38 +418,68 @@ local makeAdvert = function (station)
 		due = due + Game.time
 		timeout = timeout + Game.time
 	end
-	reward = utils.round(reward, 25)
+	reward = utils.round(MissionUtils.ApplyFactionReward(reward, issuingFaction), 25)
 	due = utils.round(due, 900)
 
 	local n = MissionUtils.getNumberOfFlavours(l, "INTROTEXT_" .. missiontype)
 	local introtext
 
 	if n >= 1 then
-		introtext = "INTROTEXT_" .. missiontype .. "_" .. Engine.rand:Integer(1, n)
+		local pick = Engine.rand:Integer(1, n)
+		if missiontype == "WHOLESALER" and pick == 2 and issuingFaction ~= "Haber Corporation" then
+			pick = 1
+		end
+		introtext = "INTROTEXT_" .. missiontype .. "_" .. pick
 	else
 		introtext = "INTROTEXT_" .. Engine.rand:Integer(1, MissionUtils.getNumberOfFlavours(l, "INTROTEXT"))
 	end
 
+	local clientOpts = {}
+	if introtext == "INTROTEXT_LOCAL_1" then
+		clientOpts = { role = "starport", org = station.label .. " Administration" }
+	elseif introtext == "INTROTEXT_MINING_1" then
+		clientOpts = { role = "mining" }
+	elseif introtext == "INTROTEXT_INFRASTRUCTURE_1" then
+		clientOpts = { role = "government", org = Game.system.name .. " Governance", factionName = issuingFaction }
+	elseif introtext == "INTROTEXT_WHOLESALER_2" then
+		clientOpts = { role = "haber", org = "Haber Corporation", factionName = "Haber Corporation" }
+	elseif introtext == "INTROTEXT_EXPENSIVE_1" or introtext == "INTROTEXT_WEDDING_1" then
+		clientOpts = { role = "broker" }
+	elseif introtext == "INTROTEXT_1" or introtext == "INTROTEXT_LOCAL_2" or introtext == "INTROTEXT_LOCAL_3"
+		or introtext == "INTROTEXT_PICKUP_LOCAL_1" or introtext == "INTROTEXT_FLUFFY_1" then
+		clientOpts = { role = "civilian" }
+	else
+		clientOpts = { role = "logistics" }
+	end
+	local client = Character.New(clientOpts)
+	if introtext == "INTROTEXT_MINING_1" then
+		client.org = client.name .. " Mining Co."
+	end
+
+	local destFaction = MissionUtils.GetSystemFactionName(location)
+
 	local ad = {
-		station       = station,
-		domicile      = station.path,
-		client        = client,
-		location      = location,
-		localdelivery = localdelivery,
-		wholesaler    = wholesaler,
-		pickup        = pickup,
-		introtext     = introtext,
-		dist          = dist,
-		due           = due,
-		timeout       = timeout,
-		amount        = amount,
-		negotiable    = negotiable,
-		branch        = branch,
-		cargotype     = cargotype,
-		risk          = risk,
-		urgency       = urgency,
-		reward        = reward,
-		faceseed      = Engine.rand:Integer(),
+		station         = station,
+		domicile        = station.path,
+		client          = client,
+		location        = location,
+		localdelivery   = localdelivery,
+		wholesaler      = wholesaler,
+		pickup          = pickup,
+		introtext       = introtext,
+		dist            = dist,
+		due             = due,
+		timeout         = timeout,
+		amount          = amount,
+		negotiable      = negotiable,
+		branch          = branch,
+		cargotype       = cargotype,
+		risk            = risk,
+		urgency         = urgency,
+		reward          = reward,
+		factionName     = issuingFaction,
+		destFactionName = destFaction,
+		faceseed        = Engine.rand:Integer(),
 	}
 
 	n = MissionUtils.getNumberOfFlavours(l, "ADTEXT_" .. missiontype)
@@ -698,6 +731,8 @@ local onPlayerDocked = function (player, station)
 
 				Character.persistent.player.reputation = Character.persistent.player.reputation + reputation
 				PlayerState.AddMoney(mission.reward)
+				local standingDelta = mission.localdelivery and 2 or 3
+				FactionStanding.ApplyMissionOutcome(mission.factionName, standingDelta, mission.destFactionName, "Cargo delivery completed")
 			else
 				if amount < mission.amount then
 					Comms.ImportantMessage(l.WHAT_IS_THIS, mission.client.name)
@@ -713,6 +748,7 @@ local onPlayerDocked = function (player, station)
 				end
 
 				Character.persistent.player.reputation = Character.persistent.player.reputation - reputation
+				FactionStanding.Adjust(mission.factionName, -(mission.localdelivery and 3 or 4), "Cargo delivery failed")
 			end
 
 			Event.Queue("onReputationChanged", oldReputation, Character.persistent.player.killcount,
@@ -736,6 +772,7 @@ local onPlayerDocked = function (player, station)
 
 				local oldReputation = Character.persistent.player.reputation
 				Character.persistent.player.reputation = Character.persistent.player.reputation - (mission.localdelivery and 1 or 1.5)
+				FactionStanding.Adjust(mission.factionName, -(mission.localdelivery and 3 or 4), "Cargo pickup missed")
 
 				Comms.ImportantMessage(l.TOO_LATE_TO_PICK_UP, mission.client.name)
 				Event.Queue("onReputationChanged", oldReputation, Character.persistent.player.killcount,

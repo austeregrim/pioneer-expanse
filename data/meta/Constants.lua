@@ -83,6 +83,7 @@ local ShipJumpStatus = {
 	OUT_OF_RANGE = 6,
 	INSUFFICIENT_FUEL = 7,
 	SAFETY_LOCKOUT = 8,
+	OBSCURED = 9,
 }
 
 ---@type ShipJumpStatus[]

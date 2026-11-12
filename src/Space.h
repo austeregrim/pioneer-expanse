@@ -63,6 +63,9 @@ public:
 		return GetHyperspaceExitPoint(source, m_starSystem->GetPath());
 	}
 
+	bool GetHyperspaceTargetDirection(const SystemPath &dest, vector3d &outDirRoot) const;
+	const Body *CheckHyperspaceTargetObstructed(const Body *fromBody, const vector3d &dirRoot) const;
+
 	Body *FindNearestTo(const Body *b, ObjectType t) const;
 	Body *FindBodyForPath(const SystemPath *path) const;
 

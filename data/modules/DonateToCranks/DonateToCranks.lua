@@ -114,7 +114,11 @@ local onCreateBB = function (station)
 		modifier = n == 6 and 1.5 or 1.0, -- donating to FOSS is twice as good
 		stringVariables = stringVariables,
 		station  = station,
-		character = Character.New({armour=false}),
+		character = Character.New({
+			role = "civilian",
+			org = string.interp(flavours[n].title, stringVariables),
+			armour = false,
+		}),
 		n        = n
 	}
 

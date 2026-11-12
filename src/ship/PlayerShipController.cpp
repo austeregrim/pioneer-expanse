@@ -18,6 +18,7 @@
 #include "lua/LuaObject.h"
 #include "ship/GunManager.h"
 #include "ship/ShipController.h"
+#include "ship/SupercruiseController.h"
 #include "Sensors.h"
 
 #include <algorithm>
@@ -147,7 +148,7 @@ REGISTER_INPUT_BINDING(PlayerShipController)
 
 	auto flightGroup = controlsPage->GetBindingGroup("ShipOrient");
 	input->AddAxisBinding("BindAxisPitch", flightGroup, Axis({}, { SDLK_k }, { SDLK_i }));
-	input->AddAxisBinding("BindAxisYaw", flightGroup, Axis({}, { SDLK_j }, { SDLK_l }));
+	input->AddAxisBinding("BindAxisYaw", flightGroup, Axis({}, { SDLK_u }, { SDLK_o }));
 	input->AddAxisBinding("BindAxisRoll", flightGroup, Axis({}, { SDLK_q }, { SDLK_e }));
 	input->AddActionBinding("BindKillRot", flightGroup, Action({ SDLK_p }, { SDLK_x }));
 	input->AddActionBinding("BindToggleRotationDamping", flightGroup, Action({ SDLK_c }));
@@ -162,6 +163,7 @@ REGISTER_INPUT_BINDING(PlayerShipController)
 	input->AddAxisBinding("BindSpeedControl", speedGroup, Axis({}, { SDLK_RETURN }, { SDLK_RSHIFT }));
 	input->AddActionBinding("BindToggleCruise", speedGroup, Action({ SDLK_v }));
 	input->AddActionBinding("BindToggleSpeedLimiter", speedGroup, Action({ SDLK_l, SDLK_RALT }));
+	input->AddActionBinding("BindToggleSupercruise", speedGroup, Action({ SDLK_j }, { SDLK_F6 }));
 
 	auto landingGroup = controlsPage->GetBindingGroup("LandingControl");
 	input->AddActionBinding("BindToggleLandingGear", landingGroup, Action({ SDLK_n }));
@@ -208,6 +210,9 @@ PlayerShipController::PlayerShipController() :
 			this->SetSpeedLimiterActive(!this->IsSpeedLimiterActive());
 		});
 
+	m_toggleSupercruise = InputBindings.toggleSupercruise->onPressed.connect(
+		sigc::mem_fun(this, &PlayerShipController::ToggleSupercruise));
+
 	m_selectTarget = InputBindings.targetObject->onPressed.connect (
 		sigc::mem_fun(this, &PlayerShipController::SelectTarget));
 
@@ -240,6 +245,7 @@ void PlayerShipController::InputBinding::RegisterBindings()
 	speedControl = AddAxis("BindSpeedControl");
 	toggleCruise = AddAction("BindToggleCruise");
 	toggleSpeedLimiter = AddAction("BindToggleSpeedLimiter");
+	toggleSupercruise = AddAction("BindToggleSupercruise");
 
 	toggleLandingGear = AddAction("BindToggleLandingGear");
 	controlLandingGear = AddAxis("BindControlLandingGear");
@@ -515,6 +521,26 @@ void PlayerShipController::StaticUpdate(const float timeStep)
 
 	UpdateLandingGear();
 
+	if (m_ship->GetFlightState() == Ship::SUPERCRUISE) {
+		SetFlightControlState(CONTROL_MANUAL);
+		PollControls(timeStep, mouseMotion, act);
+		if (auto gunManager = m_ship->GetComponent<GunManager>())
+			gunManager->SetAllGroupsFiring(false);
+
+		if (SupercruiseController *sc = m_ship->GetSupercruise()) {
+			if (!AreControlsLocked()) {
+				if (InputBindings.thrustForward->IsActive())
+					sc->ChangeThrottle(InputBindings.thrustForward->GetValue() * 0.45 * timeStep);
+				if (InputBindings.speedControl->IsActive())
+					sc->ChangeThrottle(InputBindings.speedControl->GetValue() * 0.45 * timeStep);
+				if (InputBindings.killRot->IsActive())
+					sc->SetThrottle(0.0);
+			}
+			sc->TimeStepUpdate(timeStep, act.desiredAngular);
+		}
+		return;
+	}
+
 	if (m_ship->GetFlightState() == Ship::FLYING) {
 
 		if (m_followTarget) {
@@ -600,7 +626,8 @@ void PlayerShipController::StaticUpdate(const float timeStep)
 
 bool PlayerShipController::AreControlsLocked()
 {
-	return (Pi::game->IsPaused() || Pi::player->IsDead() || (m_ship->GetFlightState() != Ship::FLYING) || !InputBindings.active || (Pi::GetView() != Pi::game->GetWorldView() && Pi::GetView() != Pi::game->GetSystemView()));
+	const bool inFlight = (m_ship->GetFlightState() == Ship::FLYING || m_ship->GetFlightState() == Ship::SUPERCRUISE);
+	return (Pi::game->IsPaused() || Pi::player->IsDead() || !inFlight || !InputBindings.active || (Pi::GetView() != Pi::game->GetWorldView() && Pi::GetView() != Pi::game->GetSystemView()));
 }
 
 vector3d PlayerShipController::GetMouseDir() const
@@ -956,6 +983,17 @@ void PlayerShipController::ToggleCruise()
 		SetFlightControlState(CONTROL_FIXSPEED);
 	} else {
 		SetFlightControlState(CONTROL_MANUAL);
+	}
+}
+
+void PlayerShipController::ToggleSupercruise()
+{
+	if (!Pi::game || Pi::game->IsPaused() || !m_ship || Pi::player->IsDead())
+		return;
+	if (!InputBindings.active || (Pi::GetView() != Pi::game->GetWorldView() && Pi::GetView() != Pi::game->GetSystemView()))
+		return;
+	if (SupercruiseController *sc = m_ship->GetSupercruise()) {
+		sc->Toggle();
 	}
 }
 

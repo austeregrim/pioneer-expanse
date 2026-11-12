@@ -13,6 +13,7 @@ local Serializer = require 'Serializer'
 local Character = require 'Character'
 local utils = require 'utils'
 local PlayerState = require 'PlayerState'
+local FactionStanding = require 'FactionStanding'
 
 local MissionUtils = require 'modules.MissionUtils'
 local ShipBuilder = require 'modules.MissionUtils.ShipBuilder'
@@ -38,42 +39,58 @@ local flavours = {
 		urgency = 0,
 		risk = 0,
 		localdelivery = false,
+		role = "civilian",
 	}, {
 		urgency = 0.1,
 		risk = 0,
 		localdelivery = false,
+		role = "civilian",
 	}, {
 		urgency = 0.6,
 		risk = 0,
 		localdelivery = false,
+		role = "science",
+		org = "Academic Research Grant",
 	}, {
 		urgency = 0.4,
 		risk = 0.75,
 		localdelivery = false,
+		role = "syndicate",
+		org = "Confidential Liaison",
+		covert = true,
 	}, {
 		urgency = 0.1,
 		risk = 0.1,
 		localdelivery = false,
+		role = "logistics",
+		org = "Bedford Courier Services",
 	}, {
 		urgency = 0.1,
 		risk = 0,
 		localdelivery = true,
+		role = "civilian",
 	}, {
 		urgency = 0.2,
 		risk = 0,
 		localdelivery = true,
+		role = "civilian",
 	}, {
 		urgency = 0.4,
 		risk = 0,
 		localdelivery = true,
+		role = "logistics",
+		org = "Orbital Freight Exchange",
 	}, {
 		urgency = 0.6,
 		risk = 0,
 		localdelivery = true,
+		role = "civilian",
 	}, {
 		urgency = 0.8,
 		risk = 0,
 		localdelivery = true,
+		role = "broker",
+		org = "Mercantile Distribution",
 	}
 }
 
@@ -190,7 +207,9 @@ local onChat = function (form, ref, option)
 			risk	 = ad.risk,
 			reward	 = ad.reward,
 			due	 = ad.due,
-			flavour	 = ad.flavour
+			flavour	 = ad.flavour,
+			factionName     = ad.factionName,
+			destFactionName = ad.destFactionName,
 		}
 
 		mission = Mission.New(mission)
@@ -255,15 +274,21 @@ end
 -- return statement is the created advert or nil
 local makeAdvert = function (station, manualFlavour, nearbystations)
 	local reward, due, location, dist, timeout
-	local client = Character.New()
+	local issuingFaction = MissionUtils.GetSystemFactionName()
 
 	-- set flavour manually if a second arg is given
 	local flavour = manualFlavour or Engine.rand:Integer(1,#flavours)
+	if not manualFlavour and flavours[flavour].covert and Engine.rand:Number(0, 1) > math.min(0.95, 0.25 + Game.system.lawlessness) then
+		flavour = Engine.rand:Integer(1,#flavours)
+	end
 
-	local urgency = flavours[flavour].urgency
-	local risk = flavours[flavour].risk
+	local flav = flavours[flavour]
+	local client = Character.New({ role = flav.role, org = flav.org })
 
-	if flavours[flavour].localdelivery then
+	local urgency = flav.urgency
+	local risk = flav.risk
+
+	if flav.localdelivery then
 		if nearbystations == nil then
 			-- discard stations closer than 1000m and further than 20AU
 			nearbystations = findNearbyStations(station, 1000, 1.4960e11 * 20)
@@ -282,22 +307,29 @@ local makeAdvert = function (station, manualFlavour, nearbystations)
 		reward = ((dist / max_delivery_dist) * typical_reward * (1+risk) * (1.5+urgency) * Engine.rand:Number(0.8,1.2))
 		due = MissionUtils.TravelTime(dist, location) * (1.5-urgency) * Engine.rand:Number(0.9,1.1)
 	end
+	if not flav.covert then
+		reward = MissionUtils.ApplyFactionReward(reward, issuingFaction)
+	end
 	reward = utils.round(reward, 5)
 	timeout = due/2 + Game.time -- timeout after half of the travel time
 	due = utils.round(due + Game.time, 900)
+
+	local destFaction = MissionUtils.GetSystemFactionName(location)
 
 	local ad = {
 		station		= station,
 		flavour		= flavour,
 		client		= client,
 		location	= location,
-		localdelivery = flavours[flavour].localdelivery,
+		localdelivery = flav.localdelivery,
 		dist        = dist,
 		due			= due,
 		timeout     = timeout,
 		risk		= risk,
 		urgency		= urgency,
 		reward		= reward,
+		factionName     = issuingFaction,
+		destFactionName = destFaction,
 		faceseed	= Engine.rand:Integer(),
 	}
 
@@ -406,13 +438,22 @@ local onPlayerDocked = function (player, station)
 			end
 
 			local oldReputation = Character.persistent.player.reputation
+			local flav = flavours[mission.flavour]
+			local isLocal = flav and flav.localdelivery
+			local isCovert = flav and flav.covert
 			if Game.time > mission.due then
-				Comms.ImportantMessage(flavours[mission.flavour].failuremsg, mission.client.name)
+				Comms.ImportantMessage(flav.failuremsg, mission.client.name)
 				Character.persistent.player.reputation = Character.persistent.player.reputation - reward
+				if not isCovert then
+					FactionStanding.Adjust(mission.factionName, -(isLocal and 2 or 3), "Package delivery failed")
+				end
 			else
-				Comms.ImportantMessage(flavours[mission.flavour].successmsg, mission.client.name)
+				Comms.ImportantMessage(flav.successmsg, mission.client.name)
 				PlayerState.AddMoney(mission.reward)
 				Character.persistent.player.reputation = Character.persistent.player.reputation + reward
+				if not isCovert then
+					FactionStanding.ApplyMissionOutcome(mission.factionName, isLocal and 1 or 2, mission.destFactionName, "Package delivery completed")
+				end
 			end
 			Event.Queue("onReputationChanged", oldReputation, Character.persistent.player.killcount,
 				Character.persistent.player.reputation, Character.persistent.player.killcount)

@@ -61,7 +61,7 @@
   },
   "BONUS_1": {
     "description": "",
-    "message": "My supervisor was impressed about your performance and has allotted a bonus of {cash} for this mission."
+    "message": "My supervisor was impressed with your performance and has allotted a bonus of {cash} for this mission."
   },
   "BONUS_2": {
     "description": "",
@@ -73,7 +73,7 @@
   },
   "BONUS_4": {
     "description": "",
-    "message": "I'm very pleased of your performance! I have transferred additional {cash} credits."
+    "message": "I'm very pleased with your performance! I have transferred an additional {cash}."
   },
   "COMBAT": {
     "description": "Name of mission type",
@@ -121,7 +121,7 @@
   },
   "DENY_2": {
     "description": "",
-    "message": "Excuse me sir. I need a real professional."
+    "message": "Excuse me, sir. I need a real professional."
   },
   "DETECTIVE": {
     "description": "Police Detective",
@@ -161,7 +161,7 @@
   },
   "GREETING_3": {
     "description": "",
-    "message": "How are you. I'm {name}."
+    "message": "How are you? I'm {name}."
   },
   "GREETING_4": {
     "description": "",
@@ -177,7 +177,7 @@
   },
   "HARVESTING_2": {
     "description": "{area} is an asteroid or planet",
-    "message": "Our market competitor is seriously claiming he has ownership of {area} in the {system} system ({sectorx}, {sectory}, {sectorz}). The {org} totally disagree and is willing to pay {cash} for a combat mission at {area}. {area} is in a distance of {dist} ly."
+    "message": "Our market competitor is seriously claiming he has ownership of {area} in the {system} system ({sectorx}, {sectory}, {sectorz}). The {org} totally disagrees and is willing to pay {cash} for a combat mission at {area}. {area} is {dist} ly away."
   },
   "HARVESTING_3": {
     "description": "{area} is an asteroid or planet",
@@ -209,15 +209,15 @@
   },
   "MILITARY_1": {
     "description": "{area} is an asteroid or planet",
-    "message": "Military intelligence believe that a hostile faction has set up a secret listening outpost on {area} in the {system} system ({sectorx}, {sectory}, {sectorz}). The government can not tolerate this and have approved a series of operations to wipe out this facility. The enemy tries to disguise its origin by using only civilian spacecraft types. We do it like this too! So we are willing to hire a mercenary for {cash}. {area} is located {dist} ly from here."
+    "message": "Military intelligence believes that a hostile faction has set up a secret listening outpost on {area} in the {system} system ({sectorx}, {sectory}, {sectorz}). The government cannot tolerate this and has approved a series of operations to wipe out this facility. The enemy tries to disguise its origin by using only civilian spacecraft types. We do it like this too! So we are willing to hire a mercenary for {cash}. {area} is located {dist} ly from here."
   },
   "MILITARY_2": {
     "description": "{area} is an asteroid or planet",
-    "message": "In response to a case of piracy in the {system} system ({sectorx}, {sectory}, {sectorz}), {dist} ly, the local authorities pay {cash} for a combat mission at {area}."
+    "message": "In response to a case of piracy in the {system} system ({sectorx}, {sectory}, {sectorz}), {dist} ly away, the local authorities pay {cash} for a combat mission at {area}."
   },
   "MILITARY_3": {
     "description": "",
-    "message": "The counter intelligence corps needs a civil pilot who asks no questions for {mission} mission in the {system} system ({sectorx}, {sectory}, {sectorz}), {dist} ly. Pay is {cash}."
+    "message": "The counterintelligence corps needs a civilian pilot who asks no questions for {mission} mission in the {system} system ({sectorx}, {sectory}, {sectorz}), {dist} ly away. Pay is {cash}."
   },
   "MILITARY_IT_MUST_BE_COMPLETED_BY": {
     "description": "",
@@ -233,7 +233,7 @@
   },
   "MINING_2": {
     "description": "{area} is an asteroid or planet",
-    "message": "I'm a manager of the {org}. We need additional help in a longtime legal dispute with a competitor about the mining rights in the {system} system ({sectorx}, {sectory}, {sectorz}), {dist} ly. We lost patience and would like to speed things up outside of the courtroom. Your mission would be to jump to {area} for {cash}."
+    "message": "I'm a manager of the {org}. We need additional help in a long-standing legal dispute with a competitor about the mining rights in the {system} system ({sectorx}, {sectory}, {sectorz}), {dist} ly away. We have lost patience and would like to speed things up outside of the courtroom. Your mission would be to jump to {area} for {cash}."
   },
   "MINING_3": {
     "description": "{area} is an asteroid or planet",
@@ -241,7 +241,7 @@
   },
   "MINING_IT_MUST_BE_COMPLETED_BY": {
     "description": "",
-    "message": "A convoy is enroute to {area}. It is essential that the mission is completed by {date}."
+    "message": "A convoy is en route to {area}. It is essential that the mission is completed by {date}."
   },
   "MINING_LAND_THERE": {
     "description": "",
@@ -313,7 +313,7 @@
   },
   "POLICE_1": {
     "description": "{area} is an asteroid or planet",
-    "message": "Police detectives have discovered that a group of pirates try to establish a stronghold on {area} in the {system} system ({sectorx}, {sectory}, {sectorz}), {dist} ly. This must not happen. The local authorities pay {cash} for a mission to {area} as preparation of a police operation."
+    "message": "Police detectives have discovered that a group of pirates is trying to establish a stronghold on {area} in the {system} system ({sectorx}, {sectory}, {sectorz}), {dist} ly away. This must not happen. The local authorities pay {cash} for a mission to {area} in preparation for a police operation."
   },
   "POLICE_2": {
     "description": "{area} is an asteroid or planet",
@@ -321,7 +321,7 @@
   },
   "POLICE_3": {
     "description": "{area} is an asteroid or planet",
-    "message": "Our markets were flooded by contraband. The source has been traced back to a hidden base at {area} in the {system} system ({sectorx}, {sectory}, {sectorz}). Only a distance of {dist} ly. Because of the reduced police budget the local authorities would like to outsource this mission and have allotted {cash} credits for this operation."
+    "message": "Our markets were flooded by contraband. The source has been traced back to a hidden base at {area} in the {system} system ({sectorx}, {sectory}, {sectorz}), only {dist} ly away. Because of a reduced police budget, the local authorities would like to outsource this mission and have allotted {cash} for this operation."
   },
   "POLICE_IT_MUST_BE_COMPLETED_BY": {
     "description": "",
@@ -389,6 +389,6 @@
   },
   "YOU_NEED_A_RADAR": {
     "description": "",
-    "message": "Yes, you need a radar! If you agree, I will program your ship's computer to record the radar data we need. The data will be transferred to me next you come back."
+    "message": "Yes, you need a radar! If you agree, I will program your ship's computer to record the radar data we need. The data will be transferred to me the next time you come back."
   }
 }

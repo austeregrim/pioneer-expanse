@@ -16,6 +16,7 @@ local ShipBuilder = require 'modules.MissionUtils.ShipBuilder'
 local ShipDef = require 'ShipDef'
 local utils = require 'utils'
 local PlayerState = require 'PlayerState'
+local FactionStanding = require 'FactionStanding'
 
 local PirateTemplate = MissionUtils.ShipTemplates.GenericPirate
 
@@ -39,54 +40,79 @@ local flavours = {
 		single = false,  -- flavour 0-2 are for groups
 		urgency = 0,
 		risk = 0.001,
+		role = "civilian",
 	}, {
 		single = false,
 		urgency = 0,
 		risk = 0,
+		role = "logistics",
+		useCorp = true,
 	}, {
 		single = false,
 		urgency = 0,
 		risk = 0,
+		role = "logistics",
+		org = "Corporate Travel",
 	}, {
 		single = true,  -- flavour 3- are for single persons
 		urgency = 0.13,
 		risk = 0.73,
+		role = "civilian",
 	}, {
 		single = true,
 		urgency = 0.3,
 		risk = 0.02,
+		role = "broker",
+		org = "Independent Trade",
 	}, {
 		single = true,
 		urgency = 0.1,
 		risk = 0.05,
+		role = "civilian",
+		org = "Private Charter",
 	}, {
 		single = true,
 		urgency = 0.02,
 		risk = 0.07,
+		role = "journalist",
+		org = "Galactic Press Freelance",
 	}, {
 		single = true,
 		urgency = 0.15,
 		risk = 1,
+		role = "syndicate",
+		org = "Private Security Detail",
+		covert = true,
 	}, {
 		single = true,
 		urgency = 0.5,
 		risk = 0.001,
+		role = "civilian",
 	}, {
 		single = true,
 		urgency = 0.85,
 		risk = 0.20,
+		role = "syndicate",
+		org = "Private Charter",
+		covert = true,
 	}, {
 		single = true,
 		urgency = 0.9,
 		risk = 0.40,
+		role = "syndicate",
+		org = "Confidential Charter",
+		covert = true,
 	}, {
 		single = true,
 		urgency = 1,
 		risk = 0.31,
+		role = "logistics",
+		org = "Industrial Inspectorate",
 	}, {
 		single = true,
 		urgency = 0,
 		risk = 0.17,
+		role = "civilian",
 	}
 }
 
@@ -168,7 +194,7 @@ local onChat = function (form, ref, option)
 		form:SetMessage(introtext)
 
 	elseif option == 1 then
-		local corporation = l["CORPORATIONS_"..Engine.rand:Integer(1,num_corporations)-1]
+		local corporation = ad.corporation or l["CORPORATIONS_"..Engine.rand:Integer(1,num_corporations)-1]
 		local whysomuch = string.interp(flavours[ad.flavour].whysomuch, {
 			corp     = corporation,
 		})
@@ -195,8 +221,9 @@ local onChat = function (form, ref, option)
 
 		local group = {}
 
+		local passengerOpts = { role = flavours[ad.flavour].role, org = ad.corporation or flavours[ad.flavour].org }
 		for i = 1, ad.group do
-			table.insert(group, Character.New())
+			table.insert(group, Character.New(passengerOpts))
 		end
 
 		add_passengers(group)
@@ -211,7 +238,9 @@ local onChat = function (form, ref, option)
 			reward	 = ad.reward,
 			due      = ad.due,
 			group	 = group,
-			flavour	 = ad.flavour
+			flavour	 = ad.flavour,
+			factionName     = ad.factionName,
+			destFactionName = ad.destFactionName,
 		}
 
 		mission = Mission.New(mission)
@@ -270,12 +299,18 @@ end
 local nearbysystems
 local makeAdvert = function (station)
 	local reward, due, location, timeout
-	local client = Character.New()
+	local issuingFaction = MissionUtils.GetSystemFactionName()
 	local flavour = Engine.rand:Integer(1,#flavours)
-	local urgency = flavours[flavour].urgency
-	local risk = flavours[flavour].risk
+	if flavours[flavour].covert and Engine.rand:Number(0, 1) > math.min(0.95, 0.25 + Game.system.lawlessness) then
+		flavour = Engine.rand:Integer(1,#flavours)
+	end
+	local flav = flavours[flavour]
+	local corporation = flav.useCorp and l["CORPORATIONS_"..Engine.rand:Integer(1,num_corporations)-1] or nil
+	local client = Character.New({ role = flav.role, org = corporation or flav.org })
+	local urgency = flav.urgency
+	local risk = flav.risk
 	local group = 1
-	if not flavours[flavour].single then
+	if not flav.single then
 		group = Engine.rand:Integer(2,max_group)
 	end
 
@@ -286,15 +321,21 @@ local makeAdvert = function (station)
 	location = nearbysystems[Engine.rand:Integer(1,#nearbysystems)]
 	local dist = location:DistanceTo(Game.system)
 	reward = ((dist / max_taxi_dist) * typical_reward * (group / 2) * (1+risk) * (1+3*urgency) * Engine.rand:Number(0.8,1.2))
+	if not flav.covert then
+		reward = MissionUtils.ApplyFactionReward(reward, issuingFaction)
+	end
 	reward = utils.round(reward, 50)
 	due = MissionUtils.TravelTime(dist) * 1.25 * (1.5-urgency) * Engine.rand:Number(0.9,1.1)
 	timeout = due/2 + Game.time -- timeout after half of the travel time
 	due = utils.round(due + Game.time, 900)
 
+	local destFaction = MissionUtils.GetSystemFactionName(location)
+
 	local ad = {
 		station		= station,
 		flavour		= flavour,
 		client		= client,
+		corporation = corporation,
 		location	= location.path,
 		dist        = dist,
 		due		    = due,
@@ -303,6 +344,8 @@ local makeAdvert = function (station)
 		risk		= risk,
 		urgency		= urgency,
 		reward		= reward,
+		factionName     = issuingFaction,
+		destFactionName = destFaction,
 		faceseed	= Engine.rand:Integer(),
 	}
 
@@ -393,13 +436,20 @@ local onPlayerDocked = function (player, station)
 	for ref,mission in pairs(missions) do
 		if mission.location == Game.system.path or Game.time > mission.due then
 			local oldReputation = Character.persistent.player.reputation
+			local isCovert = flavours[mission.flavour] and flavours[mission.flavour].covert
 			if Game.time > mission.due then
 				Comms.ImportantMessage(flavours[mission.flavour].failuremsg, mission.client.name)
 				Character.persistent.player.reputation = Character.persistent.player.reputation - 2
+				if not isCovert then
+					FactionStanding.Adjust(mission.factionName, -3, "Passenger transport failed")
+				end
 			else
 				Comms.ImportantMessage(flavours[mission.flavour].successmsg, mission.client.name)
 				PlayerState.AddMoney(mission.reward)
 				Character.persistent.player.reputation = Character.persistent.player.reputation + 2
+				if not isCovert then
+					FactionStanding.ApplyMissionOutcome(mission.factionName, 2, mission.destFactionName, "Passenger transport completed")
+				end
 			end
 			Event.Queue("onReputationChanged", oldReputation, Character.persistent.player.killcount,
 				Character.persistent.player.reputation, Character.persistent.player.killcount)

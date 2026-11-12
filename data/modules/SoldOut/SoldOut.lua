@@ -87,7 +87,7 @@ local makeAdvert = function(station, commodity)
 	-- Select commodity to run low on
 	local ad = {
 		station   = station,
-		client    = Character.New(),
+		client    = Character.New({ role = "broker", org = "Commodities Exchange" }),
 		price     = 2 * station:GetCommodityPrice(commodity) * ((not Game.system:IsCommodityLegal(commodity:GetName()) and 2) or 1),
 		commodity = commodity,
 	}

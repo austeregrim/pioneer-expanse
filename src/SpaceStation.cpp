@@ -30,6 +30,7 @@
 #include "scenegraph/MatrixTransform.h"
 #include "scenegraph/Model.h"
 #include "scenegraph/ModelSkin.h"
+#include "ship/SupercruiseController.h"
 #include "utils.h"
 
 SpaceStation::SpaceStation(const SystemBody *sbody) :
@@ -382,9 +383,9 @@ bool SpaceStation::GetDockingClearance(Ship *s)
 		const SpaceStationType::SPort *const pPort = m_type->FindPortByBay(i);
 		if (!pPort) continue;
 
-		// distance-to-station check
+		// distance-to-station check (covers 1,000 km Supercruise drop-in range plus buffer)
 		const double shipDist = s->GetPositionRelTo(this).Length();
-		double requestDist = 100000.0; //100km
+		double requestDist = SupercruiseController::SUBLIGHT_AUTOPILOT_MAX_DIST;
 		if (s->IsType(ObjectType::PLAYER) && shipDist > requestDist) {
 			LuaEvent::Queue("onDockingClearanceDenied", this, s,
 				EnumStrings::GetString("DockingRefusedReason", int(DockingRefusedReason::TooFarFromStation)));

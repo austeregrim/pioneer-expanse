@@ -88,7 +88,8 @@ local function optionTextButton(label, tooltip, enabled, callback)
 
 	local button
 	ui.withFont(pionillium.medium, function()
-		button = ui.button(label, optionButtonSize, variant, tooltip)
+		local btnWidth = math.max(optionButtonSize.x, ui.calcTextSize(label).x + ui.theme.styles.ButtonPadding.x * 2)
+		button = ui.button(label, Vector2(btnWidth, optionButtonSize.y), variant, tooltip)
 	end)
 	if button then
 		if enabled then
@@ -700,6 +701,37 @@ local optionsTabs = {
 	game=showGameOptions
 }
 
+local function makeConfirmModal(name, promptText, confirmLabel, onConfirm)
+	local win
+	win = ModalWindow.New(name, function()
+		ui.withFont(pionillium.medium, function()
+			ui.text(promptText)
+			ui.spacing()
+			optionTextButton(confirmLabel, nil, true, function()
+				win:close()
+				ui.optionsWindow:close()
+				onConfirm()
+			end)
+			ui.sameLine()
+			optionTextButton(lui.CANCEL, nil, true, function()
+				win:close()
+			end)
+		end)
+	end, function (_, drawPopupFn)
+		ui.setNextWindowPosCenter('Always')
+		ui.withStyleColors({ PopupBg = ui.theme.colors.modalBackground }, drawPopupFn)
+	end)
+	return win
+end
+
+local endGameConfirmWindow = makeConfirmModal("EndGameConfirm", lui.END_GAME_CONFIRM_PROMPT, lui.END_GAME, function()
+	Game.EndGame()
+end)
+
+local quitConfirmWindow = makeConfirmModal("QuitConfirm", lui.QUIT_CONFIRM_PROMPT, lui.QUIT, function()
+	Engine.Quit()
+end)
+
 ui.optionsWindow = ModalWindow.New("Options", function()
 	ui.horizontalGroup(function()
 		mainButton(icons.view_sidereal, lui.VIDEO, showTab=='video', function()
@@ -756,9 +788,13 @@ ui.optionsWindow = ModalWindow.New("Options", function()
 		end)
 
 		ui.sameLine()
-		optionTextButton(lui.END_GAME, nil, true, function()
-			ui.optionsWindow:close()
-			Game.EndGame()
+		optionTextButton(lui.END_GAME, lui.END_GAME_TOOLTIP, true, function()
+			endGameConfirmWindow:open()
+		end)
+
+		ui.sameLine()
+		optionTextButton(lui.QUIT, lui.QUIT_TOOLTIP, true, function()
+			quitConfirmWindow:open()
 		end)
 	end
 end, function (_, drawPopupFn)
@@ -784,6 +820,14 @@ function ui.optionsWindow:open()
 end
 
 function ui.optionsWindow:close()
+	if quitConfirmWindow.isOpen then
+		quitConfirmWindow:close()
+		return
+	end
+	if endGameConfirmWindow.isOpen then
+		endGameConfirmWindow:close()
+		return
+	end
 	if not captureBindingWindow.isOpen then
 		ModalWindow.close(self)
 

@@ -3,13 +3,16 @@
 
 #include "EnumStrings.h"
 #include "Frame.h"
+#include "Player.h"
 #include "Ship.h"
 #include "ShipAICmd.h"
 #include "ship/Propulsion.h"
+#include "ship/SupercruiseController.h"
 #include "Space.h"
 #include "SpaceStation.h"
 #include "lua/LuaEvent.h"
 #include "ship/GunManager.h"
+#include "sound/Sound.h"
 
 #include "profiler/Profiler.h"
 
@@ -44,6 +47,9 @@ bool Ship::AITimeStep(float timeStep)
 
 void Ship::AIClearInstructions()
 {
+	if (m_supercruise && m_supercruise->IsAssistActive()) {
+		m_supercruise->SetAssistActive(false, false);
+	}
 	if (!m_curAICmd) return;
 
 	delete m_curAICmd; // rely on destructor to kill children
@@ -92,6 +98,30 @@ void Ship::AIJourney(SystemBodyPath &dest)
 void Ship::AIFlyTo(Body *target)
 {
 	AIClearInstructions();
+	if (!target) return;
+
+	if (IsType(ObjectType::PLAYER) && m_supercruise) {
+		const double dist = GetPositionRelTo(target).Length() - target->GetPhysRadius();
+		if (m_flightState == SUPERCRUISE || dist > SupercruiseController::SUBLIGHT_AUTOPILOT_MAX_DIST) {
+			if (m_flightState == SUPERCRUISE && m_supercruise->IsSafeDisengageReady()) {
+				m_supercruise->SafeDisengage();
+				return;
+			}
+			if (m_supercruise->HasAssistModule()) {
+				static_cast<Player *>(this)->SetNavTarget(target);
+				m_supercruise->SetAssistActive(true, false);
+			} else {
+				if (m_flightState == SUPERCRUISE && dist <= SupercruiseController::SAFE_DISENGAGE_DIST) {
+					m_supercruise->ShowStatusMessage("SLOW DOWN TO DISENGAGE VELOCITY (<1,000 KM/S) BEFORE AUTOPILOT", 5.0f);
+				} else {
+					m_supercruise->ShowStatusMessage("TARGET BEYOND SUB-LIGHT AUTOPILOT RANGE (>2,500 KM) — ENGAGE SUPERCRUISE [J] OR EQUIP AUTOPILOT MK 2", 5.0f);
+				}
+				Sound::BodyMakeNoise(this, "beep", 0.5f);
+			}
+			return;
+		}
+	}
+
 	SetFuelReserve((GetFuel() < 0.5) ? GetFuel() / 2 : 0.25);
 
 	if (target->IsType(ObjectType::SHIP)) {
@@ -109,6 +139,30 @@ void Ship::AIFlyTo(Body *target)
 void Ship::AIDock(SpaceStation *target)
 {
 	AIClearInstructions();
+	if (!target) return;
+
+	if (IsType(ObjectType::PLAYER) && m_supercruise) {
+		const double dist = GetPositionRelTo(target).Length() - target->GetPhysRadius();
+		if (m_flightState == SUPERCRUISE || dist > SupercruiseController::SUBLIGHT_AUTOPILOT_MAX_DIST) {
+			if (m_flightState == SUPERCRUISE && m_supercruise->IsSafeDisengageReady()) {
+				m_supercruise->SafeDisengage();
+				return;
+			}
+			if (m_supercruise->HasAssistModule()) {
+				static_cast<Player *>(this)->SetNavTarget(target);
+				m_supercruise->SetAssistActive(true, true);
+			} else {
+				if (m_flightState == SUPERCRUISE && dist <= SupercruiseController::SAFE_DISENGAGE_DIST) {
+					m_supercruise->ShowStatusMessage("SLOW DOWN TO DISENGAGE VELOCITY (<1,000 KM/S) BEFORE DOCKING", 5.0f);
+				} else {
+					m_supercruise->ShowStatusMessage("STATION BEYOND DOCKING COMPUTER RANGE (>2,500 KM) — ENGAGE SUPERCRUISE [J] OR EQUIP AUTOPILOT MK 2", 5.0f);
+				}
+				Sound::BodyMakeNoise(this, "beep", 0.5f);
+			}
+			return;
+		}
+	}
+
 	SetFuelReserve((GetFuel() < 0.5) ? GetFuel() / 2 : 0.25);
 
 	m_curAICmd = new AICmdDock(this, target);
@@ -117,6 +171,30 @@ void Ship::AIDock(SpaceStation *target)
 void Ship::AIOrbit(Body *target, double alt)
 {
 	AIClearInstructions();
+	if (!target) return;
+
+	if (IsType(ObjectType::PLAYER) && m_supercruise) {
+		const double dist = GetPositionRelTo(target).Length() - target->GetPhysRadius() * std::max(alt, 1.0);
+		if (m_flightState == SUPERCRUISE || dist > SupercruiseController::SUBLIGHT_AUTOPILOT_MAX_DIST) {
+			if (m_flightState == SUPERCRUISE && m_supercruise->IsSafeDisengageReady()) {
+				m_supercruise->SafeDisengage();
+				return;
+			}
+			if (m_supercruise->HasAssistModule()) {
+				static_cast<Player *>(this)->SetNavTarget(target);
+				m_supercruise->SetAssistActive(true, false);
+			} else {
+				if (m_flightState == SUPERCRUISE && dist <= SupercruiseController::SAFE_DISENGAGE_DIST) {
+					m_supercruise->ShowStatusMessage("SLOW DOWN TO DISENGAGE VELOCITY (<1,000 KM/S) BEFORE ORBIT", 5.0f);
+				} else {
+					m_supercruise->ShowStatusMessage("ORBIT TARGET BEYOND SUB-LIGHT AUTOPILOT RANGE (>2,500 KM) — ENGAGE SUPERCRUISE [J] OR EQUIP AUTOPILOT MK 2", 5.0f);
+				}
+				Sound::BodyMakeNoise(this, "beep", 0.5f);
+			}
+			return;
+		}
+	}
+
 	SetFuelReserve((GetFuel() < 0.5) ? GetFuel() / 2 : 0.25);
 
 	m_curAICmd = new AICmdFlyAround(this, target, alt);

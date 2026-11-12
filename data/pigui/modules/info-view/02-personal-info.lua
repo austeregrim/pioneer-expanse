@@ -8,6 +8,7 @@ local Character = require 'Character'
 local PiGuiFace = require 'pigui.libs.face'
 local Event = require 'Event'
 local PlayerState = require 'PlayerState'
+local FactionStanding = require 'FactionStanding'
 
 local pionillium = ui.fonts.pionillium
 local orbiteer = ui.fonts.orbiteer
@@ -40,6 +41,18 @@ local function drawPlayerInfo()
 	textTable.withHeading(l.FINANCE, orbiteer.heading, {
 		{ l.CASH .. ":", ui.Format.Money(PlayerState.GetMoney()) }
 	})
+
+	local standings = FactionStanding.GetAll(true)
+	if #standings > 0 then
+		ui.newLine()
+		local rows = {}
+		for _, entry in ipairs(standings) do
+			local pct = math.floor((entry.mult - 1.0) * 100 + 0.5)
+			local modStr = pct == 0 and "100%" or string.format("%+d%% pay", pct)
+			table.insert(rows, { entry.name .. ":", string.format("%s (%+d) [%s]", entry.label, entry.score, modStr) })
+		end
+		textTable.withHeading("FACTION STANDINGS", orbiteer.heading, rows)
+	end
 end
 
 InfoView:registerView({

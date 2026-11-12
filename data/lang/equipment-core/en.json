@@ -33,11 +33,19 @@
   },
   "AUTOPILOT": {
     "description": "",
-    "message": "Autopilot"
+    "message": "Autopilot Mk 1 (Docking Computer)"
   },
   "AUTOPILOT_DESCRIPTION": {
     "description": "",
-    "message": "An on-board flight computer."
+    "message": "Sub-light flight computer for automated station docking, surface landing, and local orbital maneuvers (<100 km)."
+  },
+  "AUTOPILOT_MK2": {
+    "description": "",
+    "message": "Autopilot Mk 2 (Supercruise Assist)"
+  },
+  "AUTOPILOT_MK2_DESCRIPTION": {
+    "description": "",
+    "message": "Advanced FSD flight computer featuring Supercruise Assist (automatic 75% blue-zone throttle regulation, target alignment, and safe disengage drop-out) plus automated station docking."
   },
   "AUXILIARY_CARGO_RACK": {
     "description": "Equipment name for a cargo-carrying rack installed as a cabin module",

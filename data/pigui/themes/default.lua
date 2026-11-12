@@ -148,6 +148,11 @@ theme.buttonColors = {
 		hovered = styleColors.primary_800,
 		active = styleColors.primary_700
 	},
+	danger = {
+		normal = styleColors.danger_700,
+		hovered = styleColors.danger_500,
+		active = styleColors.danger_300
+	},
 	card_selected = {
 		normal = styleColors.primary_800,
 		hovered = styleColors.primary_700,

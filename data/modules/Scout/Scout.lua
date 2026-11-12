@@ -15,6 +15,7 @@ local Serializer   = require "Serializer"
 local Character    = require "Character"
 local utils        = require 'utils'
 local PlayerState  = require 'PlayerState'
+local FactionStanding = require 'FactionStanding'
 
 local ui = require 'pigui'
 
@@ -120,54 +121,82 @@ local flavours = {
 		difficulty = 1,        -- altitude, [0,1]
 		reward     = 1,        -- reward multiplier, 1=none. (unrelated to "urgency")
 		dropoff    = false,
+		role       = "science",
+		org        = "Galactic Geographical Society",
+		title      = "Senior Cartographer",
 	}, {
 		localscout = false,    -- 2 - Low altitude mapping
 		days       = 60,
 		difficulty = 2,        -- low altitude flying
 		reward     = 1,
 		dropoff    = false,
+		role       = "science",
+		org        = "Planetary Survey Guild",
+		title      = "Survey Coordinator",
 	}, {
 		localscout = false,    -- 3 rich pirate hiring
 		days       = 30,
 		difficulty = 1.5,
 		reward     = 1.5,
 		dropoff    = true,
+		role       = "syndicate",
+		org        = "Confidential Syndicate",
+		title      = "Private Broker",
+		covert     = true,
 	}, {
 		localscout = false,    -- 4 Stressed PhD student, short time
 		days       = 30,
 		difficulty = 1.5,
 		reward     = 1,
 		dropoff    = false,
+		role       = "science",
+		org        = "University Research Dept.",
+		title      = "Doctoral Researcher",
 	}, {
 		localscout = false,    -- 5 Neutral / standard
 		days       = 60,
 		difficulty = 1,
 		reward     = 1,
 		dropoff    = false,
+		role       = "broker",
+		org        = "Data & Survey Exchange",
+		title      = "Information Broker",
 	}, {
 		localscout = true,     -- 6 local system admin
 		days       = 60,
 		difficulty = 1,
 		reward     = 1.5,      -- government pays well
 		dropoff    = false,
+		role       = "government",
+		title      = "Planetary Survey Officer",
+		useFaction = true,
 	}, {
 		localscout = true,     -- 7 family in need of new land
 		days       = 25,       -- urgent!
 		difficulty = 1,
 		reward     = 2,        -- because urgent
 		dropoff    = false,
+		role       = "civilian",
+		org        = "Independent Prospector",
+		title      = "Family Representative",
 	}, {
 		localscout = true,     -- 8 geographical society, low-flying
 		days       = 80,
 		difficulty = 2,
 		reward     = 2,
 		dropoff    = false,
+		role       = "science",
+		org        = "Galactic Geographical Society",
+		title      = "Field Liaison",
 	}, {
 		localscout = false,    -- 9 Family in race to a claim
 		days       = 30,	   -- should be short
 		difficulty = 1,
 		reward     = 3,
 		dropoff    = true,
+		role       = "civilian",
+		org        = "Colonial Claimants",
+		title      = "Claim Representative",
 	}
 }
 
@@ -272,6 +301,7 @@ local onChat = function (form, ref, option)
 			coverage    = ad.coverage,
 			resolution  = ad.resolution,
 			orbital     = ad.orbital,
+			factionName = ad.factionName,
 			status      = 'ACTIVE',
 		}
 
@@ -485,8 +515,12 @@ local makeAdvert = function (station)
 	local reward, due, nearbysystem
 	local location ---@type SystemPath mission location
 	local missionBody ---@type SystemBody mission body
+	local issuingFaction = MissionUtils.GetSystemFactionName()
 
 	local flavourN = Engine.rand:Integer(1,#flavours)
+	if flavours[flavourN].covert and Engine.rand:Number(0, 1) > math.min(0.95, 0.25 + Game.system.lawlessness) then
+		flavourN = Engine.rand:Integer(1,#flavours)
+	end
 	local flavour = flavours[flavourN]
 	local days = Engine.rand:Number(flavour.days * 0.5, flavour.days)
 	local urgency = 1.0 - math.clamp((days - 30) / 50, 0.0, 1.0)
@@ -535,25 +569,35 @@ local makeAdvert = function (station)
 	reward = info.reward + MissionCalc:CalcReward(station, location, urgency, difficulty - 1.0, 0.2) * 1.6
 	local dist = MissionCalc:CalcDistance(station, location)
 
+	if not flavour.covert then
+		reward = MissionUtils.ApplyFactionReward(reward, issuingFaction)
+	end
 	reward = utils.round(reward, 5)
-	local client = Character.New({ role = "science", title = "Cartographic Survey Director" })
+	local clientOpts = {
+		role = flavour.role,
+		org = flavour.useFaction and (Game.system.name .. " Administration") or flavour.org,
+		title = flavour.title,
+		factionName = flavour.useFaction and issuingFaction or nil,
+	}
+	local client = Character.New(clientOpts)
 
 	local ad = {
-		station    = station,
-		flavour    = flavourN,
-		client     = client,
-		location   = location,
-		dist       = dist,
-		due        = due,
-		difficulty = difficulty,
-		days       = days,
-		reward     = reward,
-		dropoff    = flavour.dropoff,
-		faceseed   = Engine.rand:Integer(),
+		station     = station,
+		flavour     = flavourN,
+		client      = client,
+		location    = location,
+		dist        = dist,
+		due         = due,
+		difficulty  = difficulty,
+		days        = days,
+		reward      = reward,
+		dropoff     = flavour.dropoff,
+		factionName = issuingFaction,
+		faceseed    = Engine.rand:Integer(),
 
-		orbital    = orbital,
-		coverage   = info.coverage,
-		resolution = info.minResolution,
+		orbital     = orbital,
+		coverage    = info.coverage,
+		resolution  = info.minResolution,
 	}
 
 	placeAdvert(station, ad)
@@ -699,17 +743,26 @@ local onPlayerDocked = function (player, station)
 				Comms.ImportantMessage((flavour.failmsg), mission.client.name)
 				Character.persistent.player.reputation = Character.persistent.player.reputation - 1
 				PlayerState.AddMoney(mission.reward * mission_failed_reward)
+				if not flavour.covert then
+					FactionStanding.Adjust(mission.factionName, -1, "Survey delivered late")
+				end
 
 			elseif failed then
 				-- You get no money if you're back without data or entirely too late
 				Comms.ImportantMessage((flavour.failmsg), mission.client.name)
 				Character.persistent.player.reputation = Character.persistent.player.reputation - 1
+				if not flavour.covert then
+					FactionStanding.Adjust(mission.factionName, -3, "Survey contract failed")
+				end
 
 			else
 				-- You get all of the money and reputation if you're back in time with the data!
 				Comms.ImportantMessage((flavour.successmsg), mission.client.name)
 				Character.persistent.player.reputation = Character.persistent.player.reputation + 1
 				PlayerState.AddMoney(mission.reward)
+				if not flavour.covert then
+					FactionStanding.ApplyMissionOutcome(mission.factionName, flavour.useFaction and 5 or 3, nil, "Survey contract completed")
+				end
 			end
 
 			mission:Remove()
@@ -751,7 +804,14 @@ end
 
 local buildMissionDescription = function (mission)
 	local desc = {}
-	local dist = Game.system and string.format("%.2f", Game.system:DistanceTo(mission.location)) or "???"
+	local dist_ly = (Game.system and string.format("%.2f ", Game.system:DistanceTo(mission.location)) or "??? ") .. lc.UNIT_LY
+	local detail_dist = dist_ly
+	if Game.system and not Game.InHyperspace() and mission.location:IsSameSystem(Game.system.path) and mission.location:IsBodyPath() then
+		local sbody = mission.location:GetSystemBody()
+		if sbody and sbody.body then
+			detail_dist = ui.Format.Distance(Game.player:GetPositionRelTo(sbody.body):length())
+		end
+	end
 	local finished = mission.status == "COMPLETED" or mission.status == "FAILED"
 	local returnLocationDesc = ""
 
@@ -770,16 +830,16 @@ local buildMissionDescription = function (mission)
 				name       = mission.client.name,
 				systembody = mission.location:GetSystemBody().name,
 				system     = ui.Format.SystemPath(mission.location:SystemOnly()),
-				dist       = dist,
+				dist       = dist_ly,
 				cash       = Format.Money(mission.reward),
 			})
 			.. returnLocationDesc
 
 	desc.details = {
-		"Mapping",
+		l.MAPPING,
 		{lc.SYSTEM..":",  ui.Format.SystemPath(mission.location) },
 		{l.TARGET_BODY,   mission.location:GetSystemBody().name },
-		{l.DISTANCE,      dist .. lc.UNIT_LY},
+		{l.DISTANCE,      detail_dist},
 		{l.DEADLINE,      Format.Date(mission.due)},
 		{luc.TYPE..":",   mission.orbital and l.ORBITAL_SCAN or l.SURFACE_SCAN},
 		{l.COVERAGE,      format_coverage(mission.coverage) },

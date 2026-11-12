@@ -335,6 +335,9 @@ void Game::ToJson(Json &jsonObj)
 	case Ship::FlightState::UNDOCKING:
 		gameInfo["flight_state"] = "undocking";
 		break;
+	case Ship::FlightState::SUPERCRUISE:
+		gameInfo["flight_state"] = "supercruise";
+		break;
 	default:
 		gameInfo["flight_state"] = "unknown";
 		break;
@@ -393,65 +396,16 @@ bool Game::UpdateTimeAccel()
 		RequestTimeAccel(newTimeAccel);
 	}
 
-	// force down to timeaccel 1 during the docking sequence or when just initiating hyperspace
-	else if (m_player->GetFlightState() == Ship::DOCKING ||
+	// Pioneer: Dangerous 1:1 Real-Time Flight Clock:
+	// During all active flight states (FLYING, SUPERCRUISE, DOCKING, UNDOCKING, JUMPING),
+	// lock simulation time to 1x real-time. In-system travel uses FSD Supercruise instead of time compression.
+	else if (m_player->GetFlightState() == Ship::FLYING ||
+		m_player->GetFlightState() == Ship::SUPERCRUISE ||
+		m_player->GetFlightState() == Ship::DOCKING ||
 		m_player->GetFlightState() == Ship::JUMPING ||
 		m_player->GetFlightState() == Ship::UNDOCKING) {
-		newTimeAccel = std::min(newTimeAccel, Game::TIMEACCEL_10X);
+		newTimeAccel = std::min(newTimeAccel, Game::TIMEACCEL_1X);
 		RequestTimeAccel(newTimeAccel);
-	}
-
-	// normal flight
-	else if (m_player->GetFlightState() == Ship::FLYING) {
-
-		// limit timeaccel to 1x when fired on (no forced acceleration allowed)
-		if (m_player->GetAlertState() == Ship::ALERT_SHIP_FIRING)
-			newTimeAccel = std::min(newTimeAccel, Game::TIMEACCEL_1X);
-
-		if (!m_forceTimeAccel) {
-
-			// if not forced - limit timeaccel to 10x when other ships are close
-			if (m_player->GetAlertState() == Ship::ALERT_SHIP_NEARBY)
-				newTimeAccel = std::min(newTimeAccel, Game::TIMEACCEL_10X);
-
-			// if not forced - check if we aren't too near to objects for timeaccel
-			else {
-				for (const Body *b : m_space->GetBodies()) {
-					if (b == m_player.get()) continue;
-					if (b->IsType(ObjectType::HYPERSPACECLOUD)) continue;
-
-					vector3d toBody = m_player->GetPosition() - b->GetPositionRelTo(m_player->GetFrame());
-					double dist = toBody.Length();
-					double rad = std::max(b->GetPhysRadius(), 10000.0);
-
-					if (dist < 1000.0) {
-						newTimeAccel = std::min(newTimeAccel, Game::TIMEACCEL_1X);
-					} else if (dist < std::min(rad + 0.0001 * AU, rad * 1.1)) {
-						newTimeAccel = std::min(newTimeAccel, Game::TIMEACCEL_10X);
-					} else if (dist < std::min(rad + 0.001 * AU, rad * 2.5)) {
-						newTimeAccel = std::min(newTimeAccel, Game::TIMEACCEL_100X);
-					} else if (dist < std::min(rad + 0.01 * AU, rad * 5.0)) {
-						newTimeAccel = std::min(newTimeAccel, Game::TIMEACCEL_1000X);
-					} else if (dist < std::min(rad + 0.1 * AU, rad * 500.0)) {
-						newTimeAccel = std::min(newTimeAccel, Game::TIMEACCEL_10000X);
-					}
-				}
-			}
-
-			if (!m_player->AIIsActive()) { // don't do this when autopilot is active
-				const double locVel = m_player->GetAngVelocity().Length();
-				const double strictness = 20.0;
-				if (locVel > strictness / Game::s_timeAccelRates[TIMEACCEL_10X]) {
-					newTimeAccel = std::min(newTimeAccel, Game::TIMEACCEL_1X);
-				} else if (locVel > strictness / Game::s_timeAccelRates[TIMEACCEL_100X]) {
-					newTimeAccel = std::min(newTimeAccel, Game::TIMEACCEL_10X);
-				} else if (locVel > strictness / Game::s_timeAccelRates[TIMEACCEL_1000X]) {
-					newTimeAccel = std::min(newTimeAccel, Game::TIMEACCEL_100X);
-				} else if (locVel > strictness / Game::s_timeAccelRates[TIMEACCEL_10000X]) {
-					newTimeAccel = std::min(newTimeAccel, Game::TIMEACCEL_1000X);
-				}
-			}
-		}
 	}
 
 	// no change

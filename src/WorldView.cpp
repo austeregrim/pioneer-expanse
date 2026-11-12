@@ -22,8 +22,13 @@
 #include "graphics/Renderer.h"
 #include "graphics/RenderState.h"
 #include "matrix4x4.h"
+#include "MathUtil.h"
+#include "Space.h"
+#include "SpaceStation.h"
+#include "galaxy/SystemBody.h"
 #include "ship/GunManager.h"
 #include "ship/ShipViewController.h"
+#include "ship/SupercruiseController.h"
 #include "sound/Sound.h"
 
 WorldView::~WorldView() {}
@@ -177,15 +182,21 @@ void WorldView::Draw3D()
 			it->trail->Render(m_renderer);
 	}
 
-	m_cameraContext->EndFrame();
-
 	// don't draw crosshairs etc in hyperspace
-	if (Pi::player->GetFlightState() == Ship::HYPERSPACE) return;
+	if (Pi::player->GetFlightState() == Ship::HYPERSPACE) {
+		m_cameraContext->EndFrame();
+		return;
+	}
 
 	// setup orthographic projection the indicator coordinate system expects
 	// (could also draw this using ImGui methods in DrawPiGui, but this is a quick patch for release)
 	m_renderer->SetProjection(matrix4x4f::OrthoFrustum(0, m_renderer->GetWindowWidth(), m_renderer->GetWindowHeight(), 0, 0, 1));
 	m_renderer->SetTransform(matrix4x4f::Identity);
+
+	// Supercruise 3D HUD overlays (orbital path lines & body exclusion zone rings)
+	DrawSupercruiseOverlays();
+
+	m_cameraContext->EndFrame();
 
 	// combat target indicator
 	DrawCombatTargetIndicator(m_combatTargetIndicator, m_targetLeadIndicator, red);
@@ -593,4 +604,128 @@ vector3d WorldView::GetTargetIndicatorScreenPosition(const Body *body) const
 	vector3d pos = body->GetInterpPositionRelTo(m_cameraContext->GetCameraFrame());
 	pos += body->GetInterpOrientRelTo(m_cameraContext->GetCameraFrame()) * body->GetTargetIndicatorPosition();
 	return WorldSpaceToScreenSpace(pos);
+}
+
+void WorldView::DrawSupercruiseOverlays()
+{
+	if (!Pi::DrawGUI || !m_labelsOn || !Pi::player || !m_game || !m_game->GetSpace())
+		return;
+
+	const SupercruiseController *sc = Pi::player->GetSupercruise();
+	const bool showOverlays = (Pi::player->GetFlightState() == Ship::SUPERCRUISE) || (sc && sc->IsCharging());
+	if (!showOverlays)
+		return;
+
+	const FrameId camFrameId = m_cameraContext->GetTempFrame();
+	if (!camFrameId.valid())
+		return;
+
+	const double zClip = -1.0; // camera-space near plane clip (camera looks along -Z)
+	const float winW = float(m_renderer->GetWindowWidth());
+	const float winH = float(m_renderer->GetWindowHeight());
+
+	auto appendClippedSegment = [&](std::vector<vector3f> &verts, vector3d p0, vector3d p1) {
+		if (p0.z > zClip && p1.z > zClip)
+			return;
+		if (p0.z > zClip) {
+			const double t = (zClip - p0.z) / (p1.z - p0.z);
+			p0 = p0 + (p1 - p0) * t;
+		} else if (p1.z > zClip) {
+			const double t = (zClip - p1.z) / (p0.z - p1.z);
+			p1 = p1 + (p0 - p1) * t;
+		}
+		const vector3d s0 = projectToScreenSpace(p0, m_cameraContext, false);
+		const vector3d s1 = projectToScreenSpace(p1, m_cameraContext, false);
+		// Skip segments completely outside screen bounds with generous margin
+		if ((s0.x < -500.0 && s1.x < -500.0) || (s0.x > winW + 500.0 && s1.x > winW + 500.0) ||
+			(s0.y < -500.0 && s1.y < -500.0) || (s0.y > winH + 500.0 && s1.y > winH + 500.0))
+			return;
+		verts.emplace_back(float(s0.x), float(s0.y), 0.0f);
+		verts.emplace_back(float(s1.x), float(s1.y), 0.0f);
+	};
+
+	std::vector<vector3f> orbitVerts;
+	std::vector<vector3f> targetOrbitVerts;
+	std::vector<vector3f> exclVerts;
+	std::vector<vector3f> dangerExclVerts;
+
+	const Body *navTarget = Pi::player->GetNavTarget();
+
+	for (Body *b : m_game->GetSpace()->GetBodies()) {
+		if (!b)
+			continue;
+
+		// 1. Orbital trajectory lines for planets and orbital stations
+		const bool isTerrain = b->IsType(ObjectType::TERRAINBODY);
+		const bool isOrbStation = b->IsType(ObjectType::SPACESTATION) && !static_cast<SpaceStation *>(b)->IsGroundStation();
+		if (isTerrain || isOrbStation) {
+			const SystemBody *sb = b->GetSystemBody();
+			if (sb && sb->GetOrbit().GetSemiMajorAxis() > 0.0) {
+				Frame *bFrame = Frame::GetFrame(b->GetFrame());
+				Frame *parentFrame = isOrbStation ? bFrame : (bFrame ? Frame::GetFrame(bFrame->GetParent()) : nullptr);
+				if (parentFrame) {
+					const vector3d parentCamPos = parentFrame->GetInterpPositionRelTo(camFrameId);
+					const matrix3x3d parentCamOrient = parentFrame->GetInterpOrientRelTo(camFrameId);
+					const Orbit &orbit = sb->GetOrbit();
+					const double period = orbit.Period();
+					if (period > 0.0 && std::isfinite(period)) {
+						constexpr int ORBIT_SEGS = 96;
+						std::vector<vector3f> &dest = (b == navTarget) ? targetOrbitVerts : orbitVerts;
+						vector3d prevPt = parentCamPos + parentCamOrient * orbit.OrbitalPosAtTime(0.0);
+						for (int k = 1; k <= ORBIT_SEGS; ++k) {
+							const double t = period * (double(k) / double(ORBIT_SEGS));
+							const vector3d curPt = parentCamPos + parentCamOrient * orbit.OrbitalPosAtTime(t);
+							appendClippedSegment(dest, prevPt, curPt);
+							prevPt = curPt;
+						}
+					}
+				}
+			}
+		}
+
+		// 2. Spherical exclusion zone silhouette rings around stars, gas giants, and planets
+		if (isTerrain) {
+			const double exclR = SupercruiseController::GetExclusionZoneRadius(b);
+			if (exclR > 0.0) {
+				const vector3d bodyCamPos = b->GetInterpPositionRelTo(camFrameId);
+				const double dist = bodyCamPos.Length();
+				if (dist > exclR * 1.002 && (exclR / dist) > 0.004) {
+					const double ratio = exclR / dist;
+					const double ratioSq = ratio * ratio;
+					const vector3d ringCenter = bodyCamPos * (1.0 - ratioSq);
+					const double ringRadius = exclR * std::sqrt(std::max(0.0, 1.0 - ratioSq));
+					const vector3d u = bodyCamPos * (1.0 / dist);
+					const vector3d e1 = MathUtil::OrthogonalDirection(u).Normalized();
+					const vector3d e2 = u.Cross(e1).Normalized();
+
+					constexpr int RING_SEGS = 64;
+					std::vector<vector3f> &dest = (dist < exclR * 2.2) ? dangerExclVerts : exclVerts;
+					vector3d prevPt = ringCenter + e1 * ringRadius;
+					for (int k = 1; k <= RING_SEGS; ++k) {
+						const double ang = (2.0 * M_PI * double(k)) / double(RING_SEGS);
+						const vector3d curPt = ringCenter + (e1 * std::cos(ang) + e2 * std::sin(ang)) * ringRadius;
+						appendClippedSegment(dest, prevPt, curPt);
+						prevPt = curPt;
+					}
+				}
+			}
+		}
+	}
+
+	if (!orbitVerts.empty()) {
+		m_indicator.SetData(orbitVerts.size(), orbitVerts.data(), Color(45, 145, 220, 85));
+		m_indicator.Draw(m_renderer, m_indicatorMat.get());
+	}
+	if (!targetOrbitVerts.empty()) {
+		m_indicator.SetData(targetOrbitVerts.size(), targetOrbitVerts.data(), Color(90, 215, 255, 155));
+		m_indicator.Draw(m_renderer, m_indicatorMat.get());
+	}
+	if (!exclVerts.empty()) {
+		m_indicator.SetData(exclVerts.size(), exclVerts.data(), Color(255, 185, 40, 150));
+		m_indicator.Draw(m_renderer, m_indicatorMat.get());
+	}
+	if (!dangerExclVerts.empty()) {
+		m_indicator.SetData(dangerExclVerts.size(), dangerExclVerts.data(), Color(255, 75, 45, 215));
+		m_indicator.Draw(m_renderer, m_indicatorMat.get());
+	}
 }

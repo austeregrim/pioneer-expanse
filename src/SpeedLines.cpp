@@ -49,46 +49,49 @@ SpeedLines::SpeedLines(Ship *s) :
 void SpeedLines::Update(float time)
 {
 	PROFILE_SCOPED();
-	vector3f vel = vector3f(m_ship->GetVelocity());
-	const float absVel = vel.Length();
+	const vector3d velD = m_ship->GetVelocity();
+	const double absVelD = velD.Length();
 
 	// don't show if
 	//   vel < 100m/s
 	//   in rotating frame (near station or planet surface)
-	if (absVel < 100.f || Frame::GetFrame(m_ship->GetFrame())->IsRotFrame()) {
+	if (absVelD < 100.0 || Frame::GetFrame(m_ship->GetFrame())->IsRotFrame()) {
 		m_visible = false;
 		return;
 	}
 	m_visible = true;
 
-	//slow lines down at higher speeds
-	float mult;
-	if (absVel > 100000.f)
-		mult = 0.001f;
-	else if (absVel > 10000.f)
-		mult = 0.01f;
-	else if (absVel > 5000.f)
-		mult = 0.1f;
-	else
-		mult = 1.f;
+	const bool inSupercruise = (m_ship->GetFlightState() == Ship::SUPERCRUISE);
+	m_dir = vector3f(velD * (1.0 / absVelD));
 
-	//rate of change (incl. time acceleration)
-	float d = absVel * time * mult;
+	float d;
+	if (inSupercruise) {
+		const double logNorm = Clamp(std::log10(std::max(absVelD, 30000.0) / 30000.0) / 7.3, 0.0, 1.0);
+		m_lineLength = float(65.0 + 175.0 * logNorm);
+		d = float(35.0 + (MAX_VEL - 35.0) * logNorm);
+	} else {
+		const float absVel = float( std::min(absVelD, 1e7) );
+		float mult;
+		if (absVel > 100000.f)
+			mult = 0.001f;
+		else if (absVel > 10000.f)
+			mult = 0.01f;
+		else if (absVel > 5000.f)
+			mult = 0.1f;
+		else
+			mult = 1.f;
 
-	m_lineLength = Clamp(absVel * 0.1f, 2.f, 100.f);
-	m_dir = vel.Normalized();
+		d = absVel * time * mult;
+		m_lineLength = Clamp(absVel * 0.1f, 2.f, 100.f);
+	}
 
-	vel = vel * time * mult;
-
-	//too fast to draw - cap
-	if (d > MAX_VEL)
-		vel = m_dir * MAX_VEL;
+	vector3f stepVel = m_dir * std::min(d, MAX_VEL);
 
 	for (size_t i = 0; i < m_points.size(); i++) {
 
 		vector3f &pt = m_points[i];
 
-		pt -= vel;
+		pt -= stepVel;
 
 		//wrap around
 		if (pt.x > BOUNDS)
@@ -115,7 +118,8 @@ void SpeedLines::Render(Graphics::Renderer *r)
 
 	Uint16 vtx = 0;
 	//distance fade
-	Color col(Color::GRAY);
+	const bool inSupercruise = m_ship && (m_ship->GetFlightState() == Ship::SUPERCRUISE);
+	Color col = inSupercruise ? Color(125, 210, 255, 255) : Color(Color::GRAY);
 	for (auto it = m_points.begin(); it != m_points.end(); ++it) {
 		col.a = Clamp((1.f - it->Length() / BOUNDS), 0.f, 1.f) * 255;
 

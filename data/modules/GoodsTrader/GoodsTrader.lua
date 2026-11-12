@@ -122,7 +122,7 @@ local onCreateBB = function (station)
 	local rand = Rand.New(station.seed)
 	local rand_police = Rand.New()
 
-	local num = rand:Integer(1,3)
+	local num = math.max(1, math.floor(rand:Number(1, 1 + 2 * Game.system.lawlessness) + 0.5))
 
 	local numPolice = 0
 	local maxPolice = 1
@@ -142,12 +142,19 @@ local onCreateBB = function (station)
 			local flavour = string.interp(l["GOODS_TRADER_"..r:Integer(num_names - 1)], { name = NameGen.Surname(r) })
 			local slogan = l["SLOGAN_"..r:Integer(num_slogans - 1)]
 
+			local policeOrg = (Game.system.faction.policeName ~= "" and Game.system.faction.policeName) or (Game.system.name .. " Security")
 			local ad = {
 				station  = station, ---@type SpaceStation
 				flavour  = flavour,
 				slogan   = slogan,
 				ispolice = ispolice,
-				trader   = Character.New({title = flavour, armour=false}, r),
+				trader   = Character.New({
+					role = ispolice and "police" or "syndicate",
+					org = ispolice and policeOrg or "Freeport Exchange",
+					factionName = ispolice and Game.system.faction.name or nil,
+					title = flavour,
+					armour = false
+				}, r),
 				title    = title
 			}
 

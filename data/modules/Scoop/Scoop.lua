@@ -14,6 +14,7 @@ local Mission = require 'Mission'
 local Character = require 'Character'
 local Serializer = require 'Serializer'
 local PlayerState= require 'PlayerState'
+local FactionStanding = require 'FactionStanding'
 
 local MissionUtils = require 'modules.MissionUtils'
 local ShipBuilder  = require 'modules.MissionUtils.ShipBuilder'
@@ -283,9 +284,17 @@ local removeMission = function (mission, ref)
 		Character.persistent.player.reputation = oldReputation + mission_reputation
 		PlayerState.AddMoney(mission.reward)
 		Comms.ImportantMessage(l["SUCCESS_MSG_" .. mission.id], sender)
+		if mission.id == "RESCUE" then
+			FactionStanding.ApplyMissionOutcome(mission.factionName, 4, nil, "Escape pod recovery completed")
+		elseif mission.id == "LEGAL_GOODS" then
+			FactionStanding.ApplyMissionOutcome(mission.factionName, 2, nil, "Salvage recovery completed")
+		end
 	elseif mission.status == "FAILED" then
 		Character.persistent.player.reputation = oldReputation - mission_reputation
 		Comms.ImportantMessage(l["FAILURE_MSG_" .. mission.id], sender)
+		if mission.id == "RESCUE" then
+			FactionStanding.Adjust(mission.factionName, -4, "Escape pod recovery failed")
+		end
 	end
 	Event.Queue("onReputationChanged", oldReputation, Character.persistent.player.killcount,
 		Character.persistent.player.reputation, Character.persistent.player.killcount)
@@ -442,6 +451,7 @@ local onChat = function (form, ref, option)
 			deliver_to_ship   = ad.deliver_to_ship,
 			client_ship       = ship,
 			ship_label        = ad.ship_label,
+			factionName       = ad.factionName,
 			destination       = ad.location
 		}
 
@@ -515,7 +525,12 @@ local makeAdvert = function (station)
 	local star = stars[Engine.rand:Integer(1, #stars)]
 	local planet = planets[Engine.rand:Integer(1, #planets)]
 	local dist = station:DistanceTo(Space.GetBody(planet:GetSystemBody().index))
+	local issuingFaction = MissionUtils.GetSystemFactionName()
 	local flavour = flavours[Engine.rand:Integer(1, #flavours)]
+	if (flavour.id == "ILLEGAL_GOODS" or flavour.id == "ARMS_DEALER")
+		and Engine.rand:Number(0, 1) > math.min(0.95, 0.25 + Game.system.lawlessness) then
+		flavour = flavours[LEGAL]
+	end
 	local time = Engine.rand:Number(mission_time)
 	local due = time + MissionUtils.TravelTimeLocal(dist) * Engine.rand:Number(0.9, 1.1)
 	local timeout = due/2 + Game.time -- timeout after half of the travel time
@@ -525,16 +540,26 @@ local makeAdvert = function (station)
 		reward = flavour.reward * (1.15 - dist / max_dist) * Engine.rand:Number(0.9, 1.1)
 	else
 		reward = flavour.reward * (1 + dist / max_dist) * Engine.rand:Number(0.75, 1.25)
+		if flavour.id == "RESCUE" then
+			reward = MissionUtils.ApplyFactionReward(reward, issuingFaction)
+		end
 	end
 	reward = utils.round(reward, 50)
 	due = utils.round(due + Game.time, 3600)
+
+	local clientOpts = { role = "syndicate", org = "Salvage & Arms Syndicate" }
+	if flavour.id == "RESCUE" then
+		clientOpts = { role = "rescue", org = station.label .. " Rescue Control", factionName = issuingFaction }
+	elseif flavour.id == "LEGAL_GOODS" then
+		clientOpts = { role = "logistics", org = "Orbital Salvage Broker" }
+	end
 
 	if #flavour.cargo_type > 0 and dist < max_dist and station:DistanceTo(Space.GetBody(star.index)) < max_dist then
 		local ad = {
 			station           = station,
 			location          = planet,
 			introtext         = l["INTROTEXT_" .. flavour.id],
-			client            = Character.New(),
+			client            = Character.New(clientOpts),
 			star              = star.path,
 			planet            = planet,
 			id                = flavour.id,
@@ -545,7 +570,8 @@ local makeAdvert = function (station)
 			timeout           = timeout,
 			return_to_station = flavour.return_to_station,
 			deliver_to_ship   = flavour.deliver_to_ship,
-			ship_label        = flavour.deliver_to_ship and Ship.MakeRandomLabel() or nil
+			ship_label        = flavour.deliver_to_ship and Ship.MakeRandomLabel() or nil,
+			factionName       = issuingFaction,
 		}
 
 		placeAdvert(station, ad)

@@ -59,6 +59,7 @@ const struct EnumItem ENUM_ShipFlightState[] = {
 	{ "LANDED", int(Ship::LANDED) },
 	{ "JUMPING", int(Ship::JUMPING) },
 	{ "HYPERSPACE", int(Ship::HYPERSPACE) },
+	{ "SUPERCRUISE", int(Ship::SUPERCRUISE) },
 	{ 0, 0 },
 };
 

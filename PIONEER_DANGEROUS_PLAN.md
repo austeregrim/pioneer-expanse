@@ -85,13 +85,15 @@ graph TD
   * [x] **Continuous 3D Camera Zoom & Smooth Cross-Fade LOD** (`src/SectorMap.h`, `src/SectorMap.cpp`, `src/SectorView.cpp`):
     * Extended camera zoom bounds (`FAR_MAX = 14,000.0`) with proportional scroll/zoom speed and dynamic perspective clip planes to pull back smoothly from local star systems to the entire $100,000\text{ ly}$ Milky Way disc.
     * Implemented smooth Hermite cross-fade (`m_voronoiAlpha` and `m_macroAlpha`) transitioning between local/regional star systems and the macro galactic view without sector generation stalls.
-  * [x] **Hybrid Textured Galactic Disc + 3D Volumetric Star Cloud & Core Glow** (`src/SectorMap.cpp`):
-    * Rendered multi-layered additive-alpha 3D planes using `data/galaxy_colour.png` ($2700 \times 2700$) aligned with the engine's physical galaxy coordinates (Galactic Core at $(-25000, 0, 0)\text{ ly}$, radius $50,000\text{ ly}$).
-    * Generated a 9,500-particle 3D volumetric star cloud sampled from `DensityMapGalaxy::GetSectorDensity` with a realistic 3D central galactic bulge ($\pm 1,500\text{ ly}$) tapering into the spiral arms, plus dual-layer Sagittarius A* core glow billboards.
+  * [x] **Multi-Layered 3D Galactic Disc + 3D Volumetric Star Cloud & Nebula/Bulge Glow** (`src/SectorMap.cpp`):
+    * Rendered a 9-layer vertically stratified additive-alpha 3D disc stack using `data/galaxy_4k.png` aligned with the engine's physical galaxy coordinates (Galactic Core at $(-25000, 0, 0)\text{ ly}$, radius $50,000\text{ ly}$) so the galaxy retains vertical thickness when tilted in 3D.
+    * Generated a 45,000-particle 3D volumetric star cloud + 24,000-star regional LOD cloud sampled from `DensityMapGalaxy::GetSectorDensity` with a realistic 3D central galactic bulge ($\pm 1,500\text{ ly}$) tapering into the spiral arms.
+    * Added ~350 3D volumetric glow billboards (`textures/halo.dds`) across Sagittarius A*, the 3D ellipsoidal galactic bulge ($\pm 2,400\text{ ly}$), and high-density spiral arm star-forming regions, plus interior 3D glow for faction bubbles.
   * [x] **3D Galactic Plane Polar Grid & Light-Year Range Rings** (`src/SectorMap.cpp`):
     * Added concentric range rings around Sagittarius A* ($10\text{k}, 20\text{k}, 25\text{k}$ Sol Orbit, $30\text{k}, 40\text{k}, 50\text{k ly}$) with 12 radial azimuth spokes, plus Human Bubble range rings around Sol ($100, 250, 500, 1000, 2500\text{ ly}$).
-  * [x] **Sharp Voronoi Faction Territory Boundaries** (`src/SectorMap.cpp`):
-    * Computed exact radius-constrained Voronoi bisector edges and outer claim boundary arcs across all faction homeworlds in `FactionsDatabase`, highlighting selected faction borders and capital world stems.
+  * [x] **3D Faction Territory Bubbles & Intersection Shells** (`src/SectorMap.cpp`, `data/shaders/opengl/FresnelColour.frag`):
+    * Rendered translucent 3D Fresnel volume spheres (`m_sphere` + `fresnel_sphere`) and additive rim-glow passes at each faction's true 3D homeworld position and influence radius, sorted back-to-front in camera space.
+    * Computed 3D sphere-sphere Voronoi intersection circles in 3D bisector planes and 3D spherical contour rings (equatorial, orthogonal meridians, and $\pm 42^\circ$ latitude rings) clipped in 3D against closer overlapping faction bubbles, plus 3D vertical anchor stems to the $Z = 0$ galactic reference plane.
   * [x] **Interactive Raycast Panning, Beacons & Contextual Adaptive Sidebar** (`src/SectorMap.cpp`, `src/lua/LuaSectorMap.cpp`, `data/pigui/views/map-sector-view.lua`):
     * Added scale-adaptive 3D beacons and clickable markers for **`YOU ARE HERE`**, **`SOL`**, **`SAGITTARIUS A*`**, and major/selected factions.
     * Implemented 3D mouse raycasting onto the $Z = 0$ galactic plane to pan anywhere in the galaxy and select faction territories on click.
@@ -99,42 +101,36 @@ graph TD
 
 ---
 
-### Phase 5: In-System FTL Supercruise Flight Mechanics
+### Phase 5: In-System FTL Supercruise Flight Mechanics (COMPLETED)
 * **Goal**: Implement an *Elite Dangerous*-style Frame Shift Drive (FSD) Supercruise mode for in-system space flight, replacing in-flight time compression with 1:1 real-time FTL travel.
-* **Core Architecture & Flight Dynamics**:
-  * **Ship State Machine (`src/Ship.h`, `src/Ship.cpp`)**:
-    * Introduce `FlightState::SUPERCRUISE` into `Ship::FlightState`.
-    * **FSD Engage Cycle**: Bound to `J` (or FSD toggle). Requires landing gear retracted, hardpoints stowed, zero mass lock, and throttle $> 0$. Features a 5-second charge-up countdown.
-    * **Bypass Rigid-Body Physics**: During Supercruise, decouple `DynamicBody` from standard Bullet rigid-body collision impulses and Newtonian inertia. Velocity aligns directly with the ship's heading vector and active throttle percentage.
-    * **Rotational Handling Model**: Emulates *Elite Dangerous* flight dynamics—pitch and roll are responsive, yaw is sluggish. Rotational angular agility dynamically scales inversely with speed: tightest turn rate at low speed and in the $75\%$ throttle "blue zone", widening into sweeping multi-light-second turning arcs at high multiples of $c$.
+* **Completed Implementation**:
+  * [x] **Ship State Machine (`src/Ship.h`, `src/Ship.cpp`, `src/enum_table.cpp`)**:
+    * Introduced `FlightState::SUPERCRUISE` into `Ship::FlightState`.
+    * **FSD Engage Cycle**: Bound to `J` (and `F6` secondary / HUD FSD button). Requires landing gear retracted and zero mass lock ($>5\text{ km}$ from stations and $>5\text{ km}$ above terrain). Features a 5-second charge-up countdown.
+    * **Bypass Rigid-Body Physics**: Decoupled `DynamicBody` from Bullet rigid-body collisions (`SetColliding(false)`) and Newtonian forces during Supercruise; velocity aligns kinematically with the ship's forward heading vector and active throttle percentage while preserving sub-frame camera/model interpolation.
+    * **Rotational Handling Model**: Pitch and roll are responsive, yaw is sluggish ($0.28\text{ rad/s}$ base). Turn rate scales inversely with log velocity and receives a $1.25\times$ agility bonus inside the $75\%$ throttle "blue zone" (`[0.65, 0.80]`).
     * **Velocity Profile**: Smoothly ranges from $30\text{ km/s}$ ($0.0001c$) minimum floor up to $2,001c$ top speed in deep vacuum.
-  * **Gravity Well Drag & Exclusion Zones (`src/ship/SupercruiseController.h`, `src/ship/SupercruiseController.cpp`)**:
-    * **Gravitational Mass Drag**: Calculate aggregate gravitational potential from nearby stellar bodies ($\Phi = \sum \frac{G \cdot M_i}{r_i}$). As potential increases near stars, gas giants, and planets, dynamically suppress acceleration, deceleration, and maximum achievable speed.
-    * **The 6-Second Rule ("Loop of Shame")**: Deceleration curve tuned to reward throttle management. Maintaining $75\%$ throttle inside the blue zone balances deceleration with distance so target ETA stabilizes at $0:06$ seconds down to safe dropout. Failing to throttle down inside $0:05$ results in gravitational overshoot.
-    * **Exclusion Zone Collisions**: Crossing a body's yellow exclusion zone boundary triggers an immediate **Emergency Dropout**:
-      * Shields are completely depleted (absorbing the physical impact shock).
-      * Hull damage is applied only if shields were already down or unequipped.
-      * Ship suffers a high thermal heat spike.
-      * FSD enters an extended emergency cooldown timer before it can be recharged.
-  * **Frame Transitions & Safe Disengage / Drop-Out Logic**:
-    * **Reference Frame Handling**: While in Supercruise, the ship remains locked in the planetary or star orbital parent frame. Micro station frames ($20\text{ km}$) are ignored at FTL speeds to prevent tunneling or physics boundary jitter.
-    * **Safe Disengage Criteria**: When target distance $< 1,000\text{ km}$ and relative speed $< 1,000\text{ km/s}$, activate the `[ SAFE DISENGAGE READY ]` HUD indicator.
-    * **Orbital Station Drop-In**: Hitting disengage cleanly spawns the ship into the station's local coordinate frame at $\sim 10\text{–}15\text{ km}$ distance, oriented directly toward the station entrance/docking axis, with normalized sub-light speed.
-    * **Deep Space Manual Drop**: Disengaging in open vacuum without a target drops the ship into normal sub-light flight at zero relative velocity in the current parent frame.
-  * **Autopilot & "Supercruise Assist" (Autopilot Mk 2)**:
-    * Standard legacy Autopilot (`Ship::SetAutopilot`) is restricted strictly to sub-light docking, surface landing, and orbital station-keeping.
-    * Add an upgraded ship module / computer: **Supercruise Assist (Autopilot Mk 2)**:
-      * When engaged with a locked destination, automatically points ship toward the destination, locks throttle to $75\%$ inside the blue zone (maintaining the 6-second rule), and automatically executes Safe Disengage upon reaching dropout parameters.
-  * **Cockpit HUD, Telemetry & Sensory Polish (`data/pigui/modules/flight-ui/`)**:
-    * Supercruise HUD flight gauges:
-      * Dynamic throttle gauge showing the $75\%$ "blue zone".
-      * Velocity indicator with dynamic unit switching ($\text{km/s}$, $\text{Mm/s}$, $c$).
-      * Target telemetry: distance ($\text{ls}$, $\text{Mm}$, $\text{km}$) and real-time ETA in seconds.
-      * `[ SAFE DISENGAGE READY ]` alert prompt.
-      * Render planetary exclusion zone rings and orbital path ellipses.
-      * FTL visual cues (warp tunnel streaks / directional space dust particles).
-  * **Deprecate In-Flight Time Acceleration**:
-    * Lock game speed to 1:1 real-time during flight. Disable in-flight time compression keys ($10\times\text{--}10000\times$) in favor of Supercruise throttle.
+  * [x] **Gravity Well Drag & Exclusion Zones (`src/ship/SupercruiseController.h`, `src/ship/SupercruiseController.cpp`)**:
+    * **Gravitational Mass Drag**: Dynamically suppresses local maximum speed (`m_maxEnvSpeed`) and increases gravity well strain near stars, gas giants, and rocky planets based on altitude above their exclusion zones.
+    * **The 6-Second Rule ("Loop of Shame")**: Maintaining $75\%$ throttle inside the blue zone regulates target speed along $v = d / 6.0$ so target ETA stabilizes at $0:06$ down to safe dropout. Approaching faster than $0:05$ ETA triggers `[ SLOW DOWN ]` and gravitational overshoot.
+    * **Exclusion Zone Collisions**: Swept ray-sphere intersection against body exclusion zones (or manual drop at $\ge 1,000\text{ km/s}$) triggers an immediate **Emergency Dropout**:
+      * Shields are completely depleted (`Ship::DepleteShieldsForEmergencyDrop`) to absorb the impact shock.
+      * Hull takes $10\%$ damage **only** if shields were already down or unequipped.
+      * Ship suffers a $92\%$ thermal heat spike and a 25-second FSD emergency cooldown.
+  * [x] **Frame Transitions & Safe Disengage / Drop-Out Logic (`src/Body.cpp`, `src/ship/SupercruiseController.cpp`)**:
+    * **Reference Frame Handling**: While in Supercruise, `Body::UpdateFrame()` loops frame exits and skips rotating surface frames and $20\text{ km}$ orbital station frames.
+    * **Safe Disengage Criteria**: Active when target distance $\le 1,000\text{ km}$ and speed $\le 1,000\text{ km/s}$.
+    * **Orbital Station Drop-In**: Switches to the station's local frame at $12\text{ km}$ distance facing the station with zero relative velocity.
+    * **Surface Starport Drop-In**: Switches to the planet's rotating frame at $10\text{ km}$ altitude and $8\text{ km}$ horizontal standoff facing the surface base with zero relative velocity.
+    * **Deep Space Manual Drop**: Drops into normal flight at zero relative velocity in the current parent frame.
+  * [x] **Autopilot & "Supercruise Assist" (Autopilot Mk 2) (`src/Ship-AI.cpp`, `data/modules/Equipment/Internal.lua`)**:
+    * Standard `misc.autopilot` (`Autopilot Mk 1`) is restricted to sub-light docking, landing, and local orbital flight ($< 100\text{ km}$).
+    * Added `misc.autopilot_mk2` (**Autopilot Mk 2 / Supercruise Assist**, `autopilot_cap = 2, supercruise_assist_cap = 1`), pre-installed on the Explorer / Pathfinder start profile and purchasable at tech level 4+ stations. Automatically aligns to target, locks throttle to $75\%$ in the blue zone, auto-disengages at safe drop criteria, and hands off to `AIDock` when initiated via "Dock with station".
+  * [x] **Cockpit HUD, 3D Overlays & 1:1 Real-Time Clock (`src/WorldView.cpp`, `src/SpeedLines.cpp`, `src/Game.cpp`, `data/pigui/modules/flight-ui/supercruise.lua`)**:
+    * Added Supercruise HUD gauges (vertical throttle bar with $75\%$ cyan blue zone, dynamic $\text{km/s}, \text{Mm/s}, c$ velocity readout, gravity well strain meter, target distance/ETA panel, dual distance/speed safe-drop alignment bars, FSD charge progress bar, and `[ SAFE DISENGAGE READY ]` / `[ SLOW DOWN ]` alerts).
+    * Projected 3D orbital path ellipses and spherical exclusion zone silhouette rings in `WorldView::Draw3D()`.
+    * Enhanced `SpeedLines.cpp` with double-precision velocity normalization and cyan FTL warp streaks.
+    * Locked in-flight simulation speed to `1x` (1:1 real-time) in `Game::UpdateTimeAccel()` and replaced in-flight time compression buttons in `data/pigui/modules/time-window.lua` with FSD Supercruise & Supercruise Assist controls.
 
 ---
 

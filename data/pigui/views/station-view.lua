@@ -104,9 +104,10 @@ if not stationView then
 	end
 
 	ui.registerHandler("StationView", function(delta_t, refresh)
+		stationView.escapeConsumed = false
 		stationView:renderTabView(refresh)
 
-		if ui.escapeKeyReleased() then
+		if not stationView.escapeConsumed and ui.escapeKeyReleased() then
 			Game.SetView("WorldView")
 		end
 	end)

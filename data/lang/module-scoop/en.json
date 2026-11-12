@@ -73,7 +73,7 @@
   },
   "DOCKING_INSTRUCTION": {
     "description": "",
-    "message": "Nice to meet you. Please approach to within 100m to complete the cargo transfer!"
+    "message": "Nice to meet you. Please approach to within 100 m to complete the cargo transfer!"
   },
   "FAILURE_MSG_ARMS_DEALER": {
     "description": "",
@@ -105,7 +105,7 @@
   },
   "INTROTEXT_ARMS_DEALER": {
     "description": "",
-    "message": "Hello Commander. My name is {client}. It would be great if you could help me out. An unreliable freighter captain dropped my cargo near {planet} and has disappeared since. Your task would be to pick up one container and deliver it to ship {shipid} in orbit around {star}. I would pay you {cash}."
+    "message": "Hello Commander. My name is {client}. It would be great if you could help me out. An unreliable freighter captain dropped my cargo near {planet} and has since disappeared. Your task would be to pick up one container and deliver it to ship {shipid} in orbit around {star}. I would pay you {cash}."
   },
   "INTROTEXT_ILLEGAL_GOODS": {
     "description": "",
@@ -113,7 +113,7 @@
   },
   "INTROTEXT_LEGAL_GOODS": {
     "description": "",
-    "message": "Hello my friend. I'm {client}. I heard about a cargo hauler that got into trouble near {planet} because of bad ship maintenance. Amazing who gets to fly a spaceship these days, isn't it? Anyway, they had to dump a lot of the cargo. If you're quick, you can grab the cargo very easily! This info is as good as new! I'll sell you the coordinates for lousy {cash}. What do you say?"
+    "message": "Hello my friend. I'm {client}. I heard about a cargo hauler that got into trouble near {planet} because of bad ship maintenance. Amazing who gets to fly a spaceship these days, isn't it? Anyway, they had to dump a lot of the cargo. If you're quick, you can grab the cargo very easily! This info is as good as new! I'll sell you the coordinates for a measly {cash}. What do you say?"
   },
   "INTROTEXT_RESCUE": {
     "description": "",

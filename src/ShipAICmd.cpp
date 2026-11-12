@@ -1382,6 +1382,7 @@ bool AICmdDock::TimeStepUpdate()
 		return false;
 	case Ship::JUMPING:
 	case Ship::HYPERSPACE:
+	case Ship::SUPERCRUISE:
 		return false;
 	case Ship::FLYING:
 		break;

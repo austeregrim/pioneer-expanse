@@ -161,7 +161,7 @@
   },
   "FLAVOUR_4_FAILUREMSG": {
     "description": "",
-    "message": "Your ship registration has been noted, we will reject all further applications for work from you."
+    "message": "Your ship registration has been noted; we will reject all further applications for work from you."
   },
   "FLAVOUR_4_INTROTEXT": {
     "description": "",
@@ -261,7 +261,7 @@
   },
   "FLAVOUR_8_INTROTEXT": {
     "description": "",
-    "message": "My name is {name} and I need this item delivered to a friend at {starport} pronto, I'll pay you {cash} credits if you get it there in a reasonable time."
+    "message": "My name is {name} and I need this item delivered to a friend at {starport} pronto; I'll pay you {cash} if you get it there in a reasonable time."
   },
   "FLAVOUR_8_SUCCESSMSG": {
     "description": "",

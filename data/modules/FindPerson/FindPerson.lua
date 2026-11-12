@@ -19,6 +19,7 @@ local NameGen = require 'NameGen'
 local Ship = require 'Ship'
 local utils = require 'utils'
 local PlayerState = require 'PlayerState'
+local FactionStanding = require 'FactionStanding'
 
 local MissionUtils = require 'modules.MissionUtils'
 local ShipBuilder = require 'modules.MissionUtils.ShipBuilder'
@@ -151,10 +152,12 @@ local onChat = function (form, ref, option)
 			interceptor = nil,
 			domicile    = ad.domicile,
 			introtext   = ad.introtext,
-			flavour     = ad.flavour,
-			risk        = ad.risk,
-			reward      = ad.reward,
-			due         = ad.due,
+			flavour         = ad.flavour,
+			risk            = ad.risk,
+			reward          = ad.reward,
+			due             = ad.due,
+			factionName     = ad.factionName,
+			destFactionName = ad.destFactionName,
 		}
 		table.insert(missions, Mission.New(mission))
 		mission.wanted:Save() -- make the character available for other scripts
@@ -224,25 +227,38 @@ local makeAdvert = function (station)
 	local introtext = "INTROTEXT_" .. flavour.id .. gender
 	local intro_number = Engine.rand:Integer(1, MissionUtils.getNumberOfFlavours(l, introtext))
 	local isfamily = isfamily[flavour_number][intro_number]
+	local issuingFaction = MissionUtils.GetSystemFactionName()
+	local destFaction = MissionUtils.GetSystemFactionName(location)
+	local company = flavour.company and string.interp(l["COMPANY_" .. Engine.rand:Integer(1, MissionUtils.getNumberOfFlavours(l, "COMPANY"))], { name = NameGen.Surname() }) or nil
+	reward = MissionUtils.ApplyFactionReward(reward, issuingFaction)
+
+	local clientRole = "civilian"
+	if flavour.company then
+		clientRole = (flavour.id == "TRAITOR") and "broker" or "logistics"
+	elseif flavour.id == "PRIVATEER" then
+		clientRole = "mercenary"
+	end
 
 	local ad = {
-		station   = station,
-		domicile  = station.path,
-		introtext = l[introtext .. "_" .. intro_number],
-		flavour   = flavour,
-		client    = Character.New(),
-		wanted    = Character.New({ female = female }),
-		employee  = employee,
-		friend    = friend,
-		relative  = relative,
-		company   = flavour.company and string.interp(l["COMPANY_" .. Engine.rand:Integer(1, MissionUtils.getNumberOfFlavours(l, "COMPANY"))], { name = NameGen.Surname() }) or nil,
-		location  = location,
-		shipid    = flavour.ship and Ship.MakeRandomLabel() or nil,
-		dist      = dist,
-		due       = utils.round(due, 3600),
-		risk      = risk,
-		urgency   = urgency,
-		reward    = utils.round(reward, 100),
+		station         = station,
+		domicile        = station.path,
+		introtext       = l[introtext .. "_" .. intro_number],
+		flavour         = flavour,
+		client          = Character.New({ role = clientRole, org = company }),
+		wanted          = Character.New({ female = female }),
+		employee        = employee,
+		friend          = friend,
+		relative        = relative,
+		company         = company,
+		location        = location,
+		shipid          = flavour.ship and Ship.MakeRandomLabel() or nil,
+		dist            = dist,
+		due             = utils.round(due, 3600),
+		risk            = risk,
+		urgency         = urgency,
+		reward          = utils.round(reward, 100),
+		factionName     = issuingFaction,
+		destFactionName = destFaction,
 	}
 
 	-- 'wanted' is likely to have the same surname as 'client' if they are related.
@@ -420,10 +436,12 @@ local onPlayerDocked = function (player, station)
 					Comms.ImportantMessage(msg, mission.client.name)
 					Character.persistent.player.reputation = Character.persistent.player.reputation + reputation
 					PlayerState.AddMoney(mission.reward)
+					FactionStanding.ApplyMissionOutcome(mission.factionName, 3, mission.destFactionName, "Missing person contract completed")
 				else
 					msg = string.interp(l["FAILUREMSG_" .. Engine.rand:Integer(1, MissionUtils.getNumberOfFlavours(l, "FAILUREMSG"))], { wanted = mission.wanted.name })
 					Comms.ImportantMessage(msg, mission.client.name)
 					Character.persistent.player.reputation = Character.persistent.player.reputation - reputation
+					FactionStanding.Adjust(mission.factionName, -3, "Missing person contract failed")
 				end
 				if mission.flavour.taxi then
 					Passengers.DisembarkPassenger(player, mission.wanted)

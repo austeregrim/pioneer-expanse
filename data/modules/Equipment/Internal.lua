@@ -24,6 +24,14 @@ Equipment.Register("misc.autopilot", EquipType.New {
 	icon_name="equip_autopilot"
 })
 
+Equipment.Register("misc.autopilot_mk2", EquipType.New {
+	l10n_key="AUTOPILOT_MK2",
+	price=4800, purchasable=true, tech_level=4,
+	slot = { type="computer.autopilot", size=1 },
+	mass=0.3, volume=0.5, capabilities = { set_speed=1, autopilot=2, supercruise_assist=1 },
+	icon_name="equip_autopilot"
+})
+
 Equipment.Register("misc.trade_computer", EquipType.New {
 	l10n_key="TRADE_COMPUTER",
 	price=400, purchasable=true, tech_level=9,

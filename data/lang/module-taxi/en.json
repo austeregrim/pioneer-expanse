@@ -313,7 +313,7 @@
   },
   "FLAVOUR_2_WHYSOMUCH": {
     "description": "",
-    "message": "It's normal business trip."
+    "message": "It's a normal business trip."
   },
   "FLAVOUR_3_ADTEXT": {
     "description": "",
@@ -421,7 +421,7 @@
   },
   "FLAVOUR_5_WHYSOMUCH": {
     "description": "",
-    "message": "Didn't you know - I'm a well known dream star."
+    "message": "Didn't you know - I'm a well-known dream star."
   },
   "FLAVOUR_6_ADTEXT": {
     "description": "",
@@ -585,7 +585,7 @@
   },
   "HOW_SOON_YOU_MUST_BE_THERE": {
     "description": "",
-    "message": "How soon you must be there?"
+    "message": "How soon must you be there?"
   },
   "I_MUST_BE_THERE_BEFORE": {
     "description": "",

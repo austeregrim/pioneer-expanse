@@ -23,6 +23,10 @@
     "description": "",
     "message": "After trade-in"
   },
+  "ALL": {
+    "description": "Filter option showing all bulletin board listings",
+    "message": "All"
+  },
   "ALLEGIANCE": {
     "description": "",
     "message": "Allegiance:"
@@ -94,6 +98,14 @@
   "BACKWARD_ACCEL": {
     "description": "",
     "message": "Backward acceleration"
+  },
+  "BBS_FILTER_HINT": {
+    "description": "Placeholder text for bulletin board filter input",
+    "message": "Filter listings..."
+  },
+  "BBS_STANDBY_HINT": {
+    "description": "Shown in the bulletin board comms panel when no listing is selected",
+    "message": "Select a listing to open an encrypted comms channel."
   },
   "BINAURAL_RENDERING": {
     "description": "Label of the binaural rendering checkbox in the audio settings menu",
@@ -203,6 +215,14 @@
     "description": "",
     "message": "Case-sensitive"
   },
+  "CATEGORY_SERVICES": {
+    "description": "Bulletin board category filter for services and local notices",
+    "message": "Services"
+  },
+  "CATEGORY_TRADE": {
+    "description": "Bulletin board category filter for trade and equipment offers",
+    "message": "Trade"
+  },
   "CASH": {
     "description": "",
     "message": "Cash"
@@ -290,6 +310,26 @@
   "COMMANDER": {
     "description": "",
     "message": "Commander"
+  },
+  "COMMS_CHANNEL_OPEN": {
+    "description": "Status indicator when an encrypted bulletin board comms link is open",
+    "message": "CHANNEL OPEN"
+  },
+  "COMMS_DECRYPTING": {
+    "description": "Status indicator while incoming comms payload is decrypting with private key",
+    "message": "DECRYPTING [PRIVKEY]"
+  },
+  "COMMS_HANDSHAKE": {
+    "description": "Status indicator during brief encrypted comms handshake",
+    "message": "HANDSHAKE"
+  },
+  "COMMS_PROTOCOL": {
+    "description": "Fictional post-quantum encryption protocol label for private comms",
+    "message": "QKD-KEM-4096 // PRIVKEY"
+  },
+  "COMMS_STANDBY": {
+    "description": "Header shown in bulletin board comms panel when idle",
+    "message": "COMMS // STANDBY"
   },
   "COMMODITY": {
     "description": "Title for commodity name column in commodity market",
@@ -616,8 +656,16 @@
     "message": "Enable joystick"
   },
   "END_GAME": {
-    "description": "",
-    "message": "End Game"
+    "description": "Button in the pause menu that ends the current game session and returns to the main menu",
+    "message": "Main Menu"
+  },
+  "END_GAME_CONFIRM_PROMPT": {
+    "description": "Confirmation prompt shown when returning to the main menu from the in-game pause menu",
+    "message": "End the current game and return to the main menu? Any unsaved progress will be lost."
+  },
+  "END_GAME_TOOLTIP": {
+    "description": "Tooltip for the Main Menu button in the pause menu",
+    "message": "End the current game and return to the main menu. Any unsaved progress will be lost."
   },
   "ENGINEERING": {
     "description": "Engineering skills of crew",
@@ -888,8 +936,8 @@
     "message": "Utilize GPU for certain actions, possibly improving performance."
   },
   "HANG_UP": {
-    "description": "",
-    "message": "Hang up."
+    "description": "Button to end an active comms channel",
+    "message": "End comms"
   },
   "HARMLESS": {
     "description": "Player combat rating",
@@ -2143,6 +2191,14 @@
     "description": "For the checkbox in settings window",
     "message": "Quit confirmation"
   },
+  "QUIT_CONFIRM_PROMPT": {
+    "description": "Confirmation prompt shown when quitting the application from the in-game pause menu",
+    "message": "End the current game and quit to desktop? Any unsaved progress will be lost."
+  },
+  "QUIT_TOOLTIP": {
+    "description": "Tooltip for the Quit button in the pause menu",
+    "message": "End the current game and quit to desktop. Any unsaved progress will be lost."
+  },
   "RANDOM_COLORS": {
     "description": "Paint shop. Randomize colors",
     "message": "Random Colors"
@@ -2459,6 +2515,18 @@
     "description": "Button tooltip indicating whether to show autosave files",
     "message": "Show Autosaves"
   },
+  "SIG_PROTOCOL": {
+    "description": "Post-quantum digital signature protocol badge for station public market feeds",
+    "message": "ML-DSA-87 // PUBKEY"
+  },
+  "SIG_VERIFIED": {
+    "description": "Status indicator when station public-key signature is verified",
+    "message": "STATION PUBKEY VERIFIED"
+  },
+  "SIG_VERIFYING": {
+    "description": "Status indicator during 0.3s station public-key signature verification",
+    "message": "VERIFYING STATION PUBKEY SIGNATURE..."
+  },
   "SIMULATING_UNIVERSE_EVOLUTION_N_BYEARS": {
     "description": "",
     "message": "Simulating evolution of the universe: {age} billion years ;-)"
@@ -2467,9 +2535,17 @@
     "description": "Diagnostics at game start",
     "message": "Some parameters are not OK:"
   },
+  "SORT_BY": {
+    "description": "Label before sort mode selector",
+    "message": "Sort:"
+  },
   "SORT_COMMODITY": {
     "description": "Indicates the list of objects should be sorted by commodity",
     "message": "Commodity"
+  },
+  "SORT_DEADLINE": {
+    "description": "Sort bulletin board listings by deadline",
+    "message": "Deadline"
   },
   "SORT_DISTANCE": {
     "description": "Indicates the list of objects should be sorted by distance",
@@ -2482,6 +2558,14 @@
   "SORT_NAME": {
     "description": "Indicates the list of objects should be sorted by name",
     "message": "Name"
+  },
+  "SORT_REWARD": {
+    "description": "Sort bulletin board listings by reward payout",
+    "message": "Reward"
+  },
+  "SORT_TITLE": {
+    "description": "Sort bulletin board listings by title",
+    "message": "Title"
   },
   "SOUND": {
     "description": "",

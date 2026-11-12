@@ -12,7 +12,7 @@ Always consult this plan when implementing features across any phase:
 * **Phase 2: UI Density, Aesthetic Polish, Content Curation & Start Profiles** — Completed (`1920x1080` UI scale baseline, tighter typography/padding, procedural `facegen` and sliders replaced with non-customizable corporate/faction/authority SVG logos, Allegiance + Career Role new game starts, joke modules removed).
 * **Phase 3: Navigation & Map Quality of Life (QoL)** — Next Up (direct list targeting, station filters, cross-system destination retention across hyperspace jumps).
 * **Phase 4: Macro Galactic View** — Completed (Continuous 3D zoom out to $100,000\text{ ly}$ Milky Way disc + 3D volumetric star cloud/core glow, polar coordinate grid rings, sharp Voronoi faction boundaries, interactive raycast panning, and contextual adaptive faction dossier sidebar).
-* **Phase 5: In-System FTL Supercruise Flight Mechanics** — Elite-style Supercruise mode ($30\text{ km/s}$ to $2,001c$), mass lock/drag, safe disengage dropout.
+* **Phase 5: In-System FTL Supercruise Flight Mechanics** — Completed (*Elite Dangerous*-style Supercruise mode from $30\text{ km/s}$ to $2,001c$, 5s FSD charge-up, mass lock/gravity well drag, 75% blue-zone 6-second rule, exclusion zone emergency dropout with shield overload & heat spike, safe disengage orbital/surface drop-ins, Autopilot Mk 2 Supercruise Assist, 3D orbital/exclusion rings, and 1:1 real-time flight clock enforcement).
 * **Phase 6: Real-Time Mission Economy & Station "Pass Time" Service** — Rebalance mission deadlines/payouts for Supercruise real-time play, station "Pass Time" service.
 
 ---

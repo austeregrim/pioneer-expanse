@@ -35,6 +35,7 @@ class NavLights;
 class Planet;
 class Sensors;
 class ShipController;
+class SupercruiseController;
 class Space;
 class GunManager;
 
@@ -142,7 +143,11 @@ public:
 		LANDED,		   // rough landed (not docked)
 		JUMPING,	   // between space and hyperspace ;)
 		HYPERSPACE,	   // in hyperspace
+		SUPERCRUISE,   // in-system FTL supercruise
 	};
+
+	SupercruiseController *GetSupercruise() const { return m_supercruise.get(); }
+	void DepleteShieldsForEmergencyDrop(float cooldownTime);
 
 	// vector3d CalcAtmoPassiveControl() const;
 	vector3d CalcAtmoTorque() const;
@@ -169,14 +174,21 @@ public:
 		HYPERJUMP_DRIVE_ACTIVE,
 		HYPERJUMP_OUT_OF_RANGE,
 		HYPERJUMP_INSUFFICIENT_FUEL,
-		HYPERJUMP_SAFETY_LOCKOUT
+		HYPERJUMP_SAFETY_LOCKOUT,
+		HYPERJUMP_OBSCURED
 	};
+
+	static constexpr double HYPERJUMP_ALIGN_MAX_ANGLE_DEG = 8.0;
 
 	Ship::HyperjumpStatus CheckHyperjumpCapability() const;
 	virtual Ship::HyperjumpStatus InitiateHyperjumpTo(const SystemPath &dest, int warmup_time, double duration, const HyperdriveSoundsTable &sounds, LuaRef checks);
 	virtual void AbortHyperjump();
 	float GetHyperspaceCountdown() const { return m_hyperspace.countdown; }
 	bool IsHyperspaceActive() const { return (m_hyperspace.countdown > 0.0); }
+	bool IsHyperspaceWaitingForAlign() const { return (m_hyperspace.countdown > 0.0f && m_hyperspace.waitingForAlign); }
+	bool GetHyperspaceTargetDirection(const SystemPath &dest, vector3d &outDirInShipFrame) const;
+	bool IsHyperspaceTargetAligned(const SystemPath &dest, double *outAngleDeg = nullptr) const;
+	const Body *GetHyperspaceTargetObscuredBy(const SystemPath &dest) const;
 
 	// 0 to 1.0 is alive, > 1.0 = death
 	double GetHullTemperature() const;
@@ -285,6 +297,7 @@ protected:
 		// > 0 means active
 		float countdown;
 		bool now;
+		bool waitingForAlign;
 		double duration;
 		LuaRef checks; // A Lua function to check all the conditions before the jump
 		HyperdriveSoundsTable sounds;
@@ -361,6 +374,7 @@ private:
 
 	SceneGraph::Animation *m_landingGearAnimation;
 	std::unique_ptr<NavLights> m_navLights;
+	std::unique_ptr<SupercruiseController> m_supercruise;
 
 	std::unique_ptr<Sensors> m_sensors;
 	std::unordered_map<Body *, Uint8> m_relationsMap;

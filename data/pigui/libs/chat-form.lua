@@ -13,8 +13,22 @@ local Color = _G.Color
 local ui = require 'pigui'
 local pionillium = ui.fonts.pionillium
 local orbiteer = ui.fonts.orbiteer
+local colors = ui.theme.colors
+local icons = ui.theme.icons
 
 local l = Lang.GetResource("ui-core")
+
+local DECRYPT_DURATION = 0.30
+local REPLY_DECRYPT_DURATION = 0.16
+local CIPHER_GLYPHS = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F", "#", "@", "%", "&", "*" }
+
+local function splitUtf8Chars(str)
+	local chars = {}
+	for ch in string.gmatch(str, "[\0-\127\194-\244][\128-\191]*") do
+		chars[#chars + 1] = ch
+	end
+	return chars
+end
 
 local ChatForm = {}
 
@@ -26,6 +40,7 @@ ChatForm.meta = {
 function ChatForm.New (chatFunc, removeFunc, closeFunc, resizeFunc, ref, tabGroup, style)
 	style = style or {}
 	style.face = style.face or {}
+	local now = ui.getTime()
 	local form = {
 		chatFunc = chatFunc,
 		removeFunc = removeFunc,
@@ -35,21 +50,28 @@ function ChatForm.New (chatFunc, removeFunc, closeFunc, resizeFunc, ref, tabGrou
 		tabGroup = tabGroup,
 		market = nil,
 		navButton = function() end,
+		openTime = now,
+		messageStartTime = now,
+		initialReveal = true,
+		messageChars = {},
 		style = {
 			face = {
-				size = style.face.size or ui.rescaleUI(Vector2(136, 136), Vector2(1920, 1080)),
+				size = style.face.size or ui.rescaleUI(Vector2(220, 296), Vector2(1920, 1080)),
 				windowPadding = style.face.windowPadding or ui.rescaleUI(Vector2(4, 4), Vector2(1920, 1080)),
 				itemSpacing = style.face.itemSpacing or ui.rescaleUI(Vector2(4, 4), Vector2(1920, 1080)),
 				showCharInfo = style.face.showCharInfo == nil and true or style.face.showCharInfo,
-				charInfoPadding = style.face.charInfoPadding or ui.rescaleUI(Vector2(6, 4), Vector2(1920, 1080)),
+				charInfoPadding = style.face.charInfoPadding or ui.rescaleUI(Vector2(8, 5), Vector2(1920, 1080)),
 				charInfoBgColor = style.face.bgColor or Color(8, 11, 16, 225),
-				nameFont = style.face.nameFont or orbiteer.small,
-				titleFont = style.face.titleFont or pionillium.tiny,
+				orgFont = style.face.orgFont or pionillium.medium,
+				nameFont = style.face.nameFont or orbiteer.medium,
+				titleFont = style.face.titleFont or pionillium.details,
 			},
 			buttonSize = style.buttonSize or ui.rescaleUI(Vector2(240, 22), Vector2(1920, 1080)),
 			titleFont = style.titleFont or orbiteer.heading,
 			font = style.font or pionillium.body,
-			marketSize = style.marketSize or ui.rescaleUI(Vector2(1080, 420), Vector2(1920, 1080))
+			marketSize = style.marketSize or ui.rescaleUI(Vector2(1080, 420), Vector2(1920, 1080)),
+			fitMarketToPanel = style.fitMarketToPanel or false,
+			showCommsHeader = style.showCommsHeader == nil and true or style.showCommsHeader,
 		},
 	}
 	-- So that the font at least fits in the button in height
@@ -59,10 +81,88 @@ function ChatForm.New (chatFunc, removeFunc, closeFunc, resizeFunc, ref, tabGrou
 	return form
 end
 
+function ChatForm:getDecryptedMessage (now)
+	if not self.message or self.message == "" then
+		return self.message, 1
+	end
+
+	local chars = self.messageChars
+	local total = #chars
+	if total == 0 then
+		return self.message, 1
+	end
+
+	local revealStart = self.initialReveal and self.openTime or self.messageStartTime
+	local duration = self.initialReveal and DECRYPT_DURATION or REPLY_DECRYPT_DURATION
+	local progress = math.clamp((now - revealStart) / duration, 0, 1)
+	if progress >= 1 then
+		self.initialReveal = false
+		return self.message, 1
+	end
+
+	local tick = math.floor(now * 55)
+	local buf = {}
+
+	for i = 1, total do
+		local ch = chars[i]
+		if ch == "\n" or ch == " " or ch == "\t" then
+			buf[i] = ch
+		else
+			local threshold = (i / total) * 0.72 + ((i * 37) % 13) / 50
+			if progress >= threshold then
+				buf[i] = ch
+			else
+				buf[i] = CIPHER_GLYPHS[((i * 7 + tick) % #CIPHER_GLYPHS) + 1]
+			end
+		end
+	end
+
+	return table.concat(buf), progress
+end
+
+function ChatForm:renderCommsHeader (decryptProgress)
+	local statusLabel = l.COMMS_CHANNEL_OPEN
+	local statusColor = colors.econMajorImport or colors.font
+
+	if decryptProgress < 1 then
+		statusLabel = l.COMMS_DECRYPTING
+		statusColor = colors.maneuver or colors.font
+	end
+
+	ui.withFont(pionillium.details, function()
+		local lineH = ui.getTextLineHeight()
+		ui.icon(icons.comms, Vector2(lineH), statusColor)
+		ui.sameLine()
+		ui.textColored(statusColor, statusLabel)
+		ui.sameLine()
+		local protoText = l.COMMS_PROTOCOL
+		local avail = ui.getContentRegion().x
+		local protoW = ui.calcTextSize(protoText).x
+		if avail > protoW then
+			ui.addCursorPos(Vector2(avail - protoW, 0))
+		end
+		ui.textColored(colors.fontDim, protoText)
+	end)
+
+	local barStart = ui.getCursorScreenPos()
+	local barWidth = ui.getContentRegion().x
+	local barHeight = math.max(2, ui.rescaleUI(Vector2(0, 2), Vector2(1920, 1080)).y)
+	ui.addRectFilled(barStart, barStart + Vector2(barWidth, barHeight), colors.tableBackground, 0, ui.RoundCornersNone)
+	if barWidth > 0 then
+		ui.addRectFilled(barStart, barStart + Vector2(barWidth * decryptProgress, barHeight), statusColor, 0, ui.RoundCornersNone)
+	end
+	ui.dummy(Vector2(0, barHeight + ui.rescaleUI(Vector2(0, 6), Vector2(1920, 1080)).y))
+end
+
 function ChatForm:render ()
+	local now = ui.getTime()
+	local displayMessage, decryptProgress = self:getDecryptedMessage(now)
+
 	ui.withFont(self.style.font.name, self.style.font.size, function()
-		if not self.style.contentWidth then
-			self.style.contentWidth = ui.getContentRegion().x
+		self.style.contentWidth = ui.getContentRegion().x
+
+		if self.style.showCommsHeader then
+			self:renderCommsHeader(decryptProgress)
 		end
 
 		if self.title then
@@ -77,21 +177,19 @@ function ChatForm:render ()
 			self.face:render()
 		end
 
-		if self.message then
+		if displayMessage then
 			ui.text('')
 			ui.pushTextWrapPos(self.style.contentWidth)
-			ui.textWrapped(self.message)
+			ui.textWrapped(displayMessage)
 			ui.popTextWrapPos()
 			ui.text('')
 		end
 
-		if self.style.buttonSize.x <= 0 then
-			self.style.buttonSize.x = self.style.contentWidth
-		end
+		local btnSize = self:getButtonSize()
 
 		if self.options then
 			for _, option in ipairs(self.options) do
-				if ui.button(option[1], self.style.buttonSize) then
+				if ui.button(option[1], btnSize) then
 					if (option[2] == -1) then
 						self:Close()
 					else
@@ -102,15 +200,26 @@ function ChatForm:render ()
 		end
 
 		if self.market then
-			self.market:Render(self.style.marketSize)
+			local mSize = self.style.fitMarketToPanel
+				and Vector2(self.style.contentWidth, self.style.marketSize.y)
+				or self.style.marketSize
+			self.market:Render(mSize)
 		end
 
 		self.navButton()
 
-		if ui.button(l.HANG_UP, self.style.buttonSize) or ui.escapeKeyReleased(true) then
+		if ui.button(l.HANG_UP, btnSize, ui.theme.buttonColors.danger) or ui.escapeKeyReleased(true) then
+			if self.tabGroup then
+				self.tabGroup.escapeConsumed = true
+			end
 			self:Close()
 		end
 	end)
+end
+
+function ChatForm:getButtonSize ()
+	local w = (self.style.buttonSize.x <= 0 and self.style.contentWidth) or self.style.buttonSize.x
+	return Vector2(w, self.style.buttonSize.y)
 end
 
 function ChatForm:SetTitle (title)
@@ -127,6 +236,8 @@ end
 
 function ChatForm:SetMessage (message)
 	self.message = message
+	self.messageChars = message and splitUtf8Chars(message) or {}
+	self.messageStartTime = ui.getTime()
 end
 
 function ChatForm:AddOption (text, option)
@@ -137,6 +248,7 @@ end
 function ChatForm:Clear ()
 	self.title = nil
 	self.message = nil
+	self.messageChars = {}
 	self.options = nil
 	self.tradeFuncs = nil
 	self.market = nil
@@ -164,7 +276,7 @@ end
 
 function ChatForm:AddNavButton (target)
 	self.navButton = function()
-		if ui.button(l.SET_AS_TARGET, self.style.buttonSize) then
+		if ui.button(l.SET_AS_TARGET, self:getButtonSize()) then
 			if target:isa("Body") and target:IsDynamic() then
 				Game.player:SetNavTarget(target)
 				ui.playSfx("OK")

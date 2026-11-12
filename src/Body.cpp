@@ -324,22 +324,43 @@ void Body::UpdateFrame()
 {
 	if (!(m_flags & FLAG_CAN_MOVE_FRAME)) return;
 
+	const bool inSupercruise = IsType(ObjectType::SHIP) &&
+		(static_cast<const Ship *>(this)->GetFlightState() == Ship::SUPERCRUISE);
+
 	const Frame *frame = Frame::GetFrame(m_frame);
 
-	// falling out of frames
-	if (frame->GetRadius() < GetPosition().Length()) {
-		FrameId parent = frame->GetParent();
-		Frame *newFrame = Frame::GetFrame(parent);
-		if (newFrame) { // don't fall out of root frame
-			Log::Verbose("{} leaves frame{}\n", GetLabel(), frame->GetLabel());
-			SwitchToFrame(parent);
-			return;
+	// falling out of frames (loop in Supercruise in case FTL speed crosses multiple nested frames in 1 step)
+	bool fellOut = false;
+	while (frame) {
+		const bool invalidForSupercruise = inSupercruise &&
+			(frame->IsRotFrame() || (frame->GetBody() && frame->GetBody()->IsType(ObjectType::SPACESTATION)));
+		if (frame->GetRadius() < GetPosition().Length() || invalidForSupercruise) {
+			FrameId parent = frame->GetParent();
+			Frame *newFrame = Frame::GetFrame(parent);
+			if (newFrame) { // don't fall out of root frame
+				Log::Verbose("{} leaves frame{}\n", GetLabel(), frame->GetLabel());
+				SwitchToFrame(parent);
+				frame = Frame::GetFrame(m_frame);
+				fellOut = true;
+				if (!inSupercruise)
+					return;
+				continue;
+			}
 		}
+		break;
 	}
+	if (fellOut && !inSupercruise)
+		return;
 
 	// entering into frames
 	for (FrameId kid : frame->GetChildren()) {
 		Frame *kid_frame = Frame::GetFrame(kid);
+		if (inSupercruise) {
+			if (kid_frame->IsRotFrame())
+				continue;
+			if (kid_frame->GetBody() && kid_frame->GetBody()->IsType(ObjectType::SPACESTATION))
+				continue;
+		}
 		const vector3d pos = GetPositionRelTo(kid);
 		if (pos.Length() >= kid_frame->GetRadius()) continue;
 		SwitchToFrame(kid);

@@ -12,6 +12,7 @@
 #include "Pi.h"
 #include "SectorView.h"
 #include "Sfx.h"
+#include "Space.h"
 #include "SpaceStation.h"
 #include "StringF.h"
 #include "SystemView.h" // for the transfer planner
@@ -21,6 +22,7 @@
 #include "pigui/LuaPiGui.h"
 #include "ship/PlayerShipController.h"
 #include "ship/ShipController.h"
+#include "ship/SupercruiseController.h"
 #include "sound/Sound.h"
 
 //Some player specific sounds
@@ -279,6 +281,27 @@ void Player::ChangeCruiseSpeed(double delta)
 
 Ship::HyperjumpStatus Player::InitiateHyperjumpTo(const SystemPath &dest, int warmup_time, double duration, const HyperdriveSoundsTable &sounds, LuaRef checks)
 {
+	if (!dest.HasValidSystem() || (GetFlightState() != FLYING && GetFlightState() != SUPERCRUISE) || warmup_time < 1)
+		return HYPERJUMP_SAFETY_LOCKOUT;
+
+	if (Pi::game && Pi::game->GetSpace()) {
+		StarSystem *s = Pi::game->GetSpace()->GetStarSystem().Get();
+		if (s && s->GetPath().IsSameSystem(dest))
+			return HYPERJUMP_CURRENT_SYSTEM;
+	}
+
+	if (const Body *blocker = GetHyperspaceTargetObscuredBy(dest)) {
+		if (SupercruiseController *sc = GetSupercruise())
+			sc->ShowStatusMessage("HYPERJUMP BLOCKED: TARGET OBSCURED BY " + blocker->GetLabel(), 4.5f);
+		Sound::BodyMakeNoise(this, "warning", 0.5f);
+		return HYPERJUMP_OBSCURED;
+	}
+
+	if (SupercruiseController *sc = GetSupercruise()) {
+		if (sc->IsCharging())
+			sc->AbortCharge("HYPERJUMP FSD CHARGING");
+	}
+
 	HyperjumpStatus status = Ship::InitiateHyperjumpTo(dest, warmup_time, duration, sounds, checks);
 
 	if (status == HYPERJUMP_OK)

@@ -48,6 +48,7 @@ local Timer = require 'Timer'
 local Rand = require 'Rand'
 local ModelSkin = require 'SceneGraph.ModelSkin'
 local PlayerState = require 'PlayerState'
+local FactionStanding = require 'FactionStanding'
 
 local MissionUtils = require 'modules.MissionUtils'
 local ShipBuilder  = require 'modules.MissionUtils.ShipBuilder'
@@ -291,7 +292,12 @@ local getAircontrolChar = function (station)
 	if aircontrol_chars[station.path] then
 		return aircontrol_chars[station.path]
 	else
-		local char = Character.New({ role = "rescue", title = "Search & Rescue Control" })
+		local char = Character.New({
+			role = "rescue",
+			org = station.label .. " Rescue Control",
+			factionName = MissionUtils.GetSystemFactionName(),
+			title = "Search & Rescue Control",
+		})
 		aircontrol_chars[station.path] = char
 		return char
 	end
@@ -799,6 +805,7 @@ local onChat = function (form, ref, option)
 			destination        = ad.location,
 			due                = ad.due,
 			reward             = ad.reward,
+			factionName        = ad.factionName,
 			status             = "ACTIVE",
 
 			-- these variables are script specific
@@ -1276,7 +1283,9 @@ local makeAdvert = function (station, manualFlavour, closestplanets)
 	end
 
 	-- calculate the reward
+	local issuingFaction = MissionUtils.GetSystemFactionName()
 	local reward = calcReward(flavour, pickup_crew, pickup_pass, pickup_comm, deliver_crew, deliver_pass, deliver_comm)
+	reward = MissionUtils.ApplyFactionReward(reward, issuingFaction)
 	reward = utils.round(reward, 100)
 
 	local ad = {
@@ -1296,6 +1305,7 @@ local makeAdvert = function (station, manualFlavour, closestplanets)
 		due	           = due,
 		urgency	       = urgency,
 		reward         = reward,
+		factionName    = issuingFaction,
 		shipid         = shipdef.id,
 		crew_num       = crew_num,
 		pickup_crew    = pickup_crew,
@@ -1389,6 +1399,7 @@ local closeMission = function (mission)
 	if Game.time > mission.due then
 		Comms.ImportantMessage(mission.flavour.failuremsg)
 		Character.persistent.player.reputation = Character.persistent.player.reputation - delta_reputation
+		FactionStanding.Adjust(mission.factionName, -4, "Rescue contract overdue")
 		Event.Queue("onReputationChanged", oldReputation, Character.persistent.player.killcount,
 		            Character.persistent.player.reputation, Character.persistent.player.killcount)
 		removeMission(mission)
@@ -1399,6 +1410,7 @@ local closeMission = function (mission)
 		if mission.target_destroyed == "BY_PLAYER" then
 			Comms.ImportantMessage(l.PLAYER_DESTROYED_TARGET)
 			Character.persistent.player.reputation = Character.persistent.player.reputation - 2*delta_reputation
+			FactionStanding.Adjust(mission.factionName, -15, "Destroyed distress vessel")
 			Event.Queue("onReputationChanged", oldReputation, Character.persistent.player.killcount,
 			            Character.persistent.player.reputation, Character.persistent.player.killcount)
 			removeMission(mission)
@@ -1418,6 +1430,7 @@ local closeMission = function (mission)
 			Comms.ImportantMessage(successtxt)
 			PlayerState.AddMoney(mission.reward)
 			Character.persistent.player.reputation = Character.persistent.player.reputation + delta_reputation
+			FactionStanding.ApplyMissionOutcome(mission.factionName, 5, nil, "Search & rescue completed")
 			Event.Queue("onReputationChanged", oldReputation, Character.persistent.player.killcount,
 			            Character.persistent.player.reputation, Character.persistent.player.killcount)
 			removeMission(mission)
@@ -2084,7 +2097,7 @@ local buildMissionDescription = function(mission)
 
 	local desc = {}
 	local dist = Game.system and string.format("%.2f", Game.system:DistanceTo(mission.system_target:GetStarSystem())) or "???"
-	if mission.flavour.loctype ~= "FAR_SPACE" and Game.system then
+	if mission.flavour.loctype ~= "FAR_SPACE" and Game.system and mission.system_target:IsSameSystem(Game.system.path) then
 		dist = ui.Format.Distance(mission.dist)
 	else
 		dist = dist .." ".. lc.UNIT_LY

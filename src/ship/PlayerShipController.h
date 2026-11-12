@@ -40,6 +40,7 @@ public:
 	void ToggleRotationDamping();
 	void FireMissile();
 	void ToggleCruise();
+	void ToggleSupercruise();
 	void SelectTarget();
 	void CycleHostiles();
 
@@ -113,6 +114,7 @@ private:
 		Axis *speedControl;
 		Action *toggleCruise;
 		Action *toggleSpeedLimiter;
+		Action *toggleSupercruise;
 
 		// Landing Controls
 		Action *toggleLandingGear;
@@ -175,6 +177,7 @@ private:
 	ConnectionTicket m_fireMissileKey;
 	ConnectionTicket m_toggleCruise;
 	ConnectionTicket m_toggleSpeedLimiter;
+	ConnectionTicket m_toggleSupercruise;
 	ConnectionTicket m_selectTarget;
 	ConnectionTicket m_cycleHostiles;
 	ConnectionTicket m_toggleLandingGear;

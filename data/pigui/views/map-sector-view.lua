@@ -8,6 +8,7 @@ local SystemPath = require 'SystemPath'
 local hyperJumpPlanner = require 'pigui.modules.hyperjump-planner'
 local systemEconView = require 'pigui.modules.system-econ-view'.New()
 local PlayerState    = require 'PlayerState'
+local FactionStanding = require 'FactionStanding'
 
 local BookmarkView = require 'pigui.modules.sidebar.bookmarks'
 
@@ -384,6 +385,12 @@ local function drawMacroGalacticDossier()
 				textIcon(icons.gavel, "Law Enforcement")
 				ui.text("Security: " .. activeFaction.policeName)
 			end
+
+			local standing = FactionStanding.GetInfo(activeFaction)
+			local pct = math.floor((standing.mult - 1.0) * 100 + 0.5)
+			local modStr = pct == 0 and "Standard Pay" or string.format("%+d%% Contract Pay", pct)
+			textIcon(icons.comms, "Faction Standing")
+			ui.text(string.format("Standing: %s (%+d) — %s", standing.label, standing.score, modStr))
 		end)
 
 		if activeFaction.description and #activeFaction.description > 0 then
@@ -1036,7 +1043,8 @@ local function drawEdgeButtons()
 			sectorView:GetMap():SetZoomMode(ui.isItemActive())
 
 			local target = player:GetHyperspaceTarget()
-			local canJump = player:IsHyperjumpAllowed() and target and player:GetFlightState() == "FLYING" and player:CanHyperjumpTo(target)
+			local fs = player:GetFlightState()
+			local canJump = player:IsHyperjumpAllowed() and target and (fs == "FLYING" or fs == "SUPERCRUISE") and player:CanHyperjumpTo(target)
 
 			if not canJump then
 				ui.mainMenuButton(icons.hyperspace, lui.HUD_BUTTON_HYPERDRIVE_DISABLED, ui.theme.buttonColors.disabled)

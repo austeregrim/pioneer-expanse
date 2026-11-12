@@ -10,7 +10,6 @@ local Vector2 = _G.Vector2
 local NewGameWindow = require("pigui.modules.new-game-window.class")
 
 local lui = Lang.GetResource("ui-core")
-local qlc = Lang.GetResource("quitconfirmation-core")
 
 local ui = require 'pigui'
 
@@ -19,26 +18,7 @@ local pionillium = ui.fonts.pionillium
 local orbiteer = ui.fonts.orbiteer
 
 local mainButtonSize = ui.rescaleUI(Vector2(400,46))
-local dialogButtonSize = ui.rescaleUI(Vector2(150,46))
 local mainButtonFont = pionillium.large
-local quitPadding = ui.rescaleUI(Vector2(12, 12))
-
-local showQuitConfirm = false
-local quitConfirmMsg
-local max_flavours = 22
-
-local function dialogTextButton(label, enabled, callback)
-	local variant = not enabled and ui.theme.buttonColors.disabled or nil
-
-	local button
-	ui.withFont(mainButtonFont, function()
-		button = ui.button(label, dialogButtonSize, variant)
-	end)
-	if button then
-		callback()
-	end
-	return button
-end
 
 local function mainTextButton(label, tooltip, enabled, callback)
 	local variant = not enabled and ui.theme.buttonColors.disabled or nil
@@ -53,35 +33,6 @@ local function mainTextButton(label, tooltip, enabled, callback)
 	return button
 end --mainTextButton
 
-local function confirmQuit()
-	ui.setNextWindowPosCenter('Always')
-
-	ui.withStyleColorsAndVars({WindowBg = colors.modalBackground}, {WindowPadding = quitPadding}, function()
-		ui.window("MainMenuQuitConfirm", {"NoTitleBar", "NoResize", "AlwaysAutoResize"}, function()
-			local w = dialogButtonSize.x * 0.6
-			local fullW = w * 3 + dialogButtonSize.x * 2
-
-			ui.withFont(orbiteer.medlarge, function()
-				ui.text(qlc.QUIT)
-			end)
-			ui.withFont(pionillium.medlarge, function()
-				ui.pushTextWrapPos(fullW)
-				ui.textWrapped(quitConfirmMsg)
-				ui.popTextWrapPos()
-			end)
-			ui.dummy(Vector2(5,15)) -- small vertical spacing
-
-			ui.dummy(Vector2(0, 0))
-			ui.sameLine(0, w)
-			dialogTextButton(qlc.YES, true, Engine.Quit)
-			ui.sameLine(0, w)
-			dialogTextButton(qlc.NO, true, function() showQuitConfirm = false end)
-			ui.sameLine(0, w)
-			ui.dummy(Vector2(0, 0))
-		end)
-	end)
-end
-
 local function showOptions()
 	ui.optionsWindow:open()
 end
@@ -91,12 +42,7 @@ local function showAbout()
 end
 
 local function quitGame()
-	if Engine.GetConfirmQuit() then
-		quitConfirmMsg = string.interp(qlc["MSG_" .. Engine.rand:Integer(1, max_flavours)],{yes = qlc.YES, no = qlc.NO})
-		showQuitConfirm = true
-	else
-		Engine.Quit()
-	end
+	Engine.Quit()
 end
 
 local function continueGame()
@@ -190,8 +136,6 @@ local function showMainMenu()
 			mainTextButton(lui.OPTIONS, nil, true, showOptions)
 			mainTextButton(lui.ABOUT, nil, true, showAbout)
 			mainTextButton(lui.QUIT, nil, true, quitGame)
-
-			if showQuitConfirm then confirmQuit() end
 		end)
 	end)
 
