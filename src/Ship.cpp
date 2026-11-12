@@ -180,6 +180,8 @@ Ship::Ship(const ShipType::Id &shipId) :
 	m_hyperspace.countdown = 0;
 	m_hyperspace.now = false;
 	m_hyperspace.waitingForAlign = false;
+	m_hyperspace.jumpSurgeTimer = 0.0f;
+	m_hyperspace.jumpSurgeDuration = 0.0f;
 	m_ecmRecharge = 0;
 	m_shieldCooldown = 0.0f;
 	m_curAICmd = 0;
@@ -253,6 +255,8 @@ Ship::Ship(const Json &jsonObj, Space *space) :
 		Json hyperspaceDestObj = shipObj["hyperspace_destination"];
 		m_hyperspace.dest = SystemPath::FromJson(hyperspaceDestObj);
 		m_hyperspace.countdown = shipObj["hyperspace_countdown"];
+		m_hyperspace.jumpSurgeTimer = shipObj.value("hyperspace_surge_timer", 0.0f);
+		m_hyperspace.jumpSurgeDuration = shipObj.value("hyperspace_surge_duration", 0.0f);
 		m_hyperspace.duration = 0;
 		m_hyperspace.sounds.warmup_sound = shipObj.value("hyperspace_warmup_sound", "");
 		m_hyperspace.sounds.abort_sound = shipObj.value("hyperspace_abort_sound", "");
@@ -300,6 +304,10 @@ Ship::Ship(const Json &jsonObj, Space *space) :
 
 		m_shipName = shipObj["name"].get<std::string>();
 		Properties().Set("shipName", m_shipName);
+		m_wanted = shipObj.value("wanted", false);
+		m_bounty = shipObj.value("bounty", 0.0);
+		Properties().Set("wanted", m_wanted);
+		Properties().Set("bounty", m_bounty);
 	} catch (Json::type_error &) {
 		throw SavedGameCorruptException();
 	}
@@ -342,6 +350,8 @@ void Ship::Init()
 
 	m_hyperspace.now = false; // TODO: move this on next savegame change, maybe
 	m_hyperspace.waitingForAlign = false;
+	m_hyperspace.jumpSurgeTimer = 0.0f;
+	m_hyperspace.jumpSurgeDuration = 0.0f;
 	m_hyperspaceCloud = 0;
 
 	m_landingGearAnimation = GetModel()->FindAnimation("gear_down");
@@ -365,6 +375,7 @@ void Ship::PostLoadFixup(Space *space)
 {
 	DynamicBody::PostLoadFixup(space);
 	m_dockedWith = static_cast<SpaceStation *>(space->GetBodyByIndex(m_dockedWithIndex));
+	if (m_supercruise) m_supercruise->PostLoadFixup(space);
 	if (m_curAICmd) m_curAICmd->PostLoadFixup(space);
 	m_controller->PostLoadFixup(space);
 	m_gunManager->PostLoadFixup(space);
@@ -392,6 +403,8 @@ void Ship::SaveToJson(Json &jsonObj, Space *space)
 	m_hyperspace.dest.ToJson(hyperspaceDestObj);
 	shipObj["hyperspace_destination"] = hyperspaceDestObj; // Add hyperspace destination object to ship object.
 	shipObj["hyperspace_countdown"] = m_hyperspace.countdown;
+	shipObj["hyperspace_surge_timer"] = m_hyperspace.jumpSurgeTimer;
+	shipObj["hyperspace_surge_duration"] = m_hyperspace.jumpSurgeDuration;
 	shipObj["hyperspace_warmup_sound"] = m_hyperspace.sounds.warmup_sound;
 	shipObj["hyperspace_abort_sound"] = m_hyperspace.sounds.abort_sound;
 	shipObj["hyperspace_jump_sound"] = m_hyperspace.sounds.jump_sound;
@@ -411,13 +424,23 @@ void Ship::SaveToJson(Json &jsonObj, Space *space)
 
 	m_navLights->SaveToJson(shipObj);
 	if (m_supercruise)
-		m_supercruise->SaveToJson(shipObj);
+		m_supercruise->SaveToJson(shipObj, space);
 
 	m_shields->SaveToJson(shipObj["shields"]);
 
 	shipObj["name"] = m_shipName;
+	shipObj["wanted"] = m_wanted;
+	shipObj["bounty"] = m_bounty;
 
 	jsonObj["ship"] = shipObj; // Add ship object to supplied object.
+}
+
+void Ship::SetWanted(bool wanted, double bounty)
+{
+	m_wanted = wanted;
+	m_bounty = wanted ? std::max(0.0, bounty) : 0.0;
+	Properties().Set("wanted", m_wanted);
+	Properties().Set("bounty", m_bounty);
 }
 
 void Ship::InitMaterials()
@@ -710,6 +733,12 @@ bool Ship::DoDamage(float kgDamage)
 		if (m_stats.hull_mass_left < 0) {
 			Explode();
 		} else {
+			if (!IsType(ObjectType::PLAYER) && dam > 0.0f && m_supercruise && !m_supercruise->IsFsdOffline()) {
+				const float hullFrac = m_stats.hull_mass_left / float(m_type->hullMass);
+				if (hullFrac < 0.25f && Pi::rng.Double() < 0.35) {
+					m_supercruise->SetFsdOffline(true);
+				}
+			}
 			if (Pi::rng.Double() < dam)
 				SfxManager::Add(this, TYPE_DAMAGE);
 		}
@@ -805,6 +834,8 @@ Ship::HyperjumpStatus Ship::InitiateHyperjumpTo(const SystemPath &dest, int warm
 	m_hyperspace.countdown = warmup_time;
 	m_hyperspace.now = false;
 	m_hyperspace.waitingForAlign = false;
+	m_hyperspace.jumpSurgeTimer = 0.0f;
+	m_hyperspace.jumpSurgeDuration = 0.0f;
 	m_hyperspace.duration = duration;
 	m_hyperspace.checks = checks;
 	m_hyperspace.sounds = sounds;
@@ -817,6 +848,8 @@ void Ship::AbortHyperjump()
 	m_hyperspace.countdown = 0;
 	m_hyperspace.now = false;
 	m_hyperspace.waitingForAlign = false;
+	m_hyperspace.jumpSurgeTimer = 0.0f;
+	m_hyperspace.jumpSurgeDuration = 0.0f;
 	m_hyperspace.duration = 0;
 	m_hyperspace.checks = LuaRef();
 }
@@ -992,6 +1025,7 @@ void Ship::SetFlightState(Ship::FlightState newState)
 		SetMoving(false);
 		SetColliding(false);
 		SetStatic(false);
+		if (m_supercruise) m_supercruise->SetFsdOffline(false);
 		break;
 	case LANDED:
 		SetMoving(false);
@@ -1543,6 +1577,42 @@ void Ship::StaticUpdate(const float timeStep)
 		EnterHyperspace();
 	}
 
+	if (m_flightState == JUMPING && m_hyperspace.jumpSurgeDuration > 0.0f) {
+		m_hyperspace.jumpSurgeTimer += timeStep;
+		const float surgeProgress = Clamp(m_hyperspace.jumpSurgeTimer / m_hyperspace.jumpSurgeDuration, 0.0f, 1.0f);
+
+		// Perform final alignment perfection toward the exact target system vector
+		vector3d targetDirInFrame;
+		if (GetHyperspaceTargetDirection(m_hyperspace.dest, targetDirInFrame) && targetDirInFrame.LengthSqr() > 0.5) {
+			const vector3d fwd = (-GetOrient().VectorZ()).NormalizedSafe();
+			const vector3d axis = fwd.Cross(targetDirInFrame);
+			const double axisLen = axis.Length();
+			const double dot = Clamp(fwd.Dot(targetDirInFrame), -1.0, 1.0);
+			const double angle = std::acos(dot);
+			if (angle > 1e-4 && axisLen > 1e-7) {
+				const double frac = (surgeProgress > 0.75f) ? 1.0 : Clamp(1.0 - std::exp(-10.0 * double(timeStep)), 0.0, 1.0);
+				const matrix3x3d rot = matrix3x3d::Rotate(angle * frac, axis / axisLen);
+				SetOrient((rot * GetOrient()).Normalized());
+			}
+		}
+
+		// Surge velocity forward along the aligned jump vector
+		SetAngVelocity(vector3d::Zero);
+		ClearThrusterState();
+		const vector3d alignedFwd = (-GetOrient().VectorZ()).NormalizedSafe();
+		const double baseSpeed = std::max(GetVelocity().Length(), 2500.0);
+		SetVelocity(alignedFwd * std::min(baseSpeed * (1.0 + double(timeStep) * 4.5), 2.5e7));
+
+		if (m_hyperspace.jumpSurgeTimer >= m_hyperspace.jumpSurgeDuration) {
+			m_hyperspace.jumpSurgeTimer = 0.0f;
+			m_hyperspace.jumpSurgeDuration = 0.0f;
+			m_hyperspace.now = true;
+			// Fire OnBeforeEnterHyperspace one tick before EnterHyperspace removes the body
+			OnBeforeEnterHyperspace();
+		}
+		return;
+	}
+
 	if (m_hyperspace.countdown > 0.0f) {
 		// Check the Lua function
 		bool abort = false;
@@ -1575,13 +1645,9 @@ void Ship::StaticUpdate(const float timeStep)
 					} else {
 						m_hyperspace.countdown = 0;
 						m_hyperspace.waitingForAlign = false;
-						m_hyperspace.now = true;
+						m_hyperspace.jumpSurgeTimer = 0.0f;
+						m_hyperspace.jumpSurgeDuration = HYPERJUMP_SURGE_DURATION;
 						SetFlightState(JUMPING);
-
-						// We have to fire it here, because the event isn't actually fired until
-						// after the whole physics update, which means the flight state on next
-						// step would be HYPERSPACE, thus breaking quite a few things.
-						OnBeforeEnterHyperspace();
 					}
 				}
 			}
@@ -1663,6 +1729,7 @@ void Ship::SpawnThrusterExhaustParticles(float timeStep)
 
 void Ship::NotifyRemoved(const Body *const removedBody)
 {
+	if (m_supercruise) m_supercruise->OnDeleted(removedBody);
 	if (m_curAICmd) m_curAICmd->OnDeleted(removedBody);
 }
 
@@ -1872,6 +1939,8 @@ void Ship::ProcessSpawnQueue()
 void Ship::EnterHyperspace()
 {
 	assert(GetFlightState() != Ship::HYPERSPACE);
+	m_hyperspace.jumpSurgeTimer = 0.0f;
+	m_hyperspace.jumpSurgeDuration = 0.0f;
 
 	// Is it still a good idea, with the onLeaveSystem moved elsewhere?
 	Ship::HyperjumpStatus status = CheckHyperjumpCapability();

@@ -9,10 +9,10 @@ local Core = {
 	-- CONSTANTS / SETTINGS
 	AU = 149598000000.0, -- meters
 
-	MAX_ROUTE_FLOW = 1.8, -- flow to the most popular station in the system, ships/hour
-	MAX_BUSY = 0.3, -- maximum station load
-	MAX_SHIPS = 300, -- ~ maximim ships in open space (limitation for performance reasons)
-	MIN_STATION_DOCKING_TIME = 2, -- hours, minimum average time of the ship's stay at the station
+	MAX_ROUTE_FLOW = 28.0, -- flow to the most popular station in the system, ships/hour (Supercruise real-time)
+	MAX_BUSY = 0.25, -- maximum station load
+	MAX_SHIPS = 28, -- ~ maximum ships in open space (Supercruise real-time traffic balance)
+	MIN_STATION_DOCKING_TIME = 0.5, -- hours, minimum average time of the ship's stay at the station (30 min real-time)
 
 	WAIT_FOR_NEXT_UNDOCK = 600, -- seconds
 	MINIMUM_NEAR_SYSTEMS = 10,
@@ -170,18 +170,39 @@ do
 	}
 end
 
+local function sanitizeShips(ships)
+	if ships == nil then return 0 end
+	local count = 0
+	for k, trader in pairs(ships) do
+		if type(k) == 'userdata' and not k:exists() then
+			count = count + 1
+			-- according to the Lua manual, removing items during iteration with pairs() or next() is ok
+			ships[k] = nil
+		elseif type(trader) == 'table' then
+			if trader.attacker and (not trader.attacker.ref or type(trader.attacker.ref) ~= 'userdata' or not trader.attacker.ref:exists()) then
+				trader.attacker = nil
+				if trader.status == 'fleeing' then
+					trader.status = 'inbound'
+				elseif trader.status == 'cowering' then
+					trader.status = 'docked'
+				end
+			end
+			if trader.starport and (type(trader.starport) ~= 'userdata' or not trader.starport:exists()) then
+				trader.starport = nil
+			end
+			if trader.route and type(trader.route) == 'table' and trader.route.to and (type(trader.route.to) ~= 'userdata' or not trader.route.to:exists()) then
+				trader.route = nil
+			end
+		end
+	end
+	return count
+end
+
 local serialize = function()
 	-- all we need to save is Core.ships, the rest can be rebuilt on load
 	-- The serializer will crash if we try to serialize dead objects (issue #3123)
 	if Core.ships ~= nil then
-		local count = 0
-		for k,_ in pairs(Core.ships) do
-			if type(k) == 'userdata' and not k:exists() then
-				count = count + 1
-				-- according to the Lua manual, removing items during iteration with pairs() or next() is ok
-				Core.ships[k] = nil
-			end
-		end
+		local count = sanitizeShips(Core.ships)
 		print('TradeShips: Removed ' .. count .. ' ships before serialization')
 	end
 	return Core.ships
@@ -191,6 +212,7 @@ local unserialize = function(data)
 	Core.ships = data
 	-- made for backward compatibility with old saves
 	Core.ships.interval = nil
+	sanitizeShips(Core.ships)
 end
 
 Serializer:Register("TradeShips", serialize, unserialize)

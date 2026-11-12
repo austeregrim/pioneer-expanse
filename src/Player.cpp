@@ -290,6 +290,16 @@ Ship::HyperjumpStatus Player::InitiateHyperjumpTo(const SystemPath &dest, int wa
 			return HYPERJUMP_CURRENT_SYSTEM;
 	}
 
+	if (SupercruiseController *sc = GetSupercruise()) {
+		if (sc->GetCooldown() > 0.0f) {
+			char buf[128];
+			snprintf(buf, sizeof(buf), "FSD COOLDOWN ACTIVE (%.1fs)", sc->GetCooldown());
+			sc->ShowStatusMessage(buf, 4.0f);
+			Sound::BodyMakeNoise(this, "warning", 0.5f);
+			return HYPERJUMP_SAFETY_LOCKOUT;
+		}
+	}
+
 	if (const Body *blocker = GetHyperspaceTargetObscuredBy(dest)) {
 		if (SupercruiseController *sc = GetSupercruise())
 			sc->ShowStatusMessage("HYPERJUMP BLOCKED: TARGET OBSCURED BY " + blocker->GetLabel(), 4.5f);
@@ -312,6 +322,8 @@ Ship::HyperjumpStatus Player::InitiateHyperjumpTo(const SystemPath &dest, int wa
 
 void Player::AbortHyperjump()
 {
+	if (IsHyperspaceJumpSurging())
+		return;
 	s_soundHyperdrive.Play(m_hyperspace.sounds.abort_sound.c_str());
 	Ship::AbortHyperjump();
 }

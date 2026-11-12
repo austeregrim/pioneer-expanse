@@ -28,6 +28,10 @@
 			"type": "computer",
 			"size": 1
 		},
+		"computer_2": {
+			"type": "computer",
+			"size": 1
+		},
 		"cabin_1": {
 			"type": "cabin",
 			"size": 1,

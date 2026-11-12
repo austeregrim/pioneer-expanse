@@ -121,10 +121,15 @@ void Sensors::Update(float time)
 
 	//Find nearby contacts, same range as radar scanner. It should use these
 	//contacts, worldview labels too.
-	Space::BodyNearList nearby = Pi::game->GetSpace()->GetBodiesMaybeNear(m_owner, 100000.0f);
-	for (Body *body : nearby) {
-		if (body == m_owner || !body->IsType(ObjectType::SHIP)) continue;
-		if (body->IsDead()) continue;
+	const bool ownerInSC = (m_owner->GetFlightState() == Ship::SUPERCRUISE);
+
+	auto registerContact = [&](Body *body) {
+		if (body == m_owner || !body->IsType(ObjectType::SHIP)) return;
+		if (body->IsDead()) return;
+		const Ship *otherShip = static_cast<const Ship *>(body);
+		const bool otherInSC = (otherShip->GetFlightState() == Ship::SUPERCRUISE);
+		// Supercruise ships are only targetable/trackable on sensors while in Supercruise
+		if (otherInSC && !ownerInSC) return;
 
 		auto cit = m_radarContacts.begin();
 		while (cit != m_radarContacts.end()) {
@@ -142,6 +147,19 @@ void Sensors::Update(float time)
 		} else {
 			cit->fresh = true;
 		}
+	};
+
+	if (ownerInSC) {
+		for (Body *body : Pi::game->GetSpace()->GetBodies()) {
+			if (!body || !body->IsType(ObjectType::SHIP)) continue;
+			if (static_cast<const Ship *>(body)->GetFlightState() == Ship::SUPERCRUISE)
+				registerContact(body);
+		}
+	}
+
+	Space::BodyNearList nearby = Pi::game->GetSpace()->GetBodiesMaybeNear(m_owner, 100000.0f);
+	for (Body *body : nearby) {
+		registerContact(body);
 	}
 
 	//update contacts and delete stale ones
@@ -151,11 +169,16 @@ void Sensors::Update(float time)
 			m_radarContacts.erase(it++);
 		} else {
 			const Ship *ship = it->body->IsType(ObjectType::SHIP) ? static_cast<Ship *>(it->body) : nullptr;
-			if (ship && Ship::FLYING == ship->GetFlightState()) {
+			const bool validFlying = ship && (Ship::FLYING == ship->GetFlightState());
+			const bool validSC = ownerInSC && ship && (Ship::SUPERCRUISE == ship->GetFlightState());
+			if (validFlying || validSC) {
 				it->distance = m_owner->GetPositionRelTo(it->body).Length();
 				it->iff = CheckIFF(it->body);
 				it->trail->SetColor(IFFColor(it->iff));
-				it->trail->Update(time);
+				if (validFlying)
+					it->trail->Update(time);
+				else
+					it->trail->Reset(FrameId::Invalid);
 			} else {
 				it->trail->Reset(FrameId::Invalid);
 			}

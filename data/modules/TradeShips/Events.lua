@@ -76,6 +76,8 @@ local onShipEnterSystem = function (ship)
 end
 Event.Register("onShipEnterSystem", onShipEnterSystem)
 
+local onShipDocked
+
 local onShipLeaveSystem = function (ship)
 	if ship:IsPlayer() then
 		Core.params = nil
@@ -100,11 +102,22 @@ local onShipLeaveSystem = function (ship)
 		local system = Core.ships[ship]['dest_path']:GetStarSystem()
 		Core.log:add(ship, 'Left '..Game.system.name..' for '.. system.name)
 		Flow.cleanTradeShipsTable()
+	elseif Core.attackers.check(ship) then
+		for t_ship, trader in pairs(Core.ships) do
+			if trader.attacker and trader.attacker.ref == ship then
+				trader.attacker = nil
+				if trader.status == 'fleeing' then
+					trader['status'] = 'inbound'
+				elseif trader.status == 'cowering' then
+					onShipDocked(t_ship, trader.starport)
+				end
+			end
+		end
 	end
 end
 Event.Register("onShipLeaveSystem", onShipLeaveSystem)
 
-local onShipDocked = function (ship, starport)
+onShipDocked = function (ship, starport)
 	if Core.ships[ship] == nil then return end
 	local trader = Core.ships[ship]
 
@@ -188,7 +201,7 @@ local onShipAlertChanged = function (ship, alert)
 	local trader = Core.ships[ship]
 	if trader.attacker == nil then return end
 
-	if alert == 'NONE' or not trader.attacker.ref:exists() or
+	if alert == 'NONE' or not trader.attacker.ref or not trader.attacker.ref:exists() or
 		(alert == 'SHIP_NEARBY' and ship:DistanceTo(trader.attacker.ref) > 100) then
 		if trader.status == 'fleeing' then
 			-- had not reached starport yet
@@ -290,7 +303,7 @@ local onShipDestroyed = function (ship, attacker)
 		Core.log:add(ship, 'Destroyed by '..attacker.label..', status:'..trader.status..' starport:'..(trader.starport and trader.starport.label or 'N/A'))
 		Core.ships[ship] = nil
 		-- XXX consider spawning some CargoBodies if killed by a ship
-	elseif Core.attackers.check(attacker) then
+	elseif Core.attackers.check(ship) then
 		for t_ship, trader in pairs(Core.ships) do
 			if trader.attacker and trader.attacker.ref == ship then
 				trader.attacker = nil
@@ -303,7 +316,6 @@ local onShipDestroyed = function (ship, attacker)
 					-- we need to do everything that the ship does after docking
 					onShipDocked(t_ship, trader.starport)
 				end
-				return
 			end
 		end
 	end

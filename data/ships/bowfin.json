@@ -64,6 +64,10 @@
 			"tag": "tag_utility_s1_1",
 			"hardpoint": true
 		},
+		"computer_1": {
+			"type": "computer",
+			"size": 1
+		},
 		"computer_2": {
 			"type": "computer",
 			"size": 1

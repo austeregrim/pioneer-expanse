@@ -146,15 +146,9 @@ graph TD
 
 ---
 
-### Phase 7: NPC Supercruise Traffic & System Interdiction (FUTURE ROADMAP)
-* **Goal**: Populate system Supercruise space with simulated NPC traffic and implement interdiction gameplay.
-* **Key Components**:
-  * **NPC Supercruise Spawning**: System-level traffic manager spawning NPC haulers, system authority patrols, and pirates cruising between stations, navigation beacons, and planetary resource extraction sites.
-  * **Supercruise Radar & Contacts**: FTL sensor contacts displayed on the radar with velocity vectors and allegiance scans.
-  * **FTL Interdiction Mechanics**:
-    * Interdictor module allowing player and pirate NPCs to initiate a tether minigame.
-    * Vector-escape HUD minigame: target attempts to stay aligned with escape vector; interdictor attempts to stay locked onto target until dropout bar fills.
-    * Success drops both ships into an isolated normal space instance.
+### Phase 7: NPC Supercruise Traffic & System Interdiction (COMPLETED)
+* **Detailed Plan**: See [`NPC_SUPERCRUISE_INTERDICTION_PLAN.md`](./NPC_SUPERCRUISE_INTERDICTION_PLAN.md).
+* **Goal**: Enable universal NPC Supercruise flight, point-of-light FTL visuals, system-wide Supercruise sensors/targeting, FSD Interdiction tug-of-war mechanics, Low Wake distress drops, and post-interdiction escape/mass-lock rules.
 
 ---
 

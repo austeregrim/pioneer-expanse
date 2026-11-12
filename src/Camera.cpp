@@ -278,8 +278,9 @@ void Camera::Draw(const Body *excludeBody)
 		m_lightSources.push_back(LightSource(0, light));
 	}
 
-	//fade space background based on atmosphere thickness and light angle
+	// Fade space background based on planetary atmosphere thickness AND stellar proximity/glare (auto-exposure)
 	float bgIntensity = 1.f;
+	m_inAtmosphere = false;
 	Frame *camParent = Frame::GetFrame(camFrame->GetParent());
 	if (camParent && camParent->IsRotFrame()) {
 		//check if camera is near a planet
@@ -291,6 +292,7 @@ void Camera::Draw(const Body *excludeBody)
 			double pressure, density;
 			planet->GetAtmosphericState(altitude, &pressure, &density);
 			if (pressure >= 0.001) {
+				m_inAtmosphere = true;
 				//go through all lights to calculate something resembling light intensity
 				float intensity = 0.f;
 				const Body *pBody = Pi::game->GetPlayer();
@@ -308,6 +310,50 @@ void Camera::Draw(const Body *excludeBody)
 		}
 	}
 
+	// Stellar glare / camera exposure adaptation:
+	// Near a star (especially looking toward its photosphere), dim the background stars and skybox
+	// down toward near-black; turning away or moving further out restores the full starry sky.
+	if (Pi::game->IsNormalSpace()) {
+		float maxStarGlare = 0.0f;
+		const Body *pBody = Pi::game->GetPlayer();
+		for (Uint32 i = 0; i < m_lightSources.size(); ++i) {
+			const Body *starBody = m_lightSources[i].GetBody();
+			if (!starBody || !starBody->IsType(ObjectType::STAR))
+				continue;
+			const SystemBody *sb = starBody->GetSystemBody();
+			if (!sb)
+				continue;
+
+			const vector3d starCamPos = starBody->GetInterpPositionRelTo(camFrameId);
+			const double dist = starCamPos.Length();
+			if (dist <= 1.0)
+				continue;
+
+			const double starR = std::max(1000.0, sb->GetRadius());
+			const double lum = (sb->GetType() <= SystemBody::TYPE_STAR_MAX) ? std::max(0.01, StarSystem::starLuminosities[sb->GetType()]) : 1.0;
+			const double effDistRadii = dist / (starR * std::max(0.75, std::pow(lum, 0.35)));
+			const double sinAng = Clamp(starR / dist, 0.0, 1.0);
+			const double angRadius = std::asin(sinAng);
+
+			// Camera looks along -Z in camera frame
+			const vector3d starDir = starCamPos / dist;
+			const double viewDot = Clamp(-starDir.z, -1.0, 1.0);
+			const double angToCenter = std::acos(viewDot);
+			const double angToLimb = std::max(0.0, angToCenter - angRadius);
+
+			// Direct photosphere/corona glare when the stellar disc is in or near the viewport
+			const float fovWeight = float(std::pow(Clamp(1.0 - angToLimb / 1.05, 0.0, 1.0), 1.1));
+			// Proximity falloff scaled by luminosity: completely blacks out skybox near the star
+			const float distFade = float(Clamp(1.0 / (1.0 + std::pow(effDistRadii / 55.0, 2.2)), 0.0, 1.0));
+			const float shadow = pBody ? float(ShadowedIntensity(i, pBody)) : 1.0f;
+
+			const float glare = Clamp(distFade * (0.35f + 0.95f * fovWeight) * shadow, 0.0f, 1.0f);
+			maxStarGlare = std::max(maxStarGlare, glare);
+		}
+		bgIntensity = Clamp(bgIntensity * (1.0f - maxStarGlare), 0.0f, 1.0f);
+	}
+
+	m_bgIntensity = bgIntensity;
 	Pi::game->GetSpace()->GetBackground()->SetIntensity(bgIntensity);
 	Pi::game->GetSpace()->GetBackground()->Draw(trans2bg);
 

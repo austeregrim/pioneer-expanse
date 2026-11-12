@@ -45,20 +45,66 @@ local function drawTable(data, heading1, heading2)
 			ui.tableNextColumn()
 			ui.text(item.name)
 			ui.tableNextColumn()
-			ui.text(item.value)
+			if item.color then
+				ui.withStyleColors({ Text = item.color }, function()
+					ui.text(item.value)
+				end)
+			else
+				ui.text(item.value)
+			end
 		end
 		ui.endTable()
 	end
 end
 
+local LIGHT_SPEED = 299792458.0
+
+local function formatSupercruiseSpeed(speed)
+	if speed >= 0.1 * LIGHT_SPEED then
+		return string.format("%.2f c", speed / LIGHT_SPEED)
+	elseif speed >= 1e6 then
+		return string.format("%.1f Mm/s", speed / 1e6)
+	else
+		return string.format("%.0f km/s", speed / 1e3)
+	end
+end
+
 ---@param target Ship
 local function displayTargetScannerFor(target, maxWidth)
+	local playerInSC = player:GetFlightState() == "SUPERCRUISE"
+	local targetInSC = target:GetFlightState() == "SUPERCRUISE"
+	local inSupercruise = playerInSC or targetInSC
+
+	local isWanted = target.IsWanted and target:IsWanted() or false
+	local bounty = (isWanted and target.GetBounty) and target:GetBounty() or 0
+	local wantedText = isWanted
+		and (bounty > 0 and string.format("WANTED (%s)", ui.Format.Money(bounty, false)) or "WANTED")
+		or "CLEAN"
+	local wantedColor = isWanted and Color(255, 85, 75, 255) or Color(100, 225, 165, 255)
+
+	if inSupercruise then
+		local scSpeed = target.GetSupercruiseSpeed and target:GetSupercruiseSpeed() or 0
+		local data = {
+			{ name = "STATUS", value = wantedText, color = wantedColor },
+			{ name = "VELOCITY", value = targetInSC and formatSupercruiseSpeed(scSpeed) or "SUBLIGHT" },
+			{ name = lui.HUD_CARGO_MASS, value = "SUBLIGHT SCAN ONLY", color = colors.fontDim },
+			{ name = "HULL / SHIELDS", value = "SUBLIGHT SCAN ONLY", color = colors.fontDim },
+		}
+		ui.withFont(font_content, function()
+			drawTable(data, target.label, target:GetShipType())
+		end)
+		return
+	end
+
 	local hull = target:GetHullPercent()
 	local shield = target:GetShieldsPercent() or 0
 	local engine = target:GetInstalledHyperdrive()
+	local fsdOffline = target.IsFsdOffline and target:IsFsdOffline() or false
 
 	local data = {
-		{ name = lui.HYPERDRIVE, value = engine and engine:GetName() or lui.NO_DRIVE },
+		{ name = "STATUS", value = wantedText, color = wantedColor },
+		{ name = lui.HYPERDRIVE, value = fsdOffline and "FSD OFFLINE" or (engine and engine:GetName() or lui.NO_DRIVE),
+		  color = fsdOffline and Color(255, 85, 75, 255) or nil },
 		{ name = lui.HUD_MASS, value = formatMass(target.staticMass) },
 		{ name = lui.HUD_CARGO_MASS, value = formatMass(target.usedCargo) },
 	}
@@ -94,14 +140,18 @@ local function displayTargetScanner(min, max)
 		return
 	end
 
+	local playerInSC = player:GetFlightState() == "SUPERCRUISE"
+	local targetInSC = target:GetFlightState() == "SUPERCRUISE"
+	local inSupercruise = playerInSC or targetInSC
+
 	local textHeight = ui.getTextLineHeightWithSpacing()
 	local headingHeight = textHeight
 	ui.withFont(font_heading, function()
 		headingHeight = ui.getTextLineHeightWithSpacing()
 	end)
-	-- TODO : it would be nice if we didn't have to pre-calculate this and could
-	-- instead somehow get it from the displayTargetScannerFor() function
-	local height = (ui.gauge_height * 1.4) * 2 + textHeight * 3 + headingHeight + ui.gauge_height * 0.5
+	local height = inSupercruise
+		and (textHeight * 4 + headingHeight + ui.gauge_height * 0.5)
+		or ((ui.gauge_height * 1.4) * 2 + textHeight * 4 + headingHeight + ui.gauge_height * 0.5)
 
 	local pos, size = ui.rectcut(min, max, height, ui.sides.bottom)
 

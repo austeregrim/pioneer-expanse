@@ -14,6 +14,7 @@
 #include "perlin.h"
 #include "ship/GunManager.h"
 #include "ship/Propulsion.h"
+#include "ship/SupercruiseController.h"
 
 static const double VICINITY_MIN = 15000.0;
 static const double VICINITY_MUL = 4.0;
@@ -384,13 +385,15 @@ AICmdKill::GunStats AICmdKill::GetGunStats()
 
 bool AICmdKill::TimeStepUpdate()
 {
+	Ship *ship = nullptr;
 	if (m_dBody->IsType(ObjectType::SHIP)) {
-		Ship *ship = static_cast<Ship *>(m_dBody);
+		ship = static_cast<Ship *>(m_dBody);
 		assert(ship != nullptr);
-		if (ship->GetFlightState() == Ship::JUMPING) return false;
+		if (ship->GetFlightState() == Ship::JUMPING || ship->GetFlightState() == Ship::HYPERSPACE)
+			return false;
 		if (ship->GetFlightState() == Ship::FLYING)
 			ship->SetWheelState(false);
-		else {
+		else if (ship->GetFlightState() != Ship::SUPERCRUISE) {
 			LaunchShip(ship);
 			return false;
 		}
@@ -403,6 +406,40 @@ bool AICmdKill::TimeStepUpdate()
 
 	const vector3d targpos = m_target->GetPositionRelTo(m_dBody);
 	double dist = targpos.LengthSqr();
+
+	if (ship->GetFlightState() == Ship::SUPERCRUISE) {
+		m_guns->SetAllGroupsFiring(false);
+		if (!ship->IsType(ObjectType::PLAYER) && ship->GetPercentHull() < 30.0f) {
+			// Successfully escaped into Supercruise when badly damaged
+			return true;
+		}
+		if (!m_child)
+			m_child.reset(new AICmdFlyTo(m_dBody, m_target));
+		if (!ProcessChild())
+			return false;
+		return false;
+	}
+
+	// Damaged NPC escape logic: flee back to Supercruise if FSD is online and cooldown cleared
+	if (!ship->IsType(ObjectType::PLAYER) && ship->GetFlightState() == Ship::FLYING && ship->GetPercentHull() < 30.0f) {
+		if (SupercruiseController *sc = ship->GetSupercruise()) {
+			if (!sc->IsFsdOffline() && sc->GetCooldown() <= 0.0f) {
+				const SupercruiseController::Status st = sc->GetStatus();
+				if (st == SupercruiseController::SC_READY)
+					sc->StartCharge();
+				if (st != SupercruiseController::SC_NOT_FLYING && st != SupercruiseController::SC_FSD_OFFLINE) {
+					m_guns->SetAllGroupsFiring(false);
+					const vector3d awayDir = (-targpos).NormalizedSafe();
+					const double ang = m_prop->AIFaceDirection(awayDir);
+					if (ang < 0.6 || st == SupercruiseController::SC_MASS_LOCKED)
+						m_prop->SetLinThrusterState(vector3d(0.0, 0.0, -1.0));
+					else
+						m_prop->SetLinThrusterState(vector3d(0.0));
+					return false;
+				}
+			}
+		}
+	}
 
 	//Autopilot leads to a point VICINITY_MIN in front of target
 	//If terget (Player) is manouvering this point might never be reached..
@@ -1028,14 +1065,16 @@ bool AICmdFlyTo::TimeStepUpdate()
 	 * wheels, launch and flightstate, so
 	 * it is better to split them in a module
 	*/
+	Ship *ship = nullptr;
 	if (m_dBody->IsType(ObjectType::SHIP)) {
-		Ship *ship = static_cast<Ship *>(m_dBody);
+		ship = static_cast<Ship *>(m_dBody);
 		assert(ship != nullptr);
-		if (ship->GetFlightState() == Ship::JUMPING) return false;
+		if (ship->GetFlightState() == Ship::JUMPING || ship->GetFlightState() == Ship::HYPERSPACE)
+			return false;
 		// sort out gear, launching
 		if (ship->GetFlightState() == Ship::FLYING)
 			ship->SetWheelState(false);
-		else {
+		else if (ship->GetFlightState() != Ship::SUPERCRUISE) {
 			LaunchShip(ship);
 			return false;
 		}
@@ -1047,6 +1086,131 @@ bool AICmdFlyTo::TimeStepUpdate()
 
 	// generate base target pos (with vicinity adjustment) & vel
 	double timestep = Pi::game->GetTimeStep();
+
+	// NPC Supercruise transit for long-range travel (> 2,500 km)
+	if (!ship->IsType(ObjectType::PLAYER) && !m_tangent && m_endvel == 0.0) {
+		if (SupercruiseController *sc = ship->GetSupercruise()) {
+			const vector3d rawRel = m_target ?
+				m_target->GetPositionRelTo(ship) :
+				(GetPosInFrame(ship->GetFrame(), m_targframeId, m_posoff) - ship->GetPosition());
+			const double rawDist = rawRel.Length();
+
+			if (ship->GetFlightState() == Ship::SUPERCRUISE) {
+				if (m_target) {
+					if (sc->GetTarget() != m_target)
+						sc->SetTarget(m_target);
+				} else {
+					sc->SetTargetPosition(m_targframeId, m_posoff);
+				}
+
+				const bool targetIsSupercruisingShip = m_target &&
+					m_target->IsType(ObjectType::SHIP) &&
+					static_cast<const Ship *>(m_target)->GetFlightState() == Ship::SUPERCRUISE;
+
+				if (!targetIsSupercruisingShip) {
+					if (m_target && m_target->IsType(ObjectType::TERRAINBODY)) {
+						const double safeDist = std::max(SupercruiseController::SAFE_DISENGAGE_DIST,
+							SupercruiseController::GetExclusionZoneRadius(m_target) + SupercruiseController::SAFE_DISENGAGE_DIST);
+						if (rawDist <= safeDist && sc->GetSpeed() <= SupercruiseController::SAFE_DISENGAGE_SPEED) {
+							sc->NormalDrop();
+							return false;
+						}
+					} else if (sc->IsSafeDisengageReady()) {
+						sc->SafeDisengage();
+						return false;
+					}
+				}
+
+				vector3d steerRel = rawRel;
+				double pursuitThrottle = -1.0;
+				if (targetIsSupercruisingShip) {
+					Ship *targetShip = static_cast<Ship *>(m_target);
+					SupercruiseController *targetSc = targetShip->GetSupercruise();
+					if (sc->HasFSDInterdictor() && sc->CanInterdict(targetShip)) {
+						sc->StartInterdiction(targetShip);
+						return false;
+					}
+
+					const vector3d targetFwd = (-targetShip->GetOrient().VectorZ()).NormalizedSafe();
+					const vector3d dirToTarget = rawRel.NormalizedSafe();
+					// Positive when pursuer is behind target chasing in the same direction
+					const double behindDot = targetFwd.Dot(dirToTarget);
+					const double targetSpeed = targetSc ? targetSc->GetSpeed() : SupercruiseController::MIN_SPEED;
+					const double envMax = std::max(1.0, sc->GetMaxEnvSpeed());
+
+					if (behindDot > 0.45) {
+						// Behind target: aim straight at target (with slight rear slot bias if > 4 ls away) and match+close speed
+						if (rawDist > 4.0 * SupercruiseController::LIGHT_SPEED)
+							steerRel = rawRel - targetFwd * (1.2 * SupercruiseController::LIGHT_SPEED);
+						else
+							steerRel = rawRel;
+
+						if (rawDist > 12.0 * SupercruiseController::LIGHT_SPEED) {
+							pursuitThrottle = 1.0;
+						} else {
+							const double closingBoost = Clamp(rawDist * 0.22, 0.25 * SupercruiseController::LIGHT_SPEED, 3.0 * SupercruiseController::LIGHT_SPEED);
+							const double desiredSpeed = targetSpeed + closingBoost;
+							pursuitThrottle = Clamp(desiredSpeed / envMax, 0.25, 1.0);
+						}
+					} else {
+						// In front of or abeam target: aim for a point 2 ls behind their tail at blue-zone turn speed to avoid wide overshoot loops
+						steerRel = rawRel - targetFwd * (2.0 * SupercruiseController::LIGHT_SPEED);
+						pursuitThrottle = 0.75;
+					}
+				}
+
+				vector3d angInput;
+				double throttle = 0.75;
+				sc->ComputeAISteering(steerRel, m_target, angInput, throttle);
+				if (pursuitThrottle >= 0.0) {
+					throttle = pursuitThrottle;
+				} else if (!targetIsSupercruisingShip && m_target && m_target->IsType(ObjectType::TERRAINBODY)) {
+					const double safeDist = std::max(SupercruiseController::SAFE_DISENGAGE_DIST,
+						SupercruiseController::GetExclusionZoneRadius(m_target) + SupercruiseController::SAFE_DISENGAGE_DIST);
+					if (rawDist <= safeDist * 1.5 && sc->GetSpeed() > SupercruiseController::SAFE_DISENGAGE_SPEED * 0.9)
+						throttle = 0.15;
+				}
+				sc->SetThrottle(throttle);
+				sc->TimeStepUpdate(float(timestep), angInput);
+				return false;
+			}
+
+			if (ship->GetFlightState() == Ship::FLYING && rawDist > SupercruiseController::SUBLIGHT_AUTOPILOT_MAX_DIST) {
+				if (m_target) {
+					if (sc->GetTarget() != m_target)
+						sc->SetTarget(m_target);
+				} else {
+					sc->SetTargetPosition(m_targframeId, m_posoff);
+				}
+
+				const SupercruiseController::Status st = sc->GetStatus();
+				if (st != SupercruiseController::SC_COOLDOWN && st != SupercruiseController::SC_NOT_FLYING && st != SupercruiseController::SC_FSD_OFFLINE) {
+					if (st == SupercruiseController::SC_READY)
+						sc->StartCharge();
+
+					// Steer clear of nearby planet/station and accelerate past MIN_ENGAGE_SPEED
+					vector3d escapeDir = rawRel.NormalizedSafe();
+					Frame *curFrame = Frame::GetFrame(ship->GetFrame());
+					Body *frameBody = curFrame ? curFrame->GetBody() : nullptr;
+					if (frameBody && (frameBody->IsType(ObjectType::PLANET) || frameBody->IsType(ObjectType::SPACESTATION))) {
+						const vector3d away = ship->GetPosition().NormalizedSafe();
+						if (away.LengthSqr() > 0.1) {
+							const double bodyDist = ship->GetPosition().Length();
+							if (st == SupercruiseController::SC_MASS_LOCKED || bodyDist < frameBody->GetClipRadius() * 1.5 + 15000.0)
+								escapeDir = away;
+						}
+					}
+
+					const double ang = m_prop->AIFaceDirection(escapeDir);
+					if (ang < 0.5 || st == SupercruiseController::SC_MASS_LOCKED)
+						m_prop->SetLinThrusterState(vector3d(0.0, 0.0, -1.0));
+					else
+						m_prop->SetLinThrusterState(vector3d(0.0));
+					return false;
+				}
+			}
+		}
+	}
 	vector3d targpos, targvel;
 	if (m_target) {
 		targpos = m_target->GetPositionRelTo(m_dBody->GetFrame());

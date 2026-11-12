@@ -26,6 +26,10 @@
 			"hardpoint": true,
 			"gimbal": [0,0]
 		},
+		"computer_1": {
+			"type": "computer",
+			"size": 1
+		},
 		"computer_2": {
 			"type": "computer",
 			"size": 1

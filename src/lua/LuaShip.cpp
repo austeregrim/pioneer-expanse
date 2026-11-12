@@ -1498,6 +1498,7 @@ static int l_ship_get_supercruise_status(lua_State *l)
 	case SupercruiseController::SC_MASS_LOCKED: stName = "MASS_LOCKED"; break;
 	case SupercruiseController::SC_GEAR_DOWN: stName = "GEAR_DOWN"; break;
 	case SupercruiseController::SC_TOO_SLOW: stName = "TOO_SLOW"; break;
+	case SupercruiseController::SC_FSD_OFFLINE: stName = "FSD_OFFLINE"; break;
 	case SupercruiseController::SC_NOT_FLYING: stName = "NOT_FLYING"; break;
 	}
 	LuaPush(l, stName);
@@ -1637,6 +1638,128 @@ static int l_ship_get_supercruise_status_message(lua_State *l)
 	return 1;
 }
 
+static int l_ship_is_wanted(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushboolean(l, s->IsWanted());
+	return 1;
+}
+
+static int l_ship_set_wanted(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	const bool wanted = lua_toboolean(l, 2);
+	const double bounty = (lua_gettop(l) >= 3 && !lua_isnil(l, 3)) ? LuaPull<double>(l, 3) : 0.0;
+	s->SetWanted(wanted, bounty);
+	return 0;
+}
+
+static int l_ship_get_bounty(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushnumber(l, s->GetBounty());
+	return 1;
+}
+
+static int l_ship_has_fsd_interdictor(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushboolean(l, s->GetSupercruise() && s->GetSupercruise()->HasFSDInterdictor());
+	return 1;
+}
+
+static int l_ship_get_interdictor_level(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushinteger(l, s->GetSupercruise() ? s->GetSupercruise()->GetInterdictorLevel() : 0);
+	return 1;
+}
+
+static int l_ship_can_interdict_target(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	Ship *target = LuaObject<Ship>::GetFromLua(2);
+	std::string reason;
+	bool ok = (s->GetSupercruise() && target) ? s->GetSupercruise()->CanInterdict(target, &reason) : false;
+	lua_pushboolean(l, ok);
+	LuaPush(l, reason);
+	return 2;
+}
+
+static int l_ship_start_interdiction(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	Ship *target = LuaObject<Ship>::CheckFromLua(2);
+	bool ok = s->GetSupercruise() ? s->GetSupercruise()->StartInterdiction(target) : false;
+	lua_pushboolean(l, ok);
+	return 1;
+}
+
+static int l_ship_is_interdicting(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushboolean(l, s->GetSupercruise() && s->GetSupercruise()->IsInterdicting());
+	return 1;
+}
+
+static int l_ship_is_being_interdicted(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushboolean(l, s->GetSupercruise() && s->GetSupercruise()->IsBeingInterdicted());
+	return 1;
+}
+
+static int l_ship_get_interdiction_capture_progress(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushnumber(l, s->GetSupercruise() ? s->GetSupercruise()->GetInterdictionCaptureProgress() : 0.0);
+	return 1;
+}
+
+static int l_ship_get_interdiction_escape_progress(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushnumber(l, s->GetSupercruise() ? s->GetSupercruise()->GetInterdictionEscapeProgress() : 0.0);
+	return 1;
+}
+
+static int l_ship_get_interdiction_escape_vector(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	const vector3d dir = s->GetSupercruise() ? s->GetSupercruise()->GetEscapeVectorWorld() : vector3d(0.0, 0.0, -1.0);
+	LuaPush<vector3d>(l, dir);
+	return 1;
+}
+
+static int l_ship_is_submitting_to_interdiction(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushboolean(l, s->GetSupercruise() && s->GetSupercruise()->IsSubmittingToInterdiction());
+	return 1;
+}
+
+static int l_ship_get_interdiction_peer(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	Ship *peer = s->GetSupercruise() ? s->GetSupercruise()->GetInterdictionPeer() : nullptr;
+	LuaObject<Ship>::PushToLua(peer);
+	return 1;
+}
+
+static int l_ship_get_ship_mass_lock_factor(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushnumber(l, s->GetSupercruise() ? s->GetSupercruise()->GetShipMassLockFactor() : 1.0);
+	return 1;
+}
+
+static int l_ship_is_fsd_offline(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushboolean(l, s->GetSupercruise() && s->GetSupercruise()->IsFsdOffline());
+	return 1;
+}
+
 static bool resolve_hyperspace_dest(lua_State *l, Ship *s, SystemPath &outDest)
 {
 	if (lua_gettop(l) >= 2 && !lua_isnil(l, 2)) {
@@ -1659,6 +1782,48 @@ static int l_ship_is_hyperspace_waiting_for_align(lua_State *l)
 {
 	Ship *s = LuaObject<Ship>::CheckFromLua(1);
 	lua_pushboolean(l, s->IsHyperspaceWaitingForAlign());
+	return 1;
+}
+
+static int l_ship_is_hyperspace_jump_surging(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushboolean(l, s->IsHyperspaceJumpSurging());
+	return 1;
+}
+
+static int l_ship_get_hyperspace_jump_surge_progress(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushnumber(l, s->GetHyperspaceJumpSurgeProgress());
+	return 1;
+}
+
+static int l_ship_is_fuel_scoop_active(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushboolean(l, s->GetSupercruise() && s->GetSupercruise()->IsFuelScoopActive());
+	return 1;
+}
+
+static int l_ship_is_fuel_scoop_unscoopable(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushboolean(l, s->GetSupercruise() && s->GetSupercruise()->IsFuelScoopUnscoopable());
+	return 1;
+}
+
+static int l_ship_get_fuel_scoop_rate(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushnumber(l, s->GetSupercruise() ? s->GetSupercruise()->GetFuelScoopRate() : 0.0);
+	return 1;
+}
+
+static int l_ship_get_fuel_scoop_proximity(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushnumber(l, s->GetSupercruise() ? s->GetSupercruise()->GetFuelScoopProximity() : 0.0);
 	return 1;
 }
 
@@ -1783,9 +1948,15 @@ void LuaObject<Ship>::RegisterClass()
 		{ "GetHyperspaceCountdown", l_ship_get_hyperspace_countdown },
 		{ "IsHyperspaceActive", l_ship_is_hyperspace_active },
 		{ "IsHyperspaceWaitingForAlign", l_ship_is_hyperspace_waiting_for_align },
+		{ "IsHyperspaceJumpSurging", l_ship_is_hyperspace_jump_surging },
+		{ "GetHyperspaceJumpSurgeProgress", l_ship_get_hyperspace_jump_surge_progress },
 		{ "GetHyperspaceTargetDirection", l_ship_get_hyperspace_target_direction },
 		{ "IsHyperspaceTargetAligned", l_ship_is_hyperspace_target_aligned },
 		{ "GetHyperspaceTargetObscuredBy", l_ship_get_hyperspace_target_obscured_by },
+		{ "IsFuelScoopActive", l_ship_is_fuel_scoop_active },
+		{ "IsFuelScoopUnscoopable", l_ship_is_fuel_scoop_unscoopable },
+		{ "GetFuelScoopRate", l_ship_get_fuel_scoop_rate },
+		{ "GetFuelScoopProximity", l_ship_get_fuel_scoop_proximity },
 
 		{ "GetHullTemperature", l_ship_get_hull_temperature },
 		{ "GetGunTemperature", l_ship_get_gun_temperature },
@@ -1820,6 +1991,22 @@ void LuaObject<Ship>::RegisterClass()
 		{ "ToggleSupercruise", l_ship_toggle_supercruise },
 		{ "SafeDisengage", l_ship_safe_disengage },
 		{ "GetSupercruiseStatusMessage", l_ship_get_supercruise_status_message },
+		{ "IsWanted", l_ship_is_wanted },
+		{ "SetWanted", l_ship_set_wanted },
+		{ "GetBounty", l_ship_get_bounty },
+		{ "HasFSDInterdictor", l_ship_has_fsd_interdictor },
+		{ "GetInterdictorLevel", l_ship_get_interdictor_level },
+		{ "CanInterdictTarget", l_ship_can_interdict_target },
+		{ "StartInterdiction", l_ship_start_interdiction },
+		{ "IsInterdicting", l_ship_is_interdicting },
+		{ "IsBeingInterdicted", l_ship_is_being_interdicted },
+		{ "GetInterdictionCaptureProgress", l_ship_get_interdiction_capture_progress },
+		{ "GetInterdictionEscapeProgress", l_ship_get_interdiction_escape_progress },
+		{ "GetInterdictionEscapeVector", l_ship_get_interdiction_escape_vector },
+		{ "IsSubmittingToInterdiction", l_ship_is_submitting_to_interdiction },
+		{ "GetInterdictionPeer", l_ship_get_interdiction_peer },
+		{ "GetShipMassLockFactor", l_ship_get_ship_mass_lock_factor },
+		{ "IsFsdOffline", l_ship_is_fsd_offline },
 
 		{ 0, 0 }
 	};

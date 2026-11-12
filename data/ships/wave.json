@@ -74,6 +74,10 @@
 			"tag": "tag_missile_s3_right",
 			"hardpoint": true
 		},
+		"computer_1": {
+			"type": "computer",
+			"size": 1
+		},
 		"computer_2": {
 			"type": "computer",
 			"size": 1

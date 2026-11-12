@@ -179,13 +179,16 @@ public:
 	};
 
 	static constexpr double HYPERJUMP_ALIGN_MAX_ANGLE_DEG = 8.0;
+	static constexpr float HYPERJUMP_SURGE_DURATION = 1.25f;
 
 	Ship::HyperjumpStatus CheckHyperjumpCapability() const;
 	virtual Ship::HyperjumpStatus InitiateHyperjumpTo(const SystemPath &dest, int warmup_time, double duration, const HyperdriveSoundsTable &sounds, LuaRef checks);
 	virtual void AbortHyperjump();
 	float GetHyperspaceCountdown() const { return m_hyperspace.countdown; }
-	bool IsHyperspaceActive() const { return (m_hyperspace.countdown > 0.0); }
+	bool IsHyperspaceActive() const { return (m_hyperspace.countdown > 0.0f || IsHyperspaceJumpSurging()); }
 	bool IsHyperspaceWaitingForAlign() const { return (m_hyperspace.countdown > 0.0f && m_hyperspace.waitingForAlign); }
+	bool IsHyperspaceJumpSurging() const { return (m_flightState == JUMPING && m_hyperspace.jumpSurgeDuration > 0.0f); }
+	float GetHyperspaceJumpSurgeProgress() const { return IsHyperspaceJumpSurging() ? Clamp(m_hyperspace.jumpSurgeTimer / m_hyperspace.jumpSurgeDuration, 0.0f, 1.0f) : 0.0f; }
 	bool GetHyperspaceTargetDirection(const SystemPath &dest, vector3d &outDirInShipFrame) const;
 	bool IsHyperspaceTargetAligned(const SystemPath &dest, double *outAngleDeg = nullptr) const;
 	const Body *GetHyperspaceTargetObscuredBy(const SystemPath &dest) const;
@@ -263,6 +266,10 @@ public:
 	bool IsInvulnerable() const { return m_invulnerable; }
 	void SetInvulnerable(bool b) { m_invulnerable = b; }
 
+	bool IsWanted() const { return m_wanted; }
+	void SetWanted(bool wanted, double bounty = 0.0);
+	double GetBounty() const { return m_bounty; }
+
 	Sensors *GetSensors() const { return m_sensors.get(); }
 
 	Uint8 GetRelations(Body *other) const; //0=hostile, 50=neutral, 100=ally
@@ -298,6 +305,8 @@ protected:
 		float countdown;
 		bool now;
 		bool waitingForAlign;
+		float jumpSurgeTimer;
+		float jumpSurgeDuration;
 		double duration;
 		LuaRef checks; // A Lua function to check all the conditions before the jump
 		HyperdriveSoundsTable sounds;
@@ -380,6 +389,8 @@ private:
 	std::unordered_map<Body *, Uint8> m_relationsMap;
 
 	std::string m_shipName;
+	bool m_wanted = false;
+	double m_bounty = 0.0;
 
 	double m_hydrogenScoopedAccumulator = 0;
 

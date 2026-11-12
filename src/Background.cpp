@@ -82,7 +82,8 @@ namespace Background {
 
 	void BackgroundElement::SetIntensity(float intensity)
 	{
-		m_material->emissive = Color(intensity * 255, intensity * 255, intensity * 255);
+		const Uint8 c = Uint8(Clamp(intensity, 0.0f, 1.0f) * 255.0f);
+		m_material->emissive = Color(c, c, c, c);
 	}
 
 	UniverseBox::UniverseBox(Graphics::Renderer *renderer)
@@ -246,6 +247,7 @@ namespace Background {
 
 	struct StarQueryInfo {
 		const SystemPath *systemPath;
+		vector3f sourcePos;
 		int32_t sectorMin;
 		int32_t sectorMax;
 		int32_t visibleRadiusSqr;
@@ -295,14 +297,22 @@ namespace Background {
 						//   generation step to pay performance dividends for later code that needs to use the sectors.
 						RefCountedPtr<const Sector> sec = galaxy->GetGenerator()->Generate<Sector, SectorCache>(galaxy, sys, nullptr);
 
-						// add as many systems as we can
-						const size_t numSystems = std::min(starsLimit - stars.pos.size(), sec->m_systems.size());
-						for (size_t systemIndex = 0; systemIndex < numSystems; systemIndex++) {
+						// add systems within visible radius; always include nearby jumpable stars (< 60 ly)
+						const bool sectorNear = SystemPath::SectorDistanceSqr(sys, *systemPath) * Sector::SIZE * Sector::SIZE < (68 * 68);
+						if (!sectorNear && stars.pos.size() >= size_t(starsLimit))
+							continue;
+
+						for (size_t systemIndex = 0; systemIndex < sec->m_systems.size(); systemIndex++) {
 							const Sector::System *ss = &(sec->m_systems[systemIndex]);
 
-							const vector3f distance = Sector::SIZE * vector3f(systemPath->sectorX, systemPath->sectorY, systemPath->sectorZ) - ss->GetFullPosition();
-							if (distance.LengthSqr() >= info.visibleRadiusSqr)
-								continue; // too far
+							const vector3f distance = ss->GetFullPosition() - info.sourcePos;
+							const float distSqr = distance.LengthSqr();
+							if (distSqr < 1e-6f || distSqr >= info.visibleRadiusSqr)
+								continue; // current system or too far
+
+							const bool isNear = distSqr < (60.0f * 60.0f);
+							if (!isNear && stars.pos.size() >= size_t(starsLimit))
+								continue;
 
 							// add the colors and luminosities of all stars in a system together
 							float luminositySystemSum = 0.0f;
@@ -322,20 +332,14 @@ namespace Background {
 							col.b = Clamp(col.b, info.colorMin.b, info.colorMax.b);
 							//const Color col(Color::PINK); // debug pink
 
-							// use a logarithmic scala for brightness since this looks more natural to the human eye
-							float brightness = log(luminositySystemSum / (4 * M_PI * distance.Length() * distance.Length()));
-
-							// handle zero-brightness systems (no stars)
-							brightness = is_zero_exact(luminositySystemSum) ? 0.0 : brightness;
+							// Use positive logarithmic apparent flux scale so brighter/closer stars have larger positive values
+							const float flux = luminositySystemSum / (4.0f * float(M_PI) * distSqr);
+							const float brightness = (luminositySystemSum > 0.0f && flux > 0.0f) ? std::max(0.05f, logf(flux) + 24.0f) : 0.0f;
 
 							stars.pos.push_back(distance.Normalized() * 1000.0f);
 							stars.color.push_back(col);
 							stars.brightness.push_back(brightness);
 						}
-
-						// Don't process any more sectors if we've generated our quota of stars.
-						if (stars.pos.size() >= starsLimit)
-							break;
 					}
 				}
 			}
@@ -382,11 +386,11 @@ namespace Background {
 			const size_t numStars = stars.pos.size();
 
 			for (size_t i = 0; i < numStars; ++i) {
-				// dividing through the median helps bringing the logarithmic brightnesses to a scala that is easier to work with
-				float brightness = stars.brightness[i] / medianBrightness;
+				// dividing through the median helps bringing the logarithmic brightnesses to a scale that is easier to work with
+				const float ratio = (medianBrightness > 0.0) ? Clamp(stars.brightness[i] / float(medianBrightness), 0.0f, 2.3f) : 1.0f;
 				// the exponentiation helps to emphasize very bright stars
-				constexpr float brightnessPower = 7.5;
-				brightness = std::pow(brightness, brightnessPower);
+				constexpr float brightnessPower = 3.5f;
+				const float brightness = std::pow(ratio, brightnessPower);
 
 				// 0.0f filters out NaNs from previous operations
 				// Brightness now stores the size value used by the shader
@@ -395,12 +399,13 @@ namespace Background {
 				// convert temporarily to floats to prevent narrowing errors
 				Color4f colorF = stars.color[i].ToColor4f();
 
-				// find a color scaling factor that doesn't make a colored star look white
+				// find a color scaling factor that doesn't make a colored star look white or overflow Uint8
 				float colorMax = std::max({ colorF.r, colorF.g, colorF.b });
-				float scaledColorMax = colorMax * brightness;
-				const float colorFactor = std::min(scaledColorMax, 255.0f) / colorMax;
-
-				colorF = colorF *= colorFactor;
+				if (colorMax > 0.0f) {
+					float scaledColorMax = colorMax * brightness;
+					const float colorFactor = std::min(scaledColorMax, 1.0f) / colorMax;
+					colorF *= colorFactor;
+				}
 				colorF.a = 1.0f;
 
 				stars.color[i] = Color4ub(colorF);
@@ -477,13 +482,22 @@ namespace Background {
 			const double maxBall = pow(3.0 / 4.0 / M_PI * (double)NUM_BG_STARS / density, 1.0 / 3.0);
 			const int32_t visibleRadius = std::min<int32_t>(BG_STAR_RADIUS_MAX, maxBall * Sector::SIZE);
 
+			vector3f sourcePos = Sector::SIZE * vector3f(systemPath->sectorX, systemPath->sectorY, systemPath->sectorZ);
+			if (systemPath->IsSystemPath()) {
+				RefCountedPtr<const Sector> homeSec = galaxy->GetGenerator()->Generate<Sector, SectorCache>(galaxy, *systemPath, nullptr);
+				if (homeSec && systemPath->systemIndex < homeSec->m_systems.size()) {
+					sourcePos = homeSec->m_systems[systemPath->systemIndex].GetFullPosition();
+				}
+			}
+
 			StarQueryInfo info;
 			info.systemPath = systemPath;
+			info.sourcePos = sourcePos;
 			info.sectorMin = -(visibleRadius / Sector::SIZE); // lyrs_radius / sector_size_in_lyrs
 			info.sectorMax = visibleRadius / Sector::SIZE;	  // lyrs_radius / sector_size_in_lyrs
 			info.visibleRadiusSqr = (visibleRadius * visibleRadius);
-			info.colorMin = Color((Uint8)(m_rMin * 255), (Uint8)(m_gMin * 255), (Uint8)(m_rMin * 255));
-			info.colorMax = Color((Uint8)(m_rMax * 255), (Uint8)(m_gMax * 255), (Uint8)(m_rMax * 255));
+			info.colorMin = Color((Uint8)(m_rMin * 255), (Uint8)(m_gMin * 255), (Uint8)(m_bMin * 255));
+			info.colorMax = Color((Uint8)(m_rMax * 255), (Uint8)(m_gMax * 255), (Uint8)(m_bMax * 255));
 			info.brightnessFactor = brightnessApparentSizeFactor;
 
 			// We want the main thread to participate in this work as well,
@@ -498,7 +512,7 @@ namespace Background {
 			const double realDensity = NUM_BG_STARS / (M_PI / 0.75 * realRadius * realRadius * realRadius);
 
 			std::vector<StarInfo> taskStars(numTasks);
-			std::vector<double> taskMedians(numTasks);
+			std::vector<double> taskMedians(numTasks, 0.0);
 
 			// Split the visible area of the galaxy up into separate tasks
 			uint32_t current = 0;
@@ -527,7 +541,15 @@ namespace Background {
 			auto sampleHandle = graph->QueueTaskSet(sampleStarsTaskSet);
 			graph->WaitForTaskSet(sampleHandle);
 
-			double medianBrightness = std::reduce(taskMedians.begin(), taskMedians.end()) / taskMedians.size();
+			double medianSum = 0.0;
+			size_t medianCount = 0;
+			for (size_t i = 0; i < numTasks; ++i) {
+				if (!taskStars[i].pos.empty() && taskMedians[i] > 0.0) {
+					medianSum += taskMedians[i];
+					++medianCount;
+				}
+			}
+			double medianBrightness = (medianCount > 0) ? (medianSum / double(medianCount)) : 12.0;
 
 			TaskSet *sortStarsTaskSet = new TaskSet();
 			for (size_t i = 0; i < numTasks; i++) {
@@ -545,14 +567,15 @@ namespace Background {
 		num = stars.pos.size();
 		Output("Stars picked from galaxy: %d\n", stars.pos.size());
 
-		stars.pos.resize(NUM_BG_STARS);
-		stars.color.resize(NUM_BG_STARS);
-		stars.brightness.resize(NUM_BG_STARS);
+		const Uint32 totalStars = std::max<Uint32>(NUM_BG_STARS, num);
+		stars.pos.resize(totalStars);
+		stars.color.resize(totalStars);
+		stars.brightness.resize(totalStars);
 
 		PROFILE_START_DESC("Generate Random Stars")
 		// fill out the remaining target count with generated points and also fill hyperspace stars
-		Output("Generating %d random stars\n", NUM_BG_STARS - num);
-		for (Uint32 i = num; i < NUM_BG_STARS; i++) {
+		Output("Generating %d random stars\n", totalStars - num);
+		for (Uint32 i = num; i < totalStars; i++) {
 			const double size = rand.Double(0.2, 0.9);
 			const Uint8 colScale = size * 255;
 
@@ -592,7 +615,7 @@ namespace Background {
 
 		Output("Final stars number: %d\n", num);
 
-		m_pointSprites->SetData(NUM_BG_STARS, std::move(stars.pos), std::move(stars.color), std::move(stars.brightness));
+		m_pointSprites->SetData(totalStars, std::move(stars.pos), std::move(stars.color), std::move(stars.brightness));
 	}
 
 	void Starfield::Draw()
@@ -601,40 +624,8 @@ namespace Background {
 		// XXX would be nice to get rid of the Pi:: stuff here
 		if (!Pi::game || Pi::player->GetFlightState() != Ship::HYPERSPACE) {
 			m_pointSprites->Draw(m_renderer, m_material.Get());
-		} else {
-			if (!m_animMesh) // user doesn't want to see stars
-				return;
-
-			Graphics::VertexBuffer *buffer = m_animMesh->GetVertexBuffer();
-			assert(sizeof(StarVert) == 16);
-			assert(buffer->GetStride() == sizeof(StarVert));
-			auto vtxPtr = buffer->Map<StarVert>(Graphics::BUFFER_MAP_WRITE);
-
-			// roughly, the multiplier gets smaller as the duration gets larger.
-			// the time-looking bits in this are completely arbitrary - I figured
-			// it out by tweaking the numbers until it looked sort of right
-			const double mult = 0.001 / (Pi::player->GetHyperspaceDuration() / (60.0 * 60.0 * 24.0 * 7.0));
-
-			const double hyperspaceProgress = Pi::game->GetHyperspaceProgress();
-
-			const Sint32 numStars = buffer->GetSize() / 2;
-
-			const vector3d oz = Pi::player->GetOrient().VectorZ(); //back vector in Y-up space
-			const vector3d pz = vector3d(oz.z, oz.x, oz.y); // back vector rotated into Z-up space
-
-			for (int i = 0; i < numStars; i++) {
-				vector3f v = m_hyperVtx[numStars * 2 + i] + vector3f(pz * hyperspaceProgress * mult);
-				const Color &c = m_hyperCol[numStars * 2 + i];
-
-				vtxPtr[i * 2].pos = m_hyperVtx[i * 2] = m_hyperVtx[numStars * 2 + i] + v;
-				vtxPtr[i * 2].col = m_hyperCol[i * 2] = c;
-
-				vtxPtr[i * 2 + 1].pos = m_hyperVtx[i * 2 + 1] = v;
-				vtxPtr[i * 2 + 1].col = m_hyperCol[i * 2 + 1] = c;
-			}
-			buffer->Unmap();
-			m_renderer->DrawMesh(m_animMesh.get(), m_materialStreaks.Get());
 		}
+		// During hyperspace transit, screen transitions to pure white (no old tunnel streak animation).
 	}
 
 	MilkyWay::MilkyWay(Graphics::Renderer *renderer)
@@ -727,6 +718,8 @@ namespace Background {
 	void Container::Draw(const matrix4x4d &transform)
 	{
 		PROFILE_SCOPED()
+		if (m_intensity <= 0.005f)
+			return;
 		m_renderer->SetTransform(matrix4x4f(transform));
 		if (DRAW_SKYBOX & m_drawFlags) {
 			m_universeBox.Draw();
@@ -750,6 +743,7 @@ namespace Background {
 	{
 		PROFILE_SCOPED()
 		intensity = Clamp(intensity, 0.0f, 1.0f);
+		m_intensity = intensity;
 		m_universeBox.SetIntensity(intensity);
 		m_starField.SetIntensity(intensity);
 		m_milkyWay.SetIntensity(intensity);

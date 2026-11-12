@@ -93,6 +93,8 @@ public:
 
 	void Update();
 	void Draw(const Body *excludeBody = nullptr);
+	float GetBackgroundIntensity() const { return m_bgIntensity; }
+	bool IsInAtmosphere() const { return m_inAtmosphere; }
 
 	// camera-specific light with attached source body
 	class LightSource {
@@ -182,6 +184,8 @@ private:
 	// For interior check
 	std::vector<Body*> m_spaceStations;
 	std::vector<LightSource> m_lightSources;
+	float m_bgIntensity = 1.0f;
+	bool m_inAtmosphere = false;
 };
 
 #endif

@@ -2,9 +2,11 @@
 -- Licensed under the terms of the GPL v3. See licenses/GPL-3.txt
 
 local Engine = require 'Engine'
+local Equipment = require 'Equipment'
 local Game = require 'Game'
 local Event = require 'Event'
 local ShipDef = require 'ShipDef'
+local Space = require 'Space'
 local utils = require 'utils'
 local Timer = require 'Timer'
 local Serializer = require 'Serializer'
@@ -14,6 +16,31 @@ local ShipBuilder  = require 'modules.MissionUtils.ShipBuilder'
 
 local pirates = {}
 local planets = {}
+
+local function equipInterdictor(ship, threat)
+	local equipSet = ship:GetComponent("EquipSet")
+	local proto = (threat >= 35 and Equipment.Get("misc.fsd_interdictor_2")) or Equipment.Get("misc.fsd_interdictor_1")
+	if not equipSet or not proto then return end
+	local inst = proto:Instance()
+	local slot = equipSet:GetFreeSlotForEquip(inst)
+	if slot then
+		equipSet:Install(inst, slot)
+	end
+end
+
+local function assignSupercruisePatrol(ship, currentPlanet)
+	if #planets > 1 then
+		local dest = planets[Engine.rand:Integer(1, #planets)]:GetSystemBody()
+		if dest and dest.body and dest.body ~= currentPlanet then
+			ship:AIFlyTo(dest.body)
+			return dest.body
+		end
+	end
+	if currentPlanet then
+		ship:AIFlyTo(currentPlanet)
+	end
+	return currentPlanet
+end
 
 local pirateIsInterested = function (player)
 	-- pirates know how big cargo hold the ship model has
@@ -46,21 +73,38 @@ local onEnterSystem = function (player)
 	planets = utils.filter_array(Game.system:GetBodyPaths(),
 		function (p) return p:GetSystemBody().superType == 'ROCKY_PLANET' and p:GetSystemBody().population > 0 end
 	)
+	if #planets == 0 then
+		planets = utils.filter_array(Game.system:GetBodyPaths(),
+			function (p)
+				local sb = p:GetSystemBody()
+				return sb.superType == 'ROCKY_PLANET' or sb.superType == 'GAS_GIANT'
+			end
+		)
+	end
+	if #planets == 0 then return end
 
-	local max_pirates = math.floor(math.sqrt(lawlessness + lawlessness * population * 5 * #planets))
+	local max_pirates = math.min(5, math.max(1, math.floor(1.0 + lawlessness * 4.0 + math.sqrt(population * #planets))))
+	local spawnChance = math.min(0.95, 0.35 + lawlessness * 0.75)
 
 	while max_pirates > 0 do
 		max_pirates = max_pirates-1
 
-		if Engine.rand:Number(1) < lawlessness then
+		if Engine.rand:Number(1) < spawnChance then
 			local threat = calculateThreat(lawlessness)
 			local planet = planets[Engine.rand:Integer(1, #planets)]:GetSystemBody()
-			local ship = ShipBuilder.MakeShipOrbit(planet.body, MissionUtils.ShipTemplates.GenericPirate, threat, planet.radius * 1.2, planet.radius * 3.5)
+			if planet and planet.body then
+				local ship = ShipBuilder.MakeShipOrbit(planet.body, MissionUtils.ShipTemplates.GenericPirate, threat, planet.radius * 1.2, planet.radius * 3.5)
+				if ship then
+					ship:SetWanted(true, math.floor(1500 + threat * 150))
+					equipInterdictor(ship, threat)
 
-			if pirateIsInterested(player) then
-				pirates[ship] = { status = 'LURK', planet = planet.body }
-			else
-				pirates[ship] = { status = 'ORBIT', planet = planet.body }
+					if pirateIsInterested(player) then
+						pirates[ship] = { status = 'LURK', planet = planet.body }
+					else
+						pirates[ship] = { status = 'ORBIT', planet = planet.body }
+					end
+					assignSupercruisePatrol(ship, planet.body)
+				end
 			end
 		end
 	end
@@ -89,9 +133,11 @@ local onShipDestroyed = function (ship)
 		local planet = planets[Engine.rand:Integer(1, #planets)]:GetSystemBody()
 		local star = planet.nearestJumpable
 		local newPirate = ShipBuilder.MakeShipOrbit(star.body, MissionUtils.ShipTemplates.GenericPirate, threat, star.radius * 1.2, star.radius * 3.5)
+		newPirate:SetWanted(true, math.floor(1500 + threat * 150))
+		equipInterdictor(newPirate, threat)
 
 		pirates[newPirate] = { status = 'ORBIT', planet = planet.body }
-		enterOrbit(newPirate, planet.body)
+		assignSupercruisePatrol(newPirate, planet.body)
 	end
 end
 
@@ -115,9 +161,9 @@ end
 
 local onAICompleted = function (ship, error)
 	if pirates[ship] and error == 'NONE' then
-		-- Back in orbit
-		-- Refuel for the next run
 		ship:SetFuelPercent()
+		pirates[ship].status = pirateIsInterested(Game.player) and 'LURK' or 'ORBIT'
+		pirates[ship].planet = assignSupercruisePatrol(ship, pirates[ship].planet)
 	end
 end
 
@@ -130,11 +176,29 @@ local onGameStart = function ()
 	end
 	loaded_data = nil
 
-	Timer:CallEvery(60, function ()
+	Timer:CallEvery(20, function ()
+		if not Game.system then return end
+		local policeId = Game.system.faction.policeShip
+		local allShips = Space.GetBodies("Ship")
 		for p, s in pairs(pirates) do
-			if s.status == 'LURK' and p:DistanceTo(Game.player) < 1.5e10 then
-				p:AIKill(Game.player)
-				s.status = 'ATTACK'
+			if p:exists() and s.status ~= 'ATTACK' then
+				if s.status == 'LURK' and p:DistanceTo(Game.player) < 2.5e10 then
+					p:AIKill(Game.player)
+					s.status = 'ATTACK'
+				elseif p:GetFlightState() == "SUPERCRUISE" then
+					-- Stalk and interdict passing Supercruise trade traffic
+					for _, victim in ipairs(allShips) do
+						if victim ~= p and victim ~= Game.player and not pirates[victim] and victim.shipId ~= policeId then
+							if victim:GetFlightState() == "SUPERCRUISE" and not (victim.IsWanted and victim:IsWanted()) then
+								if p:DistanceTo(victim) < 1.8e10 then
+									p:AIKill(victim)
+									s.status = 'ATTACK'
+									break
+								end
+							end
+						end
+					end
+				end
 			end
 		end
 	end)

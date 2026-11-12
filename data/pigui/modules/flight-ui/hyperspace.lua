@@ -149,6 +149,14 @@ local function displayHyperspaceCountdown()
 	local uiPos = Vector2(center.x, center.y - radius - 90)
 
 	local _, destName = player:GetHyperspaceDestination()
+	local surging = player.IsHyperspaceJumpSurging and player:IsHyperspaceJumpSurging()
+	if surging then
+		ui.addStyledText(uiPos, ui.anchor.center, ui.anchor.bottom,
+			"HYPERSPACE CONDUIT ENGAGED — " .. string.upper(destName),
+			Color(225, 245, 255, 250), pionillium.large, nil, colors.lightBlackBackground)
+		return
+	end
+
 	local waitingAlign = player:IsHyperspaceWaitingForAlign()
 	local aligned, angleDeg = player:IsHyperspaceTargetAligned()
 	local blocker = player:GetHyperspaceTargetObscuredBy()
@@ -185,11 +193,17 @@ gameView.registerModule("hyperspace-percentage", {
         local player = gameView.player
         if not player then return end
         if Game.InHyperspace() then
-            displayHyperspace()
+            -- Pure white screen after the jump-out animation
+            ui.addRectFilled(Vector2(0, 0), Vector2(ui.screenWidth, ui.screenHeight), Color(255, 255, 255, 255), 0, ui.RoundCornersNone)
         else
             displayHyperspaceTargetIndicator(player)
             if player:IsHyperspaceActive() then
                 displayHyperspaceCountdown()
+            end
+            local flashAlpha = Game.GetHyperspaceFlashAlpha and Game.GetHyperspaceFlashAlpha() or 0
+            if flashAlpha > 0.005 then
+                local a = math.min(255, math.max(0, math.floor(flashAlpha * 255)))
+                ui.addRectFilled(Vector2(0, 0), Vector2(ui.screenWidth, ui.screenHeight), Color(255, 255, 255, a), 0, ui.RoundCornersNone)
             end
         end
     end

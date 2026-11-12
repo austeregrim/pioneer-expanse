@@ -594,6 +594,12 @@ static int l_game_get_hyperspace_travelled_percentage(lua_State *l)
 	return 1;
 }
 
+static int l_game_get_hyperspace_flash_alpha(lua_State *l)
+{
+	LuaPush(l, Pi::game ? Pi::game->GetHyperspaceFlashAlpha() : 0.0f);
+	return 1;
+}
+
 static int l_game_get_parts_from_date_time(lua_State *l)
 {
 	const double time = LuaPull<double>(l, 1);
@@ -706,6 +712,7 @@ void LuaGame::Register()
 		{ "GetTimeAcceleration", l_game_get_time_acceleration },
 		{ "GetRequestedTimeAcceleration", l_game_get_requested_time_acceleration },
 		{ "GetHyperspaceTravelledPercentage", l_game_get_hyperspace_travelled_percentage },
+		{ "GetHyperspaceFlashAlpha", l_game_get_hyperspace_flash_alpha },
 
 		{ "SetWorldCamType", l_game_set_world_cam_type },
 		{ "GetWorldCamType", l_game_get_world_cam_type },

@@ -21,6 +21,8 @@
 #include "graphics/Material.h"
 #include "graphics/Renderer.h"
 #include "graphics/RenderState.h"
+#include "graphics/TextureBuilder.h"
+#include "graphics/VertexArray.h"
 #include "matrix4x4.h"
 #include "MathUtil.h"
 #include "Space.h"
@@ -102,6 +104,20 @@ void WorldView::InitObject()
 	rsd.primitiveType = Graphics::LINE_SINGLE;
 	m_indicatorMat.reset(Pi::renderer->CreateMaterial("vtxColor", desc, rsd, m_indicator.GetVertexFormat()));
 
+	Graphics::RenderStateDesc scGlowRsd;
+	scGlowRsd.blendMode = Graphics::BLEND_ALPHA_ONE;
+	scGlowRsd.depthWrite = false;
+	scGlowRsd.depthTest = false;
+	scGlowRsd.cullMode = Graphics::CULL_NONE;
+	Graphics::MaterialDescriptor scGlowDesc;
+	scGlowDesc.textures = 1;
+	scGlowDesc.vertexColors = true;
+	auto scGlowVfmt = Graphics::VertexFormatDesc::FromAttribSet(
+		Graphics::ATTRIB_POSITION | Graphics::ATTRIB_DIFFUSE | Graphics::ATTRIB_UV0);
+	m_scGlowMat.reset(Pi::renderer->CreateMaterial("unlit", scGlowDesc, scGlowRsd, scGlowVfmt));
+	Graphics::Texture *scGlowTex = Graphics::TextureBuilder::Billboard("textures/halo.dds").GetOrCreateTexture(Pi::renderer, "billboard");
+	m_scGlowMat->SetTexture("texture0"_hash, scGlowTex);
+
 	/*
 	  NEW UI
 	*/
@@ -176,10 +192,15 @@ void WorldView::Draw3D()
 	if (Pi::AreSpeedLinesDisplayed())
 		m_speedLines->Render(m_renderer);
 
-	// Contact trails
+	// Contact trails (sublight contacts only; Supercruise ships draw short white/Doppler FTL wakes)
 	if (Pi::AreHudTrailsDisplayed()) {
-		for (auto it = Pi::player->GetSensors()->GetContacts().begin(); it != Pi::player->GetSensors()->GetContacts().end(); ++it)
+		for (auto it = Pi::player->GetSensors()->GetContacts().begin(); it != Pi::player->GetSensors()->GetContacts().end(); ++it) {
+			if (it->body && it->body->IsType(ObjectType::SHIP) &&
+				static_cast<const Ship *>(it->body)->GetFlightState() == Ship::SUPERCRUISE) {
+				continue;
+			}
 			it->trail->Render(m_renderer);
+		}
 	}
 
 	// don't draw crosshairs etc in hyperspace
@@ -193,8 +214,14 @@ void WorldView::Draw3D()
 	m_renderer->SetProjection(matrix4x4f::OrthoFrustum(0, m_renderer->GetWindowWidth(), m_renderer->GetWindowHeight(), 0, 0, 1));
 	m_renderer->SetTransform(matrix4x4f::Identity);
 
+	// Supercruise ships appear as radiant points of light across the system
+	DrawSupercruiseShips();
+
 	// Supercruise 3D HUD overlays (orbital path lines & body exclusion zone rings)
 	DrawSupercruiseOverlays();
+
+	// Hyperjump star-streaking surge right before hyperspace transit
+	DrawHyperspaceJumpStreaks();
 
 	m_cameraContext->EndFrame();
 
@@ -224,6 +251,23 @@ void WorldView::Update()
 	assert(!Pi::player->IsDead());
 
 	m_viewController->Update();
+
+	// Hyperjump wide-angle FOV warp: widen toward ~360 deg feel during jump-out surge,
+	// and snap back from ultra-wide down to normal FOV when emerging into the destination system.
+	if (Pi::player && m_cameraContext) {
+		const float defaultFov = Pi::config->Float("FOVVertical");
+		const float baseFov = (shipView && !shipView->IsExteriorView()) ? m_cameraContext->GetFovAng() : defaultFov;
+		constexpr float kWarpMaxFov = 168.0f;
+		if (Pi::player->IsHyperspaceJumpSurging()) {
+			const float p = Pi::player->GetHyperspaceJumpSurgeProgress();
+			m_cameraContext->SetFovAng(baseFov + (kWarpMaxFov - baseFov) * (p * p));
+		} else if (m_game && m_game->GetHyperspaceEntryFovFactor() > 0.0f) {
+			const float f = m_game->GetHyperspaceEntryFovFactor();
+			m_cameraContext->SetFovAng(baseFov + (kWarpMaxFov - baseFov) * (f * f));
+		} else if (shipView && shipView->IsExteriorView()) {
+			m_cameraContext->SetFovAng(defaultFov);
+		}
+	}
 
 	m_cameraContext->BeginFrame();
 	m_camera->Update();
@@ -606,6 +650,223 @@ vector3d WorldView::GetTargetIndicatorScreenPosition(const Body *body) const
 	return WorldSpaceToScreenSpace(pos);
 }
 
+void WorldView::DrawSupercruiseShips()
+{
+	if (!Pi::player || !m_game || !m_game->GetSpace() || !m_scGlowMat)
+		return;
+
+	const FrameId camFrameId = m_cameraContext->GetTempFrame();
+	if (!camFrameId.valid())
+		return;
+
+	const Frame *rootFrame = Frame::GetFrame(m_game->GetSpace()->GetRootFrame());
+	const vector3d rootCamPos = rootFrame ? rootFrame->GetInterpPositionRelTo(camFrameId) : vector3d(0.0);
+	const matrix3x3d rootCamOrient = rootFrame ? rootFrame->GetInterpOrientRelTo(camFrameId) : matrix3x3d::Identity;
+
+	const float winW = float(m_renderer->GetWindowWidth());
+	const float winH = float(m_renderer->GetWindowHeight());
+	const double zClip = -1.0;
+
+	// Collect celestial occluders (stars, gas giants, planets, moons) in camera space
+	struct Occluder {
+		vector3d pos;
+		double radiusSq;
+	};
+	std::vector<Occluder> occluders;
+	for (Body *b : m_game->GetSpace()->GetBodies()) {
+		if (!b || !b->IsType(ObjectType::TERRAINBODY))
+			continue;
+		const SystemBody *sb = b->GetSystemBody();
+		const double r = sb ? sb->GetRadius() : b->GetPhysRadius();
+		if (r <= 0.0)
+			continue;
+		const vector3d p = b->GetInterpPositionRelTo(camFrameId);
+		if (p.LengthSqr() <= r * r)
+			continue;
+		occluders.push_back({ p, r * r });
+	}
+
+	auto isOccluded = [&](const vector3d &targetCamPos, double targetDist) -> bool {
+		if (targetDist <= 1.0)
+			return false;
+		const vector3d dir = targetCamPos / targetDist;
+		for (const Occluder &occ : occluders) {
+			const double proj = occ.pos.Dot(dir);
+			if (proj <= 0.0 || proj >= targetDist)
+				continue;
+			const double perpSq = occ.pos.LengthSqr() - proj * proj;
+			if (perpSq < occ.radiusSq)
+				return true;
+		}
+		return false;
+	};
+
+	const bool inAtmosphere = m_camera && m_camera->IsInAtmosphere();
+	const float bgVis = m_camera ? Clamp(m_camera->GetBackgroundIntensity(), 0.0f, 1.0f) : 1.0f;
+	if (inAtmosphere && bgVis <= 0.04f)
+		return;
+
+	Graphics::VertexArray glowVerts(Graphics::ATTRIB_POSITION | Graphics::ATTRIB_DIFFUSE | Graphics::ATTRIB_UV0);
+
+	auto addGlowQuad = [&](float cx, float cy, float halfSize, const Color &col) {
+		const vector3f p0(cx - halfSize, cy - halfSize, 0.0f);
+		const vector3f p1(cx + halfSize, cy - halfSize, 0.0f);
+		const vector3f p2(cx + halfSize, cy + halfSize, 0.0f);
+		const vector3f p3(cx - halfSize, cy + halfSize, 0.0f);
+		glowVerts.Add(p0, col, vector2f(0.0f, 0.0f));
+		glowVerts.Add(p1, col, vector2f(1.0f, 0.0f));
+		glowVerts.Add(p2, col, vector2f(1.0f, 1.0f));
+		glowVerts.Add(p0, col, vector2f(0.0f, 0.0f));
+		glowVerts.Add(p2, col, vector2f(1.0f, 1.0f));
+		glowVerts.Add(p3, col, vector2f(0.0f, 1.0f));
+	};
+
+	for (Body *b : m_game->GetSpace()->GetBodies()) {
+		if (!b)
+			continue;
+
+		// Low Wake / Distress Signal beacon (visible in Supercruise)
+		if (b->IsType(ObjectType::HYPERSPACECLOUD) && static_cast<const HyperspaceCloud *>(b)->IsLowWake()) {
+			const vector3d wakeCamPos = b->GetInterpPositionRelTo(camFrameId);
+			if (wakeCamPos.z <= zClip) {
+				const double dist = wakeCamPos.Length();
+				if (dist >= 250.0 && !isOccluded(wakeCamPos, dist)) {
+					const vector3d screenHead = projectToScreenSpace(wakeCamPos, m_cameraContext, false);
+					if (screenHead.x >= -80.0 && screenHead.x <= winW + 80.0 &&
+						screenHead.y >= -80.0 && screenHead.y <= winH + 80.0) {
+						const float cx = float(screenHead.x);
+						const float cy = float(screenHead.y);
+						const float pulse = 0.75f + 0.25f * float(std::sin(m_game->GetTime() * 5.0));
+						addGlowQuad(cx, cy, 13.0f * pulse, Color(255, 165, 45, 195));
+						addGlowQuad(cx, cy, 5.0f, Color(255, 235, 185, 255));
+					}
+				}
+			}
+			continue;
+		}
+
+		if (!b->IsType(ObjectType::SHIP))
+			continue;
+		const Ship *ship = static_cast<const Ship *>(b);
+		if (ship->IsDead() || ship->GetFlightState() != Ship::SUPERCRUISE)
+			continue;
+		if (ship == Pi::player)
+			continue;
+
+		const vector3d shipCamPos = ship->GetInterpPositionRelTo(camFrameId);
+		if (shipCamPos.z > zClip)
+			continue;
+
+		const double dist = shipCamPos.Length();
+		if (dist < 250.0 || isOccluded(shipCamPos, dist))
+			continue;
+
+		const vector3d screenHead = projectToScreenSpace(shipCamPos, m_cameraContext, false);
+		if (screenHead.x < -80.0 || screenHead.x > winW + 80.0 ||
+			screenHead.y < -80.0 || screenHead.y > winH + 80.0)
+			continue;
+
+		const SupercruiseController *sc = ship->GetSupercruise();
+		const double speed = sc ? sc->GetSpeed() : SupercruiseController::MIN_SPEED;
+		const double speedLog = Clamp(
+			std::log10(std::max(speed, SupercruiseController::MIN_SPEED) / SupercruiseController::MIN_SPEED) /
+			std::log10(SupercruiseController::MAX_SPEED / SupercruiseController::MIN_SPEED),
+			0.0, 1.0);
+
+		const float visAlpha = inAtmosphere ? (bgVis * 0.78f) : Clamp(0.25f + 0.75f * bgVis, 0.25f, 1.0f);
+		const float outerHalf = inAtmosphere ? float(2.4 + 1.4 * speedLog) : float(5.5 + 4.5 * speedLog);
+		const float coreHalf = inAtmosphere ? float(1.2 + 0.8 * speedLog) : float(2.3 + 1.7 * speedLog);
+		const float cx = float(screenHead.x);
+		const float cy = float(screenHead.y);
+
+		// Subtle relativistic Doppler shift based on radial direction of travel relative to camera:
+		// pure white laterally, subtle cool-white blueshift approaching, warm amber-reddish shift receding.
+		const vector3d shipFwdCam = (-ship->GetInterpOrientRelTo(camFrameId).VectorZ()).NormalizedSafe();
+		const vector3d toCamDir = (-shipCamPos).NormalizedSafe();
+		const float radialDot = float(Clamp(shipFwdCam.Dot(toCamDir), -1.0, 1.0));
+		const float doppler = 0.38f * float(speedLog) * radialDot;
+
+		auto makeDopplerColor = [&](Uint8 alpha) -> Color {
+			const Uint8 scaledA = Uint8(Clamp(int(float(alpha) * visAlpha), 0, 255));
+			if (doppler >= 0.0f) {
+				// Blueshift (approaching): crisp cool-white
+				const Uint8 r = Uint8(Clamp(int(255.0f - 65.0f * doppler), 160, 255));
+				const Uint8 g = Uint8(Clamp(int(252.0f - 18.0f * doppler), 200, 255));
+				return Color(r, g, 255, scaledA);
+			} else {
+				// Redshift (receding): warm amber-white
+				const float red = -doppler;
+				const Uint8 g = Uint8(Clamp(int(250.0f - 95.0f * red), 120, 255));
+				const Uint8 b = Uint8(Clamp(int(242.0f - 155.0f * red), 75, 255));
+				return Color(255, g, b, scaledA);
+			}
+		};
+
+		// Short, subtle luminous wake along recent trajectory (in atmosphere: thin shooting-star streak)
+		if (sc && rootFrame && !sc->GetTrailPositions().empty()) {
+			const float maxTrailPix = inAtmosphere ? float(10.0 + 14.0 * speedLog) : float(8.0 + 10.0 * speedLog);
+			float accumPix = 0.0f;
+			float prevX = cx;
+			float prevY = cy;
+			vector3d prevCam = shipCamPos;
+
+			for (const vector3d &rootPt : sc->GetTrailPositions()) {
+				vector3d camPt = rootCamPos + rootCamOrient * rootPt;
+				if (camPt.z > zClip) {
+					const double denom = camPt.z - prevCam.z;
+					if (std::fabs(denom) < 1e-6)
+						break;
+					const double t = Clamp((zClip - prevCam.z) / denom, 0.0, 1.0);
+					camPt = prevCam + (camPt - prevCam) * t;
+				}
+				const vector3d sPt = projectToScreenSpace(camPt, m_cameraContext, false);
+				const float sx = float(sPt.x);
+				const float sy = float(sPt.y);
+				const float dx = sx - prevX;
+				const float dy = sy - prevY;
+				const float segLen = std::sqrt(dx * dx + dy * dy);
+				if (segLen > maxTrailPix * 3.0f)
+					break;
+				if (segLen > 0.5f) {
+					const float remain = maxTrailPix - accumPix;
+					if (remain <= 0.0f)
+						break;
+					const float useLen = std::min(segLen, remain);
+					const int steps = std::max(1, int(std::ceil(useLen / 2.2f)));
+					for (int k = 1; k <= steps; ++k) {
+						const float frac = (float(k) / float(steps)) * (useLen / segLen);
+						const float px = prevX + dx * frac;
+						const float py = prevY + dy * frac;
+						const float d = accumPix + useLen * (float(k) / float(steps));
+						const float norm = Clamp(d / maxTrailPix, 0.0f, 1.0f);
+						const float fade = std::pow(1.0f - norm, inAtmosphere ? 1.6f : 2.0f);
+						const float puffRadius = inAtmosphere
+							? float(0.75 + 0.45 * speedLog) * (1.0f - 0.72f * norm)
+							: (coreHalf * 0.90f) * (1.0f - 0.65f * norm);
+						const Uint8 baseAlpha = Uint8(Clamp(int((inAtmosphere ? 115.0f : 95.0f) * fade), 0, 255));
+						if (baseAlpha > 2) {
+							addGlowQuad(px, py, puffRadius, makeDopplerColor(baseAlpha));
+						}
+					}
+					accumPix += useLen;
+					if (accumPix >= maxTrailPix)
+						break;
+				}
+				prevX = sx;
+				prevY = sy;
+				prevCam = camPt;
+			}
+		}
+
+		addGlowQuad(cx, cy, outerHalf, makeDopplerColor(inAtmosphere ? 135 : 175));
+		addGlowQuad(cx, cy, coreHalf, Color(255, 254, 250, Uint8(Clamp(int(255.0f * visAlpha), 0, 255))));
+	}
+
+	if (!glowVerts.IsEmpty()) {
+		m_renderer->DrawBuffer(&glowVerts, m_scGlowMat.get());
+	}
+}
+
 void WorldView::DrawSupercruiseOverlays()
 {
 	if (!Pi::DrawGUI || !m_labelsOn || !Pi::player || !m_game || !m_game->GetSpace())
@@ -726,6 +987,66 @@ void WorldView::DrawSupercruiseOverlays()
 	}
 	if (!dangerExclVerts.empty()) {
 		m_indicator.SetData(dangerExclVerts.size(), dangerExclVerts.data(), Color(255, 75, 45, 215));
+		m_indicator.Draw(m_renderer, m_indicatorMat.get());
+	}
+}
+
+void WorldView::DrawHyperspaceJumpStreaks()
+{
+	if (!Pi::player || !Pi::player->IsHyperspaceJumpSurging())
+		return;
+
+	const float p = Pi::player->GetHyperspaceJumpSurgeProgress();
+	if (p <= 0.001f)
+		return;
+
+	const float winW = float(m_renderer->GetWindowWidth());
+	const float winH = float(m_renderer->GetWindowHeight());
+	const float cx = winW * 0.5f;
+	const float cy = winH * 0.5f;
+	const float maxR = std::sqrt(cx * cx + cy * cy) * 1.2f;
+
+	std::vector<vector3f> cyanStreaks;
+	std::vector<vector3f> whiteStreaks;
+	constexpr int NUM_RAYS = 260;
+	cyanStreaks.reserve(NUM_RAYS);
+	whiteStreaks.reserve(NUM_RAYS * 2);
+
+	const float surgeEase = p * p;
+	for (int i = 0; i < NUM_RAYS; ++i) {
+		// Deterministic quasi-random angle and radial phase per ray
+		const float fi = float(i);
+		const float ang = std::fmod(fi * 2.3999632f, 2.0f * float(M_PI));
+		const float phase = std::fmod(fi * 0.6180339f + 0.17f * std::sin(fi * 1.31f), 1.0f);
+		const float speedFactor = 0.65f + 0.70f * std::fmod(fi * 0.371f, 1.0f);
+
+		const float travel = std::fmod(phase + p * (1.2f + 2.4f * surgeEase) * speedFactor, 1.0f);
+		const float rOuter = 18.0f + std::pow(travel, 1.45f) * maxR;
+		const float streakLen = (24.0f + 380.0f * surgeEase) * (0.35f + 0.65f * (rOuter / maxR));
+		const float rInner = std::max(8.0f, rOuter - streakLen);
+
+		const float dx = std::cos(ang);
+		const float dy = std::sin(ang);
+		const vector3f p0(cx + dx * rInner, cy + dy * rInner, 0.0f);
+		const vector3f p1(cx + dx * rOuter, cy + dy * rOuter, 0.0f);
+
+		if (i % 3 == 0 && p < 0.85f) {
+			cyanStreaks.push_back(p0);
+			cyanStreaks.push_back(p1);
+		} else {
+			whiteStreaks.push_back(p0);
+			whiteStreaks.push_back(p1);
+		}
+	}
+
+	if (!cyanStreaks.empty()) {
+		const Uint8 alpha = Uint8(Clamp(int((140.0f + 115.0f * p)), 0, 255));
+		m_indicator.SetData(cyanStreaks.size(), cyanStreaks.data(), Color(140, 225, 255, alpha));
+		m_indicator.Draw(m_renderer, m_indicatorMat.get());
+	}
+	if (!whiteStreaks.empty()) {
+		const Uint8 alpha = Uint8(Clamp(int((185.0f + 70.0f * p)), 0, 255));
+		m_indicator.SetData(whiteStreaks.size(), whiteStreaks.data(), Color(255, 255, 255, alpha));
 		m_indicator.Draw(m_renderer, m_indicatorMat.get());
 	}
 }

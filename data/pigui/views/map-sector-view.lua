@@ -1044,10 +1044,12 @@ local function drawEdgeButtons()
 
 			local target = player:GetHyperspaceTarget()
 			local fs = player:GetFlightState()
-			local canJump = player:IsHyperjumpAllowed() and target and (fs == "FLYING" or fs == "SUPERCRUISE") and player:CanHyperjumpTo(target)
+			local cooldown = player.GetSupercruiseCooldown and player:GetSupercruiseCooldown() or 0
+			local canJump = player:IsHyperjumpAllowed() and target and (fs == "FLYING" or fs == "SUPERCRUISE") and player:CanHyperjumpTo(target) and cooldown <= 0.05
 
 			if not canJump then
-				ui.mainMenuButton(icons.hyperspace, lui.HUD_BUTTON_HYPERDRIVE_DISABLED, ui.theme.buttonColors.disabled)
+				local tip = (cooldown > 0.05) and string.format("FSD Cooldown Active (%.1fs)", cooldown) or lui.HUD_BUTTON_HYPERDRIVE_DISABLED
+				ui.mainMenuButton(icons.hyperspace, tip, ui.theme.buttonColors.disabled)
 			elseif player:IsHyperspaceActive() then
 				if ui.mainMenuButton(icons.hyperspace, lc.HYPERSPACE_JUMP_ABORT, ui.theme.buttonColors.selected) then
 					player:AbortHyperjump()

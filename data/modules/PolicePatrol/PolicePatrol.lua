@@ -2,6 +2,7 @@
 -- Licensed under the terms of the GPL v3. See licenses/GPL-3.txt
 
 local Engine = require 'Engine'
+local Equipment = require 'Equipment'
 local Lang = require 'Lang'
 local Game = require 'Game'
 local Space = require 'Space'
@@ -42,12 +43,109 @@ local patrol = {}
 local showMercy = true
 local piracy = false
 local target = nil
+local patrolTimerActive = false
+
+local function equipInterdictor(ship)
+	local equipSet = ship:GetComponent("EquipSet")
+	local proto = Equipment.Get("misc.fsd_interdictor_2")
+	if not equipSet or not proto then return end
+	local inst = proto:Instance()
+	local slot = equipSet:GetFreeSlotForEquip(inst)
+	if slot then
+		equipSet:Install(inst, slot)
+	end
+end
+
+local function assignSupercruiseRoute(ship)
+	if not Game.system then return end
+	local stations = Game.system:GetStationPaths()
+	if stations and #stations > 0 then
+		local path = stations[Engine.rand:Integer(1, #stations)]
+		local body = Space.GetBody(path.bodyIndex)
+		if body then
+			ship:AIFlyTo(body)
+			return
+		end
+	end
+	local planets = Game.system:GetBodyPaths()
+	if planets and #planets > 0 then
+		local path = planets[Engine.rand:Integer(1, #planets)]
+		local body = Space.GetBody(path.bodyIndex)
+		if body then
+			ship:AIFlyTo(body)
+		end
+	end
+end
 
 local attackShip = function (ship)
 	for i = 1, #patrol do
 		patrol[i]:AIKill(ship)
 	end
 	target = ship
+end
+
+local function startPatrolHunterTimer()
+	if patrolTimerActive then return end
+	patrolTimerActive = true
+	Timer:CallEvery(15, function ()
+		if not Game.system or #patrol == 0 then
+			patrolTimerActive = false
+			return true
+		end
+		for i = #patrol, 1, -1 do
+			if not patrol[i]:exists() then
+				table.remove(patrol, i)
+			end
+		end
+		if #patrol == 0 then
+			patrolTimerActive = false
+			return true
+		end
+
+		if target and not target:exists() then
+			target = nil
+		end
+		if target then return false end
+
+		local policeId = Game.system.faction.policeShip
+		local playerLabel = (Game.player and Game.player.label) or ""
+
+		local ships = Space.GetBodiesNear(patrol[1], lawEnforcedRange, "Ship")
+		for _, enemy in ipairs(ships) do
+			if enemy.shipId ~= policeId and enemy:GetCurrentAICommand() == "CMD_KILL" then
+				if not piracy then
+					Comms.ImportantMessage(string.interp(l_ui_core.X_CANNOT_BE_TOLERATED_HERE, { crime = l_ui_core.PIRACY }), patrol[1].label)
+					Comms.ImportantMessage(string.interp(l["RESTRICTIONS_WITHDRAWN_" .. Engine.rand:Integer(1, MissionUtils.getNumberOfFlavours(l, "RESTRICTIONS_WITHDRAWN"))], { ship_label = playerLabel }), patrol[1].label)
+					piracy = true
+				end
+				attackShip(enemy)
+				return false
+			end
+		end
+
+		-- Supercruise patrol scan for WANTED criminals (NPC pirates or wanted player)
+		local allShips = Space.GetBodies("Ship")
+		for _, enemy in ipairs(allShips) do
+			if enemy ~= patrol[1] and enemy.shipId ~= policeId and enemy.IsWanted and enemy:IsWanted() then
+				if patrol[1]:DistanceTo(enemy) < 3.0e10 then
+					piracy = true
+					attackShip(enemy)
+					return false
+				end
+			end
+		end
+
+		if piracy and not target then
+			Comms.ImportantMessage(string.interp(l["RESTRICTIONS_ESTABLISHED_" .. Engine.rand:Integer(1, MissionUtils.getNumberOfFlavours(l, "RESTRICTIONS_ESTABLISHED"))], { ship_label = playerLabel }), patrol[1].label)
+			piracy = false
+		end
+		for i = 1, #patrol do
+			if patrol[i]:GetCurrentAICommand() == "CMD_NONE" then
+				assignSupercruiseRoute(patrol[i])
+			end
+		end
+		return false
+	end)
 end
 
 local onShipDestroyed = function (ship, attacker)
@@ -85,6 +183,17 @@ local onShipHit = function (ship, attacker)
 	end
 end
 
+local onShipInterdicted = function (ship, attacker)
+	if #patrol == 0 or not attacker or not attacker:isa('Ship') then return end
+	if ship and not (ship.IsWanted and ship:IsWanted()) then
+		local policeId = Game.system and Game.system.faction.policeShip
+		if attacker.shipId ~= policeId then
+			piracy = true
+			attackShip(attacker)
+		end
+	end
+end
+
 local onShipFiring = function (ship)
 	if piracy or target then return end
 
@@ -117,9 +226,50 @@ end
 
 ---@param player Player
 local onEnterSystem = function (player)
-	if not hasIllegalGoods(Commodities) then return end
-
 	local system = assert(Game.system)
+	local policeId = system.faction.policeShip
+
+	-- Spawn ambient Supercruise police patrols in policed systems
+	if system.lawlessness < 0.75 and system.population > 0 then
+		local stations = system:GetStationPaths()
+		if stations and #stations > 0 then
+			local numPatrols = math.min(4, math.max(2, math.floor((1.0 - system.lawlessness) * 3.0 + #stations * 0.5)))
+			local threat = 20.0 + 30.0 * (1.0 - system.lawlessness)
+			local scTemplate = MissionUtils.ShipTemplates.PolicePatrol:clone {
+				shipId = policeId,
+				label = system.faction.policeName
+			}
+			for i = 1, numPatrols do
+				local stPath = stations[((i - 1) % #stations) + 1]
+				local stBody = Space.GetBody(stPath.bodyIndex)
+				local spawnHost = stBody
+				local nearDist, farDist = 12000.0, 25000.0
+				if stBody and stBody.type == "STARPORT_SURFACE" then
+					local parentSb = stBody:GetSystemBody() and stBody:GetSystemBody().parent
+					if parentSb and parentSb.body then
+						spawnHost = parentSb.body
+						nearDist = parentSb.radius * 1.2
+						farDist = parentSb.radius * 2.5
+					else
+						spawnHost = nil
+					end
+				end
+				if spawnHost then
+					local pShip = ShipBuilder.MakeShipOrbit(spawnHost, scTemplate, threat, nearDist, farDist)
+					if pShip then
+						equipInterdictor(pShip)
+						table.insert(patrol, pShip)
+						assignSupercruiseRoute(pShip)
+					end
+				end
+			end
+			if #patrol > 0 then
+				startPatrolHunterTimer()
+			end
+		end
+	end
+
+	if not hasIllegalGoods(Commodities) then return end
 
 	local cargoMgr = player:GetComponent('CargoManager')
 
@@ -152,7 +302,7 @@ local onEnterSystem = function (player)
 
 	local threat = 10.0 + Engine.rand:Number(10, 50) * system.lawlessness
 	local template = MissionUtils.ShipTemplates.PolicePatrol:clone {
-		shipId = system.faction.policeShip,
+		shipId = policeId,
 		label = system.faction.policeName
 	}
 
@@ -163,6 +313,7 @@ local onEnterSystem = function (player)
 		for i = 1, n do
 			ship = ShipBuilder.MakeShipNear(player, template, threat, 50, 100) -- "Ship detected nearby"
 			assert(ship)
+			equipInterdictor(ship)
 
 			table.insert(patrol, ship)
 		end
@@ -235,28 +386,7 @@ local onEnterSystem = function (player)
 		end)
 	end)
 
-	local policeId = system.faction.policeShip
-	Timer:CallEvery(15, function ()
-		if not Game.system or #patrol == 0 then return true end
-		if target then return false end
-
-		local ships = Space.GetBodiesNear(patrol[1], lawEnforcedRange, "Ship")
-		for _, enemy in ipairs(ships) do
-			if enemy.shipId ~= policeId and enemy:GetCurrentAICommand() == "CMD_KILL" then
-				if not piracy then
-					Comms.ImportantMessage(string.interp(l_ui_core.X_CANNOT_BE_TOLERATED_HERE, { crime = l_ui_core.PIRACY }), patrol[1].label)
-					Comms.ImportantMessage(string.interp(l["RESTRICTIONS_WITHDRAWN_" .. Engine.rand:Integer(1, MissionUtils.getNumberOfFlavours(l, "RESTRICTIONS_WITHDRAWN"))], { ship_label = player.label }), patrol[1].label)
-					piracy = true
-				end
-				attackShip(enemy)
-				break
-			end
-		end
-		if piracy and not target then
-			Comms.ImportantMessage(string.interp(l["RESTRICTIONS_ESTABLISHED_" .. Engine.rand:Integer(1, MissionUtils.getNumberOfFlavours(l, "RESTRICTIONS_ESTABLISHED"))], { ship_label = player.label }), patrol[1].label)
-			piracy = false
-		end
-	end)
+	startPatrolHunterTimer()
 end
 
 local onLeaveSystem = function (ship)
@@ -264,6 +394,7 @@ local onLeaveSystem = function (ship)
 	showMercy = true
 	piracy = false
 	target = nil
+	patrolTimerActive = false
 end
 
 local onShipDocked = function (player)
@@ -285,6 +416,9 @@ local onGameStart = function ()
 		target = loaded_data.target
 		loaded_data = nil
 	end
+	if #patrol > 0 then
+		startPatrolHunterTimer()
+	end
 end
 
 local onGameEnd = function ()
@@ -292,6 +426,7 @@ local onGameEnd = function ()
 	showMercy = true
 	piracy = false
 	target = nil
+	patrolTimerActive = false
 end
 
 local serialize = function ()
@@ -307,6 +442,7 @@ Event.Register("onLeaveSystem", onLeaveSystem)
 Event.Register("onShipDocked", onShipDocked)
 Event.Register("onShipDestroyed", onShipDestroyed)
 Event.Register("onShipHit", onShipHit)
+Event.Register("onShipInterdicted", onShipInterdicted)
 Event.Register("onShipFiring", onShipFiring)
 Event.Register("onJettison", onJettison)
 Event.Register("onGameStart", onGameStart)

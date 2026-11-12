@@ -28,6 +28,8 @@ std::unique_ptr<Graphics::MeshObject> HyperspaceCloud::s_cloudMeshArriving;
 std::unique_ptr<Graphics::MeshObject> HyperspaceCloud::s_cloudMeshLeaving;
 
 HyperspaceCloud::HyperspaceCloud(Ship *s, double dueDate, bool isArrival) :
+	m_duration(HYPERCLOUD_DURATION),
+	m_isLowWake(false),
 	m_isBeingKilled(false)
 {
 	m_flags = Body::FLAG_CAN_MOVE_FRAME |
@@ -41,8 +43,26 @@ HyperspaceCloud::HyperspaceCloud(Ship *s, double dueDate, bool isArrival) :
 	SetIsArrival(isArrival);
 }
 
+HyperspaceCloud *HyperspaceCloud::SpawnLowWake(Space *space, FrameId frame, const vector3d &pos, const std::string &label, double duration)
+{
+	if (!space || !frame.valid())
+		return nullptr;
+	HyperspaceCloud *wake = new HyperspaceCloud(nullptr, Pi::game ? Pi::game->GetTime() : 0.0, false);
+	wake->m_isLowWake = true;
+	wake->m_duration = duration;
+	wake->m_flags = Body::FLAG_CAN_MOVE_FRAME;
+	wake->SetFrame(frame);
+	wake->SetPosition(pos);
+	wake->SetVelocity(vector3d(0.0));
+	wake->SetLabel(label);
+	space->AddBody(wake);
+	return wake;
+}
+
 HyperspaceCloud::HyperspaceCloud(const Json &jsonObj, Space *space) :
 	Body(jsonObj, space),
+	m_duration(HYPERCLOUD_DURATION),
+	m_isLowWake(false),
 	m_isBeingKilled(false)
 {
 	try {
@@ -51,6 +71,8 @@ HyperspaceCloud::HyperspaceCloud(const Json &jsonObj, Space *space) :
 		m_vel = hyperspaceCloudObj["vel"];
 		m_birthdate = hyperspaceCloudObj["birth_date"];
 		m_due = hyperspaceCloudObj["due"];
+		m_duration = hyperspaceCloudObj.value("duration", HYPERCLOUD_DURATION);
+		m_isLowWake = hyperspaceCloudObj.value("is_low_wake", false);
 
 		m_ship = nullptr;
 		if (hyperspaceCloudObj["ship"].is_object()) {
@@ -58,6 +80,9 @@ HyperspaceCloud::HyperspaceCloud(const Json &jsonObj, Space *space) :
 			m_ship = static_cast<Ship *>(Body::FromJson(shipObj, space));
 		}
 		SetIsArrival(hyperspaceCloudObj["is_arrival"]);
+		if (m_isLowWake && hyperspaceCloudObj.count("wake_label")) {
+			SetLabel(hyperspaceCloudObj["wake_label"].get<std::string>());
+		}
 	} catch (Json::type_error &) {
 		throw SavedGameCorruptException();
 	}
@@ -87,7 +112,12 @@ void HyperspaceCloud::SaveToJson(Json &jsonObj, Space *space)
 	hyperspaceCloudObj["vel"] = m_vel;
 	hyperspaceCloudObj["birth_date"] = m_birthdate;
 	hyperspaceCloudObj["due"] = m_due;
+	hyperspaceCloudObj["duration"] = m_duration;
+	hyperspaceCloudObj["is_low_wake"] = m_isLowWake;
 	hyperspaceCloudObj["is_arrival"] = m_isArrival;
+	if (m_isLowWake) {
+		hyperspaceCloudObj["wake_label"] = GetLabel();
+	}
 	if (m_ship) {
 		Json shipObj = Json::object(); // Create JSON object to contain ship data.
 		m_ship->ToJson(shipObj, space);
@@ -130,8 +160,9 @@ void HyperspaceCloud::TimeStepUpdate(const float timeStep)
 	}
 
 	// cloud expiration
-	if (m_birthdate + HYPERCLOUD_DURATION <= Pi::game->GetTime()) {
-		Pi::game->RemoveHyperspaceCloud(this);
+	if (m_birthdate + m_duration <= Pi::game->GetTime()) {
+		if (!m_isLowWake)
+			Pi::game->RemoveHyperspaceCloud(this);
 		Pi::game->GetSpace()->KillBody(this);
 		m_isBeingKilled = true;
 	}

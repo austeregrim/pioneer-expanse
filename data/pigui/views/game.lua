@@ -114,22 +114,28 @@ local function displayOnScreenObjects()
 	-- make click_radius sufficiently smaller than the cluster size
 	-- to prevent overlap of selection regions
 
+	local scLabelRange = 100.0 * 299792458.0 -- 100 ls Supercruise ID label range
 	local bodies_grouped = ui.getProjectedBodiesGrouped(cluster_size, IN_SPACE_INDICATOR_SHIP_MAX_DISTANCE)
 
 	for _,group in ipairs(bodies_grouped) do
 		local mainBody = group.mainBody
 		local mainCoords = group.screenCoordinates
+		local mp = ui.getMousePos()
+		local isHovered = (mp - mainCoords):length() < click_radius
+		local isTargeted = group.hasNavTarget or (combatTarget == mainBody)
+		local isFarSCShip = mainBody:IsShip() and mainBody:GetFlightState() == "SUPERCRUISE" and
+			not isTargeted and not isHovered and (mainBody:DistanceTo(player) > scLabelRange)
 
-		ui.addIcon(mainCoords, getBodyIcon(mainBody, true), colors.frame, iconsize, ui.anchor.center, ui.anchor.center)
+		local iconColor = isFarSCShip and colors.frame:opacity(0.35) or colors.frame
+		ui.addIcon(mainCoords, getBodyIcon(mainBody, true), iconColor, iconsize, ui.anchor.center, ui.anchor.center)
 
-		if should_show_label then
+		if should_show_label and not isFarSCShip then
 			local label = mainBody:GetLabel()
 			if group.multiple then
 				label = label .. " (" .. #group.bodies .. ")"
 			end
 			ui.addStyledText(mainCoords + Vector2(label_offset,0), ui.anchor.left, ui.anchor.center, label , colors.frame, pionillium.small)
 		end
-		local mp = ui.getMousePos()
 		-- mouse release handler for radial menu
 		if (mp - mainCoords):length() < click_radius then
 			if ui.isMouseClicked(1) and ui.isWindowHovered() then

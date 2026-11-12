@@ -110,6 +110,7 @@ namespace Background {
 		Starfield m_starField;
 		UniverseBox m_universeBox;
 		Uint32 m_drawFlags;
+		float m_intensity = 1.0f;
 	};
 
 } //namespace Background

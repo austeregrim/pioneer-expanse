@@ -207,20 +207,33 @@ local function displayNavTunnels(navTarget)
 	local targetDist = player:GetPositionRelTo(navTarget):length()
 	local screenDiff = position - Vector2(ui.screenWidth / 2, ui.screenHeight / 2)
 
-	-- exponential distribution of navtunnel frames
-	-- the closer to 1.0, the more frames are drawn for a large distance
-	local scalingFactor = 1.6
+	-- Exponential distribution of navtunnel frames; larger factor = fewer, cleaner frames
+	local scalingFactor = 2.3
 	local size = Vector2(0.9, ui.screenHeight / ui.screenWidth)
-	-- TODO: a lot of iterations are wasted on very tiny frames, could be improved
+	local baseCol = colors.navTargetDark
+	local tunnelCol = Color(baseCol.r, baseCol.g, baseCol.b, math.floor(baseCol.a * 0.28))
+	local segFrac = 0.30 -- draw only the middle 30% of each side of the box
+
 	for i = 1, 100 do
 		local dist = squareDist(scalingFactor, i)
 		if (dist > targetDist) then break end
 
 		local scrHeight = squareHeight(dist, targetDist)
-		if scrHeight > 10.0 then
+		if scrHeight > 24.0 and scrHeight < ui.screenHeight * 1.2 then
 			-- as the frame gets further away from the target, bring it closer to the center of the screen
 			local rectCenter = position - screenDiff * (dist / targetDist)
-			ui.addRect(rectCenter - size * scrHeight, rectCenter + size * scrHeight, colors.navTargetDark, 0, ui.RoundCornersNone, 1.0)
+			local half = size * scrHeight
+			local tl = rectCenter - half
+			local br = rectCenter + half
+			local segW = half.x * segFrac
+			local segH = half.y * segFrac
+
+			-- Top & bottom center segments
+			ui.addLine(Vector2(rectCenter.x - segW, tl.y), Vector2(rectCenter.x + segW, tl.y), tunnelCol, 1.0)
+			ui.addLine(Vector2(rectCenter.x - segW, br.y), Vector2(rectCenter.x + segW, br.y), tunnelCol, 1.0)
+			-- Left & right center segments
+			ui.addLine(Vector2(tl.x, rectCenter.y - segH), Vector2(tl.x, rectCenter.y + segH), tunnelCol, 1.0)
+			ui.addLine(Vector2(br.x, rectCenter.y - segH), Vector2(br.x, rectCenter.y + segH), tunnelCol, 1.0)
 		end
 	end
 end

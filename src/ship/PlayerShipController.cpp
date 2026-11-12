@@ -816,6 +816,19 @@ void PlayerShipController::ToggleRotationDamping()
 
 void PlayerShipController::FireMissile()
 {
+	if (m_ship->GetFlightState() == Ship::SUPERCRUISE) {
+		if (SupercruiseController *sc = m_ship->GetSupercruise()) {
+			Body *target = GetCombatTarget();
+			if (!target || !target->IsType(ObjectType::SHIP))
+				target = GetNavTarget();
+			if (target && target->IsType(ObjectType::SHIP)) {
+				sc->StartInterdiction(static_cast<Ship *>(target));
+			} else {
+				sc->ShowStatusMessage("NO SUPERCRUISE SHIP TARGETED FOR INTERDICTION", 3.5f);
+			}
+		}
+		return;
+	}
 	if (!Pi::player->GetCombatTarget())
 		return;
 	LuaObject<Ship>::CallMethod(Pi::player, "FireMissileAt", "any", static_cast<Ship *>(Pi::player->GetCombatTarget()));
@@ -900,13 +913,19 @@ void PlayerShipController::SelectTarget()
 	//With radar ships will be selected at much greter distance, the idea is that even though
 	//you can't see them on screen overlay, they could be visible on radar
 	int ship_detect_dist = m_ship->m_stats.radar_cap > 0 ? MAX_RADAR_SIZE : IN_SPACE_INDICATOR_SHIP_MAX_DISTANCE;
+	const bool playerInSC = (m_ship->GetFlightState() == Ship::SUPERCRUISE);
 
 	//cycling
 	for (auto it = bodyDistList.begin(); it != bodyDistList.end(); ++it) {
 
 		if (it->body->GetType() == ObjectType::PROJECTILE) continue;
-		if ((it->body->GetType() == ObjectType::SHIP || it->body->GetType() == ObjectType::CARGOBODY
-			|| it->body->GetType() == ObjectType::HYPERSPACECLOUD)
+		if (it->body->GetType() == ObjectType::SHIP) {
+			const bool targetInSC = (static_cast<const Ship *>(it->body)->GetFlightState() == Ship::SUPERCRUISE);
+			if (targetInSC && !playerInSC)
+				continue;
+			if (!targetInSC && it->dist > ship_detect_dist)
+				continue;
+		} else if ((it->body->GetType() == ObjectType::CARGOBODY || it->body->GetType() == ObjectType::HYPERSPACECLOUD)
 			&& it->dist > ship_detect_dist)
 			continue;
 
@@ -1014,6 +1033,12 @@ Body *PlayerShipController::GetFollowTarget() const
 
 void PlayerShipController::SetCombatTarget(Body *const target, bool setFollowTo)
 {
+	if (target && target->IsType(ObjectType::SHIP) &&
+		static_cast<const Ship *>(target)->GetFlightState() == Ship::SUPERCRUISE &&
+		m_ship->GetFlightState() != Ship::SUPERCRUISE) {
+		return;
+	}
+
 	if (setFollowTo)
 		SetFollowTarget(target);
 
@@ -1024,6 +1049,12 @@ void PlayerShipController::SetCombatTarget(Body *const target, bool setFollowTo)
 
 void PlayerShipController::SetNavTarget(Body *const target)
 {
+	if (target && target->IsType(ObjectType::SHIP) &&
+		static_cast<const Ship *>(target)->GetFlightState() == Ship::SUPERCRUISE &&
+		m_ship->GetFlightState() != Ship::SUPERCRUISE) {
+		return;
+	}
+
 	m_navTarget = target;
 	onChangeTarget.emit(target);
 }

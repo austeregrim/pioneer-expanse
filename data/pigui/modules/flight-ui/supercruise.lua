@@ -85,13 +85,15 @@ local function drawStatusBanner(player, center, reticuleRadius)
 	if player:IsSupercruiseCharging() then
 		local prog = player:GetSupercruiseChargeProgress()
 		local rem = player:GetSupercruiseChargeCountdown()
+		local massLock = player.GetShipMassLockFactor and player:GetShipMassLockFactor() or 1.0
 		local barW = 300
 		local barH = 12
 		local tl = Vector2(center.x - barW * 0.5, yBase)
 		local br = Vector2(center.x + barW * 0.5, yBase + barH)
 
-		ui.addRectFilled(tl - Vector2(8, 26), br + Vector2(8, 8), colPanelBg, 4, ui.RoundCornersAll)
-		ui.addRect(tl - Vector2(8, 26), br + Vector2(8, 8), colCyan, 4, ui.RoundCornersAll, 1.5)
+		local extraH = (massLock > 1.05) and 16 or 0
+		ui.addRectFilled(tl - Vector2(8, 26), br + Vector2(8, 8 + extraH), colPanelBg, 4, ui.RoundCornersAll)
+		ui.addRect(tl - Vector2(8, 26), br + Vector2(8, 8 + extraH), (massLock > 1.05) and colAmber or colCyan, 4, ui.RoundCornersAll, 1.5)
 
 		local title = string.format("FRAMESHIFT DRIVE CHARGING — %.1fs", rem)
 		ui.addStyledText(Vector2(center.x, yBase - 6), ui.anchor.center, ui.anchor.bottom, title, colCyan, pionillium.medium)
@@ -99,9 +101,13 @@ local function drawStatusBanner(player, center, reticuleRadius)
 		ui.addRectFilled(tl, br, colBarBg, 2, ui.RoundCornersAll)
 		local fillW = math.max(0.0, math.min(1.0, prog)) * barW
 		if fillW > 1 then
-			ui.addRectFilled(tl, Vector2(tl.x + fillW, br.y), colCyan, 2, ui.RoundCornersAll)
+			ui.addRectFilled(tl, Vector2(tl.x + fillW, br.y), (massLock > 1.05) and colAmber or colCyan, 2, ui.RoundCornersAll)
 		end
 		ui.addRect(tl, br, colBorder, 2, ui.RoundCornersAll, 1.0)
+		if massLock > 1.05 then
+			ui.addStyledText(Vector2(center.x, br.y + 4), ui.anchor.center, ui.anchor.top,
+				string.format("INHIBITED BY NEARBY SHIP — MASS LOCK FACTOR x%.1f", massLock), colAmber, pionillium.tiny)
+		end
 		return
 	end
 
@@ -158,21 +164,23 @@ local function drawStatusBanner(player, center, reticuleRadius)
 		return
 	end
 
-	-- 5. Sub-light FSD status badges (Mass Locked, Cooldown, Gear Down)
-	if not player:IsSupercruiseActive() and not player:IsDocked() and not player:IsLanded() then
-		local status, _ = player:GetSupercruiseStatus()
+	-- 5. FSD status badges (Mass Locked, Cooldown, Gear Down)
+	if not player:IsDocked() and not player:IsLanded() then
 		local cooldown = player:GetSupercruiseCooldown()
 		local label = nil
 		local col = colCyan
-		if status == "MASS_LOCKED" then
-			label = "FSD MASS LOCKED"
-			col = colAmber
-		elseif status == "COOLDOWN" then
+		if cooldown > 0.05 then
 			label = string.format("FSD COOLDOWN: %.1fs", cooldown)
 			col = colRed
-		elseif status == "GEAR_DOWN" then
-			label = "FSD LOCKED: LANDING GEAR DEPLOYED"
-			col = colAmber
+		elseif not player:IsSupercruiseActive() then
+			local status, _ = player:GetSupercruiseStatus()
+			if status == "MASS_LOCKED" then
+				label = "FSD MASS LOCKED"
+				col = colAmber
+			elseif status == "GEAR_DOWN" then
+				label = "FSD LOCKED: LANDING GEAR DEPLOYED"
+				col = colAmber
+			end
 		end
 
 		if label then
@@ -187,6 +195,58 @@ local function drawStatusBanner(player, center, reticuleRadius)
 				label, col, pionillium.small)
 		end
 	end
+end
+
+local function drawFuelScoopHUD(player, center, reticuleRadius)
+	local active = player.IsFuelScoopActive and player:IsFuelScoopActive()
+	local unscoopable = player.IsFuelScoopUnscoopable and player:IsFuelScoopUnscoopable()
+	if not active and not unscoopable then
+		return
+	end
+
+	local boxW = 300
+	local boxH = active and 54 or 28
+	local tl = Vector2(center.x - boxW * 0.5, center.y + reticuleRadius + 24)
+	local br = Vector2(tl.x + boxW, tl.y + boxH)
+
+	if unscoopable then
+		ui.addRectFilled(tl, br, colPanelBg, 4, ui.RoundCornersAll)
+		ui.addRect(tl, br, colAmber, 4, ui.RoundCornersAll, 1.5)
+		ui.addStyledText(Vector2(center.x, tl.y + boxH * 0.5), ui.anchor.center, ui.anchor.center,
+			"FUEL SCOOP: UNSCOOPABLE STAR CLASS", colAmber, pionillium.small)
+		return
+	end
+
+	local rate = player:GetFuelScoopRate()
+	local prox = player:GetFuelScoopProximity()
+	local hd = player.GetInstalledHyperdrive and player:GetInstalledHyperdrive()
+	local hdNeed = (hd and hd.fuel and hd.fuel.name == "hydrogen" and hd.storedFuel < hd:GetMaxFuel())
+	local thrNeed = (player.fuel or 100) < 99.9
+	local full = (not hdNeed) and (not thrNeed)
+
+	local borderCol = full and colGreen or ((prox > 0.65) and colAmber or colCyan)
+	ui.addRectFilled(tl, br, colPanelBg, 4, ui.RoundCornersAll)
+	ui.addRect(tl, br, borderCol, 4, ui.RoundCornersAll, 1.5)
+
+	local title = full and "FUEL RESERVOIR FULL" or string.format("FUEL SCOOPING — +%.2f t/s", rate)
+	ui.addStyledText(Vector2(tl.x + 10, tl.y + 6), ui.anchor.left, ui.anchor.top, title, borderCol, pionillium.small)
+
+	if hd then
+		ui.addStyledText(Vector2(br.x - 10, tl.y + 6), ui.anchor.right, ui.anchor.top,
+			string.format("HYP %.1f/%.0ft | THR %.0f%%", hd.storedFuel, hd:GetMaxFuel(), player.fuel or 0),
+			colWhite, pionillium.tiny)
+	end
+
+	local barX = tl.x + 10
+	local barY = tl.y + 30
+	local barW = boxW - 20
+	local barH = 10
+	ui.addRectFilled(Vector2(barX, barY), Vector2(barX + barW, barY + barH), colBarBg, 2, ui.RoundCornersAll)
+	local fillW = math.max(0.0, math.min(1.0, prox)) * barW
+	if fillW > 1 then
+		ui.addRectFilled(Vector2(barX, barY), Vector2(barX + fillW, barY + barH), borderCol, 2, ui.RoundCornersAll)
+	end
+	ui.addRect(Vector2(barX, barY), Vector2(barX + barW, barY + barH), colBorder, 2, ui.RoundCornersAll, 1.0)
 end
 
 local function drawSupercruiseRightGauge(player, center, reticuleRadius)
@@ -315,8 +375,12 @@ local function drawSupercruiseTargetPanel(player, center, reticuleRadius)
 		return
 	end
 
+	local isShipTarget = target:IsShip()
+	local hasInterdictor = player.HasFSDInterdictor and player:HasFSDInterdictor()
+	local showInterdictRow = isShipTarget and hasInterdictor
+
 	local panelW = 196
-	local panelH = 176
+	local panelH = showInterdictRow and 202 or 176
 	local panelX = center.x - reticuleRadius - panelW - 36
 	local panelY = center.y - panelH * 0.5
 
@@ -398,11 +462,12 @@ local function drawSupercruiseTargetPanel(player, center, reticuleRadius)
 		(speed <= SAFE_DROP_SPEED) and colGreen or colAmber, 2.5)
 	ui.addRect(Vector2(barX, sBarY), Vector2(barX + barW, sBarY + 8), colBorder, 2, ui.RoundCornersAll, 1.0)
 
-	-- Bottom Drop / Assist Action Button inside target panel
-	local btnDropTL = Vector2(panelX + 8, panelY + panelH - 28)
-	local btnDropBR = Vector2(panelX + panelW - 8, panelY + panelH - 6)
+	-- Bottom Drop / Assist / Interdictor Action Row inside target panel
+	local bottomOffset = showInterdictRow and 52 or 28
+	local btnDropTL = Vector2(panelX + 8, panelY + panelH - bottomOffset)
+	local btnDropBR = Vector2(panelX + panelW - 8, panelY + panelH - bottomOffset + 22)
 
-	if safeReady then
+	if safeReady and not isShipTarget then
 		local hDrop = ui.isMouseHoveringRect(btnDropTL, btnDropBR)
 		ui.addRectFilled(btnDropTL, btnDropBR, hDrop and Color(30, 80, 50, 230) or Color(15, 45, 30, 210), 3, ui.RoundCornersAll)
 		ui.addRect(btnDropTL, btnDropBR, colGreen, 3, ui.RoundCornersAll, 1.5)
@@ -411,6 +476,9 @@ local function drawSupercruiseTargetPanel(player, center, reticuleRadius)
 		if hDrop and ui.isMouseClicked(0) then
 			player:SafeDisengage()
 		end
+	elseif isShipTarget then
+		ui.addStyledText(Vector2(panelX + panelW * 0.5, (btnDropTL.y + btnDropBR.y) * 0.5),
+			ui.anchor.center, ui.anchor.center, "SUPERCRUISE INTERCEPT", colCyan, pionillium.tiny)
 	elseif assist then
 		ui.addStyledText(Vector2(panelX + panelW * 0.5, (btnDropTL.y + btnDropBR.y) * 0.5),
 			ui.anchor.center, ui.anchor.center, "SC ASSIST: AUTO-DROP", colGreen, pionillium.small)
@@ -421,6 +489,109 @@ local function drawSupercruiseTargetPanel(player, center, reticuleRadius)
 		ui.addStyledText(Vector2(panelX + panelW * 0.5, (btnDropTL.y + btnDropBR.y) * 0.5),
 			ui.anchor.center, ui.anchor.center, "APPROACH AT 0:06 (75% THR)", colCyan, pionillium.tiny)
 	end
+
+	if showInterdictRow then
+		local canInt, reason = player:CanInterdictTarget(target)
+		local btnIntTL = Vector2(panelX + 8, panelY + panelH - 26)
+		local btnIntBR = Vector2(panelX + panelW - 8, panelY + panelH - 6)
+		local intCol = canInt and colGreen or colAmber
+		ui.addRectFilled(btnIntTL, btnIntBR, canInt and Color(15, 50, 35, 220) or colBarBg, 3, ui.RoundCornersAll)
+		ui.addRect(btnIntTL, btnIntBR, intCol, 3, ui.RoundCornersAll, 1.0)
+		local intLabel = canInt and "[M] ENGAGE INTERDICTOR" or (reason or "OUT OF ENVELOPE")
+		if #intLabel > 26 then
+			intLabel = string.sub(intLabel, 1, 24) .. ".."
+		end
+		ui.addStyledText(Vector2(panelX + panelW * 0.5, (btnIntTL.y + btnIntBR.y) * 0.5),
+			ui.anchor.center, ui.anchor.center, intLabel, intCol, pionillium.tiny)
+		if canInt and ui.isMouseHoveringRect(btnIntTL, btnIntBR) and ui.isMouseClicked(0) then
+			player:StartInterdiction(target)
+		end
+	end
+end
+
+local function drawInterdictionHUD(player, center, reticuleRadius)
+	local isTarget = player.IsBeingInterdicted and player:IsBeingInterdicted()
+	local isAttacker = player.IsInterdicting and player:IsInterdicting()
+	if not isTarget and not isAttacker then
+		return
+	end
+
+	local capProg = player:GetInterdictionCaptureProgress()
+	local escProg = player:GetInterdictionEscapeProgress()
+
+	-- 1. Escape Vector Reticle (when player is being interdicted)
+	if isTarget then
+		local escDir = player:GetInterdictionEscapeVector()
+		local onscreen, pos, dir = Engine.ProjectRelDirection(escDir)
+		local pulse = 0.72 + 0.28 * math.sin(Game.time * 9.0)
+		local vecCol = Color(55, 215, 255, math.floor(245 * pulse))
+
+		if onscreen then
+			ui.addCircle(pos, 26, vecCol, 24, 2.5)
+			ui.addCircle(pos, 14, colWhite, 20, 1.5)
+			ui.addLine(pos - Vector2(34, 0), pos - Vector2(16, 0), vecCol, 2.0)
+			ui.addLine(pos + Vector2(16, 0), pos + Vector2(34, 0), vecCol, 2.0)
+			ui.addLine(pos - Vector2(0, 34), pos - Vector2(0, 16), vecCol, 2.0)
+			ui.addLine(pos + Vector2(0, 16), pos + Vector2(0, 34), vecCol, 2.0)
+			ui.addStyledText(pos + Vector2(0, 32), ui.anchor.center, ui.anchor.top,
+				"ESCAPE VECTOR", vecCol, pionillium.small)
+		end
+
+		if not onscreen or (pos - center):length() > reticuleRadius * 0.95 then
+			local arrowPos = center + Vector2(dir.x, dir.y) * (reticuleRadius * 0.88)
+			ui.addCircleFilled(arrowPos, 6, vecCol, 12, 1.0)
+			ui.addStyledText(arrowPos + Vector2(0, 10), ui.anchor.center, ui.anchor.top,
+				"ESCAPE", vecCol, pionillium.tiny)
+		end
+	end
+
+	-- 2. Tug-of-War Progress Bars & Explanatory Banner
+	local boxW = 460
+	local boxH = 88
+	local tl = Vector2(center.x - boxW * 0.5, center.y - reticuleRadius - 122)
+	local br = Vector2(tl.x + boxW, tl.y + boxH)
+	local borderCol = isTarget and colRed or colCyan
+
+	ui.addRectFilled(tl, br, Color(12, 16, 26, 225), 5, ui.RoundCornersAll)
+	ui.addRect(tl, br, borderCol, 5, ui.RoundCornersAll, 2.0)
+
+	local header = isTarget
+		and (player:IsSubmittingToInterdiction() and "SUBMITTING TO INTERDICTION..." or "INTERDICTION DETECTED — FSD TETHER LOCKED")
+		or "FSD INTERDICTION TETHER ACTIVE"
+	local sub = isTarget
+		and "ALIGN WITH BLUE ESCAPE VECTOR TO BREAK FREE — OR THROTTLE TO 0% TO SUBMIT"
+		or "KEEP TARGET CENTERED IN RETICLE TO PULL FROM SUPERCRUISE"
+
+	ui.addStyledText(Vector2(center.x, tl.y + 10), ui.anchor.center, ui.anchor.top,
+		header, borderCol, pionillium.medium)
+	ui.addStyledText(Vector2(center.x, tl.y + 30), ui.anchor.center, ui.anchor.top,
+		sub, colWhite, pionillium.tiny)
+
+	-- Left bar (Blue/Cyan) vs Right bar (Red/Amber)
+	local barW = (boxW - 44) * 0.5
+	local barH = 12
+	local barY = tl.y + 56
+
+	local leftTL = Vector2(tl.x + 14, barY)
+	local leftVal = isTarget and escProg or capProg
+	local leftLabel = isTarget and string.format("ESCAPE %.0f%%", escProg * 100) or string.format("CAPTURE %.0f%%", capProg * 100)
+	ui.addStyledText(Vector2(leftTL.x, barY - 12), ui.anchor.left, ui.anchor.top, leftLabel, colCyan, pionillium.tiny)
+	ui.addRectFilled(leftTL, leftTL + Vector2(barW, barH), colBarBg, 2, ui.RoundCornersAll)
+	if leftVal > 0.01 then
+		ui.addRectFilled(leftTL, leftTL + Vector2(barW * leftVal, barH), colCyan, 2, ui.RoundCornersAll)
+	end
+	ui.addRect(leftTL, leftTL + Vector2(barW, barH), colBorder, 2, ui.RoundCornersAll, 1.0)
+
+	local rightTL = Vector2(tl.x + boxW - 14 - barW, barY)
+	local rightVal = isTarget and capProg or escProg
+	local rightCol = isTarget and colRed or colAmber
+	local rightLabel = isTarget and string.format("INTERDICTED %.0f%%", capProg * 100) or string.format("TARGET ESCAPE %.0f%%", escProg * 100)
+	ui.addStyledText(Vector2(rightTL.x + barW, barY - 12), ui.anchor.right, ui.anchor.top, rightLabel, rightCol, pionillium.tiny)
+	ui.addRectFilled(rightTL, rightTL + Vector2(barW, barH), colBarBg, 2, ui.RoundCornersAll)
+	if rightVal > 0.01 then
+		ui.addRectFilled(rightTL, rightTL + Vector2(barW * rightVal, barH), rightCol, 2, ui.RoundCornersAll)
+	end
+	ui.addRect(rightTL, rightTL + Vector2(barW, barH), colBorder, 2, ui.RoundCornersAll, 1.0)
 end
 
 gameView.registerModule("supercruise-hud", {
@@ -437,6 +608,8 @@ gameView.registerModule("supercruise-hud", {
 		if player:IsSupercruiseActive() then
 			drawSupercruiseRightGauge(player, center, radius)
 			drawSupercruiseTargetPanel(player, center, radius)
+			drawInterdictionHUD(player, center, radius)
+			drawFuelScoopHUD(player, center, radius)
 		end
 	end,
 	debugReload = function()

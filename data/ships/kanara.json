@@ -58,6 +58,10 @@
 			"type": "computer",
 			"size": 1
 		},
+		"computer_2": {
+			"type": "computer",
+			"size": 1
+		},
 		"shield_s1": {
 			"type": "shield",
 			"size": 1

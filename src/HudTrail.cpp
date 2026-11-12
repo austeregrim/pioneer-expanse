@@ -7,6 +7,7 @@
 #include "Frame.h"
 #include "Pi.h"
 #include "Player.h"
+#include "Ship.h"
 #include "graphics/Material.h"
 #include "graphics/RenderState.h"
 #include "graphics/Renderer.h"
@@ -40,6 +41,12 @@ void HudTrail::Update(float time)
 		return;
 	}
 
+	// Supercruise ships use their own short FTL wake rather than sublight HUD trails
+	if (m_body->IsType(ObjectType::SHIP) && static_cast<const Ship *>(m_body)->GetFlightState() == Ship::SUPERCRUISE) {
+		m_trailPoints.clear();
+		return;
+	}
+
 	//record the position relative to the player, the HUD trail then displays the history of this object's trajectory around the player
 	m_updateTime += time;
 	if (m_updateTime > UPDATE_INTERVAL) {
@@ -58,6 +65,17 @@ void HudTrail::Render(Graphics::Renderer *r)
 	PROFILE_SCOPED();
 	// Body may already be marked dead (and soon deleted), so do not try to draw a HUD trail
 	if (!m_body || m_body->IsDead() || !m_body->GetFrame().valid()) {
+		m_trailPoints.clear();
+		return;
+	}
+
+	if (m_body->IsType(ObjectType::SHIP) && static_cast<const Ship *>(m_body)->GetFlightState() == Ship::SUPERCRUISE) {
+		m_trailPoints.clear();
+		return;
+	}
+
+	// Supercruise ships use their own short FTL wake rather than sublight HUD trails
+	if (m_body->IsType(ObjectType::SHIP) && static_cast<const Ship *>(m_body)->GetFlightState() == Ship::SUPERCRUISE) {
 		m_trailPoints.clear();
 		return;
 	}

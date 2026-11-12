@@ -22,6 +22,9 @@ local function doLawAndOrder ()
 	if Game.player.flightState == "HYPERSPACE" then return end
 
 	local crimes, fine = PlayerState.GetCrimeOutstanding()
+	if Game.player and Game.player.SetWanted then
+		Game.player:SetWanted(fine > maxFineTolerated, fine)
+	end
 	if not policeDispatched then
 		if fine > maxFineTolerated and
 		Game.player.flightState == "FLYING" and
@@ -88,6 +91,25 @@ local onShipHit = function(ship, attacker)
 	end
 end
 
+local onShipInterdicted = function(ship, attacker)
+	if attacker and attacker:IsPlayer() and ship and not (ship.IsWanted and ship:IsWanted()) then
+		local system = Game.system
+		if system and system.population > 0 and system.lawlessness < 0.85 then
+			local _, fineBefore = PlayerState.GetCrimeOutstanding()
+			Legal:notifyOfCrime(attacker, "PIRACY")
+			local _, fineAfter = PlayerState.GetCrimeOutstanding()
+			if fineAfter == fineBefore then
+				local newFine = Legal:fine("PIRACY", system.lawlessness)
+				PlayerState.AddCrime("PIRACY", newFine)
+				fineAfter = fineBefore + newFine
+			end
+			if Game.player and Game.player.SetWanted then
+				Game.player:SetWanted(fineAfter > maxFineTolerated, fineAfter)
+			end
+		end
+	end
+end
+
 
 local onShipDestroyed = function(ship, attacker)
 	-- Note: crash issue #887, this _should_ no longer trigger crash.
@@ -128,6 +150,7 @@ end
 
 
 Event.Register("onShipHit", onShipHit)
+Event.Register("onShipInterdicted", onShipInterdicted)
 Event.Register("onShipDestroyed", onShipDestroyed)
 Event.Register("onShipFiring", onShipFiring)
 Event.Register("unlawfulDischargeECM", unlawfulDischargeECM)

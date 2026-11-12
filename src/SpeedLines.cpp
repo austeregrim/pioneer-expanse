@@ -62,10 +62,14 @@ void SpeedLines::Update(float time)
 	m_visible = true;
 
 	const bool inSupercruise = (m_ship->GetFlightState() == Ship::SUPERCRUISE);
+	const bool inJumpSurge = (m_ship->GetFlightState() == Ship::JUMPING);
 	m_dir = vector3f(velD * (1.0 / absVelD));
 
 	float d;
-	if (inSupercruise) {
+	if (inJumpSurge) {
+		m_lineLength = 240.f;
+		d = MAX_VEL;
+	} else if (inSupercruise) {
 		const double logNorm = Clamp(std::log10(std::max(absVelD, 30000.0) / 30000.0) / 7.3, 0.0, 1.0);
 		m_lineLength = float(65.0 + 175.0 * logNorm);
 		d = float(35.0 + (MAX_VEL - 35.0) * logNorm);
@@ -119,7 +123,8 @@ void SpeedLines::Render(Graphics::Renderer *r)
 	Uint16 vtx = 0;
 	//distance fade
 	const bool inSupercruise = m_ship && (m_ship->GetFlightState() == Ship::SUPERCRUISE);
-	Color col = inSupercruise ? Color(125, 210, 255, 255) : Color(Color::GRAY);
+	const bool inJumpSurge = m_ship && (m_ship->GetFlightState() == Ship::JUMPING);
+	Color col = inJumpSurge ? Color(235, 248, 255, 255) : (inSupercruise ? Color(125, 210, 255, 255) : Color(Color::GRAY));
 	for (auto it = m_points.begin(); it != m_points.end(); ++it) {
 		col.a = Clamp((1.f - it->Length() / BOUNDS), 0.f, 1.f) * 255;
 

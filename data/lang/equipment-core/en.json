@@ -47,6 +47,30 @@
     "description": "",
     "message": "Advanced FSD flight computer featuring Supercruise Assist (automatic 75% blue-zone throttle regulation, target alignment, and safe disengage drop-out) plus automated station docking."
   },
+  "FSD_INTERDICTOR_1": {
+    "description": "",
+    "message": "Class 1 FSD Interdictor"
+  },
+  "FSD_INTERDICTOR_1_DESCRIPTION": {
+    "description": "",
+    "message": "Projects an unstable frameshift tether to pull targeted vessels out of Supercruise into normal space. Standard range and rear-cone envelope."
+  },
+  "FSD_INTERDICTOR_2": {
+    "description": "",
+    "message": "Class 2 FSD Interdictor"
+  },
+  "FSD_INTERDICTOR_2_DESCRIPTION": {
+    "description": "",
+    "message": "Enhanced frameshift tether module offering +35% interdiction range, wider capture cone, and stronger pull."
+  },
+  "FSD_INTERDICTOR_3": {
+    "description": "",
+    "message": "Class 3 FSD Interdictor"
+  },
+  "FSD_INTERDICTOR_3_DESCRIPTION": {
+    "description": "",
+    "message": "Military-grade frameshift tether module with +70% range, broad capture arc, and rapid tether lock."
+  },
   "AUXILIARY_CARGO_RACK": {
     "description": "Equipment name for a cargo-carrying rack installed as a cabin module",
     "message": "Auxiliary Cargo Rack"
@@ -127,29 +151,197 @@
     "description": "",
     "message": "Class 1 Hyperdrive"
   },
+  "DRIVE_CLASS1_C": {
+    "description": "",
+    "message": "Class 1 Hyperdrive (Grade C)"
+  },
+  "DRIVE_CLASS1_C_DESCRIPTION": {
+    "description": "",
+    "message": "Upgraded Class 1 hyperdrive with improved fuel efficiency and an expanded hydrogen reservoir."
+  },
+  "DRIVE_CLASS1_B": {
+    "description": "",
+    "message": "Class 1 Hyperdrive (Grade B)"
+  },
+  "DRIVE_CLASS1_B_DESCRIPTION": {
+    "description": "",
+    "message": "Long-range Class 1 hyperdrive featuring high-efficiency field coils and a doubled fuel reservoir."
+  },
+  "DRIVE_CLASS1_A": {
+    "description": "",
+    "message": "Class 1 Hyperdrive (Grade A)"
+  },
+  "DRIVE_CLASS1_A_DESCRIPTION": {
+    "description": "",
+    "message": "Top-tier lightweight Class 1 hyperdrive delivering maximum jump range, fuel economy, and transit speed."
+  },
   "DRIVE_CLASS2": {
     "description": "",
     "message": "Class 2 Hyperdrive"
+  },
+  "DRIVE_CLASS2_C": {
+    "description": "",
+    "message": "Class 2 Hyperdrive (Grade C)"
+  },
+  "DRIVE_CLASS2_C_DESCRIPTION": {
+    "description": "",
+    "message": "Upgraded Class 2 hyperdrive with improved fuel efficiency and an expanded hydrogen reservoir."
+  },
+  "DRIVE_CLASS2_B": {
+    "description": "",
+    "message": "Class 2 Hyperdrive (Grade B)"
+  },
+  "DRIVE_CLASS2_B_DESCRIPTION": {
+    "description": "",
+    "message": "Long-range Class 2 hyperdrive featuring high-efficiency field coils and a doubled fuel reservoir."
+  },
+  "DRIVE_CLASS2_A": {
+    "description": "",
+    "message": "Class 2 Hyperdrive (Grade A)"
+  },
+  "DRIVE_CLASS2_A_DESCRIPTION": {
+    "description": "",
+    "message": "Top-tier lightweight Class 2 hyperdrive delivering maximum jump range, fuel economy, and transit speed."
   },
   "DRIVE_CLASS3": {
     "description": "",
     "message": "Class 3 Hyperdrive"
   },
+  "DRIVE_CLASS3_C": {
+    "description": "",
+    "message": "Class 3 Hyperdrive (Grade C)"
+  },
+  "DRIVE_CLASS3_C_DESCRIPTION": {
+    "description": "",
+    "message": "Upgraded Class 3 hyperdrive with improved fuel efficiency and an expanded hydrogen reservoir."
+  },
+  "DRIVE_CLASS3_B": {
+    "description": "",
+    "message": "Class 3 Hyperdrive (Grade B)"
+  },
+  "DRIVE_CLASS3_B_DESCRIPTION": {
+    "description": "",
+    "message": "Long-range Class 3 hyperdrive featuring high-efficiency field coils and a doubled fuel reservoir."
+  },
+  "DRIVE_CLASS3_A": {
+    "description": "",
+    "message": "Class 3 Hyperdrive (Grade A)"
+  },
+  "DRIVE_CLASS3_A_DESCRIPTION": {
+    "description": "",
+    "message": "Top-tier lightweight Class 3 hyperdrive delivering maximum jump range, fuel economy, and transit speed."
+  },
   "DRIVE_CLASS4": {
     "description": "",
     "message": "Class 4 Hyperdrive"
+  },
+  "DRIVE_CLASS4_C": {
+    "description": "",
+    "message": "Class 4 Hyperdrive (Grade C)"
+  },
+  "DRIVE_CLASS4_C_DESCRIPTION": {
+    "description": "",
+    "message": "Upgraded Class 4 hyperdrive with improved fuel efficiency and an expanded hydrogen reservoir."
+  },
+  "DRIVE_CLASS4_B": {
+    "description": "",
+    "message": "Class 4 Hyperdrive (Grade B)"
+  },
+  "DRIVE_CLASS4_B_DESCRIPTION": {
+    "description": "",
+    "message": "Long-range Class 4 hyperdrive featuring high-efficiency field coils and a doubled fuel reservoir."
+  },
+  "DRIVE_CLASS4_A": {
+    "description": "",
+    "message": "Class 4 Hyperdrive (Grade A)"
+  },
+  "DRIVE_CLASS4_A_DESCRIPTION": {
+    "description": "",
+    "message": "Top-tier lightweight Class 4 hyperdrive delivering maximum jump range, fuel economy, and transit speed."
   },
   "DRIVE_CLASS5": {
     "description": "",
     "message": "Class 5 Hyperdrive"
   },
+  "DRIVE_CLASS5_C": {
+    "description": "",
+    "message": "Class 5 Hyperdrive (Grade C)"
+  },
+  "DRIVE_CLASS5_C_DESCRIPTION": {
+    "description": "",
+    "message": "Upgraded Class 5 hyperdrive with improved fuel efficiency and an expanded hydrogen reservoir."
+  },
+  "DRIVE_CLASS5_B": {
+    "description": "",
+    "message": "Class 5 Hyperdrive (Grade B)"
+  },
+  "DRIVE_CLASS5_B_DESCRIPTION": {
+    "description": "",
+    "message": "Long-range Class 5 hyperdrive featuring high-efficiency field coils and a doubled fuel reservoir."
+  },
+  "DRIVE_CLASS5_A": {
+    "description": "",
+    "message": "Class 5 Hyperdrive (Grade A)"
+  },
+  "DRIVE_CLASS5_A_DESCRIPTION": {
+    "description": "",
+    "message": "Top-tier lightweight Class 5 hyperdrive delivering maximum jump range, fuel economy, and transit speed."
+  },
   "DRIVE_CLASS6": {
     "description": "",
     "message": "Class 6 Hyperdrive"
   },
+  "DRIVE_CLASS6_C": {
+    "description": "",
+    "message": "Class 6 Hyperdrive (Grade C)"
+  },
+  "DRIVE_CLASS6_C_DESCRIPTION": {
+    "description": "",
+    "message": "Upgraded Class 6 hyperdrive with improved fuel efficiency and an expanded hydrogen reservoir."
+  },
+  "DRIVE_CLASS6_B": {
+    "description": "",
+    "message": "Class 6 Hyperdrive (Grade B)"
+  },
+  "DRIVE_CLASS6_B_DESCRIPTION": {
+    "description": "",
+    "message": "Long-range Class 6 hyperdrive featuring high-efficiency field coils and a doubled fuel reservoir."
+  },
+  "DRIVE_CLASS6_A": {
+    "description": "",
+    "message": "Class 6 Hyperdrive (Grade A)"
+  },
+  "DRIVE_CLASS6_A_DESCRIPTION": {
+    "description": "",
+    "message": "Top-tier lightweight Class 6 hyperdrive delivering maximum jump range, fuel economy, and transit speed."
+  },
   "DRIVE_CLASS7": {
     "description": "",
     "message": "Class 7 Hyperdrive"
+  },
+  "DRIVE_CLASS7_C": {
+    "description": "",
+    "message": "Class 7 Hyperdrive (Grade C)"
+  },
+  "DRIVE_CLASS7_C_DESCRIPTION": {
+    "description": "",
+    "message": "Upgraded Class 7 hyperdrive with improved fuel efficiency and an expanded hydrogen reservoir."
+  },
+  "DRIVE_CLASS7_B": {
+    "description": "",
+    "message": "Class 7 Hyperdrive (Grade B)"
+  },
+  "DRIVE_CLASS7_B_DESCRIPTION": {
+    "description": "",
+    "message": "Long-range Class 7 hyperdrive featuring high-efficiency field coils and a doubled fuel reservoir."
+  },
+  "DRIVE_CLASS7_A": {
+    "description": "",
+    "message": "Class 7 Hyperdrive (Grade A)"
+  },
+  "DRIVE_CLASS7_A_DESCRIPTION": {
+    "description": "",
+    "message": "Top-tier lightweight Class 7 hyperdrive delivering maximum jump range, fuel economy, and transit speed."
   },
   "DRIVE_CLASS8": {
     "description": "",

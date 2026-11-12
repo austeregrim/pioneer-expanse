@@ -32,6 +32,8 @@ public:
 	double GetDueDate() const { return m_due; }
 	void SetIsArrival(bool isArrival);
 	bool IsArrival() const { return m_isArrival; }
+	bool IsLowWake() const { return m_isLowWake; }
+	static HyperspaceCloud *SpawnLowWake(Space *space, FrameId frame, const vector3d &pos, const std::string &label, double duration = 240.0);
 	void UpdateInterpTransform(double alpha) override;
 
 protected:
@@ -44,7 +46,9 @@ private:
 	vector3d m_vel;
 	double m_birthdate;
 	double m_due;
+	double m_duration;
 	bool m_isArrival;
+	bool m_isLowWake;
 	bool m_isBeingKilled;
 
 	static std::unique_ptr<Graphics::Material> s_cloudMat;

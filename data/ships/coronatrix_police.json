@@ -46,6 +46,10 @@
 			"hardpoint": true,
 			"default": "missile_bay.opli_internal_s2"
 		},
+		"computer_1": {
+			"type": "computer",
+			"size": 1
+		},
 		"computer_2": {
 			"type": "computer",
 			"size": 1

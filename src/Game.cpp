@@ -34,6 +34,7 @@
 #include "WorldView.h"
 #include "galaxy/GalaxyGenerator.h"
 #include "ship/PlayerShipController.h"
+#include "ship/SupercruiseController.h"
 
 Game::Game(const SystemPath &path, const double startDateTime, const char *shipType) :
 	m_galaxy(GalaxyGenerator::Create()),
@@ -363,13 +364,33 @@ void Game::TimeStep(float step)
 	SfxManager::TimeStepAll(step, m_space->GetRootFrame());
 
 	if (m_state == State::HYPERSPACE) {
+		// Pure white screen throughout hyperspace transit after the jump-out animation
+		m_hyperspaceFlashAlpha = 1.0f;
 		if (Pi::game->GetTime() >= m_hyperspaceEndTime) {
 			SwitchToNormalSpace();
 			m_player->EnterSystem();
+			if (SupercruiseController *sc = m_player->GetSupercruise())
+				sc->EnterSupercruiseOnHyperspaceExit();
+			m_hyperspaceFlashAlpha = 1.0f;
+			m_hyperspaceEntryFovTimer = HYPERSPACE_ENTRY_FOV_DURATION;
 			RequestTimeAccel(TIMEACCEL_1X);
-		} else
+		} else {
 			m_hyperspaceProgress += step;
+		}
 		return;
+	}
+
+	if (m_player && m_player->IsHyperspaceJumpSurging()) {
+		const float p = m_player->GetHyperspaceJumpSurgeProgress();
+		m_hyperspaceFlashAlpha = (p > 0.30f) ? Clamp(float(std::pow((p - 0.30f) / 0.70f, 1.45f)), 0.0f, 1.0f) : 0.0f;
+		m_hyperspaceEntryFovTimer = 0.0f;
+	} else {
+		if (m_hyperspaceFlashAlpha > 0.0f) {
+			m_hyperspaceFlashAlpha = std::max(0.0f, m_hyperspaceFlashAlpha - step / 0.55f);
+		}
+		if (m_hyperspaceEntryFovTimer > 0.0f) {
+			m_hyperspaceEntryFovTimer = std::max(0.0f, m_hyperspaceEntryFovTimer - step);
+		}
 	}
 
 	if (m_wantHyperspace) {
@@ -510,6 +531,7 @@ void Game::SwitchToHyperspace()
 	m_hyperspaceProgress = 0;
 	m_hyperspaceDuration = m_player->GetHyperspaceDuration();
 	m_hyperspaceEndTime = Pi::game->GetTime() + m_hyperspaceDuration;
+	m_hyperspaceFlashAlpha = 1.0f;
 
 	m_state = State::HYPERSPACE;
 	m_wantHyperspace = false;
@@ -534,17 +556,22 @@ void Game::SwitchToNormalSpace()
 
 	// place it
 	vector3d pos, vel;
-	m_space->GetHyperspaceExitParams(m_hyperspaceSource, m_hyperspaceDest, pos, vel);
+	Body *primary = nullptr;
+	m_space->GetHyperspaceExitParams(m_hyperspaceSource, m_hyperspaceDest, pos, vel, &primary);
 	m_player->SetPosition(pos);
 	m_player->SetVelocity(vel);
 
-	// orient ship in direction of travel
+	// orient ship in direction of travel (facing primary star)
 	{
 		vector3d oz = -vel.Normalized();
 		vector3d ox = MathUtil::OrthogonalDirection(vel);
 		vector3d oy = oz.Cross(ox).Normalized();
 		m_player->SetOrient(matrix3x3d::FromVectors(ox, oy, oz));
 	}
+
+	// Lock navigation target onto the primary star
+	m_player->SetNavTarget(primary);
+	m_hyperspaceFlashAlpha = 1.0f;
 
 	// place the exit cloud
 	HyperspaceCloud *cloud = new HyperspaceCloud(0, Pi::game->GetTime(), true);

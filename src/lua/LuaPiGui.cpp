@@ -8,6 +8,7 @@
 
 #include "EnumStrings.h"
 #include "Game.h"
+#include "HyperspaceCloud.h"
 #include "LuaColor.h"
 #include "LuaConstants.h"
 #include "LuaInput.h"
@@ -2566,10 +2567,19 @@ static int l_pigui_get_projected_bodies_grouped(lua_State *l)
 	PiGui::TSS_vector filtered;
 	filtered.reserve(Pi::game->GetSpace()->GetNumBodies());
 
+	const bool playerInSC = (Pi::player->GetFlightState() == Ship::SUPERCRUISE);
+
 	for (Body *body : Pi::game->GetSpace()->GetBodies()) {
 		if (body == Pi::game->GetPlayer()) continue;
 		if (body->GetType() == ObjectType::PROJECTILE) continue;
-		if ((body->GetType() == ObjectType::SHIP || body->GetType() == ObjectType::CARGOBODY || body->GetType() == ObjectType::HYPERSPACECLOUD) &&
+		if (body->GetType() == ObjectType::SHIP) {
+			const bool targetInSC = (static_cast<const Ship *>(body)->GetFlightState() == Ship::SUPERCRUISE);
+			if (targetInSC && !playerInSC) continue;
+			if (!targetInSC && body->GetPositionRelTo(Pi::player).Length() > ship_max_distance) continue;
+		} else if (body->GetType() == ObjectType::HYPERSPACECLOUD) {
+			const bool isLowWake = static_cast<const HyperspaceCloud *>(body)->IsLowWake();
+			if (!(playerInSC && isLowWake) && body->GetPositionRelTo(Pi::player).Length() > ship_max_distance) continue;
+		} else if (body->GetType() == ObjectType::CARGOBODY &&
 			body->GetPositionRelTo(Pi::player).Length() > ship_max_distance) continue;
 		const PiGui::TScreenSpace res = lua_world_space_to_screen_space(body); // defined in LuaPiGui.cpp
 		if (!res._onScreen) continue;
@@ -2701,13 +2711,33 @@ static int l_pigui_get_targets_nearby(lua_State *l)
 	int range_max = LuaPull<double>(l, 1);
 	Space::BodyNearList nearby = Pi::game->GetSpace()->GetBodiesMaybeNear(Pi::player, range_max);
 
+	const bool playerInSC = (Pi::player->GetFlightState() == Ship::SUPERCRUISE);
+
 	std::vector<Body *> filtered;
-	filtered.reserve(nearby.size());
+	filtered.reserve(nearby.size() + 16);
 	for (Body *body : nearby) {
 		if (body == Pi::player) continue;
 		if (body->GetType() == ObjectType::PROJECTILE) continue;
+		if (body->GetType() == ObjectType::SHIP && !playerInSC &&
+			static_cast<const Ship *>(body)->GetFlightState() == Ship::SUPERCRUISE)
+			continue;
 		filtered.push_back(body);
-	};
+	}
+
+	if (playerInSC) {
+		for (Body *body : Pi::game->GetSpace()->GetBodies()) {
+			if (!body || body == Pi::player)
+				continue;
+			const bool isSCShip = body->IsType(ObjectType::SHIP) &&
+				static_cast<const Ship *>(body)->GetFlightState() == Ship::SUPERCRUISE;
+			const bool isLowWake = body->IsType(ObjectType::HYPERSPACECLOUD) &&
+				static_cast<const HyperspaceCloud *>(body)->IsLowWake();
+			if (!isSCShip && !isLowWake)
+				continue;
+			if (std::find(filtered.begin(), filtered.end(), body) == filtered.end())
+				filtered.push_back(body);
+		}
+	}
 
 	LuaTable result(l, 0, filtered.size());
 	int index = 1;

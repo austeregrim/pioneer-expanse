@@ -400,6 +400,9 @@ bool SystemBody::HasAtmosphere() const
 
 bool SystemBody::IsScoopable() const
 {
+	if (GetSuperType() == SUPERTYPE_STAR) {
+		return (m_type >= TYPE_STAR_M && m_type <= TYPE_STAR_O_HYPER_GIANT);
+	}
 	if (GetSuperType() == SUPERTYPE_GAS_GIANT)
 		return true;
 	if ((m_type == TYPE_PLANET_TERRESTRIAL) &&

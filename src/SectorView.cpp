@@ -28,8 +28,10 @@
 
 #include "profiler/Profiler.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <cstdint>
 #include <unordered_set>
 
 SectorView::~SectorView() {}
@@ -429,7 +431,7 @@ const std::string SectorView::AutoRoute(const SystemPath &start, const SystemPat
 	size_t secLineToFar = 0u;
 	for (Sint32 sx = minX; sx <= maxX; sx++) {
 		for (Sint32 sy = minY; sy <= maxY; sy++) {
-			for (Sint32 sz = minZ; sz < maxZ; sz++) {
+			for (Sint32 sz = minZ; sz <= maxZ; sz++) {
 				const SystemPath sec_path = SystemPath(sx, sy, sz);
 
 				// early out here if the sector is too far from the direct line
@@ -460,32 +462,50 @@ const std::string SectorView::AutoRoute(const SystemPath &start, const SystemPat
 	}
 	Output("SectorView::AutoRoute, nodes to search = %lu, earlied out sector distance from line: %lu times.\n", nodes.size(), secLineToFar);
 
-	// setup inital values and set everything as unvisited
-	std::vector<float> path_dist;							   // distance from source to node
+	// Optimize for fewest jumps first (so longer-range drives actually use long jumps),
+	// breaking ties by shortest total jump duration.
+	struct RouteCost {
+		uint32_t jumps = UINT32_MAX;
+		float duration = INFINITY;
+
+		bool operator<(const RouteCost &other) const
+		{
+			if (jumps != other.jumps)
+				return jumps < other.jumps;
+			return duration < other.duration;
+		}
+	};
+
+	// setup initial values and set everything as unvisited
+	std::vector<RouteCost> path_cost;						   // cost from source to node
 	std::vector<std::vector<SystemPath>::size_type> path_prev; // previous node in optimal path
 	std::unordered_set<std::vector<SystemPath>::size_type> unvisited;
 	// we know how big these need to be, to reserve space up front
-	path_dist.reserve(nodes.size());
+	path_cost.reserve(nodes.size());
 	path_prev.reserve(nodes.size());
 	unvisited.reserve(nodes.size());
 	// initialise them
 	for (std::vector<SystemPath>::size_type i = 0; i < nodes.size(); i++) {
-		path_dist.push_back(INFINITY);
+		path_cost.push_back(RouteCost{});
 		path_prev.push_back(0);
 		unvisited.insert(i);
 	}
 
-	// distance to the start is 0
-	path_dist[0] = 0.f;
+	// cost to the start is 0 jumps, 0 duration
+	path_cost[0] = RouteCost{ 0, 0.f };
 
 	size_t totalSkipped = 0u;
-	while (unvisited.size() > 0) {
-		// find the closest node (for the first loop this will be start)
+	while (!unvisited.empty()) {
+		// find the lowest-cost node (for the first loop this will be start)
 		std::vector<SystemPath>::size_type closest_i = *unvisited.begin();
 		for (auto it : unvisited) {
-			if (path_dist[it] < path_dist[closest_i])
+			if (path_cost[it] < path_cost[closest_i])
 				closest_i = it;
 		}
+
+		// Remaining nodes are unreachable
+		if (path_cost[closest_i].jumps == UINT32_MAX)
+			break;
 
 		// mark it as visited
 		unvisited.erase(closest_i);
@@ -497,13 +517,15 @@ const std::string SectorView::AutoRoute(const SystemPath &start, const SystemPat
 
 		RefCountedPtr<const Sector> closest_sec = m_game.GetGalaxy()->GetSector(closest);
 
-		// if not, loop through all unvisited nodes
-		// since every system is technically reachable from every other system
-		// everything is a neighbor :)
+		// loop through all unvisited nodes within jump range
 		for (auto it : unvisited) {
 			const SystemPath &v = nodes[it];
-			// everything is a neighbor isn't quite true as the ship has a max_range for each jump!
-			if ((SystemPath::SectorDistanceSqr(closest, v) * Sector::SIZE) > max_range_sqr) {
+			// Conservative lower bound on Euclidean distance between two sectors
+			const Sint32 dx = std::max(0, std::abs(closest.sectorX - v.sectorX) - 1);
+			const Sint32 dy = std::max(0, std::abs(closest.sectorY - v.sectorY) - 1);
+			const Sint32 dz = std::max(0, std::abs(closest.sectorZ - v.sectorZ) - 1);
+			const float min_dist_sqr = float(dx * dx + dy * dy + dz * dz) * (Sector::SIZE * Sector::SIZE);
+			if (min_dist_sqr > max_range_sqr) {
 				++totalSkipped;
 				continue;
 			}
@@ -511,15 +533,16 @@ const std::string SectorView::AutoRoute(const SystemPath &start, const SystemPat
 			RefCountedPtr<const Sector> v_sec = m_game.GetGalaxy()->GetSector(v); // this causes it to generate a sector (slooooooow)
 
 			const float v_dist_ly = Sector::DistanceBetween(closest_sec, closest.systemIndex, v_sec, v.systemIndex);
+			if (v_dist_ly > max_range) {
+				++totalSkipped;
+				continue;
+			}
 
-			// in this case, duration is used for the distance since that's what we are optimizing
-			float v_dist = hyperdrive.CallMethod<float>("GetDuration", Pi::player, v_dist_ly, max_range);
+			const float v_duration = hyperdrive.CallMethod<float>("GetDuration", Pi::player, v_dist_ly, max_range);
+			const RouteCost candidate{ path_cost[closest_i].jumps + 1, path_cost[closest_i].duration + v_duration };
 
-			v_dist += path_dist[closest_i]; // we want the total duration from start to this node
-			if (v_dist < path_dist[it]) {
-				// if our calculated duration is less than a previous value, this path is more efficent
-				// so store/override it
-				path_dist[it] = v_dist;
+			if (candidate < path_cost[it]) {
+				path_cost[it] = candidate;
 				path_prev[it] = closest_i;
 			}
 		}
@@ -533,7 +556,7 @@ const std::string SectorView::AutoRoute(const SystemPath &start, const SystemPat
 	for (std::vector<SystemPath>::size_type i = 0, numNodes = nodes.size(); i < numNodes; i++) {
 		if (target.IsSameSystem(nodes[i])) {
 			u = i;
-			foundRoute = true;
+			foundRoute = (path_cost[i].jumps != UINT32_MAX);
 			break;
 		}
 	}

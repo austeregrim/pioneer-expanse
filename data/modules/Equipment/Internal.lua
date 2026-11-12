@@ -40,6 +40,30 @@ Equipment.Register("misc.trade_computer", EquipType.New {
 	icon_name="equip_trade_computer"
 })
 
+Equipment.Register("misc.fsd_interdictor_1", EquipType.New {
+	l10n_key="FSD_INTERDICTOR_1",
+	price=6500, purchasable=true, tech_level=5,
+	slot={ type="computer.interdictor", size=1 },
+	mass=1.2, volume=2.0, capabilities={ fsd_interdictor=1 },
+	icon_name="equip_radar"
+})
+
+Equipment.Register("misc.fsd_interdictor_2", EquipType.New {
+	l10n_key="FSD_INTERDICTOR_2",
+	price=18500, purchasable=true, tech_level=7,
+	slot={ type="computer.interdictor", size=1 },
+	mass=1.6, volume=2.5, capabilities={ fsd_interdictor=2 },
+	icon_name="equip_radar"
+})
+
+Equipment.Register("misc.fsd_interdictor_3", EquipType.New {
+	l10n_key="FSD_INTERDICTOR_3",
+	price=45000, purchasable=true, tech_level=9,
+	slot={ type="computer.interdictor", size=1 },
+	mass=2.0, volume=3.0, capabilities={ fsd_interdictor=3 },
+	icon_name="equip_radar"
+})
+
 --===============================================
 -- Sensors
 --===============================================

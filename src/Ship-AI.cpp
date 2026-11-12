@@ -27,10 +27,56 @@ bool Ship::AITimeStep(float timeStep)
 	if (!m_curAICmd) {
 		if (this->IsType(ObjectType::PLAYER)) return true;
 
+		if (m_flightState == SUPERCRUISE && m_supercruise &&
+			(m_supercruise->IsBeingInterdicted() || m_supercruise->IsInterdicting())) {
+			if (m_supercruise->IsBeingInterdicted()) {
+				if (m_supercruise->IsSubmittingToInterdiction()) {
+					m_supercruise->SetThrottle(0.0);
+					m_supercruise->TimeStepUpdate(timeStep, vector3d(0.0));
+				} else {
+					vector3d angInput;
+					double throttle = 0.75;
+					m_supercruise->ComputeAISteering(m_supercruise->GetEscapeVectorWorld() * 1e9, nullptr, angInput, throttle);
+					m_supercruise->SetThrottle(0.75);
+					m_supercruise->TimeStepUpdate(timeStep, angInput);
+				}
+			} else if (Ship *peer = m_supercruise->GetInterdictionPeer()) {
+				vector3d angInput;
+				double throttle = 0.75;
+				m_supercruise->ComputeAISteering(peer->GetPositionRelTo(this), peer, angInput, throttle);
+				m_supercruise->SetThrottle(0.75);
+				m_supercruise->TimeStepUpdate(timeStep, angInput);
+			}
+			return false;
+		}
+
 		// just in case the AI left it on
 		ClearThrusterState();
 		m_gunManager->SetAllGroupsFiring(false);
 		return true;
+	}
+
+	if (!IsType(ObjectType::PLAYER) && m_flightState == SUPERCRUISE && m_supercruise &&
+		(m_supercruise->IsBeingInterdicted() || m_supercruise->IsInterdicting())) {
+		if (m_supercruise->IsBeingInterdicted()) {
+			if (m_supercruise->IsSubmittingToInterdiction()) {
+				m_supercruise->SetThrottle(0.0);
+				m_supercruise->TimeStepUpdate(timeStep, vector3d(0.0));
+			} else {
+				vector3d angInput;
+				double throttle = 0.75;
+				m_supercruise->ComputeAISteering(m_supercruise->GetEscapeVectorWorld() * 1e9, nullptr, angInput, throttle);
+				m_supercruise->SetThrottle(0.75);
+				m_supercruise->TimeStepUpdate(timeStep, angInput);
+			}
+		} else if (Ship *peer = m_supercruise->GetInterdictionPeer()) {
+			vector3d angInput;
+			double throttle = 0.75;
+			m_supercruise->ComputeAISteering(peer->GetPositionRelTo(this), peer, angInput, throttle);
+			m_supercruise->SetThrottle(0.75);
+			m_supercruise->TimeStepUpdate(timeStep, angInput);
+		}
+		return false;
 	}
 
 	m_propulsion->BeginAISequentialThrusters();

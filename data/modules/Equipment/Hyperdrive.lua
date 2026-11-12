@@ -72,6 +72,47 @@ Equipment.Register("hyperspace.hyperdrive_7", HyperdriveType.New {
 })
 
 --
+-- Upgraded Civilian Drives (Grade C / B / A)
+--
+
+local civilian_base_specs = {
+	{ class=1, mass=1.4, volume=2.5, fuel_resv_size=1,   factor_eff=65, price=1700,   tech_level=3 },
+	{ class=2, mass=4.0, volume=6.0, fuel_resv_size=4,   factor_eff=60, price=2300,   tech_level=4 },
+	{ class=3, mass=9.5, volume=15,  fuel_resv_size=10,  factor_eff=55, price=7500,   tech_level=4 },
+	{ class=4, mass=25,  volume=40,  fuel_resv_size=30,  factor_eff=42, price=21000,  tech_level=6 },
+	{ class=5, mass=76,  volume=120, fuel_resv_size=75,  factor_eff=35, price=68000,  tech_level=7 },
+	{ class=6, mass=152, volume=340, fuel_resv_size=120, factor_eff=30, price=129000, tech_level=7 },
+	{ class=7, mass=540, volume=960, fuel_resv_size=350, factor_eff=25, price=341000, tech_level=9 },
+}
+
+local civilian_upgrade_grades = {
+	{ suffix="c", key="C", fuel_mult=1.5, eff_mult=1.20, time_mult=1.10, mass_mult=1.00, price_mult=2.5,  tl_add=1 },
+	{ suffix="b", key="B", fuel_mult=2.0, eff_mult=1.38, time_mult=1.25, mass_mult=0.95, price_mult=5.5,  tl_add=2 },
+	{ suffix="a", key="A", fuel_mult=2.5, eff_mult=1.60, time_mult=1.40, mass_mult=0.85, price_mult=12.0, tl_add=3 },
+}
+
+for _, base in ipairs(civilian_base_specs) do
+	for _, grade in ipairs(civilian_upgrade_grades) do
+		local id = string.format("hyperspace.hyperdrive_%d_%s", base.class, grade.suffix)
+		local l10n = string.format("DRIVE_CLASS%d_%s", base.class, grade.key)
+		-- Round reservoir to 0.5t increments for clean UI display
+		local resv = math.floor(base.fuel_resv_size * grade.fuel_mult * 2 + 0.5) / 2
+		local mass = math.floor(base.mass * grade.mass_mult * 10 + 0.5) / 10
+		local eff = math.floor(base.factor_eff * grade.eff_mult + 0.5)
+		local price = math.floor(base.price * grade.price_mult / 100 + 0.5) * 100
+
+		Equipment.Register(id, HyperdriveType.New {
+			l10n_key = l10n, fuel = Commodities.hydrogen,
+			slot = { type = "hyperdrive.civilian", size = base.class },
+			mass = mass, volume = base.volume, capabilities = { hyperclass = base.class },
+			fuel_resv_size = resv, factor_eff = eff, factor_time = grade.time_mult,
+			price = price, purchasable = true, tech_level = math.min(10, base.tech_level + grade.tl_add),
+			icon_name = "equip_hyperdrive"
+		})
+	end
+end
+
+--
 -- Military Drives (not yet ported)
 --
 

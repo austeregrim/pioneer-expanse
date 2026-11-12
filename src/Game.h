@@ -72,6 +72,8 @@ public:
 	double GetHyperspaceDuration() const { return m_hyperspaceDuration; }
 	double GetHyperspaceEndTime() const { return m_hyperspaceEndTime; }
 	double GetHyperspaceArrivalProbability() const;
+	float GetHyperspaceFlashAlpha() const { return m_hyperspaceFlashAlpha; }
+	float GetHyperspaceEntryFovFactor() const { return (m_hyperspaceEntryFovTimer > 0.0f) ? std::min(1.0f, m_hyperspaceEntryFovTimer / HYPERSPACE_ENTRY_FOV_DURATION) : 0.0f; }
 	const SystemPath &GetHyperspaceDest() const { return m_hyperspaceDest; }
 	const SystemPath &GetHyperspaceSource() const { return m_hyperspaceSource; }
 	void RemoveHyperspaceCloud(HyperspaceCloud *);
@@ -171,6 +173,9 @@ private:
 	double m_hyperspaceProgress;
 	double m_hyperspaceDuration;
 	double m_hyperspaceEndTime;
+	float m_hyperspaceFlashAlpha = 0.0f;
+	static constexpr float HYPERSPACE_ENTRY_FOV_DURATION = 0.70f;
+	float m_hyperspaceEntryFovTimer = 0.0f;
 
 	TimeAccel m_timeAccel;
 	TimeAccel m_requestedTimeAccel;

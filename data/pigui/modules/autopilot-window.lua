@@ -31,8 +31,9 @@ local function button_hyperspace()
 	local shown = true
 	local legal = player:IsHyperjumpAllowed()
 	local targetpath = player:GetHyperspaceTarget()
+	local cooldown = player.GetSupercruiseCooldown and player:GetSupercruiseCooldown() or 0
 	if player:CanHyperjumpTo(targetpath) then
-		if player:IsDocked() or player:IsLanded() then
+		if player:IsDocked() or player:IsLanded() or (cooldown > 0.05 and not player:IsHyperspaceActive()) then
 			disabled = true
 		elseif player:IsHyperspaceActive() then
 			abort = true
@@ -44,7 +45,8 @@ local function button_hyperspace()
 	if not shown then return false end
 
 	if disabled then
-		ui.mainMenuButton(icons.hyperspace, lui.HUD_BUTTON_HYPERDRIVE_DISABLED, ui.theme.buttonColors.disabled)
+		local tip = (cooldown > 0.05) and string.format("FSD Cooldown Active (%.1fs)", cooldown) or lui.HUD_BUTTON_HYPERDRIVE_DISABLED
+		ui.mainMenuButton(icons.hyperspace, tip, ui.theme.buttonColors.disabled)
 	else
 		local icon = icons.hyperspace_off
 		local tooltip = lui.HUD_BUTTON_INITIATE_ILLEGAL_HYPERJUMP

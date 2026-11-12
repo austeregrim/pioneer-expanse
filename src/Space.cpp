@@ -491,7 +491,7 @@ void Space::KillBody(Body *b)
 }
 
 void Space::GetHyperspaceExitParams(const SystemPath &source, const SystemPath &dest,
-	vector3d &pos, vector3d &vel) const
+	vector3d &pos, vector3d &vel, Body **outPrimary) const
 {
 	assert(m_starSystem);
 	assert(source.IsSystemPath());
@@ -507,50 +507,52 @@ void Space::GetHyperspaceExitParams(const SystemPath &source, const SystemPath &
 	const vector3d sourcePos = vector3d(source_sys.GetFullPosition());
 	const vector3d destPos = vector3d(dest_sys.GetFullPosition());
 
-	Body *primary = 0;
-	if (dest.IsBodyPath()) {
-		assert(dest.bodyIndex < m_starSystem->GetNumBodies());
-		primary = FindBodyForPath(&dest);
-		while (primary && primary->GetSystemBody()->GetSuperType() != SystemBody::SUPERTYPE_STAR) {
-			SystemBody *parent = primary->GetSystemBody()->GetParent();
-			primary = parent ? FindBodyForPath(&parent->GetPath()) : 0;
+	// Hyperjumps always lock onto and drop near the primary star of the destination system.
+	Body *primary = nullptr;
+	for (Body *b : GetBodies()) {
+		if (b && b->GetSystemBody() && b->GetSystemBody()->GetSuperType() == SystemBody::SUPERTYPE_STAR) {
+			primary = b;
+			break;
 		}
 	}
 	if (!primary) {
-		// find the first non-gravpoint. should be the primary star
-		for (Body *b : GetBodies())
-			if (b->GetSystemBody()->GetType() != SystemBody::TYPE_GRAVPOINT) {
+		for (Body *b : GetBodies()) {
+			if (b && b->GetSystemBody() && b->GetSystemBody()->GetType() != SystemBody::TYPE_GRAVPOINT) {
 				primary = b;
 				break;
 			}
+		}
 	}
 	assert(primary);
+	if (outPrimary)
+		*outPrimary = primary;
 
-	// calculate distance to primary body relative to body's mass and radius
-	const double max_orbit_vel = 100e3;
-	double dist = G * primary->GetSystemBody()->GetMass() /
-		(max_orbit_vel * max_orbit_vel);
+	// Transform galactic Z-up direction (source -> dest) to Space Y-up coordinates (Y, Z, X)
+	// matching Background::Container::Draw and Space::GetHyperspaceTargetDirection.
+	const vector3d deltaGal = destPos - sourcePos;
+	const vector3d dirSpace(deltaGal.y, deltaGal.z, deltaGal.x);
+	vector3d arrivalDir = dirSpace.NormalizedSafe();
+	if (arrivalDir.LengthSqr() < 0.5)
+		arrivalDir = vector3d(0.0, 0.0, -1.0);
 
-	// ensure an absolute minimum and an absolute maximum distance
-	// the minimum distance from the center of the star should not be less than the radius of the star
-	dist = Clamp(dist, primary->GetSystemBody()->GetRadius() * 1.1, std::max(primary->GetSystemBody()->GetRadius() * 1.1, 100 * AU));
+	const double starR = primary->GetSystemBody()->GetRadius();
+	const double exclR = SupercruiseController::GetExclusionZoneRadius(primary);
+	// Drop outside the stellar exclusion zone and fuel-scooping corona (3.5x radius),
+	// with a safe minimum clearance for compact remnants (white dwarfs, neutron stars, black holes).
+	double dist = std::max(starR * 3.5, std::max(exclR * 3.0, 1.5e8));
+	dist = Clamp(dist, starR * 1.5, std::max(starR * 1.5, 100.0 * AU));
+	dist *= Pi::rng.Double(0.95, 1.12);
 
-	// point velocity vector along the line from source to dest,
-	// make exit position perpendicular to it,
-	// add random component to exit position,
-	// set velocity for (almost) circular orbit
-	vel = (destPos - sourcePos).Normalized();
-	{
-		vector3d a{ MathUtil::OrthogonalDirection(vel) };
-		vector3d b{ vel.Cross(a) };
-		vector3d p{ MathUtil::RandomPointOnCircle(1.) };
-		pos = p.x * a + p.y * b;
-	}
-	pos *= dist * Pi::rng.Double(0.95, 1.2);
-	vel *= sqrt(G * primary->GetSystemBody()->GetMass() / dist);
+	// Enter from the direction of the previous system (-arrivalDir from primary star),
+	// slightly offset laterally (~7-11 deg) so the ship emerges almost facing the star
+	// rather than pointed dead-center into the core.
+	const vector3d orthA = MathUtil::OrthogonalDirection(arrivalDir);
+	const vector3d orthB = arrivalDir.Cross(orthA);
+	const vector3d latPt = MathUtil::RandomPointOnCircle(1.0);
+	const vector3d lateralOffset = (orthA * latPt.x + orthB * latPt.y) * (dist * Pi::rng.Double(0.12, 0.20));
 
-	assert(pos.Length() > primary->GetSystemBody()->GetRadius());
-	pos += primary->GetPositionRelTo(GetRootFrame());
+	pos = primary->GetPositionRelTo(GetRootFrame()) - arrivalDir * dist + lateralOffset;
+	vel = arrivalDir * SupercruiseController::MIN_SPEED;
 }
 
 bool Space::GetHyperspaceTargetDirection(const SystemPath &dest, vector3d &outDirRoot) const
