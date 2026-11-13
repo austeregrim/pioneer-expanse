@@ -1,5 +1,21 @@
 ================================================================================
-Pioneer: Expanse — Fork Initial Release (November 2026)
+Pioneer: Expanse v2026.11.2-expanse (November 2026)
+================================================================================
+Visual Identity, Typography & Mission Badge Update:
+  * Redesigned "Pioneer: Expanse" Vector Mission Badge:
+    - Positioned "P I O N E E R" arc inside the celestial space field beneath the blue compass ring.
+    - Rotated arc typography clockwise to center the letter 'N' at 12 o'clock directly under the North compass needle.
+    - Removed obsolete semi-transparent rocker plate arc for a clean, seamless deep-space background gradient.
+    - Converted all badge typography into vector <path> outlines to ensure 100% NanoSVG engine compatibility.
+  * Standalone Emblem Curation:
+    - Preserved textless crest emblem (logo-icon.svg) for minimalist and low-resolution UI contexts.
+  * Asset Pipeline & Platform Icons:
+    - Regenerated high-resolution and low-resolution badges (data/icons/badge.png, badge32-8b.png).
+    - Regenerated multi-resolution Windows executable icons (application-icon/pioneer.ico).
+    - Updated documentation and README.md header presentation.
+
+================================================================================
+Pioneer: Expanse v2026.11.1-expanse (November 2026)
 ================================================================================
 Independent single-player fork of Pioneer Space Simulator developed in
 human-AI collaboration with Google Argon / Gemini 4 and Gemini 3.8.
