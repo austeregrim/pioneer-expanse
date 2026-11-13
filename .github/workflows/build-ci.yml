@@ -1,5 +1,5 @@
 # Test all pull requests and publish release binaries
-name: Build Pioneer: Expanse
+name: "Build Pioneer: Expanse"
 
 # Controls when the action will run.
 on:
@@ -106,7 +106,7 @@ jobs:
       if: ${{ github.event_name == 'release' || github.event_name == 'workflow_dispatch' }}
       with:
         files: pioneer/pioneer-*-win.exe
-        tag_name: ${{ inputs.tag_name || github.ref_name }}
+        tag_name: ${{ inputs.tag_name || github.event.release.tag_name || github.ref_name }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -144,7 +144,7 @@ jobs:
         build_slug: linux-x64-release
         token: ${{ secrets.GITHUB_TOKEN }}
         upload_release: true
-        tag_name: ${{ inputs.tag_name }}
+        tag_name: ${{ inputs.tag_name || github.event.release.tag_name || github.ref_name }}
 
   build-clang:
     runs-on: ubuntu-22.04
@@ -209,4 +209,4 @@ jobs:
         build_slug: linux-x64-release-appimage
         token: ${{ secrets.GITHUB_TOKEN }}
         upload_release: true
-        tag_name: ${{ inputs.tag_name }}
+        tag_name: ${{ inputs.tag_name || github.event.release.tag_name || github.ref_name }}

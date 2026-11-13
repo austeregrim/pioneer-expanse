@@ -48,6 +48,6 @@ runs:
       if: ${{ (github.event_name == 'release' || github.event_name == 'workflow_dispatch') && inputs.upload_release }}
       with:
         files: Pioneer*.AppImage
-        tag_name: ${{ inputs.tag_name || github.ref_name }}
+        tag_name: ${{ inputs.tag_name || github.event.release.tag_name || github.ref_name }}
       env:
         GITHUB_TOKEN: ${{ inputs.token }}
