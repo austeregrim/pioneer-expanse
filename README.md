@@ -1,12 +1,12 @@
-[![Build](https://github.com/pioneerspacesim/pioneer/workflows/Build%20Pioneer/badge.svg)](https://github.com/pioneerspacesim/pioneer/actions)
+[![Build](https://github.com/austeregrim/pioneer-expanse/actions/workflows/build-ci.yml/badge.svg)](https://github.com/austeregrim/pioneer-expanse/actions)
 [![License GPLv3](https://img.shields.io/badge/license-GPL_v3-green.svg)](http://www.gnu.org/licenses/gpl-3.0.html)
-[![#pioneer on Libera.Chat](https://img.shields.io/badge/LiberaChat-%23pioneer-brightgreen.svg)](https://kiwiirc.com/client/irc.libera.chat/pioneer)
-[![Github All Releases](https://img.shields.io/github/downloads/pioneerspacesim/pioneer/latest/total)]()
 
 
 # Pioneer: Expanse
 
-![](https://github.com/pioneerspacesim/pioneer/blob/master/data/icons/badge.png)
+<p align="center">
+  <img src="data/icons/badge.png" alt="Pioneer: Expanse Badge" width="220" />
+</p>
 
 [![License GPLv3](https://img.shields.io/badge/license-GPL_v3-green.svg)](http://www.gnu.org/licenses/gpl-3.0.html)
 
