@@ -7,6 +7,8 @@ on:
     branches:
     - main
     - master
+    tags:
+    - 'v*'
   pull_request:
     paths:
     - 'src/**.cpp'
@@ -103,7 +105,7 @@ jobs:
 
     - name: Upload Release Files
       uses: softprops/action-gh-release@v3
-      if: ${{ github.event_name == 'release' || github.event_name == 'workflow_dispatch' }}
+      if: ${{ github.event_name == 'release' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/') }}
       with:
         files: pioneer/pioneer-*-win.exe
         tag_name: ${{ inputs.tag_name || github.event.release.tag_name || github.ref_name }}
@@ -178,7 +180,7 @@ jobs:
 
   build-appimage:
     runs-on: ubuntu-22.04
-    if: ${{github.event_name == 'release' || github.event_name == 'workflow_dispatch'}}
+    if: ${{ github.event_name == 'release' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/') }}
     steps:
     # Checkout the repository as $GITHUB_WORKSPACE
     - uses: actions/checkout@v6

@@ -23,6 +23,9 @@ Transform the open-source space simulation game **Pioneer** (inspired by *Fronti
 
 ## Project Roadmap
 
+> [!NOTE]
+> For the long-term expansion roadmap covering Planetary SRVs, Engineering/Crafting, Electronic Infiltration, Graphical/Audio overhauls, Aerospace Manufacturers, and Alien Civilizations, see [01_EXPANSE_LONG_TERM_ROADMAP.md](./01_EXPANSE_LONG_TERM_ROADMAP.md).
+
 ```mermaid
 graph TD
     P1["Phase 1: Dev Environment & Native Build (DONE)"] --> P2["Phase 2: UI Density, Polish, Curation & Start Profiles (DONE)"]
@@ -147,7 +150,7 @@ graph TD
 ---
 
 ### Phase 7: NPC Supercruise Traffic & System Interdiction (COMPLETED)
-* **Detailed Plan**: See [`NPC_SUPERCRUISE_INTERDICTION_PLAN.md`](./NPC_SUPERCRUISE_INTERDICTION_PLAN.md).
+* **Detailed Plan**: See [`04_NPC_SUPERCRUISE_INTERDICTION_PLAN.md`](./04_NPC_SUPERCRUISE_INTERDICTION_PLAN.md).
 * **Goal**: Enable universal NPC Supercruise flight, point-of-light FTL visuals, system-wide Supercruise sensors/targeting, FSD Interdiction tug-of-war mechanics, Low Wake distress drops, and post-interdiction escape/mass-lock rules.
 
 ---

@@ -6,8 +6,13 @@ Welcome to the **Pioneer: Expanse** workspace. This repository is an independent
 
 ## 1. Project Master Plan & Roadmap
 
-The authoritative implementation roadmap is maintained in [`PIONEER_EXPANSE_PLAN.md`](./PIONEER_EXPANSE_PLAN.md).
-Always consult this plan when implementing features across any phase:
+The implementation plans and long-term roadmap are maintained in the [`plans/`](./plans/) directory:
+* [`plans/01_EXPANSE_LONG_TERM_ROADMAP.md`](./plans/01_EXPANSE_LONG_TERM_ROADMAP.md): High-level architectural roadmap covering the 6 core pillars (Planetary SRVs, Crafting/Engineering, Infiltration, Graphics/Audio, Manufacturers, and Alien Civilizations).
+* [`plans/02_PIONEER_EXPANSE_FOUNDATION_PLAN.md`](./plans/02_PIONEER_EXPANSE_FOUNDATION_PLAN.md): Core foundational implementation roadmap (Phases 1–8).
+* [`plans/03_VOLUMETRIC_RINGS_AND_MINING_PLAN.md`](./plans/03_VOLUMETRIC_RINGS_AND_MINING_PLAN.md): Technical plan for volumetric planetary rings, 3-tier LOD asteroid fields, and mining.
+* [`plans/04_NPC_SUPERCRUISE_INTERDICTION_PLAN.md`](./plans/04_NPC_SUPERCRUISE_INTERDICTION_PLAN.md): Technical plan for NPC Supercruise flight, sensors, and interdiction mechanics.
+
+Always consult these plans when implementing features across any phase:
 * **Phase 1: Dev Environment & Native Build** — Completed.
 * **Phase 2: UI Density, Aesthetic Polish, Content Curation & Start Profiles** — Completed (`1920x1080` UI scale baseline, tighter typography/padding, procedural `facegen` and sliders replaced with non-customizable corporate/faction/authority SVG logos, Allegiance + Career Role new game starts, joke modules removed).
 * **Phase 3: Navigation & Map Quality of Life (QoL)** — Next Up (direct list targeting, station filters, cross-system destination retention across hyperspace jumps).

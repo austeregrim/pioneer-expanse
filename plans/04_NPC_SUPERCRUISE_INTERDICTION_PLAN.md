@@ -1,6 +1,6 @@
 # Pioneer: Expanse — NPC Supercruise & FSD Interdiction Plan
 
-Detailed design and implementation roadmap for **Phase 7** (referenced from [PIONEER_EXPANSE_PLAN.md](./PIONEER_EXPANSE_PLAN.md)).
+Detailed design and implementation roadmap for **Phase 7** (referenced from [02_PIONEER_EXPANSE_FOUNDATION_PLAN.md](./02_PIONEER_EXPANSE_FOUNDATION_PLAN.md)).
 
 ---
 

@@ -1,4 +1,17 @@
 ================================================================================
+Pioneer: Expanse v2026.11.3-expanse (November 2026)
+================================================================================
+Automated Binary Release Build & CI Pipeline:
+  * Automated Tag Release Upload Pipeline:
+    - Enabled automatic release builds on tag push (v*) across Windows and Linux runners.
+    - Added automated asset upload for Windows installer (.exe), Linux package (.tar.gz),
+      and standalone Linux AppImage (.AppImage).
+  * Project Roadmap & Architecture Documentation:
+    - Reorganized strategic development roadmaps into plans/ directory.
+    - Added comprehensive plans for Volumetric Planetary Rings, Asteroid Mining, and
+      NPC Supercruise Interdiction.
+
+================================================================================
 Pioneer: Expanse v2026.11.2-expanse (November 2026)
 ================================================================================
 Visual Identity, Typography & Mission Badge Update:
