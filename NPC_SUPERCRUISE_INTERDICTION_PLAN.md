@@ -1,6 +1,6 @@
-# Pioneer: Dangerous — NPC Supercruise & FSD Interdiction Plan
+# Pioneer: Expanse — NPC Supercruise & FSD Interdiction Plan
 
-Detailed design and implementation roadmap for **Phase 7** (referenced from [PIONEER_DANGEROUS_PLAN.md](./PIONEER_DANGEROUS_PLAN.md)).
+Detailed design and implementation roadmap for **Phase 7** (referenced from [PIONEER_EXPANSE_PLAN.md](./PIONEER_EXPANSE_PLAN.md)).
 
 ---
 

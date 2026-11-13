@@ -104,7 +104,7 @@ local unserialize = function (data)
 	loaded_data = data
 end
 
--- Disabled in Pioneer: Dangerous (joke / easter egg BBS adverts deactivated)
+-- Disabled in Pioneer: Expanse (joke / easter egg BBS adverts deactivated)
 -- Event.Register("onCreateBB", onCreateBB)
 -- Event.Register("onGameStart", onGameStart)
 

@@ -1,12 +1,12 @@
-# Pioneer: Dangerous — Agent Guidelines & Project Context
+# Pioneer: Expanse — Agent Guidelines & Project Context
 
-Welcome to the **Pioneer: Dangerous** workspace. This repository is an independent single-player fork of the open-source space simulation game **Pioneer** (`pioneerspacesim/pioneer`), modified to incorporate core gameplay mechanics and design philosophies inspired by *Elite Dangerous*.
+Welcome to the **Pioneer: Expanse** workspace. This repository is an independent single-player fork of the open-source space simulation game **Pioneer** (`pioneerspacesim/pioneer`), modified to incorporate core gameplay mechanics and design philosophies inspired by *Elite Dangerous*.
 
 ---
 
 ## 1. Project Master Plan & Roadmap
 
-The authoritative implementation roadmap is maintained in [`PIONEER_DANGEROUS_PLAN.md`](./PIONEER_DANGEROUS_PLAN.md).
+The authoritative implementation roadmap is maintained in [`PIONEER_EXPANSE_PLAN.md`](./PIONEER_EXPANSE_PLAN.md).
 Always consult this plan when implementing features across any phase:
 * **Phase 1: Dev Environment & Native Build** — Completed.
 * **Phase 2: UI Density, Aesthetic Polish, Content Curation & Start Profiles** — Completed (`1920x1080` UI scale baseline, tighter typography/padding, procedural `facegen` and sliders replaced with non-customizable corporate/faction/authority SVG logos, Allegiance + Career Role new game starts, joke modules removed).

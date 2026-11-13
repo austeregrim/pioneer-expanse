@@ -1,5 +1,5 @@
 ================================================================================
-Pioneer: Dangerous — Fork Initial Release (November 2026)
+Pioneer: Expanse — Fork Initial Release (November 2026)
 ================================================================================
 Independent single-player fork of Pioneer Space Simulator developed in
 human-AI collaboration with Google Argon / Gemini 4 and Gemini 3.8.

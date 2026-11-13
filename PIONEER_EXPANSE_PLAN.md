@@ -1,4 +1,4 @@
-# Pioneer: Dangerous — Implementation & Modernization Plan
+# Pioneer: Expanse — Implementation & Modernization Plan
 
 Transform the open-source space simulation game **Pioneer** (inspired by *Frontier: Elite II*) into an enhanced, single-player *Elite Dangerous*-style experience.
 

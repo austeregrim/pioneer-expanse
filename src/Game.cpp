@@ -420,7 +420,7 @@ bool Game::UpdateTimeAccel()
 		RequestTimeAccel(newTimeAccel);
 	}
 
-	// Pioneer: Dangerous 1:1 Real-Time Flight Clock:
+	// Pioneer: Expanse 1:1 Real-Time Flight Clock:
 	// During all active flight states (FLYING, SUPERCRUISE, DOCKING, UNDOCKING, JUMPING),
 	// lock simulation time to 1x real-time. In-system travel uses FSD Supercruise instead of time compression.
 	else if (m_player->GetFlightState() == Ship::FLYING ||

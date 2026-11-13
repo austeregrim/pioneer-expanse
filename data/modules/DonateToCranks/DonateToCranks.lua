@@ -160,7 +160,7 @@ local unserialize = function (data)
 	loaded_data = data
 end
 
--- Disabled in Pioneer: Dangerous (joke / crank donation module deactivated)
+-- Disabled in Pioneer: Expanse (joke / crank donation module deactivated)
 -- Event.Register("onCreateBB", onCreateBB)
 -- Event.Register("onGameStart", onGameStart)
 

@@ -4,19 +4,19 @@
 [![Github All Releases](https://img.shields.io/github/downloads/pioneerspacesim/pioneer/latest/total)]()
 
 
-# Pioneer: Dangerous
+# Pioneer: Expanse
 
 ![](https://github.com/pioneerspacesim/pioneer/blob/master/data/icons/badge.png)
 
 [![License GPLv3](https://img.shields.io/badge/license-GPL_v3-green.svg)](http://www.gnu.org/licenses/gpl-3.0.html)
 
-**Pioneer: Dangerous** is an independent single-player fork of the open-source space simulation game [Pioneer](https://github.com/pioneerspacesim/pioneer) (originally inspired by *Frontier: Elite II*).
+**Pioneer: Expanse** is an independent single-player fork of the open-source space simulation game [Pioneer](https://github.com/pioneerspacesim/pioneer) (originally inspired by *Frontier: Elite II*).
 
 This fork reimagines Pioneer with core flight mechanics, pacing, and visual systems inspired by *Elite: Dangerous*—replacing Newtonian time acceleration with real-time in-system **FTL Supercruise** flight, a multi-layered **Macro Galactic View** ($100,000\text{ ly}$ Milky Way disc and 3D faction territorial spheres), high-density cockpit and station UI scaling, corporate and faction SVG heraldry, dynamic crisis-driven galactic events (**InterCast News**), an interstellar equity exchange, and an emergency escape pod search-and-rescue rebuy loop.
 
 ---
 
-## Key Features in Pioneer: Dangerous
+## Key Features in Pioneer: Expanse
 
 * **In-System FTL Supercruise (Frame Shift Drive)**:
   * Cruise within star systems seamlessly from $30\text{ km/s}$ ($0.0001c$) up to $2,001c$ in deep space.
@@ -53,30 +53,43 @@ This fork reimagines Pioneer with core flight mechanics, pacing, and visual syst
 
 ---
 
-## Upstream Policy & AI Attribution
+## Upstream Relationship & Independent Fork Policy
 
-### Independent Standalone Fork
-Upstream Pioneer (`pioneerspacesim/pioneer`) maintains an official policy rejecting AI-generated code contributions. Consequently, **Pioneer: Dangerous is maintained strictly as an independent standalone single-player fork**. We do not submit pull requests or patches to upstream Pioneer.
+Upstream Pioneer (`pioneerspacesim/pioneer`) maintains an official policy against accepting AI-assisted or AI-generated contributions into its upstream codebase. 
 
-### AI Collaboration Disclosure
-This project is developed in close human-AI architectural collaboration using Google DeepMind frontier models:
+Consequently, **Pioneer: Expanse is developed and maintained strictly as an independent standalone fork**. We do not submit pull requests, patches, or issues back to upstream Pioneer. This boundary respects upstream's preferences while allowing Pioneer: Expanse to freely explore modern human-AI software engineering methodologies.
+
+---
+
+## Open Source Licensing & AI Collaboration
+
+### GNU General Public License v3 (GPLv3)
+Pioneer: Expanse is free and open-source software distributed under the terms of the **[GNU General Public License version 3 (GPLv3)](http://www.gnu.org/licenses/gpl-3.0.html)** (or, at your option, any later version), maintaining complete licensing continuity with Pioneer.
+
+The GPLv3 guarantees the four fundamental software freedoms: the freedom to run, study, modify, and redistribute the program. The GPLv3 governs the distribution of software and places zero restriction on the tools, compilers, editors, or artificial intelligence models utilized by developers to create or assist in authoring source code.
+
+### AI Collaboration & Licensing Terms
+This fork is developed in close human-AI architectural collaboration using Google DeepMind frontier models:
 * **Google Argon / Gemini 4**
 * **Gemini 3.8**
 
-AI models have been utilized throughout the engineering lifecycle—collaborating on C++ core engine architecture (supercruise kinematic integration, Bullet collision decoupling, frame transition handling, death view lifecycle, 3D sector map visualization), GLSL shaders, Lua gameplay modules (InterCast news, stock exchange, insurance rebuy, navigation lottery, universal cartographics, hyperdrive auto-feed), high-resolution vector artwork, UI scaling, documentation, and automated unit test verification.
+To ensure unambiguous legal clarity and full downstream open-source compliance:
+1. **GPLv3 Licensing of All Contributions**: All modifications, architectures, algorithms, scripts, vector graphics, shaders, and assets introduced in Pioneer: Expanse are licensed under the GNU GPLv3.
+2. **Public Domain Fallback**: To the extent that any legal jurisdiction deems machine-assisted or machine-generated expressions non-copyrightable, all such contributions are dedicated unconditionally to the **Public Domain** (or under the terms of the Creative Commons CC0 1.0 Universal Public Domain Dedication), which is fully permissive and 100% compatible with GPLv3 distribution.
+3. **Freedom for All Downstream Users**: Anyone is free to fork, study, compile, modify, and redistribute Pioneer: Expanse under the terms of the GNU GPLv3.
 
 ---
 
 ## Community & Upstream Heritage
 
-Pioneer: Dangerous builds with deep appreciation upon the foundation created by the upstream Pioneer contributors over more than a decade:
+Pioneer: Expanse builds with deep appreciation upon the foundation created by the upstream Pioneer contributors over more than a decade:
 * Upstream Pioneer Project: [https://pioneerspacesim.net/](https://pioneerspacesim.net/)
 * Upstream Repository: [https://github.com/pioneerspacesim/pioneer](https://github.com/pioneerspacesim/pioneer)
-* License: [GNU General Public License v3 (GPLv3)](http://www.gnu.org/licenses/gpl-3.0.html)
+* Original License: [GNU General Public License v3 (GPLv3)](http://www.gnu.org/licenses/gpl-3.0.html)
 
 ## Compiling from Source
 
-Pioneer: Dangerous builds using CMake and Ninja on modern Linux distributions:
+Pioneer: Expanse builds using CMake and Ninja on modern Linux distributions:
 
 ```bash
 # Install dependencies (Debian/Ubuntu)

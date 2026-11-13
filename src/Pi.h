@@ -93,7 +93,7 @@ public:
 		friend class TombstoneLoop;
 
 		App() :
-			GuiApplication("Pioneer") {}
+			GuiApplication("Pioneer: Expanse") {}
 
 		void OnStartup() override;
 		void OnShutdown() override;
