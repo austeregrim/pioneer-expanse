@@ -2069,7 +2069,7 @@
   },
   "PLEASE_REPORT_THIS_ERROR": {
     "description": "Informational text mentioning the error and asking the player to report it.",
-    "message": "¡Vaya, algo salió mal! Por favor, informe de los pasos para reproducir este error, el registro de salida y su archivo guardado al rastreador de problemas de Pioneer en Github. Puede encontrar su registro de salida en: {path}/output.txt"
+    "message": "¡Vaya, algo salió mal! Por favor, informe de los pasos para reproducir este error, el registro de salida y su archivo guardado al rastreador de problemas de Pioneer: Expanse en GitHub (https://github.com/austeregrim/pioneer-expanse/issues). Puede encontrar su registro de salida en: {path}/output.txt"
   },
   "POLICE": {
     "description": "",

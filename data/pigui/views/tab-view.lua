@@ -145,6 +145,8 @@ function PiGuiTabView.renderTabView(self, refresh)
 					ui.spacing()
 					ui.textWrapped(lui.PLEASE_REPORT_THIS_ERROR:interp {path = ui.userDirPath()})
 					ui.spacing()
+					ui.textLinkOpenURL("Open Pioneer: Expanse Issue Tracker on GitHub", "https://github.com/austeregrim/pioneer-expanse/issues")
+					ui.spacing()
 					ui.child("#TabErrorMsg", function()
 						local err = tab.err
 						if type(err) == "string" then err = err:gsub('\t', '        ') end

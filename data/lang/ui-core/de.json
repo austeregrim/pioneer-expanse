@@ -2069,7 +2069,7 @@
   },
   "PLEASE_REPORT_THIS_ERROR": {
     "description": "Informational text mentioning the error and asking the player to report it.",
-    "message": "Ups, etwas ist schiefgegangen! Um den Entwicklern bei der Behebung zu helfen, melde bitte die Schritte um das Problem zu reproduzieren, das Log und den Spielstand im Issue Tracker auf Github.\nDas Log findest du unter: {path}/output.txt"
+    "message": "Ups, etwas ist schiefgegangen! Um den Entwicklern bei der Behebung zu helfen, melde bitte die Schritte um das Problem zu reproduzieren, das Log und den Spielstand im Pioneer: Expanse Issue Tracker auf GitHub (https://github.com/austeregrim/pioneer-expanse/issues).\nDas Log findest du unter: {path}/output.txt"
   },
   "POLICE": {
     "description": "",

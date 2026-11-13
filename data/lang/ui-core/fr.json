@@ -2069,7 +2069,7 @@
   },
   "PLEASE_REPORT_THIS_ERROR": {
     "description": "Informational text mentioning the error and asking the player to report it.",
-    "message": "Oups, quelque chose est allé de travers! Vous pouvez enregistrer un nouveau bug (issue) dans notre Github en donnant les étapes permettant de reproduire le problème, votre fichier de messages et votre sauvegarde.\nVous trouverez votre fichier de messages ici: {path}/output.txt"
+    "message": "Oups, quelque chose est allé de travers! Vous pouvez enregistrer un nouveau bug (issue) sur le GitHub de Pioneer: Expanse (https://github.com/austeregrim/pioneer-expanse/issues) en donnant les étapes permettant de reproduire le problème, votre fichier de messages et votre sauvegarde.\nVous trouverez votre fichier de messages ici: {path}/output.txt"
   },
   "POLICE": {
     "description": "",

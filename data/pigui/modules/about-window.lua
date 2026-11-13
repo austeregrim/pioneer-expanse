@@ -67,7 +67,7 @@ local function showInfo()
 
 		ui.bulletText(l.LINK_BUG_TRACKER)
 		ui.sameLine()
-		ui.textLinkOpenURL("https://github.com/pioneerspacesim/pioneer/issues/")
+		ui.textLinkOpenURL("https://github.com/austeregrim/pioneer-expanse/issues")
 
 		ui.bulletText(l.LINK_COMMUNITY_FORUM)
 		ui.sameLine()
@@ -95,7 +95,7 @@ local function showInfo()
 
 		ui.bulletText(l.VERSION_LATEST)
 		ui.sameLine()
-		ui.textLinkOpenURL(l.VERSION_LATEST_CONTINUED, "https://github.com/pioneerspacesim/pioneer")
+		ui.textLinkOpenURL(l.VERSION_LATEST_CONTINUED, "https://github.com/austeregrim/pioneer-expanse")
 
 	end)
 end
