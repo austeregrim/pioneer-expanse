@@ -33,6 +33,7 @@
 #include "SystemView.h"
 #include "WorldView.h"
 #include "galaxy/GalaxyGenerator.h"
+#include "galaxy/Sector.h"
 #include "ship/PlayerShipController.h"
 #include "ship/SupercruiseController.h"
 
@@ -179,6 +180,7 @@ Game::Game(const Json &jsonObj) :
 		m_hyperspaceProgress = jsonObj["hyperspace_progress"];
 		m_hyperspaceDuration = jsonObj["hyperspace_duration"];
 		m_hyperspaceEndTime = jsonObj["hyperspace_end_time"];
+		m_hardcore = jsonObj.value("hardcore", false);
 
 		// space, all the bodies and things
 		m_space.reset(new Space(this, m_galaxy, jsonObj, m_time));
@@ -243,6 +245,7 @@ void Game::ToJson(Json &jsonObj)
 	jsonObj["hyperspace_progress"] = m_hyperspaceProgress;
 	jsonObj["hyperspace_duration"] = m_hyperspaceDuration;
 	jsonObj["hyperspace_end_time"] = m_hyperspaceEndTime;
+	jsonObj["hardcore"] = m_hardcore;
 
 	// Delete camera frame from frame structure:
 	bool have_cam_frame = m_gameViews->m_worldView->GetCameraContext()->GetTempFrame().valid();
@@ -677,6 +680,76 @@ void Game::SwitchToNormalSpace()
 	// HACK: we call RebuildObjectTrees to make the internal state of CollisionSpace valid
 	// This is absolutely not our job and CollisionSpace should be redesigned to fix this.
 	Frame::GetFrame(m_player->GetFrame())->GetCollisionSpace()->RebuildObjectTrees();
+}
+
+void Game::TriggerPlayerEscapePodRecovery()
+{
+	if (!m_player) return;
+
+	// 1. Advance simulation clock by 14-28 in-game days (simulating cryo-stasis & SAR transit)
+	const double recoveryDays = 14.0 + Pi::rng.Double() * 14.0;
+	const double recoverySeconds = recoveryDays * 86400.0;
+	m_time += recoverySeconds;
+
+	// 2. Locate nearest starport in the current system
+	SpaceStation *targetStation = nullptr;
+	for (Body *b : m_space->GetBodies()) {
+		if (b && b->IsType(ObjectType::SPACESTATION) && !b->IsDead()) {
+			targetStation = static_cast<SpaceStation *>(b);
+			break;
+		}
+	}
+
+	// 3. If no station in the current system, relocate to nearest inhabited system
+	if (!targetStation) {
+		const SystemPath currentPath = m_space->GetStarSystem()->GetPath();
+		SystemPath nearestInhabited = currentPath;
+		double bestDistSq = 1e18;
+
+		RefCountedPtr<const Sector> sec = m_galaxy->GetSector(currentPath);
+		if (sec) {
+			for (size_t i = 0; i < sec->m_systems.size(); ++i) {
+				const Sector::System &sys = sec->m_systems[i];
+				if (sys.GetPopulation() > 0) {
+					float dSq = Sector::DistanceBetweenSqr(sec, currentPath.systemIndex, sec, i);
+					if (dSq < bestDistSq) {
+						bestDistSq = dSq;
+						nearestInhabited = SystemPath(currentPath.sectorX, currentPath.sectorY, currentPath.sectorZ, i);
+					}
+				}
+			}
+		}
+
+		if (bestDistSq >= 1e17) {
+			nearestInhabited = SystemPath(0, 0, 0, 0); // Sol fallback
+		}
+
+		m_space->RemoveBody(m_player.get());
+		m_space.reset();
+		m_space.reset(new Space(this, m_galaxy, nearestInhabited, nullptr));
+		m_player->SetFrame(m_space->GetRootFrame());
+		m_space->AddBody(m_player.get());
+
+		for (Body *b : m_space->GetBodies()) {
+			if (b && b->IsType(ObjectType::SPACESTATION) && !b->IsDead()) {
+				targetStation = static_cast<SpaceStation *>(b);
+				break;
+			}
+		}
+	}
+
+	// 4. Revive player and dock at station
+	m_player->Revive();
+	if (targetStation) {
+		m_player->SetDockedWith(targetStation, 0);
+	}
+
+	// 5. Reset flash and switch to Station View
+	m_hyperspaceFlashAlpha = 0.0f;
+	Pi::SetView(GetSpaceStationView());
+
+	// 6. Notify Lua of successful rescue and recovery
+	LuaEvent::Queue("onPlayerRescued", recoveryDays, targetStation);
 }
 
 const float Game::s_timeAccelRates[] = {

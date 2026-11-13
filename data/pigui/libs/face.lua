@@ -371,6 +371,15 @@ function PiGuiFace:resolveLogoProfile()
 		end
 	end
 
+	-- 3.5 Universal Cartographics / Planetary Survey
+	if string.find(titleUpper, "CARTOGRAPH") or string.find(titleUpper, "SURVEY") or char.role == "cartography" then
+		return {
+			svg = "corp_science",
+			org = "UNIVERSAL CARTOGRAPHICS",
+			border = Color(72, 219, 251, 215),
+		}
+	end
+
 	-- 4. System Law Enforcement / Police Constable / Detective
 	if string.find(titleUpper, "POLICE") or string.find(titleUpper, "CONSTABLE") or string.find(titleUpper, "LAW") or string.find(titleUpper, "DETECTIVE") then
 		local policeOrg = (sysFaction and sysFaction.policeName and #sysFaction.policeName > 0)

@@ -600,6 +600,22 @@ static int l_game_get_hyperspace_flash_alpha(lua_State *l)
 	return 1;
 }
 
+static int l_game_set_surface_scan_overlay(lua_State *l)
+{
+	if (!Pi::game || !Pi::game->GetWorldView())
+		return 0;
+	if (lua_isnoneornil(l, 1)) {
+		Pi::game->GetWorldView()->SetSurfaceScanOverlay(nullptr, false, 0.0f, "");
+		return 0;
+	}
+	const Body *body = LuaObject<Body>::CheckFromLua(1);
+	const bool active = lua_toboolean(l, 2);
+	const float coverage = static_cast<float>(luaL_optnumber(l, 3, 0.0));
+	const char *gridStr = luaL_optstring(l, 4, "");
+	Pi::game->GetWorldView()->SetSurfaceScanOverlay(body, active, coverage, gridStr ? std::string(gridStr) : std::string());
+	return 0;
+}
+
 static int l_game_get_parts_from_date_time(lua_State *l)
 {
 	const double time = LuaPull<double>(l, 1);
@@ -685,6 +701,21 @@ static int l_game_set_config(lua_State *l)
 	return 0;
 }
 
+static int l_game_is_hardcore(lua_State *l)
+{
+	if (!Pi::game) return 0;
+	lua_pushboolean(l, Pi::game->IsHardcore());
+	return 1;
+}
+
+static int l_game_set_hardcore(lua_State *l)
+{
+	if (!Pi::game) return 0;
+	bool h = lua_toboolean(l, 1);
+	Pi::game->SetHardcore(h);
+	return 0;
+}
+
 void LuaGame::Register()
 {
 	lua_State *l = Lua::manager->GetLuaState();
@@ -700,6 +731,8 @@ void LuaGame::Register()
 		{ "ListSaves", l_game_list_saves },
 		{ "EndGame", l_game_end_game },
 		{ "InHyperspace", l_game_in_hyperspace },
+		{ "IsHardcore", l_game_is_hardcore },
+		{ "SetHardcore", l_game_set_hardcore },
 		{ "SaveGameStats", l_game_savegame_stats },
 		{ "CurrentSaveVersion", l_game_current_save_version },
 
@@ -716,6 +749,7 @@ void LuaGame::Register()
 
 		{ "SetWorldCamType", l_game_set_world_cam_type },
 		{ "GetWorldCamType", l_game_get_world_cam_type },
+		{ "SetSurfaceScanOverlay", l_game_set_surface_scan_overlay },
 
 		{ "GetConfigBool", l_game_get_config<bool> },
 		{ "SetConfigBool", l_game_set_config<bool> },

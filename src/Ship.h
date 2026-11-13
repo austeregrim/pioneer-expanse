@@ -117,6 +117,7 @@ public:
 	const shipstats_t &GetStats() const { return m_stats; }
 
 	void Explode();
+	virtual void Revive() override;
 	virtual bool DoDamage(float kgDamage); // can be overloaded in Player to add audio
 	[[deprecated]] void SetGunState(int idx, int state);
 	void UpdateMass();

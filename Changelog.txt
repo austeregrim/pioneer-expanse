@@ -1,3 +1,93 @@
+================================================================================
+Pioneer: Dangerous — Fork Initial Release (November 2026)
+================================================================================
+Independent single-player fork of Pioneer Space Simulator developed in
+human-AI collaboration with Google Argon / Gemini 4 and Gemini 3.8.
+Reimagined flight mechanics, pacing, graphics, UI, and economy inspired by
+Elite: Dangerous.
+
+  * In-System FTL Supercruise (Frame Shift Drive) Flight Mechanics
+    * Implemented SupercruiseController (src/ship/SupercruiseController.cpp) for
+      in-system real-time travel from 30 km/s (0.0001c) up to 2,001c.
+    * Decoupled rigid-body physics during Supercruise (kinematic forward heading,
+      custom inertia and angular damping).
+    * Dynamic gravity well drag: stellar and planetary mass curves restrict maximum
+      achievable speed near celestial bodies.
+    * Authentic 75% throttle "Blue Zone" maneuverability bonus and 6-second target
+      ETA approach regulation ("Loop of Shame" dynamic overshoot warning).
+    * Safe Disengage mechanism with automated orbital frame transitions:
+      - Orbital stations: smooth drop-in at 12 km facing station with zero relative velocity.
+      - Planetary surface starports: drop-in at 10 km altitude / 8 km standoff facing base.
+      - Deep space manual drop: drop into parent frame at zero relative velocity.
+    * High-speed exclusion zone impact mechanics: Emergency Dropout with total shield
+      depletion, heat spike (92%), and 25-second FSD cooldown timer.
+    * Added Supercruise Assist (Autopilot Mk 2) module for automated target heading lock,
+      throttle regulation, and auto-disengage into station approach.
+    * 3D HUD overlays: projected orbital path ellipses and spherical exclusion zone rings.
+    * Cockpit HUD gauges: vertical throttle gauge with 75% blue zone, velocity readout
+      (km/s, Mm/s, c), gravity well strain meter, target distance/ETA panel, and alerts.
+    * Supercruise speed lines with double-precision velocity normalization and FTL warp streaks.
+
+  * Flight Simulation Clock & Real-Time Pacing
+    * Locked active flight simulation to 1:1 real-time; eliminated flight time-acceleration buttons.
+    * Offline time freeze: simulation clock halts on game exit; contract deadlines represent
+      actual active gameplay hours.
+    * Rebalanced in-system mission travel times and deadlines for Supercruise velocities.
+
+  * Macro Galactic View (100,000 ly 3D Milky Way)
+    * Smooth, continuous 3D camera zoom from local star systems out to 14,000 ly camera distance
+      without sector generation stalls (Hermite cross-fade LOD transitions).
+    * 9-layer vertically stratified 3D galactic disc stack using 4K galactic texture.
+    * 45,000-particle 3D volumetric star cloud and 24,000-particle regional LOD cloud.
+    * Volumetric 3D glow billboards across Sagittarius A* central bulge and spiral arm nurseries.
+    * 3D galactic plane polar coordinate rings (10k-50k ly from core) and Sol bubble range rings.
+    * 3D Fresnel volume spheres and clipped Voronoi intersection boundaries for faction territories.
+    * Interactive 3D mouse raycasting on Z=0 plane for click-to-pan and territory selection.
+    * Macro Galactic Telemetry Banner and Contextual Adaptive Faction Dossier sidebar.
+
+  * Living Galaxy, Crisis State Machine & InterCast News
+    * Hyperjump Macro Tick Engine: calendar days elapsed during hyperspace evaluate regional
+      crises across populated systems.
+    * 4 crisis categories: Frontline (blockades, combat zones), Humanitarian (epidemics, famines),
+      Market (resource shortages, mining booms), Politics (labor strikes, summits).
+    * Multi-stage crisis progression (Incipient -> Epidemic -> Quarantine -> Resolution).
+    * Player catalyst mechanics: commodity deliveries and combat interventions accelerate resolution.
+    * 3D Sector Map Conflict Intel Overlay: renders tactical 3D octahedrons and targeting brackets.
+    * InterCast (Interstellar Broadcast News): in-flight cockpit sidebar ticker and starport terminals.
+
+  * Economy, Financial Markets & Exploration
+    * Interstellar Stock Exchange (ISX): 3-tier equity market (8 megaconglomerates, 4 faction indices,
+      and procedurally generated local starport ventures reacting directly to galactic crises).
+    * Full player stock portfolio tracking, buy/sell order execution, and quarterly dividend payouts.
+    * Nav-Locus Sweepstakes: 90.7-trillion-to-1 astrolabe lottery with rotating 3D celestial globe ticket,
+      5 match tiers, and compounding multi-billion credit jackpot rollovers.
+    * Universal Cartographics: discovery scan data sales and system survey cartography payouts.
+
+  * Search & Rescue, Insurance Rebuy & Hardcore Mode
+    * Escape Pod Ejection Sequence: replaces sudden death with two-phase hull breach alert,
+      COSPAS-SARSAT emergency transponder telemetry, and 14-28 day cryogenic stasis jump.
+    * Search & Rescue recovery: automatic revival and docking at nearest starport medical berth.
+    * Starport Insurance Terminal: 5% hull and module rebuy settlement (or starter loaner ship)
+      with persistent deep-space cargo flotsam retrieval coordinates.
+    * Optional Hardcore Ironman Charter: permanently disables SAR recovery and enforces permadeath.
+
+  * Fuel Management & Ship Systems
+    * Hyperdrive Auto-Feed: hyperspace jump initiation automatically draws hydrogen fuel from
+      the main propellant tank, eliminating artificial single-jump fuel locks.
+    * Dual-tank hyperspace route calculations: navigation planners compute multi-jump routes
+      across the player's full fuel capacity (5-8 consecutive jumps on a single tank).
+    * Fuel scooping enhancements: comms log notifications and automatic tank equalization.
+
+  * UI Density, Aesthetics & Content Curation
+    * Baseline UI resolution upgraded from 1600x900 to native 1920x1080 across all windows.
+    * Tightened typography, button paddings, and table row heights.
+    * Replaced procedural composite facegen and sliders with crisp high-resolution SVG corporate logos,
+      faction crests, starport authority seals, and syndicate insignias.
+    * Redesigned New Game flow with side-by-side Allegiance (Solar Federation, Commonwealth,
+      Haber Corp, Independent) and Career Role (Trader, Miner, Explorer, Mercenary) selectors,
+      pre-equipped with working Class 2 Hyperdrives.
+    * Deactivated joke/unserious mission modules (DonateToCranks, EasterEgg) and cleaned up lore text.
+
 October
   * Fixes
     * Clear sensor contacts before hyperspace to avoid HUD trail crash (#6446)

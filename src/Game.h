@@ -107,6 +107,11 @@ public:
 
 	float GetTimeStep() const { return s_timeAccelRates[m_timeAccel] * (1.0f / PHYSICS_HZ); }
 
+	bool IsHardcore() const { return m_hardcore; }
+	void SetHardcore(bool h) { m_hardcore = h; }
+
+	void TriggerPlayerEscapePodRecovery();
+
 	SectorView *GetSectorView() const { return m_gameViews->m_sectorView; }
 	SystemView *GetSystemView() const { return m_gameViews->m_systemView; }
 	WorldView *GetWorldView() const { return m_gameViews->m_worldView; }
@@ -180,6 +185,7 @@ private:
 	TimeAccel m_timeAccel;
 	TimeAccel m_requestedTimeAccel;
 	bool m_forceTimeAccel;
+	bool m_hardcore = false;
 	static const float s_timeAccelRates[];
 	static const float s_timeInvAccelRates[];
 };

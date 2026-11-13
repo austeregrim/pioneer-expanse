@@ -77,6 +77,21 @@ void LuaObject<SectorMap>::RegisterClass()
 		.AddFunction("SetDrawVerticalLines", &SectorMap::SetDrawVerticalLines)
 		.AddFunction("SetFactionVisible", &SectorMap::SetFactionVisible)
 		.AddFunction("SetDrawUninhabitedLabels", &SectorMap::SetDrawUninhabitedLabels)
+		.AddFunction("SetDrawUnchartedOverlay", &SectorMap::SetDrawUnchartedOverlay)
+		.AddFunction("SetDrawConflictOverlay", &SectorMap::SetDrawConflictOverlay)
+		.AddFunction("GetDrawConflictOverlay", &SectorMap::GetDrawConflictOverlay)
+		.AddFunction("SetConflictSystem", [](lua_State *l, SectorMap *sm) -> int {
+			std::string name = luaL_checkstring(l, 2);
+			int type = luaL_checkinteger(l, 3);
+			sm->SetConflictSystem(name, type);
+			return 0;
+		})
+		.AddFunction("ClearConflictSystems", [](lua_State *l, SectorMap *sm) -> int {
+			sm->ClearConflictSystems();
+			return 0;
+		})
+		.AddFunction("SetVisibleSphereScale", &SectorMap::SetVisibleSphereScale)
+		.AddFunction("GetVisibleSphereScale", &SectorMap::GetVisibleSphereScale)
 		.AddFunction("GotoSectorPath", &SectorMap::GotoSector)
 		.AddFunction("GotoSystemPath", &SectorMap::GotoSystem)
 		.AddFunction("SetRotateMode", &SectorMap::SetRotateMode)

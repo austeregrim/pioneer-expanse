@@ -59,6 +59,8 @@ public:
 
 	bool ShouldShowLabels() { return m_labelsOn; }
 
+	void SetSurfaceScanOverlay(const Body *body, bool active, float coverage, const std::string &grid);
+
 protected:
 	void OnSwitchTo() override;
 	void OnSwitchFrom() override;
@@ -91,12 +93,21 @@ private:
 	void HideIndicator(Indicator &indicator);
 
 	void OnToggleLabels();
+	void OnDiscoveryScan();
 
 	void DrawCombatTargetIndicator(const Indicator &target, const Indicator &lead, const Color &c);
 	void DrawEdgeMarker(const Indicator &marker, const Color &c);
 	void DrawSupercruiseShips();
 	void DrawSupercruiseOverlays();
+	void DrawSurfaceScanOverlay();
 	void DrawHyperspaceJumpStreaks();
+
+	struct SurfaceScanOverlay {
+		const Body *body = nullptr;
+		bool active = false;
+		float coverage = 0.0f;
+		std::string grid;
+	} m_surfaceScan;
 
 	/// Handler for "requestTimeAccelerationInc" event
 	void OnRequestTimeAccelInc();
@@ -114,6 +125,7 @@ private:
 	ConnectionTicket m_onToggleHudModeCon;
 	ConnectionTicket m_onIncTimeAccelCon;
 	ConnectionTicket m_onDecTimeAccelCon;
+	ConnectionTicket m_onDiscoveryScanCon;
 
 	RefCountedPtr<CameraContext> m_cameraContext;
 	std::unique_ptr<Camera> m_camera;
@@ -131,6 +143,7 @@ private:
 		Action *toggleHudMode;
 		Action *increaseTimeAcceleration;
 		Action *decreaseTimeAcceleration;
+		Action *discoveryScan;
 
 		void RegisterBindings() override;
 	} InputBindings;

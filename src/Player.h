@@ -33,6 +33,8 @@ public:
 
 	void DoFixspeedTakeoff(SpaceStation *from = nullptr);
 
+	virtual void Revive() override;
+
 	virtual void SetShipType(const ShipType::Id &shipId) override;
 
 	PlayerShipController *GetPlayerController() const;

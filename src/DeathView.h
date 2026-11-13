@@ -18,16 +18,20 @@ public:
 
 	void Init();
 
-	virtual void Update();
-	virtual void Draw3D();
+	virtual void Update() override;
+	virtual void Draw3D() override;
+	virtual void DrawPiGui() override;
+
+	float GetDeathTimer() const { return m_deathTimer; }
 
 protected:
-	virtual void OnSwitchTo();
+	virtual void OnSwitchTo() override;
 
 private:
 	RefCountedPtr<CameraContext> m_cameraContext;
 	std::unique_ptr<Camera> m_camera;
 	float m_cameraDist;
+	float m_deathTimer = 0.0f;
 	Game *m_game;
 };
 

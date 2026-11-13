@@ -51,6 +51,11 @@ Player::Player(const Json &jsonObj, Space *space) :
 	});
 }
 
+void Player::Revive()
+{
+	Ship::Revive();
+}
+
 void Player::SetShipType(const ShipType::Id &shipId)
 {
 	Ship::SetShipType(shipId);

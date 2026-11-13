@@ -564,6 +564,7 @@ SectorMap::SectorMap(const Json &jsonObj, SectorMapContext &&context) :
 		m_rotZ = m_rotZMovingTo = sectorViewObj["rot_z"];
 		m_zoom = m_zoomMovingTo = sectorViewObj["zoom"];
 		m_zoomClamped = Clamp(m_zoom, 1.f, FAR_LIMIT);
+		m_visibleSphereScale = sectorViewObj.value("sphere_scale", 0.75f);
 		m_detailBoxVisible = sectorViewObj["detail_box_visible"];
 	} catch (Json::type_error &) {
 		throw SavedGameCorruptException();
@@ -579,6 +580,8 @@ void SectorMap::InitDefaults()
 	m_zoomDefault = m_context.config->Float("SectorViewZoom");
 	m_rotXDefault = Clamp(m_rotXDefault, -170.0f, -10.0f);
 	m_zoomDefault = Clamp(m_zoomDefault, 0.1f, 5.0f);
+	m_visibleSphereScale = m_context.config->Float("SectorViewSphereScale", 0.75f);
+	m_visibleSphereScale = Clamp(m_visibleSphereScale, 0.35f, 1.0f);
 
 	// Note: INT_MAX != (int) ((float) INT_MAX)
 	const float farPos = static_cast<float>(INT_MAX);
@@ -663,6 +666,7 @@ void SectorMap::SaveToJson(Json &jsonObj)
 	sectorMapObj["rot_x"] = m_rotX;
 	sectorMapObj["rot_z"] = m_rotZ;
 	sectorMapObj["zoom"] = m_zoom;
+	sectorMapObj["sphere_scale"] = m_visibleSphereScale;
 
 	sectorMapObj["detail_box_visible"] = m_detailBoxVisible;
 
@@ -970,7 +974,9 @@ void SectorMap::PutFactionLabels(const vector3f &origin)
 	for (auto it = m_visibleFactions.begin(); it != m_visibleFactions.end(); ++it) {
 		if ((*it)->hasHomeworld && m_hiddenFactions.find((*it)) == m_hiddenFactions.end()) {
 			Sector::System sys = GetCached((*it)->homeworld)->m_systems[(*it)->homeworld.systemIndex];
-			if ((m_pos * Sector::SIZE - sys.GetFullPosition()).Length() > (m_zoomClamped / FAR_THRESHOLD) * OUTER_RADIUS) continue;
+			const float maxCap = 7.5f + (25.0f - 7.5f) * m_visibleSphereScale;
+			const float effectiveZoom = std::min(m_zoomClamped, maxCap);
+			if ((m_pos * Sector::SIZE - sys.GetFullPosition()).Length() > (effectiveZoom / FAR_THRESHOLD) * OUTER_RADIUS) continue;
 
 			vector3d pos = Graphics::ProjectToScreen(m_context.renderer, vector3d(sys.GetFullPosition() - origin));
 			if (pos.z < 0.0f) { // reject back-projected stars
@@ -1113,6 +1119,94 @@ void SectorMap::DrawNearSector(const int sx, const int sy, const int sz, const m
 		matrix4x4f systrans = trans * matrix4x4f::Translation(i->GetPosition().x, i->GetPosition().y, i->GetPosition().z);
 		m_context.renderer->SetTransform(systrans);
 
+		if (m_drawUnchartedOverlay) {
+			// Only draw diamond markers on charted systems (green for discovered by player, cyan for pre-charted)
+			// Unexplored/uncharted systems do not get diamond markers
+			if (i->IsExplored()) {
+				Color markerCol = (i->GetExplored() == StarSystem::eEXPLORED_BY_PLAYER)
+					? Color(75, 255, 145, 210) // Emerald: Discovered by player
+					: Color(55, 215, 255, 175); // Cyan: Pre-charted
+
+				const float d = 0.28f;
+				const vector3f px = systrans * vector3f(d, 0.f, 0.f);
+				const vector3f nx = systrans * vector3f(-d, 0.f, 0.f);
+				const vector3f py = systrans * vector3f(0.f, d, 0.f);
+				const vector3f ny = systrans * vector3f(0.f, -d, 0.f);
+				const vector3f pz = systrans * vector3f(0.f, 0.f, d);
+				const vector3f nz = systrans * vector3f(0.f, 0.f, -d);
+				// Equatorial diamond
+				m_lineVerts->Add(px, markerCol); m_lineVerts->Add(py, markerCol);
+				m_lineVerts->Add(py, markerCol); m_lineVerts->Add(nx, markerCol);
+				m_lineVerts->Add(nx, markerCol); m_lineVerts->Add(ny, markerCol);
+				m_lineVerts->Add(ny, markerCol); m_lineVerts->Add(px, markerCol);
+				// Vertical struts
+				m_lineVerts->Add(pz, markerCol); m_lineVerts->Add(px, markerCol);
+				m_lineVerts->Add(pz, markerCol); m_lineVerts->Add(nx, markerCol);
+				m_lineVerts->Add(nz, markerCol); m_lineVerts->Add(py, markerCol);
+				m_lineVerts->Add(nz, markerCol); m_lineVerts->Add(ny, markerCol);
+			}
+		}
+
+		if (m_drawConflictOverlay) {
+			auto it = m_conflictSystems.find(i->GetName());
+			if (it != m_conflictSystems.end()) {
+				Color markerCol;
+				switch (it->second) {
+				case 1: // Frontline Combat / Blockade
+					markerCol = Color(255, 45, 45, 240); // Bright Red
+					break;
+				case 2: // Humanitarian / Outbreak / Famine
+					markerCol = Color(45, 215, 255, 240); // Bright Cyan
+					break;
+				case 3: // Market Embargo / Deficit
+					markerCol = Color(255, 185, 30, 240); // Amber
+					break;
+				case 4: // Political Unrest / Summit
+				default:
+					markerCol = Color(210, 80, 255, 240); // Purple
+					break;
+				}
+
+				// Larger octahedron (0.42f) so it nests cleanly around charted diamond (0.28f)
+				const float d = 0.42f;
+				const vector3f px = systrans * vector3f(d, 0.f, 0.f);
+				const vector3f nx = systrans * vector3f(-d, 0.f, 0.f);
+				const vector3f py = systrans * vector3f(0.f, d, 0.f);
+				const vector3f ny = systrans * vector3f(0.f, -d, 0.f);
+				const vector3f pz = systrans * vector3f(0.f, 0.f, d);
+				const vector3f nz = systrans * vector3f(0.f, 0.f, -d);
+
+				// Equatorial diamond
+				m_lineVerts->Add(px, markerCol); m_lineVerts->Add(py, markerCol);
+				m_lineVerts->Add(py, markerCol); m_lineVerts->Add(nx, markerCol);
+				m_lineVerts->Add(nx, markerCol); m_lineVerts->Add(ny, markerCol);
+				m_lineVerts->Add(ny, markerCol); m_lineVerts->Add(px, markerCol);
+				// Top pyramid struts (all 4 sides)
+				m_lineVerts->Add(pz, markerCol); m_lineVerts->Add(px, markerCol);
+				m_lineVerts->Add(pz, markerCol); m_lineVerts->Add(nx, markerCol);
+				m_lineVerts->Add(pz, markerCol); m_lineVerts->Add(py, markerCol);
+				m_lineVerts->Add(pz, markerCol); m_lineVerts->Add(ny, markerCol);
+				// Bottom pyramid struts (all 4 sides)
+				m_lineVerts->Add(nz, markerCol); m_lineVerts->Add(px, markerCol);
+				m_lineVerts->Add(nz, markerCol); m_lineVerts->Add(nx, markerCol);
+				m_lineVerts->Add(nz, markerCol); m_lineVerts->Add(py, markerCol);
+				m_lineVerts->Add(nz, markerCol); m_lineVerts->Add(ny, markerCol);
+
+				// Outer hazard bracket ring around octahedron
+				const float rd = 0.54f;
+				const vector3f r_px = systrans * vector3f(rd, 0.f, 0.f);
+				const vector3f r_nx = systrans * vector3f(-rd, 0.f, 0.f);
+				const vector3f r_py = systrans * vector3f(0.f, rd, 0.f);
+				const vector3f r_ny = systrans * vector3f(0.f, -rd, 0.f);
+				Color ringCol = markerCol;
+				ringCol.a = 150;
+				m_lineVerts->Add(r_px, ringCol); m_lineVerts->Add(r_py, ringCol);
+				m_lineVerts->Add(r_py, ringCol); m_lineVerts->Add(r_nx, ringCol);
+				m_lineVerts->Add(r_nx, ringCol); m_lineVerts->Add(r_ny, ringCol);
+				m_lineVerts->Add(r_ny, ringCol); m_lineVerts->Add(r_px, ringCol);
+			}
+		}
+
 		if ((m_drawVerticalLines && (i->GetPopulation() > 0 || m_drawUninhabitedLabels)) || !can_skip) {
 
 			const Color light(128, 128, 128);
@@ -1156,13 +1250,14 @@ void SectorMap::DrawNearSector(const int sx, const int sy, const int sz, const m
 void SectorMap::DrawFarSectors(const matrix4x4f &modelview)
 {
 	PROFILE_SCOPED()
-	int buildRadius = ceilf((std::min(m_zoomClamped, 20.0f) / FAR_THRESHOLD) * 3);
+	const float maxCap = 7.5f + (25.0f - 7.5f) * m_visibleSphereScale;
+	int buildRadius = ceilf((std::min(m_zoomClamped, maxCap) / FAR_THRESHOLD) * DRAW_RAD);
 	if (buildRadius <= DRAW_RAD) buildRadius = DRAW_RAD;
 
 	const vector3f secOrigin = vector3f(int(floorf(m_pos.x)), int(floorf(m_pos.y)), int(floorf(m_pos.z)));
 
-	// Only rebuild far sector cache when not deep into the macro transition
-	if (m_zoom < 30.0f && (m_toggledFaction || buildRadius != m_radiusFar || !secOrigin.ExactlyEqual(m_secPosFar))) {
+	// Rebuild far sector cache whenever the camera moves sectors, zoom level shifts the sector build radius, or factions toggle
+	if (m_zoom < 65.0f && (m_toggledFaction || buildRadius != m_radiusFar || !secOrigin.ExactlyEqual(m_secPosFar))) {
 		m_farstars.clear();
 		m_farstarsColor.clear();
 		m_visibleFactions.clear();
@@ -1210,10 +1305,41 @@ void SectorMap::DrawFarSectors(const matrix4x4f &modelview)
 void SectorMap::BuildFarSector(RefCountedPtr<Sector> sec, const vector3f &origin, std::vector<vector3f> &points, std::vector<Color> &colors)
 {
 	PROFILE_SCOPED()
+	const float maxCap = 7.5f + (25.0f - 7.5f) * m_visibleSphereScale;
+	const float effectiveZoom = std::min(m_zoomClamped, maxCap);
 	Color starColor;
 	for (std::vector<Sector::System>::iterator i = sec->m_systems.begin(); i != sec->m_systems.end(); ++i) {
 		// skip the system if it doesn't fall within the sphere we're viewing.
-		if ((m_pos * Sector::SIZE - (*i).GetFullPosition()).Length() > (m_zoomClamped / FAR_THRESHOLD) * OUTER_RADIUS) continue;
+		if ((m_pos * Sector::SIZE - (*i).GetFullPosition()).Length() > (effectiveZoom / FAR_THRESHOLD) * OUTER_RADIUS) continue;
+
+		if (m_drawConflictOverlay) {
+			auto it = m_conflictSystems.find(i->GetName());
+			if (it != m_conflictSystems.end()) {
+				points.push_back((*i).GetFullPosition() - origin);
+				Color cCol;
+				switch (it->second) {
+				case 1: cCol = Color(255, 45, 45, 255); break; // Red
+				case 2: cCol = Color(45, 215, 255, 255); break; // Cyan
+				case 3: cCol = Color(255, 185, 30, 255); break; // Amber
+				case 4:
+				default: cCol = Color(210, 80, 255, 255); break; // Purple
+				}
+				colors.push_back(cCol);
+				continue;
+			}
+		}
+
+		if (m_drawUnchartedOverlay) {
+			points.push_back((*i).GetFullPosition() - origin);
+			if (!i->IsExplored()) {
+				colors.push_back({ 100, 100, 100, 140 }); // Natural dim gray for unexplored systems
+			} else if (i->GetExplored() == StarSystem::eEXPLORED_BY_PLAYER) {
+				colors.push_back({ 75, 255, 145, 215 }); // Emerald: Discovered by player
+			} else {
+				colors.push_back({ 55, 215, 255, 185 }); // Cyan: Pre-charted
+			}
+			continue;
+		}
 
 		if (!i->IsExplored()) {
 			points.push_back((*i).GetFullPosition() - origin);
@@ -1385,7 +1511,8 @@ void SectorMap::ShrinkCache()
 {
 	PROFILE_SCOPED()
 	// we're going to use these to determine if our sectors are within the range that we'll ever render
-	const int drawRadius = (m_zoomClamped <= FAR_THRESHOLD) ? DRAW_RAD : ceilf((std::min(m_zoomClamped, 20.0f) / FAR_THRESHOLD) * DRAW_RAD);
+	const float maxCap = 7.5f + (25.0f - 7.5f) * m_visibleSphereScale;
+	const int drawRadius = (m_zoomClamped <= FAR_THRESHOLD) ? DRAW_RAD : ceilf((std::min(m_zoomClamped, maxCap) / FAR_THRESHOLD) * DRAW_RAD);
 
 	const int xmin = int(floorf(m_pos.x)) - drawRadius;
 	const int xmax = int(floorf(m_pos.x)) + drawRadius;
@@ -1417,7 +1544,9 @@ void SectorMap::ShrinkCache()
 
 double SectorMap::GetZoomLevel() const
 {
-	return ((m_zoomClamped / FAR_THRESHOLD) * (OUTER_RADIUS)) + 0.5 * Sector::SIZE;
+	const float maxCap = 7.5f + (25.0f - 7.5f) * m_visibleSphereScale;
+	const float effectiveZoom = std::min(m_zoomClamped, maxCap);
+	return ((effectiveZoom / FAR_THRESHOLD) * (OUTER_RADIUS)) + 0.5 * Sector::SIZE;
 }
 
 std::vector<SystemPath> SectorMap::GetNearbyStarSystemsByName(std::string pattern)

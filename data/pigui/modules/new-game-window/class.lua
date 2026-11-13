@@ -197,6 +197,8 @@ local function updateParams()
 	end
 end
 
+local isHardcore = false
+
 local function setStartVariant(variant)
 	for _, param in ipairs(Layout.UpdateOrder) do
 		param:fromStartVariant(variant)
@@ -211,6 +213,9 @@ local function startGame(gameParams)
 		startTime = util.standardGameStartTime()
 	end
 	Game.StartGame(gameParams.location.path, startTime, gameParams.ship.type)
+	if Game.SetHardcore then
+		Game.SetHardcore(isHardcore)
+	end
 	local player = Game.player
 
 	PlayerState.SetMoney(gameParams.player.money)
@@ -384,6 +389,11 @@ local function drawBottomButtons()
 	ui.sameLine()
 	if ui.button(lui.CLOSE) then
 		NewGameWindow:close()
+	end
+	ui.sameLine(0, 24)
+	local changed, checked = ui.checkbox("Hardcore Mode (Permadeath / No Insurance)", isHardcore)
+	if changed then
+		isHardcore = checked
 	end
 end
 

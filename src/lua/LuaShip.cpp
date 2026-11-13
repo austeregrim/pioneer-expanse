@@ -190,6 +190,8 @@ static int l_ship_set_fuel_percent(lua_State *l)
 	}
 
 	s->SetFuel(percent / 100.0);
+	s->UpdateFuelStats();
+	s->Properties().Set("fuel", s->GetFuel() * 100.0);
 	// This is required for the fuel to properly update when the game is paused.
 	// Without this we can sell fuel indefinitely, or buy fuel without receiving
 	// anything. This is a workaround - the proper fix is to prevent interactions

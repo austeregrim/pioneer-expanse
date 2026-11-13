@@ -181,26 +181,109 @@ local function gauge_cabins()
 	end
 end
 
+local transferStatusMsg = nil
+local transferStatusCol = colors.white
+local transferStatusTime = 0
+
+local function isHydrogenFuel(comm)
+	if not comm then return false end
+	if comm == Commodities.hydrogen then return true end
+	if type(comm) == "table" and comm.name == "hydrogen" then return true end
+	return false
+end
+
+local function isMilitaryFuel(comm)
+	if not comm then return false end
+	if comm == Commodities.military_fuel then return true end
+	if type(comm) == "table" and comm.name == "military_fuel" then return true end
+	return false
+end
+
 ---@param hyperdrive Equipment.HyperdriveType
 local function transfer_hyperfuel_hydrogen(hyperdrive, amt)
-	local fuelTankSize = ShipDef[Game.player.shipId].fuelTankMass
-	local fuelMassLeft = Game.player.fuelMassLeft
+	local player = Game.player
+	local shipDef = ShipDef[player.shipId]
+	local fuelTankSize = shipDef and shipDef.fuelTankMass or 0
+	local fuelMassLeft = player.fuelMassLeft or (fuelTankSize * (player.fuel or 0) / 100)
 
-	-- Ensure we're not transferring more than the hyperdrive holds
-	local delta = math.clamp(amt, -hyperdrive.storedFuel, hyperdrive:GetMaxFuel() - hyperdrive.storedFuel)
-	-- Ensure we're not transferring more than the fuel tank holds
-	delta = math.clamp(delta, fuelMassLeft - fuelTankSize, fuelMassLeft)
+	if fuelTankSize <= 0 then return end
 
-	if math.abs(delta) > 0.0001 then
-		Game.player:SetFuelPercent((fuelMassLeft - delta) * 100 / fuelTankSize)
-		hyperdrive:SetFuel(Game.player, hyperdrive.storedFuel + delta)
+	if amt < 0 then
+		-- Draining from hyperdrive to main fuel tank
+		local maxDrain = hyperdrive.storedFuel
+		local tankSpaceLeft = math.max(0, fuelTankSize - fuelMassLeft)
+		if maxDrain <= 0.0001 then
+			transferStatusMsg = "Hyperdrive reservoir is empty (no fuel to transfer)."
+			transferStatusCol = colors.compareWorse
+			transferStatusTime = ui.getTime()
+			ui.playSfx("error")
+			return
+		end
+		if tankSpaceLeft <= 0.0001 then
+			transferStatusMsg = string.format("Main fuel tank is 100%% full (%.1f / %.1f t). Cannot transfer more fuel to tank.", fuelMassLeft, fuelTankSize)
+			transferStatusCol = colors.compareWorse
+			transferStatusTime = ui.getTime()
+			ui.playSfx("error")
+			return
+		end
+
+		local wantTransfer = math.abs(amt)
+		local transfer = math.min(wantTransfer, maxDrain, tankSpaceLeft)
+		if transfer > 0.0001 then
+			local newDriveFuel = math.max(0, hyperdrive.storedFuel - transfer)
+			hyperdrive:SetFuel(player, newDriveFuel)
+			local newTankMass = math.min(fuelTankSize, fuelMassLeft + transfer)
+			local newPct = math.min(100, (newTankMass * 100) / fuelTankSize)
+			player:SetFuelPercent(newPct)
+			player:setprop("fuel", newPct)
+			player:setprop("fuelMassLeft", newTankMass)
+			transferStatusMsg = string.format("Transferred %.1f t from Hyperdrive into Main Fuel Tank.", transfer)
+			transferStatusCol = colors.compareBetter
+			transferStatusTime = ui.getTime()
+			ui.playSfx("OK")
+		end
+	else
+		-- Pumping from main fuel tank into hyperdrive
+		local maxDriveNeeds = math.max(0, hyperdrive:GetMaxFuel() - hyperdrive.storedFuel)
+		local fuelAvailable = fuelMassLeft
+		if maxDriveNeeds <= 0.0001 then
+			transferStatusMsg = string.format("Hyperdrive reservoir is already full (%.1f / %.1f t).", hyperdrive.storedFuel, hyperdrive:GetMaxFuel())
+			transferStatusCol = colors.compareWorse
+			transferStatusTime = ui.getTime()
+			ui.playSfx("error")
+			return
+		end
+		if fuelAvailable <= 0.0001 then
+			transferStatusMsg = "Main fuel tank is empty (no hydrogen available to transfer)."
+			transferStatusCol = colors.compareWorse
+			transferStatusTime = ui.getTime()
+			ui.playSfx("error")
+			return
+		end
+
+		local wantTransfer = amt
+		local transfer = math.min(wantTransfer, maxDriveNeeds, fuelAvailable)
+		if transfer > 0.0001 then
+			local newTankMass = math.max(0, fuelMassLeft - transfer)
+			local newPct = math.max(0, (newTankMass * 100) / fuelTankSize)
+			player:SetFuelPercent(newPct)
+			player:setprop("fuel", newPct)
+			player:setprop("fuelMassLeft", newTankMass)
+			local newDriveFuel = math.min(hyperdrive:GetMaxFuel(), hyperdrive.storedFuel + transfer)
+			hyperdrive:SetFuel(player, newDriveFuel)
+			transferStatusMsg = string.format("Transferred %.1f t from Main Fuel Tank into Hyperdrive Reservoir.", transfer)
+			transferStatusCol = colors.compareBetter
+			transferStatusTime = ui.getTime()
+			ui.playSfx("OK")
+		end
 	end
 end
 
 ---@param hyperdrive Equipment.HyperdriveType
 local function transfer_hyperfuel_mil(hyperdrive, amt)
 	local cargoMgr = Game.player:GetComponent('CargoManager')
-	local availableFuel = cargoMgr:CountCommodity(hyperdrive.fuel)
+	local fuelComm = hyperdrive.fuel or Commodities.military_fuel
+	local availableFuel = cargoMgr:CountCommodity(fuelComm)
 	local availableCargo = cargoMgr:GetFreeSpace()
 
 	-- Ensure we're not transferring more than the hyperdrive holds
@@ -213,33 +296,42 @@ local function transfer_hyperfuel_mil(hyperdrive, amt)
 	delta = math.modf(delta)
 
 	if delta > 0 then
-		cargoMgr:RemoveCommodity(hyperdrive.fuel, delta)
+		cargoMgr:RemoveCommodity(fuelComm, delta)
 		hyperdrive:SetFuel(Game.player, hyperdrive.storedFuel + delta)
+		transferStatusMsg = string.format("Transferred %d t military fuel into Hyperdrive.", delta)
+		transferStatusCol = colors.compareBetter
+		transferStatusTime = ui.getTime()
+		ui.playSfx("OK")
 	elseif delta < 0 then
-		cargoMgr:AddCommodity(hyperdrive.fuel, math.abs(delta))
+		cargoMgr:AddCommodity(fuelComm, math.abs(delta))
 		hyperdrive:SetFuel(Game.player, hyperdrive.storedFuel + delta)
+		transferStatusMsg = string.format("Drained %d t military fuel to Cargo Hold.", math.abs(delta))
+		transferStatusCol = colors.compareBetter
+		transferStatusTime = ui.getTime()
+		ui.playSfx("OK")
 	end
 end
 
-local function fuelTransferButton(drive, amt)
-	local driveEnabled = false
+local function fuelTransferButton(drive, amt, label)
+	local driveDisabled = false
 
 	-- Don't allow transferring fuel while the hyperdrive is doing its thing
 	if Game.player:IsHyperspaceActive() or
 			Game.player.flightState == "JUMPING" or
 			Game.player.flightState == "HYPERSPACE" then
-		driveEnabled = true
+		driveDisabled = true
 	end
 
-	local color = driveEnabled and ui.theme.buttonColors.disabled or ui.theme.buttonColors.default
+	local color = driveDisabled and ui.theme.buttonColors.disabled or ui.theme.buttonColors.default
 	local icon = amt < 0 and icons.chevron_up or icons.chevron_down
 	local tooltip = amt < 0 and l.PUMP_DOWN_FROM_HYPERDRIVE_TOOLTIP or l.PUMP_DOWN_TO_HYPERDRIVE_TOOLTIP
+	local btnLabel = label or (ui.get_icon_glyph(icon) .. tostring(math.abs(amt)) .. "##Trf" .. tostring(amt))
 
-	if ui.button(ui.get_icon_glyph(icon) .. tostring(math.abs(amt)), Vector2(100, 0), color, string.format(tooltip, math.abs(amt))) then
-		if not driveEnabled then
-			if drive.fuel == Commodities.hydrogen then
+	if ui.button(btnLabel, Vector2(100, 0), color, string.format(tooltip, math.abs(amt))) then
+		if not driveDisabled then
+			if isHydrogenFuel(drive.fuel) then
 				transfer_hyperfuel_hydrogen(drive, amt)
-			elseif drive.fuel == Commodities.military_fuel then
+			elseif isMilitaryFuel(drive.fuel) then
 				transfer_hyperfuel_mil(drive, amt)
 			end
 		end
@@ -262,15 +354,20 @@ local function drawCentered(id, fun)
 end
 
 local function drawFuelTransfer(drive)
+	if transferStatusMsg and (ui.getTime() - transferStatusTime < 4.0) then
+		ui.textColored(transferStatusCol, transferStatusMsg)
+		ui.spacing()
+	end
+
 	drawCentered("Hyperdrive", function()
 		ui.horizontalGroup(function()
-			fuelTransferButton(drive, 10)
-			fuelTransferButton(drive, 1)
+			fuelTransferButton(drive, 10, "Feed 10t##F10")
+			fuelTransferButton(drive, 1, "Feed 1t##F1")
 
 			ui.text(l.TRANSFER_FUEL)
 
-			fuelTransferButton(drive, -1)
-			fuelTransferButton(drive, -10)
+			fuelTransferButton(drive, -1, "Drain 1t##D1")
+			fuelTransferButton(drive, -10, "Drain 10t##D10")
 		end)
 	end)
 end

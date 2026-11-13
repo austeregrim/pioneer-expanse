@@ -11,6 +11,7 @@
 #include "HyperspaceCloud.h"
 #include "Input.h"
 #include "Json.h"
+#include "lua/LuaEvent.h"
 #include "Pi.h"
 #include "Player.h"
 #include <SDL_keycode.h>
@@ -56,6 +57,7 @@ REGISTER_INPUT_BINDING(WorldView)
 	input->AddActionBinding("BindFlightAssistRadial", group, Action{});
 	input->AddActionBinding("BindFixheadingRadial", group, Action{});
 	input->AddActionBinding("BindTargetRadial", group, Action{});
+	input->AddActionBinding("BindDiscoveryScan", group, Action({ SDLK_b }));
 }
 
 void WorldView::InputBinding::RegisterBindings()
@@ -68,6 +70,7 @@ void WorldView::InputBinding::RegisterBindings()
 	AddAction("BindFlightAssistRadial");
 	AddAction("BindFixheadingRadial");
 	AddAction("BindTargetRadial");
+	discoveryScan = AddAction("BindDiscoveryScan");
 }
 
 WorldView::WorldView(Game *game) :
@@ -143,6 +146,7 @@ void WorldView::InitObject()
 	m_onToggleHudModeCon = InputBindings.toggleHudMode->onPressed.connect(sigc::mem_fun(this, &WorldView::OnToggleLabels));
 	m_onIncTimeAccelCon = InputBindings.increaseTimeAcceleration->onPressed.connect(sigc::mem_fun(this, &WorldView::OnRequestTimeAccelInc));
 	m_onDecTimeAccelCon = InputBindings.decreaseTimeAcceleration->onPressed.connect(sigc::mem_fun(this, &WorldView::OnRequestTimeAccelDec));
+	m_onDiscoveryScanCon = InputBindings.discoveryScan->onPressed.connect(sigc::mem_fun(this, &WorldView::OnDiscoveryScan));
 }
 
 
@@ -220,6 +224,9 @@ void WorldView::Draw3D()
 	// Supercruise 3D HUD overlays (orbital path lines & body exclusion zone rings)
 	DrawSupercruiseOverlays();
 
+	// Active planetary surface scan 3D coverage grid sphere
+	DrawSurfaceScanOverlay();
+
 	// Hyperjump star-streaking surge right before hyperspace transit
 	DrawHyperspaceJumpStreaks();
 
@@ -227,6 +234,13 @@ void WorldView::Draw3D()
 
 	// combat target indicator
 	DrawCombatTargetIndicator(m_combatTargetIndicator, m_targetLeadIndicator, red);
+}
+
+void WorldView::OnDiscoveryScan()
+{
+	if (Pi::GetView() == this) {
+		LuaEvent::Queue("onDiscoveryScanRequested");
+	}
 }
 
 void WorldView::OnToggleLabels()
@@ -987,6 +1001,130 @@ void WorldView::DrawSupercruiseOverlays()
 	}
 	if (!dangerExclVerts.empty()) {
 		m_indicator.SetData(dangerExclVerts.size(), dangerExclVerts.data(), Color(255, 75, 45, 215));
+		m_indicator.Draw(m_renderer, m_indicatorMat.get());
+	}
+}
+
+void WorldView::SetSurfaceScanOverlay(const Body *body, bool active, float coverage, const std::string &grid)
+{
+	m_surfaceScan.body = body;
+	m_surfaceScan.active = active;
+	m_surfaceScan.coverage = coverage;
+	m_surfaceScan.grid = grid;
+}
+
+void WorldView::DrawSurfaceScanOverlay()
+{
+	if (!m_surfaceScan.active || !m_surfaceScan.body || !Pi::DrawGUI || !m_labelsOn || !m_game || !m_game->GetSpace())
+		return;
+
+	// Verify body still exists in current space
+	const Body *targetBody = nullptr;
+	for (const Body *b : m_game->GetSpace()->GetBodies()) {
+		if (b == m_surfaceScan.body) {
+			targetBody = b;
+			break;
+		}
+	}
+	if (!targetBody || !targetBody->IsType(ObjectType::TERRAINBODY)) {
+		m_surfaceScan.active = false;
+		m_surfaceScan.body = nullptr;
+		return;
+	}
+
+	const FrameId camFrameId = m_cameraContext->GetTempFrame();
+	if (!camFrameId.valid())
+		return;
+
+	const double R = targetBody->GetPhysRadius() * 1.015;
+	if (R <= 0.0)
+		return;
+
+	const vector3d bodyCamPos = targetBody->GetInterpPositionRelTo(camFrameId);
+	const matrix3x3d bodyCamOrient = targetBody->GetInterpOrientRelTo(camFrameId);
+
+	const double zClip = -1.0;
+	const float winW = float(m_renderer->GetWindowWidth());
+	const float winH = float(m_renderer->GetWindowHeight());
+
+	auto appendClippedSegment = [&](std::vector<vector3f> &verts, vector3d p0, vector3d p1) {
+		if (p0.z > zClip && p1.z > zClip)
+			return;
+		if (p0.z > zClip) {
+			const double t = (zClip - p0.z) / (p1.z - p0.z);
+			p0 = p0 + (p1 - p0) * t;
+		} else if (p1.z > zClip) {
+			const double t = (zClip - p1.z) / (p0.z - p1.z);
+			p1 = p1 + (p0 - p1) * t;
+		}
+		const vector3d s0 = projectToScreenSpace(p0, m_cameraContext, false);
+		const vector3d s1 = projectToScreenSpace(p1, m_cameraContext, false);
+		if ((s0.x < -500.0 && s1.x < -500.0) || (s0.x > winW + 500.0 && s1.x > winW + 500.0) ||
+			(s0.y < -500.0 && s1.y < -500.0) || (s0.y > winH + 500.0 && s1.y > winH + 500.0))
+			return;
+		verts.emplace_back(float(s0.x), float(s0.y), 0.0f);
+		verts.emplace_back(float(s1.x), float(s1.y), 0.0f);
+	};
+
+	constexpr int NLAT = 12;
+	constexpr int NLON = 24;
+	const size_t expectedLen = size_t(NLAT * NLON);
+
+	auto spherePt = [&](int i, int j) -> vector3d {
+		const double lat = -0.5 * M_PI + M_PI * (double(i) / double(NLAT));
+		const double lon = 2.0 * M_PI * (double(j) / double(NLON));
+		const double clat = std::cos(lat);
+		return bodyCamPos + bodyCamOrient * vector3d(clat * std::cos(lon) * R, std::sin(lat) * R, clat * std::sin(lon) * R);
+	};
+
+	std::vector<vector3f> unscannedVerts;
+	std::vector<vector3f> scannedVerts;
+	unscannedVerts.reserve(NLAT * NLON * 8);
+	scannedVerts.reserve(NLAT * NLON * 8);
+
+	for (int i = 0; i < NLAT; ++i) {
+		const double latMid = -0.5 * M_PI + M_PI * ((double(i) + 0.5) / double(NLAT));
+		const double clatMid = std::cos(latMid);
+		const double slatMid = std::sin(latMid);
+
+		for (int j = 0; j < NLON; ++j) {
+			const double lonMid = 2.0 * M_PI * ((double(j) + 0.5) / double(NLON));
+			const vector3d relCenter = bodyCamOrient * vector3d(clatMid * std::cos(lonMid) * R, slatMid * R, clatMid * std::sin(lonMid) * R);
+			// Back-face cull far-side cells for clean holographic readability
+			if (relCenter.Dot(bodyCamPos) > R * bodyCamPos.Length() * 0.12) {
+				continue;
+			}
+
+			const size_t idx = size_t(i * NLON + j);
+			const bool isScanned = (m_surfaceScan.grid.size() == expectedLen) && (m_surfaceScan.grid[idx] == '1');
+			std::vector<vector3f> &dest = isScanned ? scannedVerts : unscannedVerts;
+
+			const vector3d p00 = spherePt(i, j);
+			const vector3d p10 = spherePt(i + 1, j);
+			const vector3d p01 = spherePt(i, j + 1);
+			const vector3d p11 = spherePt(i + 1, j + 1);
+
+			appendClippedSegment(dest, p00, p01);
+			appendClippedSegment(dest, p00, p10);
+			if (isScanned) {
+				appendClippedSegment(dest, p10, p11);
+				appendClippedSegment(dest, p01, p11);
+				// Subtle diagonal cross-hatch on scanned cells
+				appendClippedSegment(dest, p00, p11);
+			}
+		}
+	}
+
+	if (!unscannedVerts.empty()) {
+		m_indicator.SetData(unscannedVerts.size(), unscannedVerts.data(), Color(45, 175, 255, 65));
+		m_indicator.Draw(m_renderer, m_indicatorMat.get());
+	}
+	if (!scannedVerts.empty()) {
+		const float t = Clamp(m_surfaceScan.coverage / 0.85f, 0.0f, 1.0f);
+		const Uint8 r = Uint8(50 + int(110.0f * t));
+		const Uint8 g = Uint8(245);
+		const Uint8 b = Uint8(165 - int(75.0f * t));
+		m_indicator.SetData(scannedVerts.size(), scannedVerts.data(), Color(r, g, b, 225));
 		m_indicator.Draw(m_renderer, m_indicatorMat.get());
 	}
 }

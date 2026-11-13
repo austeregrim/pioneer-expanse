@@ -50,6 +50,7 @@ HullConfig.equipCapacity = 0
 ---@type table<string, HullConfig.Slot>
 HullConfig.slots = {
 	sensor = Slot:clone { type = "sensor", size = 1 },
+	sensor_discovery = Slot:clone { type = "sensor.discovery_scanner", size = 1 },
 }
 
 function HullConfig:__clone()

@@ -689,12 +689,34 @@ void Ship::Explode()
 {
 	if (m_invulnerable) return;
 
+	if (IsType(ObjectType::PLAYER)) {
+		LuaEvent::Queue("onPlayerShipDestroyed", this);
+		LuaEvent::Emit();
+	}
+
 	Pi::game->GetSpace()->KillBody(this);
 	if (this->GetFrame() == Pi::player->GetFrame()) {
 		SfxManager::AddExplosion(this);
 		Sound::BodyMakeNoise(this, "Explosion_1", 1.0f);
 	}
 	ClearThrusterState();
+}
+
+void Ship::Revive()
+{
+	Body::Revive();
+	m_stats.hull_mass_left = float(m_type->hullMass);
+	m_stats.shield_mass_left = m_stats.shield_mass;
+	Properties().Set("hullMassLeft", m_stats.hull_mass_left);
+	Properties().Set("hullPercent", 100.0f);
+	Properties().Set("shieldMassLeft", m_stats.shield_mass_left);
+	ClearThrusterState();
+	SetVelocity(vector3d::Zero);
+	SetAngVelocity(vector3d::Zero);
+	SetTorque(vector3d::Zero);
+	if (m_supercruise) {
+		m_supercruise->SetFsdOffline(false);
+	}
 }
 
 bool Ship::DoDamage(float kgDamage)

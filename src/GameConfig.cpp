@@ -35,6 +35,7 @@ GameConfig::GameConfig(const map_string &override_)
 	map["SectorViewXRotation"] = "-10.0";
 	map["SectorViewZRotation"] = "0";
 	map["SectorViewZoom"] = "2.0";
+	map["SectorViewSphereScale"] = "0.75";
 	map["MaxPhysicsCyclesPerRender"] = "4";
 	map["AntiAliasingMode"] = "2";
 	map["JoystickDeadzone"] = "0.2"; // 20% deadzone is common

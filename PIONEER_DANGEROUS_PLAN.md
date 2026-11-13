@@ -152,6 +152,62 @@ graph TD
 
 ---
 
+### Phase 8: Dynamic Galaxy, InterCast News, Faction Wars & Escape Pod Rebuy System (IN PROGRESS)
+* **Goal**: Transform the static universe into an evolving single-player living galaxy. Hyperjumps act as macro turns driving territorial wars, economic blockades, and humanitarian crises across frontlines, broadcast via Interstellar Broadcast News (InterCast). Replace permadeath with an emergency escape pod ejection, cryogenic stasis time jump (+14 to 28 days), SAR hospital recovery, and 5% insurance rebuy loop.
+* **Implementation Progress**:
+  * [x] **Escape Pod, SAR Recovery, Insurance Rebuy & Hardcore Mode (Step 1)**:
+    * `src/Body.h`, `src/Player.h`, `src/Player.cpp`: Added `Revive()` method resetting dead flag, restoring hull & shield integrity to 100%, and resetting flight velocities.
+    * `src/Ship.cpp`: Queues and emits `onPlayerShipDestroyed` on player lethal explosion before body disposal.
+    * `src/DeathView.h`, `src/DeathView.cpp`: Added two-phase death sequence with real-time frame timer:
+      * Phase 1 ($0.0\text{ to }2.5\text{s}$): Pulsing red critical hull breach alert and emergency escape pod ejection warning.
+      * Phase 2 ($2.5\text{ to }7.5\text{s}$): Fade to deep stasis monitor with cyan/amber COSPAS-SARSAT $121.5\text{ MHz} / 406\text{ MHz}$ distress telemetry, pilot stasis readout, simulated passing days, and SAR patrol acquisition notification.
+      * Hardcore Mode Distinction: If hardcore mode is enabled, displays fatal permadeath telemetry (`HARDCORE IRONMAN CHARTER - NO SEARCH & RESCUE TRANSPONDER`) and invokes classic `TombstoneLoop` game over.
+    * `src/Game.h`, `src/Game.cpp`, `src/lua/LuaGame.cpp`: Added `m_hardcore` state, getters/setters, savegame JSON serialization, and `Game::TriggerPlayerEscapePodRecovery()` advancing simulation clock by $14\text{ to }28\text{ days}$, finding nearest starport in current system or nearest inhabited sector system, reviving and docking player in medical berth, and queueing `onPlayerRescued`.
+    * `src/Pi.cpp`: Transitions from `DeathView` at $7.5\text{s}$ to `TriggerPlayerEscapePodRecovery()` (or `TombstoneLoop` if Hardcore), eliminating tombstone game-over for standard play while preserving permadeath for hardcore pilots.
+    * `data/pigui/modules/new-game-window/class.lua`: Added Hardcore Ironman Mode checkbox in New Game bottom buttons passing `isHardcore` flag to `Game.SetHardcore()`.
+    * `data/modules/Insurance/Insurance.lua`: Records destroyed ship specifications (hull, equipped items, value, 5% deductible), jettisons cargo as deep space flotsam canisters with coordinates, and handles Rebuy vs. Payout & Starter Loaner settlements. Suppressed when hardcore mode is active.
+    * `data/pigui/modules/station-view/09-insuranceRebuy.lua`: Dedicated Starport Insurance & SAR Medical Terminal displaying discharge logs, cargo flotsam notes, 5% rebuy option, and policy schedule (or "UNINSURED HARDCORE CHARTER" notice).
+    * `data/pigui/modules/station-view/01-lobby.lua`: Redirects recovered pilots to insurance terminal and locks launch button with warning if an active claim is unresolved.
+  * [x] **InterCast (Interstellar Broadcast News) Engine & Cockpit Sidebar Drawer (Step 2)**:
+    * `data/modules/InterCast/InterCast.lua`: Core wire service engine generating categorized news articles across `FRONTLINE` (military blockades, combat zones), `HUMANITARIAN` (epidemic outbreaks, famines, aid relief), `MARKET` (metal shortages, fuel tariffs, black market booms), and `POLITICS` (interstellar summits, high-value bounties, expansion treaties). Persists articles in savegames via `Serializer`.
+    * `data/pigui/modules/flight-ui/intercast-ticker.lua`: Openable in-flight right-sidebar module registered beside the System Overview toggle button (`gameView.registerSidebarModule("intercast-news", ...)`). Displays category filter buttons, collapsible news dispatches, flash urgent warnings, date, system location, and full story readouts.
+    * `data/pigui/modules/station-view/10-interCastNews.lua`: Dedicated Starport InterCast News Terminal with category tabs, article list browser, and full two-column article reader.
+  * [x] **Hyperdrive Auto-Feed & Dual-Tank Hyperspace Integration**:
+    * **The Problem**: In upstream Pioneer, hyperspace jumping exclusively consumed fuel from the tiny hyperdrive reservoir (1t–4t). Even if a ship had 15–40 tonnes of scooped stellar hydrogen in its main thruster tank, players were blocked from jumping after 1 jump ("INSUFFICIENT FUEL") and had to manually pump fuel through awkward sub-menus. Furthermore, transferring fuel from the drive to the tank failed when the main tank was full.
+    * **Elite Dangerous Auto-Feed Solution**:
+      * `data/modules/Equipment/Types.lua`:
+        * `GetRange(ship)`: Accounts for the ship's full main hydrogen tank (`math.min(resv, storedFuel + fuelMassLeft)`), ensuring true maximum single-jump range is always available.
+        * `HyperjumpTo(ship, dest)`: Automatically draws missing hydrogen from the main tank before jump initiation.
+        * `OnLeaveHyperspace(ship)`: Automatically tops off the hyperdrive reservoir from the main fuel tank upon arrival in the new system.
+      * `data/libs/Ship.lua`: `GetHyperspaceDetails` evaluates total available hydrogen (`engine.storedFuel + self.fuelMassLeft`), preventing false "INSUFFICIENT FUEL" locks.
+      * `data/pigui/modules/hyperjump-planner.lua` & `data/pigui/views/map-sector-view.lua`: Route planners now calculate multi-jump reachability across the player's full fuel reserves (allowing 5–8 consecutive jumps on a single full tank).
+      * `data/pigui/modules/info-view/03-econ-trade.lua`: Overhauled manual transfer UI with explicit bidirectional controls ("Feed Drive [From Tank]" / "Drain Drive [To Tank]"), audio feedback, full-capacity warnings, and "✓ HYPERDRIVE AUTO-FEED ACTIVE" status.
+      * `data/modules/FuelScoop.lua`: Added comms log notifications when harvesting stellar hydrogen and when both reservoirs reach 100% capacity.
+    * **PiGui Robustness Audit**: Audited and fixed all recent views (`intercast-ticker.lua`, `11-stockExchange.lua`, `12-navLocusLottery.lua`, `10-interCastNews.lua`, `08-universalCartographics.lua`, `09-insuranceRebuy.lua`). Eliminated boolean parameters in `ui.child()` which caused PiGui type mismatches (`Expected table, string, or integer, got boolean`) and disabled panels; enforced `ui.withStyleColors()`, `ui.withStyleVars()`, and `ui.withID()` RAII patterns across all UI code.
+  * [x] **Sector Map Conflict Intel Overlay (Step 3)**:
+    * `src/SectorMap.h`, `src/SectorMap.cpp`, `src/lua/LuaSectorMap.cpp`: Added `m_drawConflictOverlay`, `m_conflictSystems` map, and getters/setters/clear methods. In near-sector rendering, renders a tactical 3D octahedron ($d = 0.42\text{f}$) with an outer targeting bracket ($rd = 0.54\text{f}$) nested cleanly around charted system diamonds ($d = 0.28\text{f}$); in far-sector macro star rendering, highlights conflict systems with full-brightness beacon colors.
+    * `data/pigui/views/map-sector-view.lua`: Added `draw_conflict_overlay` toggle and color legend in the Settings sidebar (Red = Frontline, Cyan = Humanitarian, Amber = Market, Purple = Politics). Added `syncConflictIntel()` extracting active conflict systems from `InterCast`. In the system info dossier sidebar (`infoView`), added an **[INTERCAST CRISIS DISPATCH]** dossier box with flash warnings, date, headline, and crisis briefing whenever a selected system is experiencing an active incident.
+  * [x] **Dynamic Crisis State Machine & Hyperjump Macro Tick Engine (Step 4)**:
+    * `data/modules/MacroGalaxy/MacroGalaxyEngine.lua`: Evaluates simulation turns during hyperjump elapsed calendar days ($\Delta t = \text{Game.time} - \text{lastSimTime}$). Maintains 12 to 18 active regional crisis nodes across 35 populated bubble systems across 4 categories: `FRONTLINE` (Orbital Blockades, Insurgencies), `HUMANITARIAN` (Viral Outbreaks, Agricultural Famine), `MARKET` (Precious Mineral Rush), and `POLITICS` (Dockworker Labor Strikes).
+    * Handles multi-stage progressive escalation (Incipient $\to$ Epidemic $\to$ Severe Quarantine $\to$ Convalescence) and resolution, auto-publishing dispatches to `InterCast` and synchronizing the 3D `SectorMap` conflict overlay.
+    * Features "Player as Catalyst" mechanics: player relief deliveries and tactical interventions advance crisis progress towards positive resolution, complemented by autonomous background NPC drift.
+  * [x] **Interstellar Stock Exchange (ISX) Engine & Station Terminal (Step 5)**:
+    * `data/modules/Economy/StockExchange.lua`: Three-tier interstellar equity structure:
+      * **Tier 1 (8 Megaconglomerates)**: Sirius Heavy Industrial, Core Dynamics Aerospace, Ceti BioPharm, AgriCore Pan-Galactic, Universal Transit, Gutamaya Advanced Tech, Achilles Robotics, and Helios Fusion Cartel. Prices dynamically react to active galaxy-wide crises (e.g. BioPharm surges during viral outbreaks, Core Dynamics spikes during blockades).
+      * **Tier 2 (4 Faction Indices)**: Federal Industrial Index (FII), Commonwealth Market Index (CMI), Ares Alliance Composite (AAC), and Outer Rim Independent Average (ORIA).
+      * **Tier 3 (Procedural Local Enterprises)**: Dynamically generated on demand at every starport visited based on the local star system, economy, and active local crises. Local vaccine labs surge $+300\%\text{ to }+500\%$ during system outbreaks!
+      * Features full player portfolio tracking, buy/sell orders ($\pm 1, 10, 100, 1000$ shares), and quarterly dividend payouts every 30 calendar days.
+    * `data/pigui/modules/station-view/11-stockExchange.lua`: Dedicated Starport Trading Floor with live market index tickers, financial summary bar, sparkline price trends, and order execution.
+  * [x] **90.7-Trillion-to-One Nav-Locus 3D Astrolabe Sweepstakes (Step 6)**:
+    * `data/modules/Economy/NavLocusLottery.lua`: Interstellar astrogation coordinate lottery:
+      $$\text{Sector Ring } (00\text{–}99) \times \text{Stellar Class } (\text{14 types}) \times \text{Right Ascension } (000.0\text{–}359.9^\circ) \times \text{Declination } (-90.0\text{–}+90.0^\circ) \times \text{Epoch Vector } (0000\text{–}9999) = \mathbf{90{,}770{,}400{,}000{,}000 \text{ to } 1}$$
+      * 7-day drawing clock evaluated on the macro tick; unclaimed Grand Jackpot rolls over and compounds by $+75\text{M to }+150\text{M Cr}$ per cycle, generating multi-billion credit jackpots.
+      * 5 payout tiers for partial matches ($15\text{ Cr}$ up to $2,500,000\text{ Cr}$).
+      * Algorithmic bulk batch purchases: Cluster Batch (100 loci), Grid Saturation (1,000 loci), Sector Carpet (10,000 loci), and Armillary Blanket (100,000 loci).
+    * `data/pigui/modules/station-view/12-navLocusLottery.lua`: Interactive Starport Lottery Terminal featuring an animated **3D Wireframe Rotating Celestial Globe / Astrolabe Ticket** rendered with low-level trigonometry in PiGui. Features glowing neon cyan equator, latitude parallels, longitude meridians, glowing target astrogation ray, reticle crosshairs, and animated 5-dial vector lock displays.
+
+---
+
 ## Verification & Build Commands
 
 * **Compile Game & Assets**:

@@ -2,8 +2,10 @@
 -- Licensed under the terms of the GPL v3. See licenses/GPL-3.txt
 
 local Event = require 'Event'
+local Game = require 'Game'
 local Timer = require 'Timer'
 local Serializer = require 'Serializer'
+local Cartography = require 'modules.Cartography.Cartography'
 
 local utils = require 'utils'
 
@@ -103,14 +105,14 @@ end
 --       This especially impacts the Orbial Scans. It is proposed to replace
 --       this mechanism with a timewarp-invariant timer instead.
 --       See : https://github.com/pioneerspacesim/pioneer/pull/5932#discussion_r1800544550
-local SURFACE_SCAN_UPDATE_RATE = 1
-local ORBITAL_SCAN_UPDATE_RATE = 1
+local SURFACE_SCAN_UPDATE_RATE = 0.25
+local ORBITAL_SCAN_UPDATE_RATE = 0.5
 
 -- Square meters to square kilometers
 local SQUARE_KILOMETERS = 10^6
 
 local function makeScanID(count, path, orbital)
-	return string.format("scan-%d-%s-%s", count, path, orbital and "orbit" or "surface")
+	return string.format("scan-%d-%s-%s", count, tostring(path), orbital and "orbit" or "surface")
 end
 
 --=============================================================================
@@ -232,7 +234,8 @@ function ScanManager:GetScanBodyByType(scan)
 	scan = scan or self.activeScan
 	assert(scan, "ScanManager:GetScanBodyByType: Error: scan was nil")
 	assert(self.scanMap[scan.id], "ScanManager:GetScanBodyByType: Error: scan doesn't belong to current ScanManager")
-	return scan.orbital and scan.bodyPath:GetSystemBody().body or self.ship.frameBody
+	local sbody = scan.bodyPath:GetSystemBody()
+	return sbody and sbody.body or nil
 end
 
 ---@param body Body
@@ -271,6 +274,87 @@ function ScanManager:GetAvailableSensors()
 	return self.sensors
 end
 
+local NLAT = 12
+local NLON = 24
+local GRID_CELLS = NLAT * NLON
+local SURFACE_VISIBILITY_DOT = 0.35
+local SURFACE_COMPLETE_COVERAGE = 0.85
+
+local SPHERE_NORMALS = {}
+for i = 0, NLAT - 1 do
+	local lat = -0.5 * math.pi + math.pi * ((i + 0.5) / NLAT)
+	local clat = math.cos(lat)
+	local slat = math.sin(lat)
+	for j = 0, NLON - 1 do
+		local lon = 2.0 * math.pi * ((j + 0.5) / NLON)
+		SPHERE_NORMALS[i * NLON + j + 1] = Vector3(clat * math.cos(lon), slat, clat * math.sin(lon))
+	end
+end
+
+local function getScanMaxDistance(body, isOrbital)
+	local radius = body:GetSystemBody().radius
+	if isOrbital then
+		return math.max(radius * 6.0, 12000000)
+	else
+		return math.max(radius * 4.0, 8000000)
+	end
+end
+
+ScanManager.GetScanMaxDistance = getScanMaxDistance
+
+function ScanManager:HasSensorOfType(isOrbital)
+	for _, s in ipairs(self.sensors) do
+		if s.orbital == isOrbital then
+			return true
+		end
+	end
+	return false
+end
+
+function ScanManager:GetSensorForType(isOrbital)
+	for idx, s in ipairs(self.sensors) do
+		if s.orbital == isOrbital then
+			return s, idx
+		end
+	end
+	return nil, nil
+end
+
+function ScanManager:HasSensorForScan(scan)
+	if not scan then return false end
+	for idx, s in ipairs(self.sensors) do
+		if s.orbital == scan.orbital then
+			if scan.freeScan or (s.minResolution <= scan.minResolution) then
+				return true, idx
+			end
+		end
+	end
+	return false, nil
+end
+
+local function isSameBodyPath(p1, p2)
+	if not p1 or not p2 then return false end
+	if p1 == p2 then return true end
+	return tostring(p1) == tostring(p2)
+end
+
+function ScanManager:GetScanStatusForBody(bodyPath, isOrbital)
+	if self.activeScan and isSameBodyPath(self.activeScan.bodyPath, bodyPath) and self.activeScan.orbital == isOrbital then
+		return "ACTIVE", self.activeScan
+	end
+	for _, s in ipairs(self.pendingScans) do
+		if isSameBodyPath(s.bodyPath, bodyPath) and s.orbital == isOrbital then
+			return "QUEUED", s
+		end
+	end
+	for _, s in ipairs(self.completedScans) do
+		if isSameBodyPath(s.bodyPath, bodyPath) and s.orbital == isOrbital then
+			return "COMPLETED", s
+		end
+	end
+	return nil, nil
+end
+
 ---@return ScanManager.State
 function ScanManager:GetState()
 	if not self.activeSensor then
@@ -279,10 +363,14 @@ function ScanManager:GetState()
 
 	if self.activeScan then
 		local body = self:GetScanBodyByType()
-		assert(body)
+		if not body then
+			return self.State.OutOfRange
+		end
 
-		local altitude, resolution = self:GetBodyState(body)
-		local isInRange = resolution <= self.activeScan.minResolution
+		local dist = self.ship:GetPositionRelTo(body):length()
+		local altitude = self:GetBodyState(body)
+		local maxDist = getScanMaxDistance(body, self.activeScan.orbital)
+		local isInRange = dist <= maxDist
 
 		if altitude > self.activeSensor.minAltitude then
 			return isInRange and self.State.Scanning or self.State.OutOfRange
@@ -373,7 +461,7 @@ end
 ---@param requiredCoverage number the percentage of the body's surface that needs to be scanned
 ---@return ScanID ID used to look up the resulting scan datum
 function ScanManager:AddNewOrbitalScan(bodyPath, minResolution, requiredCoverage)
-	local id = makeScanID(self.scanId, bodyPath, false)
+	local id = makeScanID(self.scanId, bodyPath, true)
 	self.scanId = self.scanId + 1
 
 	local scanData = ScanData.New(id, bodyPath, minResolution, requiredCoverage, true)
@@ -405,21 +493,106 @@ function ScanManager:SetActiveScan(id)
 		return
 	end
 
+	local hasSensor, sensorIdx = self:HasSensorForScan(scan)
+	if not hasSensor then
+		return
+	end
+
+	-- Auto-select matching sensor if current active sensor differs
+	if not self.activeSensor or self.activeSensor.orbital ~= scan.orbital then
+		self:SetActiveSensor(sensorIdx)
+	end
+
 	if not self:CanScanBeActivated(id) then
 		return
 	end
 
 	utils.remove_elem(self.pendingScans, scan)
-	table.insert(self.pendingScans, self.activeScan)
-
 	if self.activeScan then
-		Event.Queue("onScanPaused", self.ship, scan.id)
+		table.insert(self.pendingScans, self.activeScan)
+		Event.Queue("onScanPaused", self.ship, self.activeScan.id)
 	end
 
 	self.activeScan = scan
 	self.withinParameters = false
 
 	self:StartScanCallback()
+end
+
+-- Start or queue a free-target cartography scan on a body (without a Scout mission)
+---@param body Body
+---@param isOrbital boolean
+---@return ScanID? id, string? errReason
+function ScanManager:StartFreeScan(body, isOrbital)
+	if not body or not Game.system then return nil, "INVALID_BODY" end
+	if not (body.isa and body:isa("Body")) then return nil, "INVALID_BODY" end
+	local sbody = body:GetSystemBody()
+	if not sbody or sbody.superType == "STARPORT" then return nil, "INVALID_BODY" end
+	if not isOrbital and (sbody.superType == "STAR" or sbody.type == "PLANET_GAS_GIANT") then
+		return nil, "NO_SURFACE"
+	end
+	if Cartography.HasUnsoldScan(body, isOrbital) then
+		return nil, "ALREADY_STORED"
+	end
+
+	-- If already the active scan, keep it
+	if self.activeScan and isSameBodyPath(self.activeScan.bodyPath, body.path) and self.activeScan.orbital == isOrbital then
+		return self.activeScan.id
+	end
+
+	-- Reuse existing pending scan for this body/mode if any
+	for _, s in ipairs(self.pendingScans) do
+		if isSameBodyPath(s.bodyPath, body.path) and s.orbital == isOrbital then
+			if not self.activeScan then
+				local _, sensorIdx = self:GetSensorForType(isOrbital)
+				if sensorIdx then
+					self:SetActiveSensor(sensorIdx)
+					if self:CanScanBeActivated(s.id) then
+						self:SetActiveScan(s.id)
+					end
+				end
+			end
+			return s.id
+		end
+	end
+
+	local id = makeScanID(self.scanId, body.path, isOrbital)
+	self.scanId = self.scanId + 1
+
+	local targetCov = isOrbital and 1.0 or SURFACE_COMPLETE_COVERAGE
+	local scanData = ScanData.New(id, body.path, 1e9, targetCov, isOrbital)
+	scanData.freeScan = true
+	self.scanMap[id] = scanData
+	table.insert(self.pendingScans, scanData)
+
+	-- If we have no active scan, auto-select sensor and activate immediately!
+	if not self.activeScan then
+		local _, sensorIdx = self:GetSensorForType(isOrbital)
+		if sensorIdx then
+			self:SetActiveSensor(sensorIdx)
+			if self:CanScanBeActivated(id) then
+				self:SetActiveScan(id)
+			end
+		end
+	end
+
+	return id
+end
+
+-- Automatically activate the next scan in the queue if one is viable
+function ScanManager:AdvanceQueue()
+	if self.activeScan then return false end
+	for _, s in ipairs(self.pendingScans) do
+		if self:CanScanBeActivated(s.id) then
+			self:SetActiveScan(s.id)
+			local body = self:GetScanBodyByType(s)
+			if body and self.ship == Game.player then
+				self.ship:SetNavTarget(body)
+			end
+			return true
+		end
+	end
+	return false
 end
 
 -- Clear the currently active scan and running callback
@@ -432,42 +605,27 @@ function ScanManager:ClearActiveScan()
 	self.activeScan = nil
 	self.activeCallback = nil
 	self.withinParameters = false
+	Game.SetSurfaceScanOverlay(nil)
 end
 
--- Check if the given scan is within viable parameters (e.g. in correct body frame, etc)
+-- Check if the given scan is within viable parameters (e.g. in correct star system)
 ---@param id ScanID id of the scan to activate
 ---@return boolean
 function ScanManager:CanScanBeActivated(id)
-	if not self.activeSensor then return false end
-
 	local scan = self.scanMap[id]
-	if not scan then return false end
+	if not scan or scan.complete then return false end
 
-	if scan.complete then return false end
+	local hasSensor = self:HasSensorForScan(scan)
+	if not hasSensor then return false end
 
 	local body = self:GetScanBodyByType(scan)
 	if not body then return false end
 
-	if body.path ~= scan.bodyPath then
+	if not isSameBodyPath(body.path, scan.bodyPath) then
 		return false
 	end
 
-	if scan.orbital then
-		local altitude, resolution = self:GetBodyState(body, scan)
-		if(resolution > (scan.minResolution * 1.10)) then
-			return false
-		end
-	end
-
-	if scan.orbital ~= self.activeSensor.orbital then
-		return false
-	end
-
-	if scan.minResolution < self.activeSensor.minResolution then
-		return false
-	end
-
-	return (scan.orbital or self.ship.frameRotating)
+	return true
 end
 
 -- Remove a completed scan from the scanner's data storage
@@ -487,7 +645,7 @@ function ScanManager:AcceptScanComplete(id)
 	return scan
 end
 
--- Cancel a pending or active scan completely (e.g. mission failure)
+-- Cancel a pending or active scan completely (e.g. mission failure or player survey discard)
 ---@param id unknown an ID returned from AddNewScan
 ---@return ScanData? scan the completed scan data
 ---@nodiscard
@@ -503,6 +661,8 @@ function ScanManager:CancelScan(id)
 	if scan == self.activeScan then
 		self.activeScan = nil
 		self.activeCallback = nil
+		self.withinParameters = false
+		Game.SetSurfaceScanOverlay(nil)
 	else
 		utils.remove_elem(self.pendingScans, scan)
 	end
@@ -516,17 +676,7 @@ end
 ---@param body Body
 ---@package
 function ScanManager:OnEnteredFrame(body)
-	if self.activeScan then
-		if self.activeScan.orbital then
-			return
-		end
-		local frameBody = body.frameBody
-
-		if not frameBody or frameBody.path ~= self.activeScan.bodyPath then
-			self:ClearActiveScan()
-		end
-
-	end
+	-- Scans work in Supercruise and across frames now; nothing to cancel on frame change
 end
 
 -- Start the scanner callback
@@ -572,61 +722,100 @@ function ScanManager:OnUpdateScan(scan)
 		return true
 	end
 
-	local radius = body:GetSystemBody().radius
-	local altitude, resolution = self:GetBodyState(body)
-	local currentScanPos = self.ship:GetPositionRelTo(body):normalized()
+	local altitude = self:GetBodyState(body)
+	local relPos = self.ship:GetPositionRelTo(body)
+	local dist = relPos:length()
+	local maxDist = getScanMaxDistance(body, scan.orbital)
+	local withinParams = dist <= maxDist and altitude > self.activeSensor.minAltitude
 
 	if scan.orbital then
-		if(resolution > (scan.minResolution * 1.10)) then
-			self:ClearActiveScan()
+		Game.SetSurfaceScanOverlay(nil)
+		if withinParams then
+			-- Orbital scan completes immediately once within scan range
+			scan.coverage = scan.targetCoverage
+			scan.complete = true
+			self.activeScan = nil
+			self.activeCallback = nil
+			self.withinParameters = false
+
+			if scan.freeScan then
+				Cartography.RecordBodyScan(body, true)
+			else
+				table.insert(self.completedScans, scan)
+			end
+			Event.Queue("onScanComplete", self.ship, scan.id)
+			self:AdvanceQueue()
 			return true
+		else
+			if self.withinParameters then
+				Event.Queue("onScanRangeExit", self.ship, scan.id)
+			end
+			self.withinParameters = false
+			return false
 		end
 	end
 
-	-- Determine if we're currently in range to record scan data
-	local withinParams = resolution <= scan.minResolution and altitude > self.activeSensor.minAltitude
-
-
-
-	-- Use great-arc distance to calculate the amount of scan coverage in square meters
-	-- distance = Δσ * radius = arctan( |n1 ⨯ n2| / n1 · n2 ) * radius
-	-- See https://en.wikipedia.org/wiki/Great-circle_distance#Vector_version
-	if withinParams and self.withinParameters then
-
-		local crossTerm = currentScanPos:cross(self.lastScanPos):length()
-		local dotTerm = currentScanPos:dot(self.lastScanPos)
-		local dS = math.atan(crossTerm / dotTerm)
-
-		local coverage
-		local beamWidth = self.activeSensor.apertureWidth * altitude
-
-		local distance = dS * radius
-		-- total coverage gain in square kilometers
-		coverage = beamWidth * distance / SQUARE_KILOMETERS
-
-		scan.coverage = scan.coverage + coverage
-
-	elseif withinParams then
-		Event.Queue("onScanRangeEnter", self.ship, scan.id)
-	elseif self.withinParameters then
-		Event.Queue("onScanRangeExit", self.ship, scan.id)
+	-- Surface scan: 3D sphere coverage tracking (completes at 85% surface seen)
+	if not scan.surfaceGrid then
+		scan.surfaceGrid = {}
+		for k = 1, GRID_CELLS do
+			scan.surfaceGrid[k] = "0"
+		end
+		scan.scannedCells = 0
 	end
 
-	self.lastScanPos = currentScanPos
+	if withinParams then
+		if not self.withinParameters then
+			Event.Queue("onScanRangeEnter", self.ship, scan.id)
+		end
+
+		local shipDir = relPos:normalized()
+		local grid = scan.surfaceGrid
+		local count = scan.scannedCells or 0
+
+		for k = 1, GRID_CELLS do
+			if grid[k] == "0" and SPHERE_NORMALS[k]:dot(shipDir) >= SURFACE_VISIBILITY_DOT then
+				grid[k] = "1"
+				count = count + 1
+			end
+		end
+
+		scan.scannedCells = count
+		local coverageRatio = count / GRID_CELLS
+		if scan.freeScan or scan.targetCoverage <= 1.0 then
+			scan.coverage = coverageRatio
+		else
+			scan.coverage = math.min(scan.targetCoverage * 1.01, (coverageRatio / SURFACE_COMPLETE_COVERAGE) * scan.targetCoverage)
+		end
+
+		if coverageRatio >= SURFACE_COMPLETE_COVERAGE then
+			scan.coverage = scan.targetCoverage
+			scan.complete = true
+			self.activeScan = nil
+			self.activeCallback = nil
+			self.withinParameters = false
+			Game.SetSurfaceScanOverlay(nil)
+
+			if scan.freeScan then
+				Cartography.RecordBodyScan(body, false)
+			else
+				table.insert(self.completedScans, scan)
+			end
+			Event.Queue("onScanComplete", self.ship, scan.id)
+			self:AdvanceQueue()
+			return true
+		else
+			Game.SetSurfaceScanOverlay(body, true, coverageRatio, table.concat(grid))
+		end
+	else
+		if self.withinParameters then
+			Event.Queue("onScanRangeExit", self.ship, scan.id)
+		end
+		-- Hide 3D grid sphere highlight when leaving scan range
+		Game.SetSurfaceScanOverlay(nil)
+	end
+
 	self.withinParameters = withinParams
-
-	if scan.coverage > scan.targetCoverage then
-		scan.complete = true
-		self.activeScan = nil
-		self.activeCallback = nil
-
-		table.insert(self.completedScans, scan)
-		Event.Queue("onScanComplete", self.ship, scan.id)
-
-		return true
-	end
-
-
 	return false
 end
 

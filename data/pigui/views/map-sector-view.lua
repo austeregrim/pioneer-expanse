@@ -61,8 +61,49 @@ local settings =
 	draw_vertical_lines=false,
 	draw_out_range_labels=false,
 	draw_uninhabited_labels=true,
+	draw_uncharted_overlay=false,
+	draw_conflict_overlay=false,
+	visible_sphere_scale=0.75,
 	automatic_system_selection=true
 }
+
+local function syncConflictIntel(map)
+	if not map then return end
+	map:ClearConflictSystems()
+
+	local categoryTypeMap = {
+		FRONTLINE = 1,
+		HUMANITARIAN = 2,
+		MARKET = 3,
+		POLITICS = 4,
+	}
+
+	-- 1. Direct active crisis nodes from MacroGalaxyEngine
+	local okMacro, MacroEngine = pcall(require, 'modules.MacroGalaxy.MacroGalaxyEngine')
+	if okMacro and MacroEngine and MacroEngine.GetActiveCrises then
+		for _, c in ipairs(MacroEngine.GetActiveCrises()) do
+			if c.system and c.system ~= "" then
+				local t = categoryTypeMap[c.category] or 4
+				map:SetConflictSystem(c.system, t)
+			end
+		end
+	end
+
+	-- 2. InterCast wire dispatches
+	local okInter, InterCast = pcall(require, 'modules.InterCast.InterCast')
+	if okInter and InterCast then
+		local articles = InterCast.GetArticles("ALL")
+		if articles then
+			for i = #articles, 1, -1 do
+				local art = articles[i]
+				if art.system and art.system ~= "" then
+					local t = categoryTypeMap[art.category] or 4
+					map:SetConflictSystem(art.system, t)
+				end
+			end
+		end
+	end
+end
 
 local loaded_data = nil
 local ui_visible = true
@@ -132,6 +173,12 @@ local onGameStart = function ()
 	sectorView:SetDrawOutRangeLabels(settings.draw_out_range_labels)
 	sectorView:GetMap():SetDrawUninhabitedLabels(settings.draw_uninhabited_labels)
 	sectorView:GetMap():SetDrawVerticalLines(settings.draw_vertical_lines)
+	sectorView:GetMap():SetDrawUnchartedOverlay(settings.draw_uncharted_overlay or false)
+	sectorView:GetMap():SetDrawConflictOverlay(settings.draw_conflict_overlay or false)
+	if settings.draw_conflict_overlay then
+		syncConflictIntel(sectorView:GetMap())
+	end
+	sectorView:GetMap():SetVisibleSphereScale(settings.visible_sphere_scale or 0.75)
 	sectorView:GetMap():SetLabelParams("sector-map", font.size, 2.0, svColor.LABEL_HIGHLIGHT, svColor.LABEL_SHADE)
 
 	-- allow hyperjump planner to register its events:
@@ -513,6 +560,43 @@ local infoView = {
 
 			end)
 		end)
+
+		-- InterCast Crisis & Conflict Intel Dossier
+		local okInter, InterCast = pcall(require, 'modules.InterCast.InterCast')
+		if okInter and InterCast then
+			local sysArticles = {}
+			local allArticles = InterCast.GetArticles("ALL")
+			if allArticles then
+				for _, art in ipairs(allArticles) do
+					if art.system and string.lower(art.system) == string.lower(system.name) then
+						table.insert(sysArticles, art)
+					end
+				end
+			end
+			if #sysArticles > 0 then
+				local topArt = sysArticles[1]
+				local catCol = colors.alertYellow
+				if topArt.category == "FRONTLINE" then
+					catCol = Color(255, 65, 65, 255)
+				elseif topArt.category == "HUMANITARIAN" then
+					catCol = Color(55, 220, 255, 255)
+				elseif topArt.category == "MARKET" then
+					catCol = Color(255, 185, 30, 255)
+				elseif topArt.category == "POLITICS" then
+					catCol = Color(215, 90, 255, 255)
+				end
+
+				ui.separatorText("INTERCAST CRISIS DISPATCH")
+				ui.withFont(pionillium.details, function()
+					if topArt.urgent then
+						ui.textColored(Color(255, 50, 50, 255), "⚠ FLASH ADVISORY: ACTIVE HAZARD ZONE")
+					end
+					ui.textColored(catCol, string.format("[%s INTEL]  %s", topArt.category, topArt.date))
+					ui.textWrapped(topArt.headline)
+					ui.textColored(Color(190, 190, 190, 225), topArt.summary)
+				end)
+			end
+		end
 
 		ui.separatorText(lui.SYSTEM_INFORMATION)
 
@@ -931,6 +1015,46 @@ local optionView = {
 		changed, settings.automatic_system_selection = ui.checkbox(lc.AUTOMATIC_SYSTEM_SELECTION, settings.automatic_system_selection)
 		if changed then
 			sectorView:SetAutomaticSystemSelection(settings.automatic_system_selection)
+		end
+		changed, settings.draw_uncharted_overlay = ui.checkbox("Mark Charted Systems", settings.draw_uncharted_overlay or false)
+		if changed then
+			sectorView:GetMap():SetDrawUnchartedOverlay(settings.draw_uncharted_overlay)
+		end
+		if settings.draw_uncharted_overlay then
+			ui.textColored(Color(75, 255, 145, 255), "  ◆ Green: Discovered by You")
+			ui.textColored(Color(55, 215, 255, 255), "  ◆ Cyan: Pre-charted")
+			ui.textColored(Color(160, 160, 160, 220), "    Uncharted: Unmarked Star")
+		end
+
+		changed, settings.draw_conflict_overlay = ui.checkbox("Conflict & Crisis Intel Overlay", settings.draw_conflict_overlay or false)
+		if changed then
+			sectorView:GetMap():SetDrawConflictOverlay(settings.draw_conflict_overlay)
+			if settings.draw_conflict_overlay then
+				syncConflictIntel(sectorView:GetMap())
+			end
+		end
+		if settings.draw_conflict_overlay then
+			ui.textColored(Color(255, 65, 65, 255), "  ◈ Red: Frontline Combat / Blockade")
+			ui.textColored(Color(45, 215, 255, 255), "  ◈ Cyan: Humanitarian Relief / Outbreak")
+			ui.textColored(Color(255, 185, 30, 255), "  ◈ Amber: Market Embargo / Deficit")
+			ui.textColored(Color(210, 80, 255, 255), "  ◈ Purple: Political Unrest / Summit")
+		end
+
+		ui.spacing()
+		local sphereLabels = { "Compact (56 ly)", "Medium (80 ly)", "Standard (104 ly)", "Maximum (136 ly)" }
+		local currentSphereIdx = 2
+		local curScale = settings.visible_sphere_scale or 0.75
+		if curScale <= 0.40 then currentSphereIdx = 0
+		elseif curScale <= 0.60 then currentSphereIdx = 1
+		elseif curScale <= 0.85 then currentSphereIdx = 2
+		else currentSphereIdx = 3 end
+
+		ui.text("Visible Star Sphere Radius:")
+		local sphereChanged, newSphereIdx = ui.combo("##VisibleSphereSize", currentSphereIdx, sphereLabels)
+		if sphereChanged then
+			local scaleMap = { [0] = 0.35, [1] = 0.55, [2] = 0.75, [3] = 1.0 }
+			settings.visible_sphere_scale = scaleMap[newSphereIdx] or 0.75
+			sectorView:GetMap():SetVisibleSphereScale(settings.visible_sphere_scale)
 		end
 
 		sidebarStyle:pop()

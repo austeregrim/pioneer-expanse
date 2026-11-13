@@ -21,7 +21,8 @@ Event.Register("onShipScoopFuel", function(ship, body, amount)
 
 		-- 1. Refill hydrogen-fueled hyperdrive reservoir first (Elite Dangerous style)
 		local hd = ship.GetInstalledHyperdrive and ship:GetInstalledHyperdrive()
-		if hd and hd.fuel == Commodities.hydrogen then
+		local isHydrogen = hd and (hd.fuel == Commodities.hydrogen or (hd.fuel and hd.fuel.name == "hydrogen"))
+		if isHydrogen then
 			local maxFuel = hd:GetMaxFuel()
 			if hd.storedFuel < maxFuel then
 				local addHd = math.min(remaining, maxFuel - hd.storedFuel)
@@ -37,7 +38,12 @@ Event.Register("onShipScoopFuel", function(ship, body, amount)
 			local tankMass = shipDef and shipDef.fuelTankMass or 0
 			if tankMass > 0 and ship.fuel < 100 then
 				local addPct = (remaining / tankMass) * 100
-				ship:SetFuelPercent(math.min(100, ship.fuel + addPct))
+				local newPct = math.min(100, ship.fuel + addPct)
+				ship:SetFuelPercent(newPct)
+				ship:setprop("fuel", newPct)
+				if ship.fuelMassLeft then
+					ship:setprop("fuelMassLeft", math.min(tankMass, tankMass * newPct / 100))
+				end
 				scoopedAny = true
 			end
 		end
@@ -45,9 +51,19 @@ Event.Register("onShipScoopFuel", function(ship, body, amount)
 		if ship == Game.player and scoopedAny then
 			local now = Game.time
 			local lastMsg = ship:hasprop('lastStellarScoopLog') and ship.lastStellarScoopLog or -999
-			if now - lastMsg >= 8.0 then
-				ship:setprop('lastStellarScoopLog', now)
-				Game.AddCommsLogLine("Fuel scoop engaged: harvesting stellar hydrogen.")
+			local isAllFull = (not hd or hd.storedFuel >= (hd:GetMaxFuel() - 0.001)) and (ship.fuel >= 99.9)
+			if isAllFull then
+				if not ship:hasprop('stellarScoopReportedFull') then
+					ship:setprop('stellarScoopReportedFull', true)
+					Game.AddCommsLogLine("Fuel scoop: Hyperdrive reservoir & Main fuel tank 100% full.")
+				end
+			else
+				ship:unsetprop('stellarScoopReportedFull')
+				if now - lastMsg >= 8.0 then
+					ship:setprop('lastStellarScoopLog', now)
+					local hdStr = hd and string.format("Hyperdrive: %.1f/%.1ft, ", hd.storedFuel, hd:GetMaxFuel()) or ""
+					Game.AddCommsLogLine(string.format("Fuel scoop: harvesting stellar hydrogen (%sMain Tank: %.0f%%).", hdStr, ship.fuel))
+				end
 			end
 		end
 		return

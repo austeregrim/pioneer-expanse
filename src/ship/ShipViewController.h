@@ -57,6 +57,7 @@ private:
 
 	bool headtracker_input_priority;
 	bool m_mouseActive;
+	Uint32 m_lastMiddleClickMs = 0;
 
 	void MouseWheel(bool up);
 

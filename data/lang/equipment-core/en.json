@@ -887,6 +887,14 @@
     "description": "",
     "message": "1MW dual-fire pulse cannon"
   },
+  "DISCOVERY_SCANNER": {
+    "description": "",
+    "message": "System Discovery Scanner"
+  },
+  "DISCOVERY_SCANNER_DESCRIPTION": {
+    "description": "",
+    "message": "Full-spectrum stellar cartography scanner. Reveals all bodies in an unexplored star system and records stellar data for Universal Cartographics."
+  },
   "PULSECANNON_RAPID_2MW": {
     "description": "",
     "message": "2MW rapid-fire pulse cannon"

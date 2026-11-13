@@ -144,7 +144,7 @@ function CommodityType.Unserialize(data)
 		CommodityType.registry[data.name] = data
 	end
 
-	return data
+	return CommodityType.registry[data.name] or data
 end
 
 Serializer:RegisterClass('CommodityType', CommodityType)

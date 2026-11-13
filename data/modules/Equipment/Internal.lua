@@ -76,6 +76,14 @@ Equipment.Register("sensor.radar", SensorType.New {
 	icon_name="equip_radar"
 })
 
+Equipment.Register("sensor.discovery_scanner", SensorType.New {
+	l10n_key="DISCOVERY_SCANNER",
+	price=2500, purchasable=true, tech_level=2,
+	slot = { type="sensor.discovery_scanner", size=1 },
+	mass=0.5, volume=1.0, capabilities = { discovery_scanner=1 },
+	icon_name="equip_radar"
+})
+
 --===============================================
 -- Shield Generators
 --===============================================

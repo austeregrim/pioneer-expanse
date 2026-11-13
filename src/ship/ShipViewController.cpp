@@ -2,6 +2,7 @@
 // Licensed under the terms of the GPL v3. See licenses/GPL-3.txt
 
 #include "ShipViewController.h"
+#include <SDL_timer.h>
 
 #include "CameraController.h"
 #include "GameConfig.h"
@@ -272,12 +273,20 @@ void ShipViewController::Update()
 	int mouseMotion[2];
 	Pi::input->GetMouseMotion(mouseMotion);
 
-	// external camera mouselook
+	// external camera mouselook (double-click middle mouse resets view like Home)
 	bool mouse_down = Pi::input->MouseButtonState(SDL_BUTTON_MIDDLE);
 	if (mouse_down && !headtracker_input_priority) {
 		if (!m_mouseActive) {
 			m_mouseActive = true;
 			Pi::input->SetCapturingMouse(true);
+
+			const Uint32 nowMs = SDL_GetTicks();
+			if (m_lastMiddleClickMs != 0 && (nowMs - m_lastMiddleClickMs) <= 350) {
+				cam->Reset();
+				m_lastMiddleClickMs = 0;
+			} else {
+				m_lastMiddleClickMs = nowMs;
+			}
 		}
 
 		// invert the mouse input to convert between screen coordinates and

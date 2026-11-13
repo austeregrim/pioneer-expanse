@@ -152,6 +152,7 @@ end
 ---@param ship Ship? The ship this hyperdrive is installed in, or nil if the hyperdrive is not yet installed
 ---@param newFuel number The fuel amount stored in the hyperdrive's reservoir, in tons
 function HyperdriveType:SetFuel(ship, newFuel)
+	newFuel = math.clamp(newFuel, 0, self.fuel_resv_size)
 	assert(newFuel >= 0 and newFuel <= self.fuel_resv_size)
 
 	local massDiff = newFuel - self.storedFuel
@@ -244,9 +245,10 @@ function HyperdriveType:HyperjumpTo(ship, destination)
 	if not distance then
 		return "OUT_OF_RANGE"
 	end
-	if not fuel_use then
+	if not fuel_use or self.storedFuel < fuel_use then
 		return "INSUFFICIENT_FUEL"
 	end
+
 	ship:setprop('nextJumpFuelUse', fuel_use)
 	local warmup_time = 5 + self.capabilities.hyperclass*1.5
 

@@ -1011,11 +1011,14 @@ void GameLoop::Update(float deltaTime)
 			Pi::game->GetDeathView()->Init();
 			Pi::SetView(Pi::game->GetDeathView());
 			time_player_died = Pi::game->GetTime();
-		} else if (Pi::game->GetTime() - time_player_died > 8.0) {
-			// This also shouldn't go here, though we should evaluate to what degree
-			// Pi.cpp is involved in queuing the tombstone loop.
-			SetNextLifecycle(RefCountedPtr<TombstoneLoop>(new TombstoneLoop()));
-			RequestEndLifecycle();
+		} else if (Pi::game->GetDeathView()->GetDeathTimer() >= 7.5f) {
+			if (Pi::game->IsHardcore()) {
+				SetNextLifecycle(RefCountedPtr<TombstoneLoop>(new TombstoneLoop()));
+				RequestEndLifecycle();
+			} else {
+				Pi::game->TriggerPlayerEscapePodRecovery();
+			}
+			time_player_died = 0.0;
 		}
 	}
 

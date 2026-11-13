@@ -15,6 +15,8 @@
 #include "imgui/imgui.h"
 #include "imgui/imgui_internal.h"
 #include "SectorMapContext.h"
+#include <map>
+#include <string>
 
 namespace Graphics {
 	class RenderTarget;
@@ -44,6 +46,41 @@ public:
 
 	void SetDrawUninhabitedLabels(bool value) { m_drawUninhabitedLabels = value; }
 	void SetDrawVerticalLines(bool value) { m_drawVerticalLines = value; }
+	void SetDrawUnchartedOverlay(bool value)
+	{
+		if (m_drawUnchartedOverlay != value) {
+			m_drawUnchartedOverlay = value;
+			m_toggledFaction = true;
+		}
+	}
+	bool GetDrawUnchartedOverlay() const { return m_drawUnchartedOverlay; }
+	void SetDrawConflictOverlay(bool value)
+	{
+		if (m_drawConflictOverlay != value) {
+			m_drawConflictOverlay = value;
+			m_toggledFaction = true;
+		}
+	}
+	bool GetDrawConflictOverlay() const { return m_drawConflictOverlay; }
+	void SetConflictSystem(const std::string &sysName, int type)
+	{
+		m_conflictSystems[sysName] = type;
+		m_toggledFaction = true;
+	}
+	void ClearConflictSystems()
+	{
+		m_conflictSystems.clear();
+		m_toggledFaction = true;
+	}
+	void SetVisibleSphereScale(float scale)
+	{
+		scale = std::clamp(scale, 0.35f, 1.0f);
+		if (std::fabs(m_visibleSphereScale - scale) > 0.01f) {
+			m_visibleSphereScale = scale;
+			m_toggledFaction = true;
+		}
+	}
+	float GetVisibleSphereScale() const { return m_visibleSphereScale; }
 	void SetFactionVisible(const Faction *faction, bool visible);
 	void SetZoomMode(bool enable);
 	void SetRotateMode(bool enable);
@@ -149,6 +186,10 @@ private:
 	bool m_manualMove = false;
 
 	bool m_drawUninhabitedLabels = false;
+	bool m_drawUnchartedOverlay = false;
+	bool m_drawConflictOverlay = false;
+	std::map<std::string, int> m_conflictSystems;
+	float m_visibleSphereScale = 0.75f;
 	bool m_drawVerticalLines = false;
 
 	std::set<const Faction *> m_visibleFactions;

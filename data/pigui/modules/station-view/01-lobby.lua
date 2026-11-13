@@ -5,6 +5,7 @@ local ui = require 'pigui'
 local StationView = require 'pigui.views.station-view'
 local AutoSave    = require 'modules.AutoSave.AutoSave'
 local PlayerState = require 'PlayerState'
+local Insurance   = require 'modules.Insurance.Insurance'
 
 local Game = require 'Game'
 local Rand = require 'Rand'
@@ -298,8 +299,16 @@ local function drawPlayerInfo()
 
 					ui.withFont(orbiteer.title, function()
 						local size = Vector2(ui.getContentRegion().x, widgetSizes.buttonLaunchSize.y)
-						if ui.button(l.REQUEST_LAUNCH, size) then
-							requestLaunch(station)
+						if Insurance.HasPendingClaim() then
+							ui.withStyleColors({ Button = colors.alertRed }, function()
+								if ui.button("SETTLE INSURANCE CLAIM TO LAUNCH", size) then
+									StationView:SwitchTo("insurance")
+								end
+							end)
+						else
+							if ui.button(l.REQUEST_LAUNCH, size) then
+								requestLaunch(station)
+							end
 						end
 					end)
 				end)
@@ -318,6 +327,11 @@ StationView:registerView({
 	showView = true,
 	draw = drawPlayerInfo,
 	refresh = function()
+		if Insurance.ShouldOpenModal() then
+			StationView:SwitchTo("insurance")
+			return
+		end
+
 		local station = Game.player:GetDockedWith()
 		shipDef = ShipDef[Game.player.shipId]
 

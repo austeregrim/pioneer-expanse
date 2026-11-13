@@ -39,15 +39,11 @@ local exploreSystem = function (system)
 end
 
 local onEnterSystem = function (player)
-	if not Game.system.explored then
-		exploreSystem(Game.system)
-	end
+	-- Exploration is now triggered manually via the System Discovery Scanner
 end
 
 local onGameStart = function ()
-    if not Game.system.explored then
-        exploreSystem(Game.system)
-    end
+	-- Exploration is now triggered manually via the System Discovery Scanner
 end
 
 Event.Register("onEnterSystem", onEnterSystem)

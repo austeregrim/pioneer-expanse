@@ -47,6 +47,12 @@ gameView.registerSidebarModule("system-overview", {
 			return
 		end
 
+		if not Game.system.explored then
+			ui.textColored(ui.theme.colors.alertYellow, lui.UNEXPLORED_SYSTEM or "UNEXPLORED SYSTEM")
+			ui.textWrapped("Run System Discovery Scanner from the Scanner panel to map bodies in this system.")
+			return
+		end
+
 		systemOverview:displaySearch()
 
 		systemOverview.size.y = math.max(ui.getContentRegion().y, ui.screenHeight / height_fraction)

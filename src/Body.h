@@ -186,6 +186,7 @@ public:
 	// Only Space::KillBody() should call this method.
 	void MarkDead() { m_dead = true; }
 	bool IsDead() const { return m_dead; }
+	virtual void Revive() { m_dead = false; }
 
 	// all Bodies are in space... except where they're not (Ships hidden in hyperspace clouds)
 	virtual bool IsInSpace() const { return true; }

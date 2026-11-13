@@ -879,9 +879,27 @@ local function displayAlertMarker()
 end
 
 
+local reticuleCornerColor = _G.Color(75, 195, 255, 210)
+local reticuleCornerAccent = _G.Color(140, 225, 255, 150)
+
+local function drawReticuleCornerArcs()
+	local r = reticuleCircleRadius
+	local halfSpan = math.rad(19)
+	local corners = { math.rad(45), math.rad(135), math.rad(225), math.rad(315) }
+	for _, a in ipairs(corners) do
+		ui.pathArcTo(center, r, a - halfSpan, a + halfSpan, 14)
+		ui.pathStroke(reticuleCornerColor, false, reticuleCircleThickness)
+
+		-- Subtle outer corner bracket tick
+		local tickIn = Vector2(math.cos(a), math.sin(a)) * (r + 3)
+		local tickOut = Vector2(math.cos(a), math.sin(a)) * (r + 8)
+		ui.addLine(center + tickIn, center + tickOut, reticuleCornerAccent, 1.5)
+	end
+end
+
 local function displayReticule()
-	-- reticule circle
-	ui.addCircle(center, reticuleCircleRadius, colors.reticuleCircle, ui.circleSegments(reticuleCircleRadius), reticuleCircleThickness)
+	-- futuristic corner-arc reticle
+	drawReticuleCornerArcs()
 
 	local inSupercruise = player:IsSupercruiseActive()
 	if not inSupercruise then
