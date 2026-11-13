@@ -1,11 +1,11 @@
-# Test all pull requests to ensure they build
-
-name: Build Pioneer
+# Test all pull requests and publish release binaries
+name: Build Pioneer: Expanse
 
 # Controls when the action will run.
 on:
   push:
     branches:
+    - main
     - master
   pull_request:
     paths:
@@ -25,9 +25,12 @@ on:
         required: true
         type: string
 
+permissions:
+  contents: write
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref == 'refs/heads/master' }}
+  cancel-in-progress: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
 
 env:
   packages: >
