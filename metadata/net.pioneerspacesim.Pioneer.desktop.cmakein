@@ -1,7 +1,7 @@
 [Desktop Entry]
 Version=1.0
-Name=Pioneer
-GenericName=Pioneer Space Simulator
+Name=Pioneer: Expanse
+GenericName=Pioneer: Expanse Space Simulator
 Comment=A game of lonely space adventure
 Exec=@PIONEER_EXECUTABLE@
 Icon=net.pioneerspacesim.Pioneer

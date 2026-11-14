@@ -1,4 +1,18 @@
 ================================================================================
+Pioneer: Expanse v2026.11.4-expanse (November 2026)
+================================================================================
+Dynamic Git Versioning & Inno Setup Branding:
+  * Dynamic Version Resolution:
+    - Replaced upstream hardcoded version ("20260907-dev") in CMakeLists.txt with
+      automatic git tag detection via `git describe --tags --always --match "v*"`.
+    - Main menu build marker and About window (`Engine.version`) now dynamically
+      display the exact release tag and commit hash (e.g., `v2026.11.4-expanse (hash)`).
+  * Windows Installer & Desktop Metadata:
+    - Updated Inno Setup configuration (pioneer.iss.cmakein) to title the application
+      "Pioneer: Expanse" and name installers dynamically using the git release tag.
+    - Updated Linux desktop launcher metadata (net.pioneerspacesim.Pioneer.desktop.cmakein).
+
+================================================================================
 Pioneer: Expanse v2026.11.3-expanse (November 2026)
 ================================================================================
 Automated Binary Release Build & CI Pipeline:

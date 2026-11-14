@@ -1,16 +1,16 @@
 #define AppExeName "pioneer.exe"
-#define AppName "Pioneer"
-#define AppUrl "https://www.pioneerspacesim.net"
+#define AppName "Pioneer: Expanse"
+#define AppUrl "https://github.com/austeregrim/pioneer-expanse"
 
 [Setup]
 AppId={{5ba280c9-1d73-4039-b2e1-7fc7800f784c}
 AppName="{#AppName}"
 AppVersion="@PIONEER_VERSION@"
-AppPublisher="{#AppName} Developers"
+AppPublisher="Austere Grim"
 AppPublisherURL="{#AppUrl}"
 AppSupportURL="{#AppUrl}"
 AppUpdatesURL="{#AppUrl}"
-AppCopyright="Copyright 2008-@BUILD_YEAR@ {#AppName} developers"
+AppCopyright="Copyright 2008-@BUILD_YEAR@ Pioneer: Expanse contributors"
 CreateAppDir=yes
 LicenseFile="@PROJECT_SOURCE_DIR@\licenses\GPL-3.txt"
 OutputBaseFilename=pioneer-@PIONEER_VERSION@-win
@@ -18,8 +18,8 @@ OutputDir="@PROJECT_SOURCE_DIR@"
 Compression=lzma
 SolidCompression=yes
 ArchitecturesInstallIn64BitMode=x64
-DefaultDirName={autopf}\Pioneer
-DefaultGroupName=Pioneer
+DefaultDirName={autopf}\Pioneer Expanse
+DefaultGroupName=Pioneer Expanse
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

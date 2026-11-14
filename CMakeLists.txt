@@ -5,8 +5,25 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 set(CMAKE_CXX_STANDARD 17)
 
 # Version identifier for current compiled build
-# Do not cache this variable
-set(PIONEER_VERSION "20260907-dev")
+# Dynamically determine version from git tags if available
+find_package(Git QUIET)
+if (GIT_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
+	execute_process(
+		COMMAND ${GIT_EXECUTABLE} describe --tags --always --match "v*"
+		WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+		OUTPUT_VARIABLE PIONEER_VERSION_GIT
+		OUTPUT_STRIP_TRAILING_WHITESPACE
+		RESULT_VARIABLE GIT_DESCRIBE_RESULT
+	)
+	if (GIT_DESCRIBE_RESULT EQUAL 0 AND PIONEER_VERSION_GIT)
+		set(PIONEER_VERSION "${PIONEER_VERSION_GIT}")
+	endif()
+endif()
+
+# Fallback version if git is not available (e.g. source tarball)
+if (NOT DEFINED PIONEER_VERSION OR PIONEER_VERSION STREQUAL "")
+	set(PIONEER_VERSION "v2026.11.3-expanse")
+endif()
 
 set(PROJECT_VERSION_INFO ""
 	CACHE STRING "Additional version information (optional)")
