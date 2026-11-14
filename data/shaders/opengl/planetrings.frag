@@ -54,30 +54,29 @@ void main(void)
 	for (int i=0; i<NUM_LIGHTS; ++i) {
 		// Compute intersection between the light ray and the planet sphere (rings are scaled so 1.0 = planet radius)
 		vec2 eye_dist = raySphereIntersect(-vec3(texCoord1), normalize(vec3(uViewMatrixInverse * normalize(uLight[i].position))), 1.0);
-		// Find the length of intersection in planet radii (ergo, a value ranging from 0..2)
+		// Find the length of intersection in planet radii (0.0 outside shadow -> up to 2.0 across planet core)
 		float l = (eye_dist.y - eye_dist.x);
-		// Approximate shadow penumbra, completely non-physical.
-		// pixel_width controls the minimum screen-space size of the penumbra regardless of zoom level in pixels.
-		float pixel_width = abs(fwidth(l)) * 6;
-		float penumbra = 1 - smoothstep(0, max(0.2, pixel_width), l);
+		// Sharp planetary self-shadow with crisp penumbra edge
+		float pixel_width = abs(fwidth(l)) * 3.0;
+		float penumbra = 1.0 - smoothstep(0.0, max(0.025, pixel_width), l);
 
 		// Compute ring lighting
 		{
 			// first term: diffuse light phase (like in full/new moon)
 			float mu = dot(normalize(vec3(uLight[i].position)), eyenorm);
-			float diffuse = sqrt((1 - mu) / 2);
+			float diffuse = sqrt(clamp((1.0 - mu) * 0.5, 0.0, 1.0));
 
-			// second term: diffuse mie (scattering through ring)
-			float g = 0.76f;
-			float phaseThrough = miePhaseFunction(g, mu);
+			// second term: forward Mie scattering through ice/dust ring particles
+			float g = 0.78;
+			float phaseThrough = miePhaseFunction(g, mu) * 1.15;
 
-			// third term: reflect mie (imitate albedo >= 1.0)
+			// third term: retro-reflective opposition surge (rocky & metallic grains)
 			float muRev = dot(-normalize(vec3(uLight[i].position)), eyenorm);
-			// Reduce impact of retro-reflectance by including density as a second term
-			float phaseReflect = density * miePhaseFunction(g, muRev);
+			float phaseReflect = (0.35 + 0.65 * density) * miePhaseFunction(0.72, muRev);
 
-			// Scale contributed lighting by penumbra factor.
-			col = col + texCol * (diffuse + phaseThrough + phaseReflect) * uLight[i].diffuse * vec4(penumbra);
+			// Ambient scatter prevents shadowed umbra from vanishing completely while keeping sharp contrast
+			float shadowLight = mix(0.04, 1.0, penumbra);
+			col = col + texCol * (diffuse + phaseThrough + phaseReflect) * uLight[i].diffuse * vec4(shadowLight);
 		}
 	}
 	col.a = texCol.a;

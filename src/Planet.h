@@ -15,14 +15,19 @@ namespace Graphics {
 	class MeshObject;
 } // namespace Graphics
 
+class RingField;
+
 class Planet : public TerrainBody {
 public:
 	OBJDEF(Planet, TerrainBody, PLANET);
 	Planet() = delete;
 	Planet(SystemBody *);
 	Planet(const Json &jsonObj, Space *space);
+	virtual ~Planet();
 
+	void TimeStepUpdate(const float timeStep) override;
 	void SubRender(Graphics::Renderer *r, const matrix4x4d &viewTran, const vector3d &camPos) override;
+	bool TraceRingRay(FrameId rayFrameId, const vector3d &startPos, const vector3d &dir, double maxLen, bool isMining, double &outHitDist);
 
 	void GetAtmosphericState(double dist, double *outPressure, double *outDensity) const;
 	double GetAtmosphereRadius() const { return m_atmosphereRadius; }
@@ -41,6 +46,7 @@ private:
 	RefCountedPtr<Graphics::Texture> m_ringNoiseTexture;
 	std::unique_ptr<Graphics::Material> m_ringMaterial;
 	std::unique_ptr<Graphics::MeshObject> m_ringMesh;
+	std::unique_ptr<RingField> m_ringField;
 };
 
 #endif /* _PLANET_H */

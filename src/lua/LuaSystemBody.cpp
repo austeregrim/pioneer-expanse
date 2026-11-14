@@ -422,6 +422,61 @@ static int l_sbody_attr_has_rings(lua_State *l)
 	return 1;
 }
 
+static int l_sbody_attr_ring_type(lua_State *l)
+{
+	SystemBody *sbody = LuaObject<SystemBody>::CheckFromLua(1);
+	if (!sbody->HasRings()) {
+		lua_pushnil(l);
+		return 1;
+	}
+	lua_pushstring(l, RingStyle::GetCompositionName(sbody->GetRings().composition));
+	return 1;
+}
+
+static int l_sbody_attr_ring_reserve(lua_State *l)
+{
+	SystemBody *sbody = LuaObject<SystemBody>::CheckFromLua(1);
+	if (!sbody->HasRings()) {
+		lua_pushnil(l);
+		return 1;
+	}
+	lua_pushstring(l, RingStyle::GetReserveGradeName(sbody->GetRings().reserveGrade));
+	return 1;
+}
+
+static int l_sbody_attr_ring_inner_radius(lua_State *l)
+{
+	SystemBody *sbody = LuaObject<SystemBody>::CheckFromLua(1);
+	lua_pushnumber(l, sbody->HasRings() ? (sbody->GetRadius() * sbody->GetRings().minRadius.ToDouble()) : 0.0);
+	return 1;
+}
+
+static int l_sbody_attr_ring_outer_radius(lua_State *l)
+{
+	SystemBody *sbody = LuaObject<SystemBody>::CheckFromLua(1);
+	lua_pushnumber(l, sbody->HasRings() ? (sbody->GetRadius() * sbody->GetRings().maxRadius.ToDouble()) : 0.0);
+	return 1;
+}
+
+static int l_sbody_attr_ring_thickness(lua_State *l)
+{
+	SystemBody *sbody = LuaObject<SystemBody>::CheckFromLua(1);
+	lua_pushnumber(l, sbody->HasRings() ? sbody->GetRings().thickness.ToDouble() : 0.0);
+	return 1;
+}
+
+static int l_sbody_attr_ring_band_count(lua_State *l)
+{
+	SystemBody *sbody = LuaObject<SystemBody>::CheckFromLua(1);
+	if (!sbody->HasRings()) {
+		lua_pushinteger(l, 0);
+		return 1;
+	}
+	const size_t count = sbody->GetRings().bands.empty() ? 2 : sbody->GetRings().bands.size();
+	lua_pushinteger(l, lua_Integer(count));
+	return 1;
+}
+
 /*
  * Attribute: hasAtmosphere
  *
@@ -574,6 +629,12 @@ void LuaObject<SystemBody>::RegisterClass()
 		{ "volcanicity", l_sbody_attr_volcanicity },
 		{ "life", l_sbody_attr_life },
 		{ "hasRings", l_sbody_attr_has_rings },
+		{ "ringType", l_sbody_attr_ring_type },
+		{ "ringReserve", l_sbody_attr_ring_reserve },
+		{ "ringInnerRadius", l_sbody_attr_ring_inner_radius },
+		{ "ringOuterRadius", l_sbody_attr_ring_outer_radius },
+		{ "ringThickness", l_sbody_attr_ring_thickness },
+		{ "ringBandCount", l_sbody_attr_ring_band_count },
 		{ "agricultural", l_sbody_attr_agricultural },
 		{ "hasAtmosphere", l_sbody_attr_has_atmosphere },
 		{ "isScoopable", l_sbody_attr_is_scoopable },

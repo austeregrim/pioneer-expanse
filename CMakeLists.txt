@@ -175,6 +175,7 @@ list(APPEND SRC_FOLDERS
 	src/graphics/opengl
 	src/math
 	src/pigui
+	src/planet
 	src/scenegraph
 	src/ship
 	src/sound

@@ -97,6 +97,10 @@ void SupercruiseController::OnDeleted(const Body *body)
 {
 	if (m_target == body)
 		m_target = nullptr;
+	if (m_ringDropPlanet == body)
+		m_ringDropPlanet = nullptr;
+	if (m_ringImmersionPlanet == body)
+		m_ringImmersionPlanet = nullptr;
 	if (m_interdictPeer == body) {
 		ClearInterdiction();
 	}
@@ -513,9 +517,52 @@ void SupercruiseController::EnterSupercruiseOnHyperspaceExit()
 	ShowStatusMessage("HYPERSPACE EXIT — FSD COOLDOWN ACTIVE", 5.0f);
 }
 
+void SupercruiseController::DropIntoRing(Planet *planet, const std::string &reason)
+{
+	ClearInterdiction();
+	m_charging = false;
+	m_assistActive = false;
+	m_dockOnArrival = false;
+	m_cooldown = NORMAL_COOLDOWN;
+	m_speed = 0.0;
+	m_safeDisengageReady = false;
+	m_slowDownWarning = false;
+	m_ringDropPlanet = nullptr;
+	m_ringImmersionPlanet = nullptr;
+
+	if (planet && planet->GetSystemBody()) {
+		const SystemBody *sb = planet->GetSystemBody();
+		Frame *pf = Frame::GetFrame(planet->GetFrame());
+		FrameId orbFrameId = pf ? pf->GetNonRotFrame() : planet->GetFrame();
+		if (orbFrameId.valid() && Frame::GetFrame(orbFrameId)) {
+			m_ship->SwitchToFrame(orbFrameId);
+			const vector3d planetPosOrb = planet->GetPositionRelTo(orbFrameId);
+			const matrix3x3d axialRot = matrix3x3d::RotateX(sb->GetAxialTilt());
+			vector3d relRing = axialRot.Transpose() * (m_ship->GetPosition() - planetPosOrb);
+
+			if (std::abs(relRing.y) > 550.0) {
+				relRing.y = (relRing.y >= 0.0) ? 550.0 : -550.0;
+			}
+			m_ship->SetPosition(planetPosOrb + axialRot * relRing);
+		}
+	}
+
+	m_ship->SetVelocity(vector3d(0.0));
+	m_ship->SetAngVelocity(vector3d(0.0));
+	m_ship->SetFlightState(Ship::FLYING);
+	m_ship->ClearThrusterState();
+	m_trailPositions.clear();
+	ResetFuelScoopState();
+	ClearStaleSupercruiseTarget();
+
+	Sound::BodyMakeNoise(m_ship, "Hyperdrive_Abort", 1.0f);
+	ShowStatusMessage(reason.empty() ? "DROPPED INTO PLANETARY RING" : reason, 5.0f);
+}
+
 void SupercruiseController::SafeDisengage()
 {
 	Body *target = GetActiveTarget();
+	Planet *ringPlanet = m_ringDropPlanet;
 	const bool dockAfterDrop = m_dockOnArrival;
 
 	m_charging = false;
@@ -525,6 +572,8 @@ void SupercruiseController::SafeDisengage()
 	m_speed = 0.0;
 	m_safeDisengageReady = false;
 	m_slowDownWarning = false;
+	m_ringDropPlanet = nullptr;
+	m_ringImmersionPlanet = nullptr;
 
 	if (target && target->IsType(ObjectType::SPACESTATION)) {
 		SpaceStation *station = static_cast<SpaceStation *>(target);
@@ -578,6 +627,9 @@ void SupercruiseController::SafeDisengage()
 		m_ship->SetPosition(target->GetPosition() + fromTarget * dropOff);
 		m_ship->SetVelocity(target->GetVelocity());
 		m_ship->SetAngVelocity(vector3d(0.0));
+	} else if (ringPlanet) {
+		DropIntoRing(ringPlanet, "DROPPED INTO PLANETARY RING — " + ringPlanet->GetLabel());
+		return;
 	} else if (!target && m_targetFrame.valid() && Frame::GetFrame(m_targetFrame)) {
 		m_ship->SwitchToFrame(m_targetFrame);
 		m_ship->SetVelocity(vector3d(0.0));
@@ -627,6 +679,8 @@ void SupercruiseController::NormalDrop(const std::string &reason)
 	m_speed = 0.0;
 	m_safeDisengageReady = false;
 	m_slowDownWarning = false;
+	m_ringDropPlanet = nullptr;
+	m_ringImmersionPlanet = nullptr;
 
 	m_ship->SetVelocity(vector3d(0.0));
 	m_ship->SetAngVelocity(vector3d(0.0));
@@ -650,6 +704,8 @@ void SupercruiseController::EmergencyDrop(const std::string &reason)
 	m_speed = 0.0;
 	m_safeDisengageReady = false;
 	m_slowDownWarning = false;
+	m_ringDropPlanet = nullptr;
+	m_ringImmersionPlanet = nullptr;
 
 	m_ship->SetVelocity(vector3d(0.0));
 	m_ship->SetAngVelocity(vector3d(0.18, -0.09, 0.14));
@@ -679,6 +735,8 @@ void SupercruiseController::OnEnterHyperspace()
 	m_speed = 0.0;
 	m_safeDisengageReady = false;
 	m_slowDownWarning = false;
+	m_ringDropPlanet = nullptr;
+	m_ringImmersionPlanet = nullptr;
 }
 
 void SupercruiseController::ResetFuelScoopState()
@@ -904,12 +962,19 @@ void SupercruiseController::UpdateEnvironmentAndTarget(float timeStep, Body **ou
 	if (outHitExclusionBody)
 		*outHitExclusionBody = nullptr;
 
+	m_ringDropPlanet = nullptr;
+	m_ringImmersionPlanet = nullptr;
+
 	if (!m_ship || !Pi::game || !Pi::game->GetSpace())
 		return;
 
 	double envMax = MAX_SPEED;
 	double maxStrain = 0.0;
+	Planet *ringReadyPlanet = nullptr;
+	Planet *ringImmersionPlanet = nullptr;
 	const vector3d forwardDir = -m_ship->GetOrient().VectorZ();
+	const FrameId shipFrameId = m_ship->GetFrame();
+	const Frame *shipFrame = Frame::GetFrame(shipFrameId);
 
 	for (Body *b : Pi::game->GetSpace()->GetBodies()) {
 		if (!b->IsType(ObjectType::TERRAINBODY))
@@ -992,6 +1057,61 @@ void SupercruiseController::UpdateEnvironmentAndTarget(float timeStep, Body **ou
 			strain *= (1.0 - 0.65 * outboundDot);
 		}
 
+		// Planetary Ring Proximity: planar speed regulation & safe/emergency drop-in
+		if (sb->HasRings() && b->IsType(ObjectType::PLANET)) {
+			Planet *planet = static_cast<Planet *>(b);
+			Frame *pf = Frame::GetFrame(planet->GetFrame());
+			FrameId orbFrameId = pf ? pf->GetNonRotFrame() : planet->GetFrame();
+			if (orbFrameId.valid() && Frame::GetFrame(orbFrameId)) {
+				const vector3d relOrb = m_ship->GetPositionRelTo(orbFrameId) - planet->GetPositionRelTo(orbFrameId);
+				const matrix3x3d axialRot = matrix3x3d::RotateX(sb->GetAxialTilt());
+				const vector3d relRing = axialRot.Transpose() * relOrb;
+				const double rXZ = std::hypot(relRing.x, relRing.z);
+				const double absY = std::abs(relRing.y);
+
+				const RingStyle &rings = sb->GetRings();
+				const double innerR = rings.minRadius.ToDouble() * r;
+				const double outerR = rings.maxRadius.ToDouble() * r;
+				const double halfThick = rings.thickness.ToDouble();
+
+				if (rXZ >= innerR * 0.96 && rXZ <= outerR * 1.04) {
+					const vector3d fwdOrb = (shipFrame && shipFrameId != orbFrameId)
+						? (shipFrame->GetOrientRelTo(orbFrameId) * forwardDir)
+						: forwardDir;
+					const vector3d fwdRing = axialRot.Transpose() * fwdOrb;
+					const double vertSign = relRing.y * fwdRing.y; // < 0: approaching midplane; > 0: escaping plane
+
+					if (absY < 200000000.0) {
+						const double yAlt = std::max(absY - 85000.0, 0.0);
+						double ringVMax = (yAlt <= 250000.0)
+							? (SAFE_DISENGAGE_SPEED * 0.85)
+							: (SAFE_DISENGAGE_SPEED * 0.85 + 0.08 * yAlt);
+						double ringStrain = 1.0 / (1.0 + std::pow(yAlt / 1200000.0, 1.25));
+						if (vertSign > 0.0 && std::abs(fwdRing.y) > 0.05) {
+							ringVMax = std::min(MAX_SPEED, ringVMax * (1.0 + 3.0 * std::abs(fwdRing.y)));
+							ringStrain *= (1.0 - 0.65 * std::abs(fwdRing.y));
+						}
+						vBody = std::min(vBody, ringVMax);
+						strain = std::max(strain, ringStrain);
+					}
+
+					if (rXZ >= innerR && rXZ <= outerR) {
+						if (absY <= 1000000.0 && m_speed <= SAFE_DISENGAGE_SPEED) {
+							ringReadyPlanet = planet;
+						}
+						const double dropSlabY = std::max(halfThick * 2.0, 85000.0);
+						if (absY <= dropSlabY && vertSign < -0.05) {
+							if (m_speed <= SAFE_DISENGAGE_SPEED) {
+								ringImmersionPlanet = planet;
+							} else if (outHitExclusionBody && !*outHitExclusionBody) {
+								*outHitExclusionBody = b;
+							}
+						}
+					}
+				}
+			}
+		}
+
 		vBody = Clamp(vBody, 100000.0, MAX_SPEED);
 		envMax = std::min(envMax, vBody);
 		maxStrain = std::max(maxStrain, strain);
@@ -999,6 +1119,8 @@ void SupercruiseController::UpdateEnvironmentAndTarget(float timeStep, Body **ou
 
 	m_maxEnvSpeed = envMax;
 	m_gravityStrain = Clamp(maxStrain, 0.0, 1.0);
+	m_ringDropPlanet = ringReadyPlanet;
+	m_ringImmersionPlanet = ringImmersionPlanet;
 
 	// Target telemetry
 	vector3d relToTarget;
@@ -1029,6 +1151,9 @@ void SupercruiseController::UpdateEnvironmentAndTarget(float timeStep, Body **ou
 		if (m_assistActive) {
 			SetAssistActive(false, false);
 		}
+	}
+	if (m_ringDropPlanet) {
+		m_safeDisengageReady = true;
 	}
 }
 
@@ -1088,6 +1213,12 @@ void SupercruiseController::StaticUpdate(float timeStep)
 
 	if (hitExclBody) {
 		EmergencyDrop("EMERGENCY DROP — TOO CLOSE TO " + hitExclBody->GetLabel());
+		return;
+	}
+
+	if (m_ringImmersionPlanet) {
+		Planet *immPlanet = m_ringImmersionPlanet;
+		DropIntoRing(immPlanet, "RING IMMERSION — DROPPED INTO " + immPlanet->GetLabel() + " RINGS");
 		return;
 	}
 

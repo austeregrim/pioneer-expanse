@@ -10,6 +10,7 @@
 #include <string>
 
 class Body;
+class Planet;
 class Ship;
 class Space;
 
@@ -153,6 +154,7 @@ private:
 	void UpdateInterdiction(float timeStep);
 	static void DropPairFromInterdiction(Ship *attacker, Ship *target, bool submitted);
 	void ClearStaleSupercruiseTarget();
+	void DropIntoRing(Planet *planet, const std::string &reason);
 	Body *GetActiveTarget() const;
 	bool GetActiveTargetPosRelToShip(vector3d &outPosRelToShip) const;
 
@@ -177,6 +179,8 @@ private:
 
 	bool m_assistActive = false;
 	bool m_dockOnArrival = false;
+	Planet *m_ringDropPlanet = nullptr;
+	Planet *m_ringImmersionPlanet = nullptr;
 
 	double m_heatSpike = 0.0;
 	bool m_fsdOffline = false;

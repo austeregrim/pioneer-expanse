@@ -295,73 +295,171 @@ void StarSystemLegacyGeneratorBase::PickAtmosphere(SystemBody *sbody)
 	}
 }
 
-static const unsigned char RANDOM_RING_COLORS[][4] = {
-	{ 156, 122, 98, 217 },	// jupiter-like
-	{ 156, 122, 98, 217 },	// saturn-like
-	{ 181, 173, 174, 217 }, // neptune-like
-	{ 130, 122, 98, 217 },	// uranus-like
-	{ 207, 122, 98, 217 }	// brown dwarf-like
-};
+static Color TintForRingComposition(RingComposition comp, Random &rng)
+{
+	switch (comp) {
+	case RingComposition::ICE_WATER:
+		return Color(
+			Clamp(205 + rng.Int32(-18, 25), 0, 255),
+			Clamp(212 + rng.Int32(-18, 22), 0, 255),
+			Clamp(222 + rng.Int32(-15, 25), 0, 255),
+			Clamp(215 + rng.Int32(-20, 20), 0, 255));
+	case RingComposition::ICE_AMMONIA_METHANE:
+		return Color(
+			Clamp(132 + rng.Int32(-18, 22), 0, 255),
+			Clamp(138 + rng.Int32(-15, 20), 0, 255),
+			Clamp(146 + rng.Int32(-12, 24), 0, 255),
+			Clamp(175 + rng.Int32(-25, 25), 0, 255));
+	case RingComposition::ROCKY_SILICATE:
+		return Color(
+			Clamp(158 + rng.Int32(-22, 24), 0, 255),
+			Clamp(134 + rng.Int32(-20, 20), 0, 255),
+			Clamp(108 + rng.Int32(-18, 18), 0, 255),
+			Clamp(205 + rng.Int32(-20, 20), 0, 255));
+	case RingComposition::METAL_RICH:
+		return Color(
+			Clamp(172 + rng.Int32(-20, 24), 0, 255),
+			Clamp(156 + rng.Int32(-20, 20), 0, 255),
+			Clamp(142 + rng.Int32(-18, 20), 0, 255),
+			Clamp(220 + rng.Int32(-15, 20), 0, 255));
+	case RingComposition::METALLIC_PRECIOUS:
+		return Color(
+			Clamp(205 + rng.Int32(-18, 25), 0, 255),
+			Clamp(182 + rng.Int32(-18, 22), 0, 255),
+			Clamp(136 + rng.Int32(-18, 22), 0, 255),
+			Clamp(230 + rng.Int32(-15, 15), 0, 255));
+	default:
+		return Color(180, 175, 165, 210);
+	}
+}
 
 void StarSystemLegacyGeneratorBase::PickRings(SystemBodyData *sbody, bool forceRings)
 {
-	sbody->m_rings.minRadius = fixed();
-	sbody->m_rings.maxRadius = fixed();
-	sbody->m_rings.baseColor = Color(255, 255, 255, 255);
+	sbody->m_rings.Clear();
 
 	bool bHasRings = forceRings;
+	Random ringRng(sbody->m_seed + 965467);
 	if (!bHasRings) {
-		Random ringRng(sbody->m_seed + 965467);
-		// today's forecast:
 		if (sbody->m_type == SystemBody::TYPE_PLANET_GAS_GIANT) {
-			// 50% chance of rings
-			bHasRings = ringRng.Double() < 0.5;
+			bHasRings = ringRng.Double() < 0.45;
 		} else if (sbody->m_type == SystemBody::TYPE_PLANET_TERRESTRIAL) {
-			// 10% chance of rings
-			bHasRings = ringRng.Double() < 0.1;
+			bHasRings = ringRng.Double() < 0.10;
 		}
-		/*else if (sbody->m_type == SystemBody::TYPE_PLANET_ASTEROID)
-		{
-			// 1:10 (10%) chance of rings
-			bHasRings = ringRng.Double() < 0.1;
-		}*/
 	}
 
-	if (bHasRings) {
-		Random ringRng(sbody->m_seed + 965467);
+	if (!bHasRings)
+		return;
 
-		// today's forecast: 50% chance of rings
-		double rings_die = ringRng.Double();
-		if (forceRings || (rings_die < 0.5)) {
-			const unsigned char *const baseCol = RANDOM_RING_COLORS[ringRng.Int32(COUNTOF(RANDOM_RING_COLORS))];
-			sbody->m_rings.baseColor.r = Clamp(baseCol[0] + ringRng.Int32(-20, 20), 0, 255);
-			sbody->m_rings.baseColor.g = Clamp(baseCol[1] + ringRng.Int32(-20, 20), 0, 255);
-			sbody->m_rings.baseColor.b = Clamp(baseCol[2] + ringRng.Int32(-20, 10), 0, 255);
-			sbody->m_rings.baseColor.a = Clamp(baseCol[3] + ringRng.Int32(-5, 5), 0, 255);
+	// Astrophysical frost-line & metallicity composition model
+	const double tempK = double(sbody->m_averageTemp);
+	const double metal = sbody->m_metallicity.ToDouble();
+	const double compRoll = ringRng.Double();
 
-			// from wikipedia: http://en.wikipedia.org/wiki/Roche_limit
-			// basic Roche limit calculation assuming a rigid satellite
-			// d = R (2 p_M / p_m)^{1/3}
-			//
-			// where R is the radius of the primary, p_M is the density of
-			// the primary and p_m is the density of the satellite
-			//
-			// I assume a satellite density of 500 kg/m^3
-			// (which Wikipedia says is an average comet density)
-			//
-			// also, I can't be bothered to think about unit conversions right now,
-			// so I'm going to ignore the real density of the primary and take it as 1100 kg/m^3
-			// (note: density of Saturn is ~687, Jupiter ~1,326, Neptune ~1,638, Uranus ~1,318)
-			//
-			// This gives: d = 1.638642 * R
-			fixed innerMin = fixed(110, 100);
-			fixed innerMax = fixed(145, 100);
-			fixed outerMin = fixed(150, 100);
-			fixed outerMax = fixed(168642, 100000);
+	RingComposition dominantComp = RingComposition::ICE_WATER;
+	if (tempK > 210.0) {
+		// Inside stellar water frost line: refractory silicate and metallic rings only
+		if (compRoll < (0.16 + 0.18 * metal))
+			dominantComp = RingComposition::METALLIC_PRECIOUS;
+		else if (compRoll < (0.55 + 0.20 * metal))
+			dominantComp = RingComposition::METAL_RICH;
+		else
+			dominantComp = RingComposition::ROCKY_SILICATE;
+	} else if (tempK > 110.0) {
+		// Intermediate condensation zone (Saturn archetype)
+		if (compRoll < 0.65)
+			dominantComp = RingComposition::ICE_WATER;
+		else if (compRoll < 0.85)
+			dominantComp = RingComposition::ROCKY_SILICATE;
+		else
+			dominantComp = RingComposition::METAL_RICH;
+	} else {
+		// Deep-freeze outer system (Uranus/Neptune clathrate + water ice archetype)
+		if (compRoll < 0.50)
+			dominantComp = RingComposition::ICE_AMMONIA_METHANE;
+		else if (compRoll < 0.90)
+			dominantComp = RingComposition::ICE_WATER;
+		else
+			dominantComp = RingComposition::ROCKY_SILICATE;
+	}
 
-			sbody->m_rings.minRadius = innerMin + (innerMax - innerMin) * ringRng.Fixed();
-			sbody->m_rings.maxRadius = outerMin + (outerMax - outerMin) * ringRng.Fixed();
-		}
+	// Reserve grade influenced by human population density & ring seed
+	const double popScore = Clamp(sbody->m_population.ToDouble() + sbody->m_humanActivity.ToDouble(), 0.0, 2.0);
+	const double resRoll = ringRng.Double();
+	RingReserveGrade systemReserve = RingReserveGrade::COMMON;
+	if (popScore > 0.5) {
+		if (resRoll < 0.25)
+			systemReserve = RingReserveGrade::DEPLETED;
+		else if (resRoll < 0.60)
+			systemReserve = RingReserveGrade::LOW;
+		else if (resRoll < 0.90)
+			systemReserve = RingReserveGrade::COMMON;
+		else
+			systemReserve = RingReserveGrade::MAJOR;
+	} else if (popScore > 0.01) {
+		if (resRoll < 0.12)
+			systemReserve = RingReserveGrade::LOW;
+		else if (resRoll < 0.55)
+			systemReserve = RingReserveGrade::COMMON;
+		else if (resRoll < 0.88)
+			systemReserve = RingReserveGrade::MAJOR;
+		else
+			systemReserve = RingReserveGrade::PRISTINE;
+	} else {
+		if (resRoll < 0.10)
+			systemReserve = RingReserveGrade::COMMON;
+		else if (resRoll < 0.45)
+			systemReserve = RingReserveGrade::MAJOR;
+		else
+			systemReserve = RingReserveGrade::PRISTINE;
+	}
+
+	// Roche-bounded radial span (in planet radii)
+	const bool denseMaterial = (dominantComp == RingComposition::METAL_RICH || dominantComp == RingComposition::METALLIC_PRECIOUS);
+	const double innerR = 1.14 + 0.22 * ringRng.Double();
+	const double maxRocheSpan = denseMaterial ? (0.42 + 0.30 * ringRng.Double()) : (0.58 + 0.52 * ringRng.Double());
+	const double outerR = innerR + maxRocheSpan;
+
+	// Divide into 2 to 4 concentric bands with Lindblad resonance gaps (Cassini / Encke style)
+	const int bandCount = ringRng.Int32(2, 4);
+	const double avgGap = (bandCount > 1) ? (0.025 + 0.025 * ringRng.Double()) : 0.0;
+	const double usableSpan = std::max(0.20, (outerR - innerR) - avgGap * double(bandCount - 1));
+
+	double cursor = innerR;
+	double maxThickness = 0.0;
+	for (int b = 0; b < bandCount; ++b) {
+		const double remFrac = (b == bandCount - 1) ? (outerR - cursor) : (usableSpan / double(bandCount)) * (0.75 + 0.50 * ringRng.Double());
+		const double bandOuter = std::min(outerR, cursor + std::max(0.08, remFrac));
+		if (bandOuter <= cursor + 0.02)
+			break;
+
+		RingBand band;
+		band.minRadius = fixed::FromDouble(cursor);
+		band.maxRadius = fixed::FromDouble(bandOuter);
+		const double bandThick = 45.0 + 135.0 * ringRng.Double();
+		band.thickness = fixed::FromDouble(bandThick);
+		maxThickness = std::max(maxThickness, bandThick);
+		band.opticalDepth = fixed::FromDouble(0.35 + 1.45 * ringRng.Double());
+		// Inner/outer bands may shift slightly in mineral concentration while anchored to dominant composition
+		band.composition = dominantComp;
+		if (b == 0 && dominantComp == RingComposition::ROCKY_SILICATE && ringRng.Double() < 0.35)
+			band.composition = RingComposition::METAL_RICH;
+		band.reserveGrade = systemReserve;
+		band.baseColor = TintForRingComposition(band.composition, ringRng);
+		band.seedOffset = ringRng.Int32();
+
+		sbody->m_rings.bands.push_back(band);
+		cursor = bandOuter + avgGap * (0.8 + 0.4 * ringRng.Double());
+		if (cursor >= outerR - 0.04)
+			break;
+	}
+
+	if (!sbody->m_rings.bands.empty()) {
+		sbody->m_rings.minRadius = sbody->m_rings.bands.front().minRadius;
+		sbody->m_rings.maxRadius = sbody->m_rings.bands.back().maxRadius;
+		sbody->m_rings.baseColor = sbody->m_rings.bands.front().baseColor;
+		sbody->m_rings.thickness = fixed::FromDouble(maxThickness);
+		sbody->m_rings.composition = dominantComp;
+		sbody->m_rings.reserveGrade = systemReserve;
 	}
 }
 
@@ -1029,11 +1127,7 @@ void StarSystemRandomGenerator::MakePlanetsAround(RefCountedPtr<StarSystem::Gene
 		if (hasRings &&
 			parentSuperType == SystemBody::SUPERTYPE_ROCKY_PLANET &&
 			test_overlap(ring.minRadius, ring.maxRadius, periapsis, apoapsis)) {
-			//Output("Overlap, eliminating rings from parent SystemBody\n");
-			//Overlap, eliminating rings from parent SystemBody
-			primary->m_rings.minRadius = fixed();
-			primary->m_rings.maxRadius = fixed();
-			primary->m_rings.baseColor = Color(255, 255, 255, 255);
+			primary->m_rings.Clear();
 		}
 
 		/* minimum separation between planets of 1.2x */

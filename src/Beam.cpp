@@ -281,6 +281,20 @@ void Beam::StaticUpdate(const float timeStep)
 			m_active = false;
 			if (hit->IsType(ObjectType::SHIP))
 				LuaEvent::Queue("onShipHit", dynamic_cast<Ship *>(hit), dynamic_cast<Body *>(m_parent));
+			return;
+		}
+	}
+
+	if (frame->GetBody() && frame->GetBody()->IsType(ObjectType::PLANET)) {
+		Planet *const planet = static_cast<Planet *>(frame->GetBody());
+		if (planet->GetSystemBody()->HasRings()) {
+			double ringHitDist = m_length;
+			if (planet->TraceRingRay(GetFrame(), GetPosition(), m_dir.Normalized(), m_length, m_mining, ringHitDist)) {
+				m_length = float(ringHitDist);
+				SfxManager::Add(this, TYPE_DAMAGE);
+				m_active = false;
+				return;
+			}
 		}
 	}
 

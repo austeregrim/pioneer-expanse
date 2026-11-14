@@ -67,6 +67,23 @@ void SystemBodyData::SaveToJson(Json &out)
 		out["ringsMinRadius"] = m_rings.minRadius;
 		out["ringsMaxRadius"] = m_rings.maxRadius;
 		out["ringsBaseColor"] = m_rings.baseColor;
+		out["ringsThickness"] = m_rings.thickness;
+		out["ringsComposition"] = uint8_t(m_rings.composition);
+		out["ringsReserveGrade"] = uint8_t(m_rings.reserveGrade);
+		Json bandsArr = Json::array();
+		for (const RingBand &b : m_rings.bands) {
+			Json bandObj = Json::object();
+			bandObj["minRadius"] = b.minRadius;
+			bandObj["maxRadius"] = b.maxRadius;
+			bandObj["thickness"] = b.thickness;
+			bandObj["opticalDepth"] = b.opticalDepth;
+			bandObj["composition"] = uint8_t(b.composition);
+			bandObj["reserveGrade"] = uint8_t(b.reserveGrade);
+			bandObj["baseColor"] = b.baseColor;
+			bandObj["seedOffset"] = b.seedOffset;
+			bandsArr.push_back(bandObj);
+		}
+		out["ringsBands"] = bandsArr;
 	}
 
 	if (!m_spaceStationType.empty())
@@ -118,6 +135,24 @@ void SystemBodyData::LoadFromJson(const Json &obj)
 		m_rings.minRadius = obj.value<fixed>("ringsMinRadius", 0);
 		m_rings.maxRadius = obj.value<fixed>("ringsMaxRadius", 0);
 		m_rings.baseColor = obj.value<Color>("ringsBaseColor", {});
+		m_rings.thickness = obj.value<fixed>("ringsThickness", fixed(80, 1));
+		m_rings.composition = static_cast<RingComposition>(obj.value<uint8_t>("ringsComposition", uint8_t(RingComposition::ICE_WATER)));
+		m_rings.reserveGrade = static_cast<RingReserveGrade>(obj.value<uint8_t>("ringsReserveGrade", uint8_t(RingReserveGrade::COMMON)));
+		m_rings.bands.clear();
+		if (obj.contains("ringsBands") && obj["ringsBands"].is_array()) {
+			for (const Json &bandObj : obj["ringsBands"]) {
+				RingBand band;
+				band.minRadius = bandObj.value<fixed>("minRadius", m_rings.minRadius);
+				band.maxRadius = bandObj.value<fixed>("maxRadius", m_rings.maxRadius);
+				band.thickness = bandObj.value<fixed>("thickness", m_rings.thickness);
+				band.opticalDepth = bandObj.value<fixed>("opticalDepth", fixed(8, 10));
+				band.composition = static_cast<RingComposition>(bandObj.value<uint8_t>("composition", uint8_t(m_rings.composition)));
+				band.reserveGrade = static_cast<RingReserveGrade>(bandObj.value<uint8_t>("reserveGrade", uint8_t(m_rings.reserveGrade)));
+				band.baseColor = bandObj.value<Color>("baseColor", m_rings.baseColor);
+				band.seedOffset = bandObj.value<uint32_t>("seedOffset", 0);
+				m_rings.bands.push_back(band);
+			}
+		}
 	}
 
 	// NOTE: the following parameters should be replaced with entries

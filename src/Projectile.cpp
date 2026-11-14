@@ -280,8 +280,22 @@ void Projectile::StaticUpdate(const float timeStep)
 			Pi::game->GetSpace()->KillBody(this);
 			if (hit->IsType(ObjectType::SHIP))
 				LuaEvent::Queue("onShipHit", dynamic_cast<Ship *>(hit), dynamic_cast<Body *>(m_parent));
+			return;
 		}
 	}
+
+	if (frame->GetBody() && frame->GetBody()->IsType(ObjectType::PLANET)) {
+		Planet *const planet = static_cast<Planet *>(frame->GetBody());
+		if (planet->GetSystemBody()->HasRings()) {
+			double ringHitDist = vel.Length();
+			if (planet->TraceRingRay(GetFrame(), GetPosition(), vel.Normalized(), ringHitDist, m_mining, ringHitDist)) {
+				SfxManager::Add(this, TYPE_DAMAGE);
+				Pi::game->GetSpace()->KillBody(this);
+				return;
+			}
+		}
+	}
+
 	if (m_mining) // mining lasers can break off chunks of terrain
 	{
 		// need to test for terrain hit

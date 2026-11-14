@@ -432,7 +432,15 @@ local function getObjectData(obj)
 				{ name = lc.POPULATION, icon = icons.personal,
 					value = pop > 0 and ui.Format.NumberAbbv(pop) or nil },
 				{ name = luc.TECH_LEVEL, icon = icons.equipment,
-					value = starport and techLevel or nil }
+					value = starport and techLevel or nil },
+				{ name = "Ring Type", icon = icons.info,
+					value = body.hasRings and body.ringType or nil },
+				{ name = "Ring Reserves", icon = icons.info,
+					value = body.hasRings and body.ringReserve or nil },
+				{ name = "Ring Span", icon = icons.body_radius,
+					value = body.hasRings and (ui.Format.Distance(body.ringInnerRadius) .. " – " .. ui.Format.Distance(body.ringOuterRadius)) or nil },
+				{ name = "Ring Bands", icon = icons.body_semi_major_axis,
+					value = body.hasRings and tostring(body.ringBandCount) or nil }
 			}
 
 			--change the internal cached data only when new is fully built

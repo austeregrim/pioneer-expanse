@@ -4,7 +4,9 @@
 #include "Planet.h"
 
 #include "Color.h"
+#include "Frame.h"
 #include "GeoSphere.h"
+#include "MathUtil.h"
 #include "galaxy/SystemBody.h"
 #include "graphics/Graphics.h"
 #include "graphics/Material.h"
@@ -16,6 +18,7 @@
 #include "graphics/VertexArray.h"
 #include "graphics/VertexBuffer.h"
 #include "perlin.h"
+#include "planet/RingField.h"
 #include "profiler/Profiler.h"
 
 #ifdef _MSC_VER
@@ -40,6 +43,8 @@ Planet::Planet(const Json &jsonObj, Space *space) :
 	InitParams(sbody);
 }
 
+Planet::~Planet() = default;
+
 void Planet::InitParams(const SystemBody *sbody)
 {
 	m_surfaceGravity_g = sbody->CalcSurfaceGravity();
@@ -50,9 +55,25 @@ void Planet::InitParams(const SystemBody *sbody)
 	// SetPhysRadius(std::max(m_atmosphereRadius, std::max(GetMaxFeatureRadius() * 2.0 + 2000, sbody->GetRadius() * 1.05)));
 	if (sbody->HasRings()) {
 		SetClipRadius(sbody->GetRadius() * sbody->GetRings().maxRadius.ToDouble());
+		m_ringField.reset(new RingField(this));
 	} else {
 		SetClipRadius(GetPhysRadius());
+		m_ringField.reset();
 	}
+}
+
+void Planet::TimeStepUpdate(const float timeStep)
+{
+	TerrainBody::TimeStepUpdate(timeStep);
+	if (m_ringField)
+		m_ringField->TimeStepUpdate(timeStep);
+}
+
+bool Planet::TraceRingRay(FrameId rayFrameId, const vector3d &startPos, const vector3d &dir, double maxLen, bool isMining, double &outHitDist)
+{
+	if (!m_ringField)
+		return false;
+	return m_ringField->TraceRay(rayFrameId, startPos, dir, maxLen, isMining, outHitDist);
 }
 
 /*
@@ -123,29 +144,46 @@ void Planet::GenerateRings(Graphics::Renderer *renderer)
 	//       this is something to do with mipmapping (probably mipmap generation going wrong)
 	//       (if the texture is generated without mipmaps then a 1xN texture works)
 	const int RING_TEXTURE_WIDTH = 4;
-	const int RING_TEXTURE_LENGTH = 256;
+	const int RING_TEXTURE_LENGTH = 512;
 	std::unique_ptr<Color, FreeDeleter> buf(
 		static_cast<Color *>(malloc(RING_TEXTURE_WIDTH * RING_TEXTURE_LENGTH * 4)));
 
 	const float ringScale = (outer - inner) * sbody->GetRadius() / 1.5e7f;
+	const RingStyle &rings = sbody->GetRings();
 
 	Random rng(GetSystemBody()->GetSeed() + 4609837);
-	Color baseCol = sbody->GetRings().baseColor;
+	Color baseCol = rings.baseColor;
 	double noiseOffset = 2048.0 * rng.Double();
 	for (int i = 0; i < RING_TEXTURE_LENGTH; ++i) {
-		const float alpha = (float(i) / float(RING_TEXTURE_LENGTH)) * ringScale;
-		const float n = 0.25 +
-			0.60 * noise(vector3d(5.0 * alpha, noiseOffset, 0.0)) +
-			0.15 * noise(vector3d(10.0 * alpha, noiseOffset, 0.0));
+		const float u = (float(i) + 0.5f) / float(RING_TEXTURE_LENGTH);
+		const float rRatio = inner + u * (outer - inner);
+
+		RingBand band;
+		if (!rings.TryGetBandAtRadius(rRatio, band)) {
+			Color *row = buf.get() + i * RING_TEXTURE_WIDTH;
+			std::fill_n(row, RING_TEXTURE_WIDTH, Color::BLANK);
+			continue;
+		}
+
+		const float bandWidth = std::max(0.001f, (band.maxRadius - band.minRadius).ToFloat());
+		const float edgeIn = Clamp((rRatio - band.minRadius.ToFloat()) / std::min(0.02f, bandWidth * 0.15f), 0.0f, 1.0f);
+		const float edgeOut = Clamp((band.maxRadius.ToFloat() - rRatio) / std::min(0.02f, bandWidth * 0.15f), 0.0f, 1.0f);
+		const float edgeFade = std::min(edgeIn, edgeOut);
+
+		const float alpha = u * ringScale;
+		const float n = 0.25f +
+			0.55f * noise(vector3d(5.0 * alpha, noiseOffset, 0.0)) +
+			0.20f * noise(vector3d(14.0 * alpha, noiseOffset, 0.0));
 
 		const float LOG_SCALE = 1.0f / sqrtf(sqrtf(log1p(1.0f)));
-		const float v = LOG_SCALE * sqrtf(sqrtf(log1p(n)));
+		const float v = LOG_SCALE * sqrtf(sqrtf(log1p(std::max(0.0f, n))));
 
+		const Color bandCol = (band.baseColor.a > 0) ? band.baseColor : baseCol;
 		Color color;
-		color.r = v * baseCol.r;
-		color.g = v * baseCol.g;
-		color.b = v * baseCol.b;
-		color.a = ((v * 0.25f) + 0.75f) * baseCol.a;
+		color.r = uint8_t(Clamp(v * (0.35f * baseCol.r + 0.65f * bandCol.r), 0.0f, 255.0f));
+		color.g = uint8_t(Clamp(v * (0.35f * baseCol.g + 0.65f * bandCol.g), 0.0f, 255.0f));
+		color.b = uint8_t(Clamp(v * (0.35f * baseCol.b + 0.65f * bandCol.b), 0.0f, 255.0f));
+		color.a = uint8_t(Clamp(((v * 0.35f) + 0.65f) * bandCol.a * band.opticalDepth.ToFloat() * edgeFade, 0.0f, 255.0f));
 
 		Color *row = buf.get() + i * RING_TEXTURE_WIDTH;
 		for (int j = 0; j < RING_TEXTURE_WIDTH; ++j) {
@@ -203,5 +241,8 @@ void Planet::SubRender(Renderer *r, const matrix4x4d &viewTran, const vector3d &
 {
 	if (GetSystemBody()->HasRings()) {
 		DrawGasGiantRings(r, viewTran);
+		if (m_ringField) {
+			m_ringField->Render(r, viewTran, camPos);
+		}
 	}
 }

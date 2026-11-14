@@ -1,20 +1,17 @@
 # Technical Implementation Plan: Planetary Ring Lifecycle, Volumetric LOD & Asteroid Mining
 
-**Document Version**: 1.0  
-**Status**: Ready for Implementation  
+**Document Version**: 1.1  
+**Status**: Completed (Core Volumetric Ring Engine, Shader Overhaul, Supercruise Drops & Mining)  
 **Parent Roadmap**: [`01_EXPANSE_LONG_TERM_ROADMAP.md`](./01_EXPANSE_LONG_TERM_ROADMAP.md)  
-**Target Files**:
-* `src/galaxy/RingStyle.h`
-* `src/galaxy/SystemBody.h`, `src/galaxy/SystemBody.cpp`
-* `src/galaxy/StarSystemGenerator.cpp`
+**Implemented Files**:
+* `src/galaxy/RingStyle.h`, `src/galaxy/SystemBody.cpp`, `src/galaxy/StarSystemGenerator.cpp`, `src/lua/LuaSystemBody.cpp`
+* `src/planet/RingField.h`, `src/planet/RingField.cpp`
 * `src/Planet.h`, `src/Planet.cpp`
 * `src/ship/SupercruiseController.h`, `src/ship/SupercruiseController.cpp`
-* `src/Body.cpp`, `src/Frame.h`, `src/Frame.cpp`
-* `src/planet/RingField.h`, `src/planet/RingField.cpp` (NEW)
-* `src/planet/RingAsteroid.h`, `src/planet/RingAsteroid.cpp` (NEW)
-* `src/WorldView.cpp`
-* `data/shaders/opengl/planetrings.vert`, `data/shaders/opengl/planetrings.frag`
-* `data/modules/Mining.lua`, `data/economy/commodities/mining.json`
+* `src/Beam.cpp`, `src/Projectile.cpp`
+* `data/shaders/opengl/planetrings.frag`
+* `data/modules/Mining.lua`, `data/pigui/modules/system-view-ui.lua`
+* `src/test/TestRingStyle.cpp`
 
 ---
 
