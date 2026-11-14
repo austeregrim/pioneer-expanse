@@ -152,6 +152,42 @@ local function showVideoOptions()
 	local vsync = Engine.GetVSyncEnabled()
 	local anisoFilter = Engine.GetAnisoFiltering()
 
+	-- Frame Rate Cap
+	local fpsModes = { 0, 30, 60, 75, 90, 120, 144, 165, 240 }
+	local fpsLabels = { lui.OFF or "Unlimited", "30 FPS", "60 FPS", "75 FPS", "90 FPS", "120 FPS", "144 FPS", "165 FPS", "240 FPS" }
+	local curFps = Engine.GetMaxFPS()
+	local selectedFps = 0
+	for i, fps in ipairs(fpsModes) do
+		if fps == curFps then
+			selectedFps = i - 1
+			break
+		end
+	end
+
+	-- Field of View (Vertical)
+	local fov = math.floor(Engine.GetFOV() + 0.5)
+
+	-- Anisotropic Filtering Levels
+	local anisoModes = { 0, 2, 4, 8, 16 }
+	local anisoLabels = { lui.OFF, "2x", "4x", "8x", "16x" }
+	local curAniso = Engine.GetAnisoFiltering()
+	if type(curAniso) == "boolean" then
+		curAniso = curAniso and 16 or 0
+	end
+	local selectedAniso = 0
+	for i, a in ipairs(anisoModes) do
+		if a == curAniso then
+			selectedAniso = i - 1
+			break
+		end
+	end
+
+	-- Volumetric Planetary Rings
+	local ringLevels = { 0, 1, 2, 3, 4 }
+	local ringLabels = { lui.OFF, lui.LOW, lui.MEDIUM, lui.HIGH, lui.VERY_HIGH }
+	local curRing = Engine.GetVolumetricRings()
+	local selectedRing = math.max(0, math.min(4, curRing))
+
 	local textCompress = Engine.GetTextureCompressionEnabled()
 	local gpuJobs = Engine.GetGpuJobsEnabled()
 	local disableScreenshotInfo = Engine.GetDisableScreenshotInfo()
@@ -181,18 +217,7 @@ local function showVideoOptions()
 		Engine.SetVideoResolution(mode.width,mode.height)
 	end
 
-	c,selectedAA = combo(lui.MULTISAMPLING, selectedAA, aaLabels, lui.MULTISAMPLING_DESC)
-	if c then
-		local aa = aaModes[aaLabels[selectedAA+1]]
-		Engine.SetMultisampling(aa)
-	end
-
-	c,realisticScattering = combo(lui.REALISTIC_SCATTERING, realisticScattering, scatteringLabels, lui.REALISTIC_SCATTERING_DESC)
-	if c then
-		Engine.SetRealisticScattering(realisticScattering)
-	end
-
-	ui.columns(2,"video_checkboxes",false)
+	ui.columns(2,"video_display_checkboxes",false)
 	c,fullscreen = checkbox(lui.FULL_SCREEN, fullscreen)
 	if c then
 		Engine.SetFullscreen(fullscreen)
@@ -202,12 +227,54 @@ local function showVideoOptions()
 	if c then
 		Engine.SetVSyncEnabled(vsync)
 	end
-	ui.nextColumn()
-	c,anisoFilter = checkbox(lui.ENABLE_ANISOTROPIC_FILTERING, anisoFilter, lui.ANISOTROPIC_FILTERING_DESC)
+	ui.columns(1,"",false)
+
+	c,selectedFps = combo(lui.FRAME_RATE_LIMIT or "Frame Rate Limit", selectedFps, fpsLabels, lui.FRAME_RATE_LIMIT_DESC or "Limits maximum frames per second to reduce GPU load, heat, and fan noise.")
 	if c then
-		Engine.SetAnisoFiltering(anisoFilter)
+		Engine.SetMaxFPS(fpsModes[selectedFps+1])
 	end
-	ui.nextColumn()
+
+	c,fov = slider(lui.FIELD_OF_VIEW or "Field of View (Vertical)", fov, 50, 95, lui.FIELD_OF_VIEW_DESC or "Vertical camera field of view in degrees.")
+	if c then
+		Engine.SetFOV(fov)
+	end
+
+	ui.separator()
+
+	c,selectedAA = combo(lui.MULTISAMPLING, selectedAA, aaLabels, lui.MULTISAMPLING_DESC)
+	if c then
+		local aa = aaModes[aaLabels[selectedAA+1]]
+		Engine.SetMultisampling(aa)
+	end
+
+	c,selectedAniso = combo(lui.ANISOTROPIC_FILTERING or lui.ENABLE_ANISOTROPIC_FILTERING, selectedAniso, anisoLabels, lui.ANISOTROPIC_FILTERING_DESC)
+	if c then
+		Engine.SetAnisoFiltering(anisoModes[selectedAniso+1])
+	end
+
+	c,realisticScattering = combo(lui.REALISTIC_SCATTERING, realisticScattering, scatteringLabels, lui.REALISTIC_SCATTERING_DESC)
+	if c then
+		Engine.SetRealisticScattering(realisticScattering)
+	end
+
+	c,selectedRing = combo(lui.VOLUMETRIC_RINGS or "Volumetric Planetary Rings", selectedRing, ringLabels, lui.VOLUMETRIC_RINGS_DESC or "Controls 3D boulder and dust density in planetary rings.")
+	if c then
+		Engine.SetVolumetricRings(ringLevels[selectedRing+1])
+	end
+
+	c,selectedDetail = combo(lui.PLANET_DETAIL_DISTANCE, selectedDetail, detailLabels, lui.DETAIL_DESC)
+	if c then
+		local detail = detailLevels[detailLabels[selectedDetail+1]]
+		Engine.SetPlanetDetailLevel(detail)
+	end
+
+	c,cityDetail = combo(lui.CITY_DETAIL_LEVEL, cityDetail, detailLabels, lui.DETAIL_DESC)
+	if c then
+		local detail = detailLevels[detailLabels[cityDetail+1]]
+		Engine.SetCityDetailLevel(detail)
+	end
+
+	ui.columns(2,"video_quality_checkboxes",false)
 	c,textCompress = checkbox(lui.COMPRESS_TEXTURES, textCompress, lui.TEXTURE_COMPRESSION)
 	if c then
 		Engine.SetTextureCompressionEnabled(textCompress)
@@ -224,39 +291,29 @@ local function showVideoOptions()
 	end
 	ui.columns(1,"",false)
 
-
 	ui.separator()
-	c,selectedDetail = combo(lui.PLANET_DETAIL_DISTANCE, selectedDetail, detailLabels, lui.DETAIL_DESC)
-	if c then
-		local detail = detailLevels[detailLabels[selectedDetail+1]]
-		Engine.SetPlanetDetailLevel(detail)
-	end
 
-	c,cityDetail = combo(lui.CITY_DETAIL_LEVEL, cityDetail, detailLabels, lui.DETAIL_DESC)
-	if c then
-		local detail = detailLevels[detailLabels[cityDetail+1]]
-		Engine.SetCityDetailLevel(detail)
-	end
-
-	c,displayNavTunnels = checkbox(lui.DISPLAY_NAV_TUNNELS, displayNavTunnels, lui.DISPLAY_NAV_TUNNELS_DESC)
-	if c then
-		Engine.SetDisplayNavTunnels(displayNavTunnels)
-	end
-
-	c,displaySpeedLines = checkbox(lui.DISPLAY_SPEED_LINES, displaySpeedLines, lui.DISPLAY_SPEED_LINES_DESC)
-	if c then
-		Engine.SetDisplaySpeedLines(displaySpeedLines)
-	end
-
-	c,displayHudTrails = checkbox(lui.DISPLAY_HUD_TRAILS, displayHudTrails, lui.DISPLAY_HUD_TRAILS_DESC)
-	if c then
-		Engine.SetDisplayHudTrails(displayHudTrails)
-	end
-
+	ui.columns(2,"video_fx_checkboxes",false)
 	c,enableCockpit = checkbox(lui.ENABLE_COCKPIT, enableCockpit, lui.ENABLE_COCKPIT_DESC)
 	if c then
 		Engine.SetCockpitEnabled(enableCockpit)
 	end
+	ui.nextColumn()
+	c,displayNavTunnels = checkbox(lui.DISPLAY_NAV_TUNNELS, displayNavTunnels, lui.DISPLAY_NAV_TUNNELS_DESC)
+	if c then
+		Engine.SetDisplayNavTunnels(displayNavTunnels)
+	end
+	ui.nextColumn()
+	c,displaySpeedLines = checkbox(lui.DISPLAY_SPEED_LINES, displaySpeedLines, lui.DISPLAY_SPEED_LINES_DESC)
+	if c then
+		Engine.SetDisplaySpeedLines(displaySpeedLines)
+	end
+	ui.nextColumn()
+	c,displayHudTrails = checkbox(lui.DISPLAY_HUD_TRAILS, displayHudTrails, lui.DISPLAY_HUD_TRAILS_DESC)
+	if c then
+		Engine.SetDisplayHudTrails(displayHudTrails)
+	end
+	ui.columns(1,"",false)
 
 	c,starDensity = slider(lui.STAR_FIELD_DENSITY, starDensity, 0, 100)
 	if c then

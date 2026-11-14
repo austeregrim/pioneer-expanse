@@ -15,7 +15,7 @@ namespace Graphics {
 			void Update(const TextureCubeData &data, const vector3f &dataSize, TextureFormat format, const unsigned int numMips) final;
 			void Update(const vecDataPtr &data, const vector3f &dataSize, const TextureFormat format, const unsigned int numMips) final;
 
-			TextureGL(const TextureDescriptor &descriptor, const bool useCompressed, const bool useAnisoFiltering, const Uint16 numSamples = 0);
+			TextureGL(const TextureDescriptor &descriptor, const bool useCompressed, const Uint8 anisoSamples, const Uint16 numSamples = 0);
 			virtual ~TextureGL();
 
 			void Bind() final;
@@ -41,7 +41,7 @@ namespace Graphics {
 			GLenum m_target;
 			GLuint m_texture;
 			uint32_t m_allocSize;
-			const bool m_useAnisoFiltering;
+			const Uint8 m_anisoSamples;
 		};
 	} // namespace OGL
 } // namespace Graphics

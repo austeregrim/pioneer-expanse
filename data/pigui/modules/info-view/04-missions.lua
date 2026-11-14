@@ -118,7 +118,7 @@ local function drawMissionDescription(missionDesc)
 			local assignedShip = PlayerFleet.GetMissionAssignedShip(missionObj)
 			if assignedShip then
 				ui.textColored(ui.theme.colors.econProfit, string.format("Assigned Vessel: %s (%s)", assignedShip.shipName, assignedShip.orderPhase or "In Progress"))
-				ui.progressBar(assignedShip.orderProgress or 0, Vector2(-1, ui.rescaleUI(14, Vector2(1920, 1080))), "")
+				ui.progressBar(assignedShip.orderProgress or 0, Vector2(-1, ui.rescaleUI(14, Vector2(1920, 1080))), tostring(assignedShip.status or "IN TRANSIT"))
 			else
 				local eligible, reason = PlayerFleet.GetEligibleShipsForMission(missionObj)
 				if #eligible > 0 then

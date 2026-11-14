@@ -356,6 +356,7 @@ void Pi::App::OnStartup()
 	Pi::SetStarFieldStarSizeFactor(config->Float("StarFieldStarSizeFactor"));
 	Pi::detail.planets = config->Int("DetailPlanets");
 	Pi::detail.cities = config->Int("DetailCities");
+	SetTargetFrameRate(config->Int("MaxFPS", 0));
 
 	Graphics::RendererOGL::RegisterRenderer();
 	Pi::renderer = StartupRenderer(Pi::config, false, config->Int("DebugWindowResize"));

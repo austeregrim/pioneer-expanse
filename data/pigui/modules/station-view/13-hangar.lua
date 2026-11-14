@@ -76,8 +76,11 @@ local function drawFleetShipList(ships, station)
 
 			local here = isDockedHere(entry, station)
 			local isSelected = (selectedUid == entry.uid)
-			local badge = here and "[HERE]" or ("[" .. (entry.status or "REMOTE") .. "]")
-			local badgeCol = here and colors.econProfit or (entry.order ~= "IDLE" and colors.alertYellow or colors.fontDim)
+			local st = entry.status or "REMOTE"
+			local badge = here and "[HERE]" or ("[" .. st .. "]")
+			local badgeCol = here and colors.econProfit
+				or ((st == "HYPERSPACE" or st == "SUPERCRUISE") and colors.hyperspaceInfo)
+				or (entry.order ~= "IDLE" and colors.alertYellow or colors.fontDim)
 			local def = ShipDef[entry.shipId]
 
 			local cardLabel = string.format("%s  %s##hangar_%d", badge, entry.shipName or (def and def.name or entry.shipId), entry.uid)
@@ -174,6 +177,12 @@ local function drawCargoTransferPane(entry, station)
 	end
 	if not hasFleetCargo then
 		ui.textColored(colors.fontDim, "  (Hangar vessel cargo hold empty)")
+	else
+		ui.spacing()
+		if ui.button("Liquidate / Sell All Cargo to Station Market##sell_hangar_cargo", Vector2(-1, 0), ui.theme.buttonColors.selected) then
+			local _, msg = PlayerFleet.OrderSellCargo(entry.uid)
+			setStatus(msg)
+		end
 	end
 
 	ui.columns(1)
@@ -256,6 +265,13 @@ local function drawFleetShipDetail(entry, station)
 			if ui.button("Refuel 100%", Vector2(0, 0)) then
 				local _, msg = PlayerFleet.RefuelShip(entry.uid)
 				setStatus(msg)
+			end
+			if PlayerFleet.GetCargoUsed(entry) > 0 then
+				ui.sameLine()
+				if ui.button("Sell Cargo Hold", Vector2(0, 0)) then
+					local _, msg = PlayerFleet.OrderSellCargo(entry.uid)
+					setStatus(msg)
+				end
 			end
 			ui.sameLine()
 			if confirmSellUid == entry.uid then
@@ -348,7 +364,7 @@ end
 
 local function drawHangarView()
 	local station = Game.player:GetDockedWith()
-	local ships = PlayerFleet.GetShips()
+	local ships = PlayerFleet.GetShips() or {}
 
 	if selectedUid and not PlayerFleet.GetShipByUid(selectedUid) then
 		selectedUid = ships[1] and ships[1].uid or nil

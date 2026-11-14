@@ -28,11 +28,49 @@ local ORDER_COLOR_MAP = {
 	IDLE       = colors.fontDim,
 	FOLLOW     = colors.hyperspaceInfo,
 	DOCK       = colors.alertYellow,
+	SELL_CARGO = colors.econProfit,
 	AUTO_TRADE = colors.econProfit,
 	AUTO_MINE  = colors.uiPrimaryLight,
 	PATROL     = colors.combatTarget,
 	MISSION    = colors.navTarget,
 }
+
+local STATUS_COLOR_MAP = {
+	DOCKED      = colors.econProfit,
+	UNDOCKING   = colors.alertYellow,
+	FLYING      = colors.uiPrimaryLight,
+	SUPERCRUISE = colors.hyperspaceInfo,
+	DOCKING     = colors.alertYellow,
+	JUMPING     = colors.alertYellow,
+	HYPERSPACE  = colors.hyperspaceInfo,
+	MINING      = colors.uiPrimaryLight,
+	PATROLLING  = colors.combatTarget,
+	ESCORTING   = colors.hyperspaceInfo,
+}
+
+local function formatTelemetryDist(d)
+	if not d or d < 0 then return "--" end
+	if d < 1000 then
+		return string.format("%.0f m", d)
+	elseif d < 1e7 then
+		return string.format("%.1f km", d / 1000)
+	elseif d < 1.496e10 then
+		return string.format("%.2f Mm", d / 1e6)
+	else
+		return string.format("%.2f AU", d / 1.495978707e11)
+	end
+end
+
+local function formatTelemetrySpeed(v)
+	if not v or v < 0 then return "0 m/s" end
+	if v >= 299792458 * 0.05 then
+		return string.format("%.2fc", v / 299792458)
+	elseif v >= 10000 then
+		return string.format("%.1f km/s", v / 1000)
+	else
+		return string.format("%.0f m/s", v)
+	end
+end
 
 local function drawFleetHeaderBar(ships)
 	local activeCount = 0
@@ -42,7 +80,6 @@ local function drawFleetHeaderBar(ships)
 		end
 	end
 
-	local budget = PlayerFleet.GetTradeBudget()
 	local totalProfit = PlayerFleet.GetTotalProfit()
 
 	ui.child("##FleetCommandTopBar", Vector2(-1, ui.rescaleUI(66, Vector2(1920, 1080))), nil, childFlags, function()
@@ -54,19 +91,7 @@ local function drawFleetHeaderBar(ships)
 			ui.sameLine(0, 0)
 			ui.textColored(totalProfit >= 0 and colors.econProfit or colors.econLoss, Format.Money(totalProfit, false))
 			ui.sameLine(0, ui.rescaleUI(24, Vector2(1920, 1080)))
-			ui.text("Auto-Trade Leg Budget: " .. Format.Money(budget, false))
-			ui.sameLine()
-			if ui.button("-10k", Vector2(0, 0)) then
-				PlayerFleet.SetTradeBudget(math.max(5000, budget - 10000))
-			end
-			ui.sameLine()
-			if ui.button("+10k", Vector2(0, 0)) then
-				PlayerFleet.SetTradeBudget(budget + 10000)
-			end
-			ui.sameLine()
-			if ui.button("100k", Vector2(0, 0)) then
-				PlayerFleet.SetTradeBudget(100000)
-			end
+			ui.text("Fleet Operating Account: Player Bank (" .. Format.Money(PlayerState.GetMoney(), false) .. ")")
 		end)
 	end)
 end
@@ -122,7 +147,7 @@ local function drawCommandDeck(entry)
 				ui.textColored(colors.uiPrimaryLight, "RECENT FLEET OPERATIONS LOG")
 			end)
 			ui.separator()
-			local logs = PlayerFleet.GetLogs()
+			local logs = PlayerFleet.GetLogs() or {}
 			if #logs == 0 then
 				ui.textColored(colors.fontDim, "No fleet operations recorded yet.")
 			else
@@ -159,11 +184,26 @@ local function drawCommandDeck(entry)
 		ui.withFont(orbiteer.heading, function()
 			ui.textColored(colors.uiPrimaryLight, "STANDING AUTONOMOUS ORDERS")
 		end)
-		ui.textColored(ORDER_COLOR_MAP[entry.order or "IDLE"] or colors.font, "Current Directive: " .. (entry.orderPhase or "Standby"))
+		local directiveCol = STATUS_COLOR_MAP[entry.status or ""] or ORDER_COLOR_MAP[entry.order or "IDLE"] or colors.font
+		ui.textColored(directiveCol, "Current Directive: " .. (entry.orderPhase or "Standby"))
+		if entry.liveShip and entry.liveShip:exists() then
+			local live = entry.liveShip
+			local okV, vel = pcall(function() return live:GetVelocity() end)
+			local spd = (okV and vel and vel.length) and vel:length() or 0
+			local distPlayer = (Game.player and live ~= Game.player) and live:DistanceTo(Game.player) or 0
+			ui.textColored(colors.hyperspaceInfo, string.format("Live In-System Telemetry: State=%s  |  Speed=%s  |  Range to Flagship=%s",
+				tostring(live.flightState or entry.status or "UNKNOWN"),
+				formatTelemetrySpeed(spd),
+				formatTelemetryDist(distPlayer)
+			))
+		elseif entry.transit and entry.transit.state then
+			ui.textColored(colors.fontDim, string.format("Remote Transit State: %s", tostring(entry.transit.state)))
+		end
 		if entry.order ~= "IDLE" then
 			local etaRem = math.max(0, (entry.orderEta or 0) - Game.time)
-			local etaText = etaRem > 0 and ("Cycle ETA: " .. Format.Duration(etaRem)) or "Executing..."
-			ui.progressBar(entry.orderProgress or 0, Vector2(-1, ui.rescaleUI(18, Vector2(1920, 1080))), etaText)
+			local barText = (etaRem > 0 and ("ETA: " .. Format.Duration(etaRem)))
+				or tostring(entry.status or "IN FLIGHT")
+			ui.progressBar(entry.orderProgress or 0, Vector2(-1, ui.rescaleUI(18, Vector2(1920, 1080))), barText)
 		end
 
 		ui.spacing()
@@ -193,6 +233,16 @@ local function drawCommandDeck(entry)
 		if ui.button("Security Patrol##cmd_patrol", Vector2(0, 0), entry.order == "PATROL" and ui.theme.buttonColors.selected or btnDisabled) then
 			local _, msg = PlayerFleet.IssueOrder(entry.uid, "PATROL")
 			statusMsg = msg
+		end
+
+		local cargoHeld = PlayerFleet.GetCargoUsed(entry)
+		if cargoHeld > 0 then
+			ui.sameLine()
+			local sellBtnText = (entry.status == "DOCKED") and "Liquidate Cargo Hold##cmd_sell_cargo" or "Fly & Sell Cargo##cmd_sell_cargo"
+			if ui.button(sellBtnText, Vector2(0, 0), entry.order == "SELL_CARGO" and ui.theme.buttonColors.selected or nil) then
+				local _, msg = PlayerFleet.OrderSellCargo(entry.uid)
+				statusMsg = msg
+			end
 		end
 
 		if not hasCaptain then
@@ -278,6 +328,14 @@ local function drawCommandDeck(entry)
 		end
 		if not hasCargo then
 			ui.textColored(colors.fontDim, "  (Empty)")
+		else
+			ui.spacing()
+			local sellLabel = (entry.status == "DOCKED") and "Liquidate / Sell All Cargo to Market"
+				or "Order Pilot to Fly to Station & Sell Cargo"
+			if ui.button(sellLabel .. "##liquidate_cargo_btn", Vector2(-1, 0), ui.theme.buttonColors.selected) then
+				local _, msg = PlayerFleet.OrderSellCargo(entry.uid)
+				statusMsg = msg
+			end
 		end
 
 		ui.spacing()
@@ -285,7 +343,7 @@ local function drawCommandDeck(entry)
 			ui.textColored(colors.uiPrimaryLight, "RECENT FLEET OPERATIONS LOG")
 		end)
 		ui.child("##FleetLogMini", Vector2(-1, ui.rescaleUI(220, Vector2(1920, 1080))), nil, childFlags, function()
-			local logs = PlayerFleet.GetLogs()
+			local logs = PlayerFleet.GetLogs() or {}
 			if #logs == 0 then
 				ui.textColored(colors.fontDim, "No operations logged yet.")
 			else
@@ -309,7 +367,7 @@ InfoView:registerView({
 	icon = icons.heavy_cargo_shuttle or icons.ship,
 	showView = true,
 	draw = function()
-		local ships = PlayerFleet.GetShips()
+		local ships = PlayerFleet.GetShips() or {}
 		if selectedUid and not PlayerFleet.GetShipByUid(selectedUid) then
 			selectedUid = ships[1] and ships[1].uid or nil
 		end

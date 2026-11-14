@@ -122,6 +122,8 @@ public:
 	// TODO: remove this and replace with a better function.
 	void getRots(double &rotX, double &rotY);
 
+	void SetOrigFov(float fov) { m_origFov = fov; }
+
 private:
 	Mode m_mode;
 	const char *m_name;

@@ -92,10 +92,10 @@ namespace Graphics {
 			return (format == TEXTURE_DXT1 || format == TEXTURE_DXT5);
 		}
 
-		TextureGL::TextureGL(const TextureDescriptor &descriptor, const bool useCompressed, const bool useAnisoFiltering, const Uint16 numSamples) :
+		TextureGL::TextureGL(const TextureDescriptor &descriptor, const bool useCompressed, const Uint8 anisoSamples, const Uint16 numSamples) :
 			Texture(descriptor),
 			m_allocSize(0),
-			m_useAnisoFiltering(useAnisoFiltering && descriptor.useAnisotropicFiltering)
+			m_anisoSamples(descriptor.useAnisotropicFiltering ? anisoSamples : 0)
 		{
 			PROFILE_SCOPED()
 			// this is kind of a hack, but it limits the amount of things that need to care about multisample textures.
@@ -297,10 +297,10 @@ namespace Graphics {
 			}
 
 			// Anisotropic texture filtering
-			if (m_useAnisoFiltering) {
+			if (m_anisoSamples > 1) {
 				GLfloat maxAniso = 0.0f;
 				glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &maxAniso);
-				glTexParameterf(m_target, GL_TEXTURE_MAX_ANISOTROPY_EXT, maxAniso);
+				glTexParameterf(m_target, GL_TEXTURE_MAX_ANISOTROPY_EXT, std::min(float(m_anisoSamples), maxAniso));
 			}
 
 			CHECKERRORS();
@@ -517,10 +517,10 @@ namespace Graphics {
 			glTexParameteri(m_target, GL_TEXTURE_MIN_FILTER, minFilter);
 
 			// Anisotropic texture filtering
-			if (m_useAnisoFiltering) {
+			if (m_anisoSamples > 1) {
 				GLfloat maxAniso = 0.0f;
 				glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &maxAniso);
-				glTexParameterf(m_target, GL_TEXTURE_MAX_ANISOTROPY_EXT, maxAniso);
+				glTexParameterf(m_target, GL_TEXTURE_MAX_ANISOTROPY_EXT, std::min(float(m_anisoSamples), maxAniso));
 			}
 
 			glBindTexture(m_target, 0);

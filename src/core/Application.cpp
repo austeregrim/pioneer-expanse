@@ -13,6 +13,7 @@
 #include <SDL_timer.h>
 
 #include <stdexcept>
+#include <thread>
 
 static constexpr Uint32 SYNC_JOBS_PER_LOOP = 1;
 
@@ -200,6 +201,9 @@ void Application::Run()
 
 		EndFrame();
 
+		if (m_targetFps > 0)
+			ThrottleFrame();
+
 #ifdef PIONEER_PROFILER
 		const bool profileReset = (m_activeLifecycle && !m_activeLifecycle->m_profilerAccumulate);
 #endif
@@ -234,5 +238,50 @@ void Application::Run()
 		if (profileReset)
 			Profiler::reset();
 #endif
+	}
+}
+
+void Application::ThrottleFrame()
+{
+	if (m_targetFps <= 0) {
+		m_lastFrameCounter = 0;
+		return;
+	}
+
+	const uint64_t freq = SDL_GetPerformanceFrequency();
+	const uint64_t targetCounts = freq / static_cast<uint64_t>(m_targetFps);
+
+	uint64_t current = SDL_GetPerformanceCounter();
+	if (m_lastFrameCounter == 0) {
+		m_lastFrameCounter = current;
+		return;
+	}
+
+	uint64_t elapsed = current - m_lastFrameCounter;
+	if (elapsed < targetCounts) {
+		uint64_t remainingCounts = targetCounts - elapsed;
+		double remainingSec = static_cast<double>(remainingCounts) / static_cast<double>(freq);
+
+		// If more than 2.5ms remain, sleep thread via SDL_Delay to drop CPU core usage & heat
+		if (remainingSec > 0.0025) {
+			Uint32 delayMs = static_cast<Uint32>((remainingSec - 0.002) * 1000.0);
+			if (delayMs > 0)
+				SDL_Delay(delayMs);
+		}
+
+		// Precision yield-wait for exact frame interval completion
+		while (true) {
+			current = SDL_GetPerformanceCounter();
+			if (current - m_lastFrameCounter >= targetCounts)
+				break;
+			std::this_thread::yield();
+		}
+	}
+
+	current = SDL_GetPerformanceCounter();
+	if (current - m_lastFrameCounter < targetCounts * 2) {
+		m_lastFrameCounter += targetCounts;
+	} else {
+		m_lastFrameCounter = current;
 	}
 }

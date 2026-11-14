@@ -35,6 +35,11 @@ public:
 	// returns true if the active camera is an exterior view.
 	bool IsExteriorView() const;
 
+	void SetFov(float fov) {
+		if (m_internalCameraController)
+			m_internalCameraController->SetOrigFov(fov);
+	}
+
 	sigc::signal<void> onChangeCamType;
 
 private:

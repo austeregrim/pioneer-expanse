@@ -129,6 +129,7 @@ namespace Graphics {
 		float m_maxZFar;
 		bool m_useCompressedTextures;
 		bool m_useAnisotropicFiltering;
+		Uint8 m_anisoSamples;
 
 		// TODO: iterate shaderdef files on startup and cache by Shader name directive rather than filename fragment
 		std::vector<std::pair<std::string, OGL::Shader *>> m_shaders;

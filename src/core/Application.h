@@ -90,6 +90,9 @@ public:
 
 	void RequestProfileFrame(const std::string &path = "");
 
+	void SetTargetFrameRate(int fps) { m_targetFps = fps; }
+	int GetTargetFrameRate() const { return m_targetFps; }
+
 protected:
 	// Hooks for inheriting classes to add their own behaviors to.
 
@@ -127,12 +130,15 @@ protected:
 private:
 	bool StartLifecycle();
 	void EndLifecycle();
+	void ThrottleFrame();
 
 	bool m_applicationRunning = false;
 	bool m_doTempProfile = false;
 	bool m_doSlowProfile = false;
 	bool m_profileZones = false;
 	bool m_profileTrace = false;
+	int m_targetFps = 0;
+	uint64_t m_lastFrameCounter = 0;
 	float m_deltaTime = 0.f;
 	double m_totalTime = 0.f;
 

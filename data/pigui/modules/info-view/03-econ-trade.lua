@@ -354,11 +354,6 @@ local function drawCentered(id, fun)
 end
 
 local function drawFuelTransfer(drive)
-	if transferStatusMsg and (ui.getTime() - transferStatusTime < 4.0) then
-		ui.textColored(transferStatusCol, transferStatusMsg)
-		ui.spacing()
-	end
-
 	drawCentered("Hyperdrive", function()
 		ui.horizontalGroup(function()
 			fuelTransferButton(drive, 10, "Feed 10t##F10")

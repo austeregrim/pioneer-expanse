@@ -7,6 +7,7 @@
 #include "CargoBody.h"
 #include "Frame.h"
 #include "Game.h"
+#include "GameConfig.h"
 #include "MathUtil.h"
 #include "Pi.h"
 #include "Planet.h"
@@ -63,6 +64,39 @@ inline double NextRand01(uint64_t &state)
 inline int64_t FloorCell(double coord, double cellSize)
 {
 	return static_cast<int64_t>(std::floor(coord / cellSize));
+}
+
+inline double Smoothstep(double edge0, double edge1, double x)
+{
+	const double t = Clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0);
+	return t * t * (3.0 - 2.0 * t);
+}
+
+struct CellOffset {
+	int64_t dx;
+	int64_t dz;
+	int64_t distSq;
+};
+
+const std::vector<CellOffset> &GetSortedCellOffsets(int range)
+{
+	thread_local std::unordered_map<int, std::vector<CellOffset>> s_cache;
+	auto it = s_cache.find(range);
+	if (it != s_cache.end())
+		return it->second;
+
+	std::vector<CellOffset> offsets;
+	const int span = 2 * range + 1;
+	offsets.reserve(size_t(span) * size_t(span));
+	for (int64_t dz = -range; dz <= range; ++dz) {
+		for (int64_t dx = -range; dx <= range; ++dx) {
+			offsets.push_back({ dx, dz, dx * dx + dz * dz });
+		}
+	}
+	std::sort(offsets.begin(), offsets.end(), [](const CellOffset &a, const CellOffset &b) {
+		return a.distSq < b.distSq;
+	});
+	return s_cache.emplace(range, std::move(offsets)).first->second;
 }
 
 bool RaySphereIntersect(const vector3d &start, const vector3d &dir, const vector3d &center, double radius, double maxLen, double &outT)
@@ -295,7 +329,7 @@ Color RingField::ComputeRockColor(const RingBand &band, uint64_t seed) const
 		255);
 }
 
-void RingField::GatherCellRocks(int64_t gx, int64_t gz, double cellSize, bool coarse, std::vector<RockInstance> &out) const
+void RingField::GatherCellRocks(int64_t gx, int64_t gz, double cellSize, RockTier tier, std::vector<RockInstance> &out) const
 {
 	const SystemBody *sbody = m_planet->GetSystemBody();
 	if (!sbody || !sbody->HasRings())
@@ -320,18 +354,25 @@ void RingField::GatherCellRocks(int64_t gx, int64_t gz, double cellSize, bool co
 
 	const double tau = std::max(0.25, band.opticalDepth.ToDouble());
 	const double halfThick = std::max(30.0, band.thickness.ToDouble());
-	uint64_t state = HashCell(gx, gz, m_baseSeed + band.seedOffset, coarse ? 0xC0A5E2U : 0xF1E1D0U);
 
-	int count = 0;
-	if (coarse) {
-		const double avgCoarse = Clamp(2.6 * tau * edgeFade, 0.8, 4.5);
-		const int baseCount = int(avgCoarse);
-		count = baseCount + (NextRand01(state) < (avgCoarse - baseCount) ? 1 : 0);
-	} else {
-		const double avgCount = Clamp(3.8 * tau * edgeFade, 1.5, 7.0);
-		const int baseCount = int(avgCount);
-		count = baseCount + (NextRand01(state) < (avgCount - baseCount) ? 1 : 0);
-	}
+	struct TierParams {
+		uint32_t salt;
+		uint32_t idOffset;
+		double avgMult, avgMin, avgMax;
+		double scaleBase, scaleExp, scaleRange;
+	};
+	static constexpr TierParams kTierParams[] = {
+		{ 0xB1C200U, 3000U, 4.8, 1.8, 8.5, 1.4, 1.8, 10.5 },  // MICRO
+		{ 0xF1E1D0U, 0U, 4.8, 2.0, 8.5, 3.0, 1.7, 38.0 },     // FINE
+		{ 0xC0A5E2U, 1000U, 6.0, 2.5, 10.0, 12.0, 1.5, 54.0 }, // COARSE
+		{ 0xFA4B00U, 2000U, 5.5, 2.0, 9.0, 24.0, 1.4, 64.0 }  // FAR
+	};
+	const TierParams &tp = kTierParams[static_cast<size_t>(tier)];
+
+	uint64_t state = HashCell(gx, gz, m_baseSeed + band.seedOffset, tp.salt);
+	const double avgCount = Clamp(tp.avgMult * tau * edgeFade, tp.avgMin, tp.avgMax);
+	const int baseCount = int(avgCount);
+	const int count = baseCount + (NextRand01(state) < (avgCount - baseCount) ? 1 : 0);
 
 	for (int i = 0; i < count; ++i) {
 		const double ox = (NextRand01(state) - 0.5) * cellSize * 0.88;
@@ -349,11 +390,9 @@ void RingField::GatherCellRocks(int64_t gx, int64_t gz, double cellSize, bool co
 		const double py = uY * std::abs(uY) * halfThick;
 
 		const double rScale = NextRand01(state);
-		const double scale = coarse
-			? (14.0 + std::pow(rScale, 1.5) * 52.0)
-			: (3.0 + std::pow(rScale, 1.7) * 38.0);
+		const double scale = tp.scaleBase + std::pow(rScale, tp.scaleExp) * tp.scaleRange;
 
-		const uint64_t rockId = SplitMix64(HashCell(gx, gz, m_baseSeed, coarse ? 1000U + uint32_t(i) : uint32_t(i)));
+		const uint64_t rockId = SplitMix64(HashCell(gx, gz, m_baseSeed, tp.idOffset + uint32_t(i)));
 
 		const double ax = NextRand01(state) * 2.0 - 1.0;
 		const double ay = NextRand01(state) * 2.0 - 1.0;
@@ -367,6 +406,7 @@ void RingField::GatherCellRocks(int64_t gx, int64_t gz, double cellSize, bool co
 		RockInstance inst;
 		inst.id = rockId;
 		inst.pos = vector3d(px, py, pz);
+		inst.posView = vector3d::Zero;
 		inst.scale = scale;
 		inst.collRadius = scale * 0.90;
 		inst.spinAxis = axis;
@@ -374,7 +414,7 @@ void RingField::GatherCellRocks(int64_t gx, int64_t gz, double cellSize, bool co
 		inst.phase = NextRand01(state) * (2.0 * M_PI);
 		inst.color = ComputeRockColor(rockBand, rockId);
 		inst.variant = uint8_t(HashCell(gx, gz, uint32_t(rockId), 7U) % uint64_t(NUM_VARIANTS));
-		inst.coarse = coarse;
+		inst.tier = tier;
 		out.push_back(inst);
 	}
 }
@@ -438,14 +478,14 @@ void RingField::TimeStepUpdate(float timeStep)
 		const int64_t fz = FloorCell(shipRing.z, CELL_FINE);
 		for (int64_t dz = -1; dz <= 1; ++dz) {
 			for (int64_t dx = -1; dx <= 1; ++dx) {
-				GatherCellRocks(fx + dx, fz + dz, CELL_FINE, false, nearby);
+				GatherCellRocks(fx + dx, fz + dz, CELL_FINE, RockTier::FINE, nearby);
 			}
 		}
 		const int64_t cx = FloorCell(shipRing.x, CELL_COARSE);
 		const int64_t cz = FloorCell(shipRing.z, CELL_COARSE);
 		for (int64_t dz = -1; dz <= 1; ++dz) {
 			for (int64_t dx = -1; dx <= 1; ++dx) {
-				GatherCellRocks(cx + dx, cz + dz, CELL_COARSE, true, nearby);
+				GatherCellRocks(cx + dx, cz + dz, CELL_COARSE, RockTier::COARSE, nearby);
 			}
 		}
 
@@ -522,94 +562,153 @@ void RingField::Render(Graphics::Renderer *r, const matrix4x4d &viewTran, const 
 	const double minR = rings.minRadius.ToDouble() * m_planetRadius;
 	const double maxR = rings.maxRadius.ToDouble() * m_planetRadius;
 
-	if (std::abs(camInRing.y) > 25000.0 || camR < minR - 25000.0 || camR > maxR + 25000.0)
+	if (std::abs(camInRing.y) > 34000.0 || camR < minR - 34000.0 || camR > maxR + 34000.0)
+		return;
+
+	const int ringQuality = Pi::config ? Pi::config->Int("VolumetricRings", 3) : 3;
+	if (ringQuality <= 0)
 		return;
 
 	if (!m_rockMaterial)
 		InitGraphics(r);
 
+	double maxHalfThick = std::max(80.0, rings.thickness.ToDouble());
+	for (const RingBand &b : rings.bands)
+		maxHalfThick = std::max(maxHalfThick, b.thickness.ToDouble());
+
+	int maxVisible = MAX_VISIBLE_ROCKS;
+	int budgetMicro = 950;
+	int budgetFine = 1550;
+	int budgetCoarse = 1300;
+	int budgetFar = 700;
+	int dustRange = 5;
+
+	switch (ringQuality) {
+	case 1: // Low
+		maxVisible = 1000;
+		budgetMicro = 300;
+		budgetFine = 450;
+		budgetCoarse = 250;
+		budgetFar = 0;
+		dustRange = 3;
+		break;
+	case 2: // Medium
+		maxVisible = 2500;
+		budgetMicro = 600;
+		budgetFine = 1000;
+		budgetCoarse = 600;
+		budgetFar = 300;
+		dustRange = 4;
+		break;
+	case 4: // Ultra
+		maxVisible = 7500;
+		budgetMicro = 1400;
+		budgetFine = 2600;
+		budgetCoarse = 2200;
+		budgetFar = 1300;
+		dustRange = 7;
+		break;
+	case 3: // High
+	default:
+		maxVisible = 4500;
+		budgetMicro = 950;
+		budgetFine = 1550;
+		budgetCoarse = 1300;
+		budgetFar = 700;
+		dustRange = 5;
+		break;
+	}
+
 	std::vector<RockInstance> visibleRocks;
-	visibleRocks.reserve(MAX_VISIBLE_ROCKS);
+	visibleRocks.reserve(maxVisible);
 
-	// Pass 1: Fine local asteroid field (up to 2.2 km, densely packed)
-	{
-		const int64_t cx = FloorCell(camInRing.x, CELL_FINE);
-		const int64_t cz = FloorCell(camInRing.z, CELL_FINE);
-		const int range = 11;
-		std::vector<RockInstance> cellRocks;
-		cellRocks.reserve(10);
+	std::vector<RockInstance> cellRocks;
+	cellRocks.reserve(16);
 
-		for (int64_t dz = -range; dz <= range; ++dz) {
-			for (int64_t dx = -range; dx <= range; ++dx) {
-				const double distSqGuess = (double(dx) * CELL_FINE) * (double(dx) * CELL_FINE) +
-					(double(dz) * CELL_FINE) * (double(dz) * CELL_FINE);
-				if (distSqGuess > 2300.0 * 2300.0)
+	auto gatherTier = [&](RockTier tier, double cellSize, int range,
+						  double innerInStart, double innerInEnd,
+						  double outerFullEnd, double outerMax,
+						  double maxRockScale, double densityBoost, int tierBudget) {
+		if (densityBoost <= 0.0 || tierBudget <= 0 || int(visibleRocks.size()) >= maxVisible)
+			return;
+
+		const int64_t cx = FloorCell(camInRing.x, cellSize);
+		const int64_t cz = FloorCell(camInRing.z, cellSize);
+		const double cellBoundR = 0.65 * cellSize + maxHalfThick + maxRockScale * 3.0;
+		const double maxCellHorizDist = outerMax + 0.65 * cellSize;
+		int added = 0;
+
+		for (const CellOffset &off : GetSortedCellOffsets(range)) {
+			const int64_t gx = cx + off.dx;
+			const int64_t gz = cz + off.dz;
+			const double cellCenterX = (double(gx) + 0.5) * cellSize;
+			const double cellCenterZ = (double(gz) + 0.5) * cellSize;
+
+			if (std::hypot(cellCenterX - camInRing.x, cellCenterZ - camInRing.z) > maxCellHorizDist)
+				continue;
+
+			// Conservative cell-level frustum cull before generating rock instances
+			const vector3d cellCenterRing(cellCenterX, 0.0, cellCenterZ);
+			const vector3d cellView = viewTran * ((spinMatrix * cellCenterRing) / m_planetRadius);
+			if (cellView.z - cellBoundR > 0.0)
+				continue;
+			const double cellFwd = std::max(1.0, -cellView.z + cellBoundR);
+			if (std::hypot(cellView.x, cellView.y) - cellBoundR > cellFwd * 1.65)
+				continue;
+
+			cellRocks.clear();
+			GatherCellRocks(gx, gz, cellSize, tier, cellRocks);
+			for (RockInstance &inst : cellRocks) {
+				auto depIt = m_depletedYield.find(inst.id);
+				if (depIt != m_depletedYield.end() && depIt->second <= 0.0f)
 					continue;
 
-				cellRocks.clear();
-				GatherCellRocks(cx + dx, cz + dz, CELL_FINE, false, cellRocks);
-				for (const RockInstance &inst : cellRocks) {
-					const double d2 = (inst.pos - camInRing).LengthSqr();
-					if (d2 > 2200.0 * 2200.0)
-						continue;
-					visibleRocks.push_back(inst);
-					if (int(visibleRocks.size()) >= MAX_VISIBLE_ROCKS - 450)
-						break;
-				}
-				if (int(visibleRocks.size()) >= MAX_VISIBLE_ROCKS - 450)
-					break;
-			}
-			if (int(visibleRocks.size()) >= MAX_VISIBLE_ROCKS - 450)
-				break;
-		}
-	}
-
-	// Pass 2: Coarse horizon boulders (1.6 km to 12.5 km)
-	{
-		const int64_t cx = FloorCell(camInRing.x, CELL_COARSE);
-		const int64_t cz = FloorCell(camInRing.z, CELL_COARSE);
-		const int range = 15;
-		std::vector<RockInstance> cellRocks;
-		cellRocks.reserve(6);
-
-		for (int64_t dz = -range; dz <= range; ++dz) {
-			for (int64_t dx = -range; dx <= range; ++dx) {
-				const double d2Guess = (double(dx) * CELL_COARSE) * (double(dx) * CELL_COARSE) +
-					(double(dz) * CELL_COARSE) * (double(dz) * CELL_COARSE);
-				if (d2Guess > 13000.0 * 13000.0)
+				const double d = (inst.pos - camInRing).Length();
+				if (d > outerMax)
+					continue;
+				if (innerInEnd > 0.0 && d < innerInStart)
 					continue;
 
-				cellRocks.clear();
-				GatherCellRocks(cx + dx, cz + dz, CELL_COARSE, true, cellRocks);
-				for (const RockInstance &inst : cellRocks) {
-					const double d2 = (inst.pos - camInRing).LengthSqr();
-					if (d2 < 1600.0 * 1600.0 || d2 > 12500.0 * 12500.0)
-						continue;
-					visibleRocks.push_back(inst);
-					if (int(visibleRocks.size()) >= MAX_VISIBLE_ROCKS)
-						break;
-				}
-				if (int(visibleRocks.size()) >= MAX_VISIBLE_ROCKS)
-					break;
+				double fade = 1.0;
+				if (innerInEnd > innerInStart && d < innerInEnd)
+					fade *= Smoothstep(innerInStart, innerInEnd, d);
+				if (d > outerFullEnd)
+					fade *= (1.0 - Smoothstep(outerFullEnd, outerMax, d));
+
+				const double keepProb = fade * fade * densityBoost;
+				const double uKeep = double((inst.id >> 16) & 0xFFFFU) * (1.0 / 65536.0);
+				if (uKeep >= keepProb)
+					continue;
+
+				inst.scale *= fade;
+				if (inst.scale <= 0.05)
+					continue;
+
+				const vector3d posView = viewTran * ((spinMatrix * inst.pos) / m_planetRadius);
+				if (posView.z > inst.scale * 2.5)
+					continue;
+				const double forwardDist = std::max(1.0, -posView.z);
+				if (std::hypot(posView.x, posView.y) > forwardDist * 1.65 + inst.scale * 3.0)
+					continue;
+
+				inst.posView = posView;
+				visibleRocks.push_back(inst);
+				++added;
+				if (added >= tierBudget || int(visibleRocks.size()) >= maxVisible)
+					return;
 			}
-			if (int(visibleRocks.size()) >= MAX_VISIBLE_ROCKS)
-				break;
 		}
-	}
+	};
+
+	const double proxFactor = Clamp(1.0 - (std::abs(camInRing.y) - 60.0) / 1400.0, 0.0, 1.0);
+	gatherTier(RockTier::MICRO, CELL_MICRO, 11, 0.0, 0.0, 320.0, 1150.0, 12.0, proxFactor, budgetMicro);
+	gatherTier(RockTier::FINE, CELL_FINE, 20, 0.0, 0.0, 1800.0, 4200.0, 42.0, 1.0, budgetFine);
+	gatherTier(RockTier::COARSE, CELL_COARSE, 19, 0.0, 0.0, 5500.0, 16000.0, 68.0, 1.0, budgetCoarse);
+	gatherTier(RockTier::FAR, CELL_FAR, 16, 9000.0, 13500.0, 14000.0, 33000.0, 90.0, 1.0, budgetFar);
 
 	// Draw boulders in camera view space using double-precision offsets first to avoid jitter.
 	for (const RockInstance &inst : visibleRocks) {
-		// Skip completely depleted boulders if fully harvested
-		auto depIt = m_depletedYield.find(inst.id);
-		if (depIt != m_depletedYield.end() && depIt->second <= 0.0f)
-			continue;
-
-		const vector3d posView = viewTran * ((spinMatrix * inst.pos) / m_planetRadius);
-		if (posView.z > inst.scale * 2.5)
-			continue;
-		const double forwardDist = std::max(1.0, -posView.z);
-		if (std::hypot(posView.x, posView.y) > forwardDist * 1.65 + inst.scale * 3.0)
-			continue;
+		const vector3d &posView = inst.posView;
 
 		const double angle = inst.phase + inst.spinRate * m_elapsedTime;
 		const matrix3x3d rockRot = matrix3x3d::Rotate(angle, inst.spinAxis);
@@ -643,7 +742,6 @@ void RingField::Render(Graphics::Renderer *r, const matrix4x4d &viewTran, const 
 		const double dustCell = 900.0;
 		const int64_t cx = FloorCell(camInRing.x, dustCell);
 		const int64_t cz = FloorCell(camInRing.z, dustCell);
-		const int dustRange = 5;
 
 		for (int64_t dz = -dustRange; dz <= dustRange; ++dz) {
 			for (int64_t dx = -dustRange; dx <= dustRange; ++dx) {
@@ -811,7 +909,7 @@ bool RingField::TraceRay(FrameId rayFrameId, const vector3d &startPos, const vec
 	std::vector<RockInstance> candidates;
 	candidates.reserve(64);
 
-	auto gatherAlongSegment = [&](double cellSize, bool coarse) {
+	auto gatherAlongSegment = [&](double cellSize, RockTier tier) {
 		int64_t x0 = FloorCell(std::min(startRing.x, endRing.x), cellSize) - 1;
 		int64_t x1 = FloorCell(std::max(startRing.x, endRing.x), cellSize) + 1;
 		int64_t z0 = FloorCell(std::min(startRing.z, endRing.z), cellSize) - 1;
@@ -820,13 +918,15 @@ bool RingField::TraceRay(FrameId rayFrameId, const vector3d &startPos, const vec
 		z0 = std::max(z0, z1 - 30);
 		for (int64_t gz = z0; gz <= z1; ++gz) {
 			for (int64_t gx = x0; gx <= x1; ++gx) {
-				GatherCellRocks(gx, gz, cellSize, coarse, candidates);
+				GatherCellRocks(gx, gz, cellSize, tier, candidates);
 			}
 		}
 	};
 
-	gatherAlongSegment(CELL_FINE, false);
-	gatherAlongSegment(CELL_COARSE, true);
+	if (std::abs(startRing.y) < 1400.0)
+		gatherAlongSegment(CELL_MICRO, RockTier::MICRO);
+	gatherAlongSegment(CELL_FINE, RockTier::FINE);
+	gatherAlongSegment(CELL_COARSE, RockTier::COARSE);
 
 	bool hit = false;
 	double bestT = maxLen;

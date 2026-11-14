@@ -253,6 +253,7 @@ namespace Graphics {
 
 		const bool useAnisotropicFiltering = vs.useAnisotropicFiltering;
 		m_useAnisotropicFiltering = useAnisotropicFiltering;
+		m_anisoSamples = vs.anisoSamples > 0 ? Uint8(vs.anisoSamples) : (useAnisotropicFiltering ? 16 : 0);
 
 		//XXX bunch of fixed function states here!
 		glCullFace(GL_BACK);
@@ -1058,7 +1059,7 @@ namespace Graphics {
 	Texture *RendererOGL::CreateTexture(const TextureDescriptor &descriptor)
 	{
 		PROFILE_SCOPED()
-		return new OGL::TextureGL(descriptor, m_useCompressedTextures, m_useAnisotropicFiltering);
+		return new OGL::TextureGL(descriptor, m_useCompressedTextures, m_useAnisotropicFiltering ? m_anisoSamples : 0);
 	}
 
 	RenderTarget *RendererOGL::CreateRenderTarget(const RenderTargetDesc &desc)
@@ -1078,7 +1079,7 @@ namespace Graphics {
 				false,
 				false,
 				0, Graphics::TEXTURE_2D);
-			OGL::TextureGL *colorTex = new OGL::TextureGL(cdesc, false, false, desc.numSamples);
+			OGL::TextureGL *colorTex = new OGL::TextureGL(cdesc, false, 0, desc.numSamples);
 			rt->SetColorTexture(colorTex);
 			CHECKERRORS();
 		}
@@ -1093,7 +1094,7 @@ namespace Graphics {
 					false,
 					false,
 					0, Graphics::TEXTURE_2D);
-				OGL::TextureGL *depthTex = new OGL::TextureGL(ddesc, false, false, desc.numSamples);
+				OGL::TextureGL *depthTex = new OGL::TextureGL(ddesc, false, 0, desc.numSamples);
 				rt->SetDepthTexture(depthTex);
 				CHECKERRORS();
 			} else {

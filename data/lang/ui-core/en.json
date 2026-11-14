@@ -899,6 +899,22 @@
     "description": "Legal status of player",
     "message": "Fugitive"
   },
+  "FIELD_OF_VIEW": {
+    "description": "",
+    "message": "Field of View (Vertical)"
+  },
+  "FIELD_OF_VIEW_DESC": {
+    "description": "",
+    "message": "Vertical camera field of view in degrees. Higher values provide wider peripheral awareness; lower values zoom in and reduce rendering load."
+  },
+  "FRAME_RATE_LIMIT": {
+    "description": "",
+    "message": "Frame Rate Limit"
+  },
+  "FRAME_RATE_LIMIT_DESC": {
+    "description": "",
+    "message": "Limits maximum frames per second to reduce GPU load, heat, fan noise, and power consumption."
+  },
   "FULL_SCREEN": {
     "description": "",
     "message": "Full screen"
@@ -2958,6 +2974,14 @@
   "VOLUME": {
     "description": "The volume property of some object",
     "message": "Volume"
+  },
+  "VOLUMETRIC_RINGS": {
+    "description": "",
+    "message": "Volumetric Planetary Rings"
+  },
+  "VOLUMETRIC_RINGS_DESC": {
+    "description": "",
+    "message": "Controls 3D volumetric boulder and dust rendering within planetary ring systems. Lower settings significantly reduce GPU draw call and geometry load."
   },
   "VSYNC": {
     "description": "For the checkbox in settings window",

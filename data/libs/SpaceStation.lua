@@ -786,9 +786,11 @@ function SpaceStation:UnlockAdvert (ref)
 		SpaceStation.advertLockCount = SpaceStation.advertLockCount - 1
 		return
 	end
+	local shouldRemove = SpaceStation.removeOnReleased
 	SpaceStation.lockedAdvert = nil
 	SpaceStation.advertLockCount = 0
-	if SpaceStation.removeOnReleased then
+	SpaceStation.removeOnReleased = false
+	if shouldRemove and self:exists() and SpaceStation.adverts[self] and SpaceStation.adverts[self][ref] then
 		self:RemoveAdvert(ref)
 	end
 end
@@ -850,6 +852,10 @@ local function destroySystem ()
 	police = {}
 
 	shipsOnSale = {}
+
+	SpaceStation.lockedAdvert = nil
+	SpaceStation.advertLockCount = 0
+	SpaceStation.removeOnReleased = false
 
 	for station,ads in pairs(SpaceStation.adverts) do
 		for ref,ad in pairs(ads) do

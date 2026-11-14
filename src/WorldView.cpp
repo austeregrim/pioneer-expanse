@@ -159,6 +159,14 @@ void WorldView::SaveToJson(Json &jsonObj)
 	jsonObj["world_view"] = worldViewObj; // Add world view object to supplied object.
 }
 
+void WorldView::UpdateFov(float fov)
+{
+	if (m_cameraContext)
+		m_cameraContext->SetFovAng(fov);
+	if (shipView)
+		shipView->SetFov(fov);
+}
+
 void WorldView::OnRequestTimeAccelInc()
 {
 	// requests an increase in time acceleration
@@ -944,6 +952,33 @@ void WorldView::DrawSupercruiseOverlays()
 	std::vector<vector3f> dangerExclVerts;
 
 	const Body *navTarget = Pi::player->GetNavTarget();
+	const double gameTime = m_game->GetTime();
+	std::vector<FrameId> drawnGravFrames;
+
+	auto drawOrbitInParentFrame = [&](const Orbit &orbit, Frame *parentFrame, std::vector<vector3f> &dest) {
+		if (!parentFrame || orbit.GetSemiMajorAxis() <= 0.0 || orbit.GetEccentricity() >= 1.0)
+			return;
+		const double period = orbit.Period();
+		if (!(period > 0.0 && std::isfinite(period)))
+			return;
+
+		const vector3d parentCamPos = parentFrame->GetInterpPositionRelTo(camFrameId);
+		const matrix3x3d parentCamOrient = parentFrame->GetInterpOrientRelTo(camFrameId);
+
+		constexpr int ORBIT_SEGS = 256;
+		auto sampleOrbitPt = [&](int k) -> vector3d {
+			const double s = 2.0 * (double(k) / double(ORBIT_SEGS)) - 1.0;
+			const double u = 0.5 * (0.2 * s + 0.8 * s * s * s);
+			return parentCamPos + parentCamOrient * orbit.EvenSpacedPosTrajectory(u, gameTime);
+		};
+
+		vector3d prevPt = sampleOrbitPt(0);
+		for (int k = 1; k <= ORBIT_SEGS; ++k) {
+			const vector3d curPt = sampleOrbitPt(k);
+			appendClippedSegment(dest, prevPt, curPt);
+			prevPt = curPt;
+		}
+	};
 
 	for (Body *b : m_game->GetSpace()->GetBodies()) {
 		if (!b)
@@ -956,22 +991,26 @@ void WorldView::DrawSupercruiseOverlays()
 			const SystemBody *sb = b->GetSystemBody();
 			if (sb && sb->GetOrbit().GetSemiMajorAxis() > 0.0) {
 				Frame *bFrame = Frame::GetFrame(b->GetFrame());
-				Frame *parentFrame = isOrbStation ? bFrame : (bFrame ? Frame::GetFrame(bFrame->GetParent()) : nullptr);
+				Frame *orbFrame = bFrame ? Frame::GetFrame(bFrame->GetNonRotFrame()) : nullptr;
+				Frame *parentFrame = orbFrame ? Frame::GetFrame(orbFrame->GetParent()) : nullptr;
 				if (parentFrame) {
-					const vector3d parentCamPos = parentFrame->GetInterpPositionRelTo(camFrameId);
-					const matrix3x3d parentCamOrient = parentFrame->GetInterpOrientRelTo(camFrameId);
-					const Orbit &orbit = sb->GetOrbit();
-					const double period = orbit.Period();
-					if (period > 0.0 && std::isfinite(period)) {
-						constexpr int ORBIT_SEGS = 96;
-						std::vector<vector3f> &dest = (b == navTarget) ? targetOrbitVerts : orbitVerts;
-						vector3d prevPt = parentCamPos + parentCamOrient * orbit.OrbitalPosAtTime(0.0);
-						for (int k = 1; k <= ORBIT_SEGS; ++k) {
-							const double t = period * (double(k) / double(ORBIT_SEGS));
-							const vector3d curPt = parentCamPos + parentCamOrient * orbit.OrbitalPosAtTime(t);
-							appendClippedSegment(dest, prevPt, curPt);
-							prevPt = curPt;
+					std::vector<vector3f> &dest = (b == navTarget) ? targetOrbitVerts : orbitVerts;
+					drawOrbitInParentFrame(sb->GetOrbit(), parentFrame, dest);
+
+					// If the parent is a binary barycenter (TYPE_GRAVPOINT) that itself orbits a parent body, draw its orbit once too
+					Frame *ancFrame = parentFrame;
+					while (ancFrame && ancFrame->GetSystemBody() &&
+						ancFrame->GetSystemBody()->GetType() == SystemBody::TYPE_GRAVPOINT &&
+						ancFrame->GetSystemBody()->GetOrbit().GetSemiMajorAxis() > 0.0) {
+						const FrameId ancId = ancFrame->GetId();
+						Frame *ancParent = Frame::GetFrame(ancFrame->GetParent());
+						if (!ancParent)
+							break;
+						if (std::find(drawnGravFrames.begin(), drawnGravFrames.end(), ancId) == drawnGravFrames.end()) {
+							drawnGravFrames.push_back(ancId);
+							drawOrbitInParentFrame(ancFrame->GetSystemBody()->GetOrbit(), ancParent, orbitVerts);
 						}
+						ancFrame = ancParent;
 					}
 				}
 			}

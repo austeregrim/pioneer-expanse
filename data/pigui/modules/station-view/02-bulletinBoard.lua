@@ -79,6 +79,7 @@ end
 
 local bulletinBoard
 local chatForm
+local activeStation
 local activeRef
 local activeAd
 local searchText = ""
@@ -120,12 +121,20 @@ local function adActive(ref, ad)
 end
 
 local function closeActiveComms()
-	if chatForm then
-		local station = Game.player and Game.player:GetDockedWith()
-		if station and activeRef then
-			station:UnlockAdvert(activeRef)
+	if activeRef or chatForm then
+		local station = activeStation or (Game.player and Game.player:GetDockedWith())
+		if activeRef and SpaceStation.lockedAdvert == activeRef then
+			if station and station:exists() then
+				station:UnlockAdvert(activeRef)
+			end
+			if SpaceStation.lockedAdvert == activeRef then
+				SpaceStation.lockedAdvert = nil
+				SpaceStation.advertLockCount = 0
+				SpaceStation.removeOnReleased = false
+			end
 		end
 		chatForm = nil
+		activeStation = nil
 		activeRef = nil
 		activeAd = nil
 		if bulletinBoard then
@@ -341,16 +350,34 @@ bulletinBoard = Table.New("BulletinBoardTable", false, {
 			end
 		end
 
+		if SpaceStation.lockedAdvert ~= nil then
+			closeActiveComms()
+			if SpaceStation.lockedAdvert ~= nil then
+				SpaceStation.lockedAdvert = nil
+				SpaceStation.advertLockCount = 0
+				SpaceStation.removeOnReleased = false
+			end
+		end
+
+		activeStation = station
 		activeRef = ref
 		activeAd = ad
 		bulletinBoard.selectedItem = ad
 		station:LockAdvert(ref)
 
-		chatForm = ChatForm.New(chatFunc, removeFunc, closeFunc, resizeFunc, ref, StationView, {
+		local ok, form = pcall(ChatForm.New, chatFunc, removeFunc, closeFunc, resizeFunc, ref, StationView, {
 			buttonSize = widgetSizes.chatButtonSize,
 			marketSize = Vector2(0, widgetSizes.marketHeight),
 			fitMarketToPanel = true,
 		})
+		if not ok then
+			closeActiveComms()
+			error(form, 0)
+		end
+		if activeRef ~= ref then
+			return
+		end
+		chatForm = form
 		chatForm.resizeFunc()
 	end,
 	sortingFunction = function(s1, s2)
@@ -458,7 +485,7 @@ local function renderCommsStandby()
 end
 
 local function renderBulletinBoard()
-	if chatForm and not (Game.player and Game.player:GetDockedWith()) then
+	if (chatForm or activeRef) and (not (Game.player and Game.player:GetDockedWith()) or Game.player:GetDockedWith() ~= activeStation) then
 		closeActiveComms()
 	end
 

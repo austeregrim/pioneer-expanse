@@ -521,16 +521,64 @@ static int l_engine_set_cockpit_enabled(lua_State *l)
 
 static int l_engine_get_aniso_enabled(lua_State *l)
 {
-	lua_pushboolean(l, Pi::config->Int("UseAnisotropicFiltering") != 0);
+	lua_pushinteger(l, Pi::config->Int("UseAnisotropicFiltering"));
 	return 1;
 }
 
 static int l_engine_set_aniso_enabled(lua_State *l)
 {
 	if (lua_isnone(l, 1))
-		return luaL_error(l, "SetAnisoEnabled takes one boolean argument");
-	const bool enabled = lua_toboolean(l, 1);
-	Pi::config->SetInt("UseAnisotropicFiltering", (enabled ? 1 : 0));
+		return luaL_error(l, "SetAnisoFiltering takes one argument");
+	int level = 0;
+	if (lua_isboolean(l, 1))
+		level = lua_toboolean(l, 1) ? 16 : 0;
+	else
+		level = lua_tointeger(l, 1);
+	Pi::config->SetInt("UseAnisotropicFiltering", level);
+	return 0;
+}
+
+static int l_engine_get_max_fps(lua_State *l)
+{
+	lua_pushinteger(l, Pi::config->Int("MaxFPS", 0));
+	return 1;
+}
+
+static int l_engine_set_max_fps(lua_State *l)
+{
+	const int fps = luaL_checkinteger(l, 1);
+	Pi::config->SetInt("MaxFPS", std::max(0, fps));
+	if (Pi::GetApp())
+		Pi::GetApp()->SetTargetFrameRate(std::max(0, fps));
+	return 0;
+}
+
+static int l_engine_get_fov(lua_State *l)
+{
+	lua_pushnumber(l, Pi::config->Float("FOVVertical"));
+	return 1;
+}
+
+static int l_engine_set_fov(lua_State *l)
+{
+	const float fov = Clamp(float(luaL_checknumber(l, 1)), 45.0f, 110.0f);
+	Pi::config->SetFloat("FOVVertical", fov);
+	if (Pi::game && Pi::game->GetWorldView()) {
+		Pi::game->GetWorldView()->UpdateFov(fov);
+	}
+	return 0;
+}
+
+static int l_engine_get_volumetric_rings(lua_State *l)
+{
+	lua_pushinteger(l, Pi::config->Int("VolumetricRings", 3));
+	return 1;
+}
+
+static int l_engine_set_volumetric_rings(lua_State *l)
+{
+	const int level = Clamp(int(luaL_checkinteger(l, 1)), 0, 4);
+	Pi::config->SetInt("VolumetricRings", level);
 	return 0;
 }
 
@@ -1077,6 +1125,13 @@ void LuaEngine::Register()
 
 		{ "GetCockpitEnabled", l_engine_get_cockpit_enabled },
 		{ "SetCockpitEnabled", l_engine_set_cockpit_enabled },
+
+		{ "GetMaxFPS", l_engine_get_max_fps },
+		{ "SetMaxFPS", l_engine_set_max_fps },
+		{ "GetFOV", l_engine_get_fov },
+		{ "SetFOV", l_engine_set_fov },
+		{ "GetVolumetricRings", l_engine_get_volumetric_rings },
+		{ "SetVolumetricRings", l_engine_set_volumetric_rings },
 
 		{ "GetAnisoFiltering", l_engine_get_aniso_enabled },
 		{ "SetAnisoFiltering", l_engine_set_aniso_enabled },

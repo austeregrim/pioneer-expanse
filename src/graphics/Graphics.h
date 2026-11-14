@@ -30,6 +30,7 @@ namespace Graphics {
 		bool hidden;
 		bool useTextureCompression;
 		bool useAnisotropicFiltering;
+		int anisoSamples; // 0 = off, 2, 4, 8, 16
 		bool enableDebugMessages;
 		bool gl3ForwardCompatible;
 		bool canBeResized;

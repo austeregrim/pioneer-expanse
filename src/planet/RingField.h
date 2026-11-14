@@ -38,29 +38,39 @@ public:
 	bool TraceRay(FrameId rayFrameId, const vector3d &startPos, const vector3d &dir, double maxLen, bool isMining, double &outHitDist);
 
 private:
+	enum class RockTier : uint8_t {
+		MICRO = 0,
+		FINE = 1,
+		COARSE = 2,
+		FAR = 3
+	};
+
 	struct RockInstance {
 		uint64_t id;
-		vector3d pos; // position in axial-tilted non-spinning ringLocal frame (meters)
-		double scale; // visual radius in meters
+		vector3d pos;	  // position in axial-tilted non-spinning ringLocal frame (meters)
+		vector3d posView; // cached view-space position during frustum-culled render gathering
+		double scale;	  // visual radius in meters
 		double collRadius;
 		vector3d spinAxis;
 		double spinRate;
 		double phase;
 		Color color;
 		uint8_t variant;
-		bool coarse;
+		RockTier tier;
 	};
 
 	static constexpr int NUM_VARIANTS = 8;
-	static constexpr int MAX_VISIBLE_ROCKS = 2800;
+	static constexpr int MAX_VISIBLE_ROCKS = 4500;
+	static constexpr double CELL_MICRO = 105.0;
 	static constexpr double CELL_FINE = 210.0;
 	static constexpr double CELL_COARSE = 850.0;
+	static constexpr double CELL_FAR = 2100.0;
 
 	void InitGraphics(Graphics::Renderer *r);
 	std::unique_ptr<Graphics::MeshObject> BuildRockMesh(Graphics::Renderer *r, uint32_t seed) const;
 
 	FrameId GetOrbitalFrameId() const;
-	void GatherCellRocks(int64_t gx, int64_t gz, double cellSize, bool coarse, std::vector<RockInstance> &out) const;
+	void GatherCellRocks(int64_t gx, int64_t gz, double cellSize, RockTier tier, std::vector<RockInstance> &out) const;
 	Color ComputeRockColor(const RingBand &band, uint64_t seed) const;
 	void SpawnMiningFragment(const vector3d &hitPosOrb, const vector3d &normalOrb, const RingBand &band);
 

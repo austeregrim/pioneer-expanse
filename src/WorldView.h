@@ -38,6 +38,7 @@ public:
 	void SaveToJson(Json &jsonObj) override;
 
 	RefCountedPtr<CameraContext> GetCameraContext() const { return m_cameraContext; }
+	void UpdateFov(float fov);
 
 	ViewController *GetViewController() const { return m_viewController; }
 	void SetViewController(ViewController *newView);
