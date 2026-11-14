@@ -18,6 +18,8 @@ local Comms = require 'Comms'
 
 local pirates = {}
 local planets = {}
+local playerSCStartTime = nil
+local nextPlayerInterdictTime = 0
 
 local function equipInterdictor(ship, threat)
 	local equipSet = ship:GetComponent("EquipSet")
@@ -64,7 +66,7 @@ local pirateIsInterested = function (player)
 	local cargoTons = player.usedCargo or 0
 
 	if player:GetFlightState() == "SUPERCRUISE" then
-		local prob = math.min(0.95, 0.45 + 0.45 * lawlessness + math.min(0.35, cargoTons * 0.05))
+		local prob = math.min(0.95, 0.18 + 0.55 * lawlessness + math.min(0.35, cargoTons * 0.05))
 		return Engine.rand:Number(1) <= prob
 	end
 
@@ -165,7 +167,8 @@ local function spawnSystemPirates(player)
 					status = pirateIsInterested(player) and 'LURK' or 'ORBIT',
 					planet = hostSb and hostSb.body or nil,
 					hasInterdictor = hasInterdictor,
-					warned = false
+					warned = false,
+					target = nil
 				}
 				if not placedOnLane then
 					pirates[ship].planet = assignSupercruisePatrol(ship, pirates[ship].planet)
@@ -176,12 +179,16 @@ local function spawnSystemPirates(player)
 end
 
 local onEnterSystem = function (player)
+	playerSCStartTime = nil
+	nextPlayerInterdictTime = 0
 	spawnSystemPirates(player)
 end
 
 local onLeaveSystem = function ()
 	pirates = {}
 	planets = {}
+	playerSCStartTime = nil
+	nextPlayerInterdictTime = 0
 end
 
 local onShipHit = function (ship, attacker)
@@ -189,6 +196,7 @@ local onShipHit = function (ship, attacker)
 		if pirates[ship].status ~= 'ATTACK' then
 			ship:AIKill(attacker)
 			pirates[ship].status = 'ATTACK'
+			pirates[ship].target = attacker
 		end
 	end
 end
@@ -203,19 +211,22 @@ local onShipDestroyed = function (ship)
 		local star = planet.nearestJumpable
 		local newPirate = ShipBuilder.MakeShipOrbit(star.body, MissionUtils.ShipTemplates.GenericPirate, threat, star.radius * 1.2, star.radius * 3.5)
 		newPirate:SetWanted(true, math.floor(1500 + threat * 150))
-		equipInterdictor(newPirate, threat)
+		local hasInterdictor = equipInterdictor(newPirate, threat)
 
-		pirates[newPirate] = { status = 'ORBIT', planet = planet.body }
+		pirates[newPirate] = { status = 'ORBIT', planet = planet.body, hasInterdictor = hasInterdictor, warned = false, target = nil }
 		assignSupercruisePatrol(newPirate, planet.body)
 	end
 end
 
 local onPlayerDocked = function ()
+	playerSCStartTime = nil
 	for p, s in pairs(pirates) do
-		if s.status == 'ATTACK' then
+		if s.status == 'ATTACK' or s.status == 'INTERDICT_PLAYER' then
 			enterOrbit(p, s.planet)
 		end
 		s.status = 'ORBIT'
+		s.target = nil
+		s.warned = false
 	end
 end
 
@@ -232,6 +243,13 @@ local onAICompleted = function (ship, error)
 	if pirates[ship] and error == 'NONE' then
 		ship:SetFuelPercent()
 		pirates[ship].status = pirateIsInterested(Game.player) and 'LURK' or 'ORBIT'
+		pirates[ship].target = nil
+		pirates[ship].warned = false
+		pirates[ship].planet = assignSupercruisePatrol(ship, pirates[ship].planet)
+	elseif pirates[ship] and (pirates[ship].status == 'ATTACK' or pirates[ship].status == 'INTERDICT_PLAYER') then
+		pirates[ship].status = 'ORBIT'
+		pirates[ship].target = nil
+		pirates[ship].warned = false
 		pirates[ship].planet = assignSupercruisePatrol(ship, pirates[ship].planet)
 	end
 end
@@ -240,6 +258,8 @@ local loaded_data
 
 local onGameStart = function ()
 	local wasLoaded = loaded_data ~= nil
+	playerSCStartTime = nil
+	nextPlayerInterdictTime = (loaded_data and loaded_data.nextPlayerInterdictTime) or 0
 	if loaded_data and loaded_data.pirates and loaded_data.planets then
 		pirates = loaded_data.pirates
 		planets = loaded_data.planets
@@ -262,33 +282,53 @@ local onGameStart = function ()
 		local policeId = Game.system.faction.policeShip
 		local allShips = Space.GetBodies("Ship")
 		local playerInSC = Game.player:GetFlightState() == "SUPERCRUISE"
+		if playerInSC then
+			if not playerSCStartTime then
+				playerSCStartTime = Game.time
+			end
+		else
+			playerSCStartTime = nil
+		end
 		local playerBusy = playerInSC and Game.player.IsBeingInterdicted and Game.player:IsBeingInterdicted()
 
-		-- Check if a pirate is already actively hunting/interdicting the player
+		-- Check if a pirate is already actively hunting/interdicting the player,
+		-- and clean up any pirate whose interdiction attempt already ended
 		local playerHunterActive = false
 		for p, s in pairs(pirates) do
 			if p:exists() and (s.status == 'INTERDICT_PLAYER' or s.status == 'ATTACK') then
-				if p:GetAITarget() == Game.player then
+				if s.status == 'INTERDICT_PLAYER' and playerInSC and p:GetFlightState() ~= "SUPERCRUISE" then
+					-- Pirate dropped out of Supercruise (e.g. player evaded interdiction)
+					s.status = 'ORBIT'
+					s.target = nil
+					s.warned = false
+					nextPlayerInterdictTime = math.max(nextPlayerInterdictTime, Game.time + 90)
+					s.planet = assignSupercruisePatrol(p, s.planet)
+				elseif s.target == Game.player or (p.GetInterdictionPeer and p:GetInterdictionPeer() == Game.player) then
 					playerHunterActive = true
-					break
 				end
 			end
 		end
 
+		-- Require at least 24s in Supercruise and respect post-interdiction cooldown before ambushing player
+		local scGraceElapsed = playerSCStartTime and (Game.time - playerSCStartTime >= 24)
+		local cooldownElapsed = Game.time >= nextPlayerInterdictTime
+
 		-- Actively pursue and interdict the player when flying in Supercruise
-		if playerInSC and not playerBusy and not playerHunterActive then
+		if playerInSC and scGraceElapsed and cooldownElapsed and not playerBusy and not playerHunterActive then
 			for p, s in pairs(pirates) do
 				if p:exists() and s.status ~= 'ATTACK' and s.status ~= 'INTERDICT_PLAYER' and s.hasInterdictor ~= false then
 					if p:GetFlightState() == "SUPERCRUISE" or p:GetFlightState() == "FLYING" then
 						if s.status == 'LURK' or pirateIsInterested(Game.player) then
 							if p:DistanceTo(Game.player) > 120 * LIGHT_SPEED or p:GetFlightState() ~= "SUPERCRUISE" then
-								Space.PutShipInSupercruiseBehind(p, Game.player, 15, 35)
+								Space.PutShipInSupercruiseBehind(p, Game.player, 35, 65)
 							end
 							if not s.warned then
 								Comms.ImportantMessage(threatMessages[Engine.rand:Integer(1, #threatMessages)], p.label or "Unknown Contact")
 								s.warned = true
 							end
 							s.status = 'INTERDICT_PLAYER'
+							s.target = Game.player
+							nextPlayerInterdictTime = Game.time + 90
 							p:AIKill(Game.player)
 							break
 						end
@@ -303,6 +343,7 @@ local onGameStart = function ()
 				if not playerInSC and s.status == 'LURK' and p:DistanceTo(Game.player) < 2.5e10 and p:GetFlightState() == Game.player:GetFlightState() then
 					p:AIKill(Game.player)
 					s.status = 'ATTACK'
+					s.target = Game.player
 				elseif p:GetFlightState() == "SUPERCRUISE" then
 					for _, victim in ipairs(allShips) do
 						if victim ~= p and victim ~= Game.player and not pirates[victim] and victim.shipId ~= policeId then
@@ -310,6 +351,7 @@ local onGameStart = function ()
 								if p:DistanceTo(victim) < 1.8e10 then
 									p:AIKill(victim)
 									s.status = 'ATTACK'
+									s.target = victim
 									break
 								end
 							end
@@ -324,10 +366,12 @@ end
 local onGameEnd = function ()
 	pirates = {}
 	planets = {}
+	playerSCStartTime = nil
+	nextPlayerInterdictTime = 0
 end
 
 local serialize = function ()
-	return { pirates = pirates, planets = planets }
+	return { pirates = pirates, planets = planets, nextPlayerInterdictTime = nextPlayerInterdictTime }
 end
 
 local unserialize = function (data)
