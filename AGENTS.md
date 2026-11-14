@@ -7,10 +7,12 @@ Welcome to the **Pioneer: Expanse** workspace. This repository is an independent
 ## 1. Project Master Plan & Roadmap
 
 The implementation plans and long-term roadmap are maintained in the [`plans/`](./plans/) directory:
-* [`plans/01_EXPANSE_LONG_TERM_ROADMAP.md`](./plans/01_EXPANSE_LONG_TERM_ROADMAP.md): High-level architectural roadmap covering the 6 core pillars (Planetary SRVs, Crafting/Engineering, Infiltration, Graphics/Audio, Manufacturers, and Alien Civilizations).
+* [`plans/01_EXPANSE_LONG_TERM_ROADMAP.md`](./plans/01_EXPANSE_LONG_TERM_ROADMAP.md): High-level architectural roadmap linking core foundation plans (`02`–`04`) and lettered expansion pillar plans (`A`–`H`).
 * [`plans/02_PIONEER_EXPANSE_FOUNDATION_PLAN.md`](./plans/02_PIONEER_EXPANSE_FOUNDATION_PLAN.md): Core foundational implementation roadmap (Phases 1–8).
-* [`plans/03_VOLUMETRIC_RINGS_AND_MINING_PLAN.md`](./plans/03_VOLUMETRIC_RINGS_AND_MINING_PLAN.md): Technical plan for volumetric planetary rings, 3-tier LOD asteroid fields, and mining.
-* [`plans/04_NPC_SUPERCRUISE_INTERDICTION_PLAN.md`](./plans/04_NPC_SUPERCRUISE_INTERDICTION_PLAN.md): Technical plan for NPC Supercruise flight, sensors, and interdiction mechanics.
+* [`plans/03_VOLUMETRIC_RINGS_AND_MINING_PLAN.md`](./plans/03_VOLUMETRIC_RINGS_AND_MINING_PLAN.md): Volumetric planetary rings, 3-tier LOD asteroid field, and ring mining (**Completed**).
+* [`plans/04_NPC_SUPERCRUISE_INTERDICTION_PLAN.md`](./plans/04_NPC_SUPERCRUISE_INTERDICTION_PLAN.md): Living NPC Supercruise traffic, sensors, and FSD interdiction mechanics (**Completed**).
+* [`plans/A_PLAN_MULTI_SHIP_AND_CREW_AUTONOMY.md`](./plans/A_PLAN_MULTI_SHIP_AND_CREW_AUTONOMY.md): Multi-ship ownership, station hangars, NPC Captains, and X4-style autonomous fleet operations (**Next Up**).
+* `plans/B`–`H`: Planetary SRVs (`B`), Engineering (`C`), Infiltration (`D`), Graphics/Audio (`E`), Manufacturers (`F`), Exploration/Aliens (`G`), and Capital Ships/Station Building (`H`).
 
 Always consult these plans when implementing features across any phase:
 * **Phase 1: Dev Environment & Native Build** — Completed.

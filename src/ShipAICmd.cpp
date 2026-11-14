@@ -1107,7 +1107,7 @@ bool AICmdFlyTo::TimeStepUpdate()
 					m_target->IsType(ObjectType::SHIP) &&
 					static_cast<const Ship *>(m_target)->GetFlightState() == Ship::SUPERCRUISE;
 
-				if (!targetIsSupercruisingShip) {
+				if (!targetIsSupercruisingShip && !sc->IsBeingInterdicted() && !sc->IsInterdicting()) {
 					if (m_target && m_target->IsType(ObjectType::TERRAINBODY)) {
 						const double safeDist = std::max(SupercruiseController::SAFE_DISENGAGE_DIST,
 							SupercruiseController::GetExclusionZoneRadius(m_target) + SupercruiseController::SAFE_DISENGAGE_DIST);
@@ -1123,7 +1123,10 @@ bool AICmdFlyTo::TimeStepUpdate()
 
 				vector3d steerRel = rawRel;
 				double pursuitThrottle = -1.0;
-				if (targetIsSupercruisingShip) {
+				if (sc->IsBeingInterdicted()) {
+					steerRel = sc->GetEscapeVectorWorld() * 1.0e9;
+					pursuitThrottle = sc->IsSubmittingToInterdiction() ? 0.0 : 0.85;
+				} else if (targetIsSupercruisingShip) {
 					Ship *targetShip = static_cast<Ship *>(m_target);
 					SupercruiseController *targetSc = targetShip->GetSupercruise();
 					if (sc->HasFSDInterdictor() && sc->CanInterdict(targetShip)) {

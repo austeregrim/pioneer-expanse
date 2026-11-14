@@ -1,4 +1,40 @@
 ================================================================================
+Pioneer: Expanse v2026.11.5-expanse (November 2026)
+================================================================================
+Volumetric Planetary Rings, Ring Mining, Active FSD Interdictions & SAR Overhaul:
+  * Volumetric Planetary Rings & 3-Tier Asteroid Field (Plan 03):
+    - Implemented astrophysical Roche/frost-line ring generation with icy, silicate,
+      and metallic compositional bands and planetary self-shadowing shaders.
+    - Added 3-tier volumetric RingField around ringed planets: instanced 3D boulder
+      field (up to 2,800 visible rocks), physical ship-asteroid collision response,
+      and close-range 2D ring plane fade-out with depth-write disabled so 3D rocks
+      are never occluded above or below the ring midplane.
+    - Added ring laser mining and fragment spawning yielding composition-driven
+      commodities (water, precious metals, minerals) for cargo scooping.
+  * Living NPC Supercruise Traffic & Active FSD Interdiction (Plan 04):
+    - Boosted in-system NPC traffic density across docked ports and Supercruise lanes,
+      normalizing per-port docked ship weights and hardening hyperspace jump spawns.
+    - Obscured external Supercruise contact/wake HUD markers while docked inside
+      stations.
+    - Enabled active pirate and police Supercruise interdictions with FSD Interdictor
+      equipment modules, rear-cone tether lock, Escape Vector tug-of-war HUD, NPC
+      evasion steering when interdicted by the player, Low Wake signals, and
+      security-scaled interdiction pacing in safe vs lawless systems.
+  * Search & Rescue (SAR) Recovery, Insurance & Crew Fixes:
+    - Scaled post-destruction SAR time advancement by distance: in-system station
+      recovery takes hours (0.15-1.8 days based on AU distance), while cross-system
+      recovery scales by 3D light-year jump distance (~0.365 days/ly, up to decades
+      across the galaxy).
+    - Fixed post-recovery station frame assignment, skybox/star background flags,
+      and free docking bay selection so exterior station views render properly.
+    - Preserved player crew roster on ship destruction and added self-healing crew
+      checks so rescued/rebought ships never suffer crew launch lockouts.
+  * Master Roadmap Expansion (Plans A-H):
+    - Reorganized standalone pillar plans into lettered plans A-H, adding Plan A
+      (Multi-Ship Ownership, Station Hangars, Crewed Fleet & X4-Style Autonomy)
+      and Plan H (Capital Ships, Station Construction & Grand Strategy).
+
+================================================================================
 Pioneer: Expanse v2026.11.4-expanse (November 2026)
 ================================================================================
 Dynamic Git Versioning & Inno Setup Branding:
