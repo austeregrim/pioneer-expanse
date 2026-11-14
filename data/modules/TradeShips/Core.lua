@@ -9,12 +9,12 @@ local Core = {
 	-- CONSTANTS / SETTINGS
 	AU = 149598000000.0, -- meters
 
-	MAX_ROUTE_FLOW = 28.0, -- flow to the most popular station in the system, ships/hour (Supercruise real-time)
-	MAX_BUSY = 0.25, -- maximum station load
-	MAX_SHIPS = 28, -- ~ maximum ships in open space (Supercruise real-time traffic balance)
-	MIN_STATION_DOCKING_TIME = 0.5, -- hours, minimum average time of the ship's stay at the station (30 min real-time)
+	MAX_ROUTE_FLOW = 48.0, -- flow to the most popular station in the system, ships/hour (Supercruise real-time)
+	MAX_BUSY = 0.55, -- maximum station load
+	MAX_SHIPS = 42, -- ~ maximum ships in open space (Supercruise real-time traffic balance)
+	MIN_STATION_DOCKING_TIME = 0.05, -- hours, minimum average time of the ship's stay at the station (~3 min real-time)
 
-	WAIT_FOR_NEXT_UNDOCK = 600, -- seconds
+	WAIT_FOR_NEXT_UNDOCK = 35, -- seconds
 	MINIMUM_NEAR_SYSTEMS = 10,
 	LOG_SIZE = 2000, -- records in log
 

@@ -669,6 +669,10 @@ void WorldView::DrawSupercruiseShips()
 	if (!Pi::player || !m_game || !m_game->GetSpace() || !m_scGlowMat)
 		return;
 
+	const Ship::FlightState pState = Pi::player->GetFlightState();
+	if (pState == Ship::DOCKED || pState == Ship::LANDED || pState == Ship::HYPERSPACE || Pi::player->GetDockedWith() != nullptr)
+		return;
+
 	const FrameId camFrameId = m_cameraContext->GetTempFrame();
 	if (!camFrameId.valid())
 		return;
@@ -681,14 +685,29 @@ void WorldView::DrawSupercruiseShips()
 	const float winH = float(m_renderer->GetWindowHeight());
 	const double zClip = -1.0;
 
-	// Collect celestial occluders (stars, gas giants, planets, moons) in camera space
+	// Collect celestial and station occluders in camera space
 	struct Occluder {
 		vector3d pos;
 		double radiusSq;
 	};
 	std::vector<Occluder> occluders;
 	for (Body *b : m_game->GetSpace()->GetBodies()) {
-		if (!b || !b->IsType(ObjectType::TERRAINBODY))
+		if (!b)
+			continue;
+
+		if (b->IsType(ObjectType::SPACESTATION)) {
+			const vector3d p = b->GetInterpPositionRelTo(camFrameId);
+			const double distSq = p.LengthSqr();
+			const SpaceStation *st = static_cast<const SpaceStation *>(b);
+			if (!st->IsGroundStation() && distSq < b->GetClipRadius() * b->GetClipRadius())
+				return; // Camera is inside orbital station superstructure; hide external Supercruise wakes
+			const double r = std::max(b->GetPhysRadius(), 450.0);
+			if (distSq > r * r)
+				occluders.push_back({ p, r * r });
+			continue;
+		}
+
+		if (!b->IsType(ObjectType::TERRAINBODY))
 			continue;
 		const SystemBody *sb = b->GetSystemBody();
 		const double r = sb ? sb->GetRadius() : b->GetPhysRadius();

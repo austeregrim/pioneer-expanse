@@ -2,6 +2,8 @@
 
 Detailed design and implementation roadmap for **Phase 7** (referenced from [02_PIONEER_EXPANSE_FOUNDATION_PLAN.md](./02_PIONEER_EXPANSE_FOUNDATION_PLAN.md)).
 
+**Status:** **Completed** — All core milestones plus station occlusion, living traffic density, and active New-Game patrol/pirate FSD interdictions are implemented and verified.
+
 ---
 
 ## Core Design Decisions
@@ -87,5 +89,7 @@ Detailed design and implementation roadmap for **Phase 7** (referenced from [02_
 
 ### Milestone 4: NPC Traffic Lanes, Piracy/Police AI, Low Wakes & Escape Rules (COMPLETED)
 * [x] Update `TradeShips` (via `AICmdDock`/`AICmdFlyTo` Supercruise transit), `PolicePatrol`, and `Pirates.lua` to spawn/cruise in Supercruise, intercept `WANTED` targets or traders, and use FSD Interdictors.
+* [x] Hide Supercruise points-of-light and Low Wakes when docked/landed/inside station interiors, and occlude them behind `SPACESTATION` hulls (`WorldView.cpp`).
+* [x] Populate starports with docked ships, multi-station in-system Supercruise hops, short real-time cloud arrival timers, and `onGameStart` police/pirate ambient spawns + active rear-cone Supercruise interdictions (`Space.PutShipInSupercruiseBehind`, `misc.fsd_interdictor_1` available at `tech_level=2` and pre-equipped on Mercenary start).
 * [x] Implement probabilistic NPC-vs-NPC interdiction drops with **Low Wake / Distress Signal** markers targetable in Supercruise (`HyperspaceCloud::SpawnLowWake` + `SafeDisengage` drop-in support).
 * [x] Implement ship-to-ship Mass Lock Factor (Option A: slows Supercruise charge, ignored by Hyperspace) and NPC `< 25%` hull FSD offline disruption (Option 1) + NPC Supercruise flee behavior.

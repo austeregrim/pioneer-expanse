@@ -1138,10 +1138,11 @@ bool AICmdFlyTo::TimeStepUpdate()
 					const double targetSpeed = targetSc ? targetSc->GetSpeed() : SupercruiseController::MIN_SPEED;
 					const double envMax = std::max(1.0, sc->GetMaxEnvSpeed());
 
+					const double rearOffset = std::min(rawDist * 0.35, 1.2 * SupercruiseController::LIGHT_SPEED);
 					if (behindDot > 0.45) {
 						// Behind target: aim straight at target (with slight rear slot bias if > 4 ls away) and match+close speed
 						if (rawDist > 4.0 * SupercruiseController::LIGHT_SPEED)
-							steerRel = rawRel - targetFwd * (1.2 * SupercruiseController::LIGHT_SPEED);
+							steerRel = rawRel - targetFwd * (0.8 * SupercruiseController::LIGHT_SPEED);
 						else
 							steerRel = rawRel;
 
@@ -1152,10 +1153,19 @@ bool AICmdFlyTo::TimeStepUpdate()
 							const double desiredSpeed = targetSpeed + closingBoost;
 							pursuitThrottle = Clamp(desiredSpeed / envMax, 0.25, 1.0);
 						}
+
+						if (rawDist < 60.0 * SupercruiseController::LIGHT_SPEED && sc->GetSpeed() < targetSpeed * 1.35 + 150000.0) {
+							pursuitThrottle = 1.0;
+							const double boostSpeed = std::min(SupercruiseController::MAX_SPEED, std::max(sc->GetSpeed(), targetSpeed * 1.25 + 250000.0));
+							sc->SetSpeed(boostSpeed);
+						}
 					} else {
-						// In front of or abeam target: aim for a point 2 ls behind their tail at blue-zone turn speed to avoid wide overshoot loops
-						steerRel = rawRel - targetFwd * (2.0 * SupercruiseController::LIGHT_SPEED);
+						// In front of or abeam target: aim behind their tail scaled to current separation so close pursuers don't invert
+						steerRel = rawRel - targetFwd * rearOffset;
 						pursuitThrottle = 0.75;
+						if (rawDist < 60.0 * SupercruiseController::LIGHT_SPEED && rawDist > 2.0 * SupercruiseController::LIGHT_SPEED && sc->GetSpeed() < targetSpeed) {
+							sc->SetSpeed(std::min(SupercruiseController::MAX_SPEED, targetSpeed * 1.05));
+						}
 					}
 				}
 

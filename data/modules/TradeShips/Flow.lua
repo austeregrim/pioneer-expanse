@@ -17,11 +17,10 @@ local Flow = {}
 
 -- UTILS
 
--- the inbound cloud lifetime cannot be more than half the route duration, and
--- asymptotically approaches two days
+-- Inbound cloud lifetime for real-time Supercruise pacing (15-90s so arrivals visibly materialize)
 local function inboundCloudDuration(route_duration)
-	local max_duration = 2 * 24 * 60 * 60 -- 2 days max
-	return utils.asymptote(route_duration / 2, max_duration, 0.0)
+	local scaled = utils.asymptote(route_duration * 0.1, 75.0, 0.0)
+	return math.clamp(15.0 + scaled, 15.0, 90.0)
 end
 
 -- change of the standard parameter depending on local factors
@@ -350,7 +349,9 @@ Flow.calculateSystemParams = function()
 		-- available hyperspace routes lookup table by ship name
 		hyper_routes = hyper_routes,
 		-- station parameters lookup table by it's path
-		port_params = port_params
+		port_params = port_params,
+		-- all ports in the system
+		ports = ports
 	}
 	return true
 end
@@ -451,46 +452,68 @@ Flow.spawnInitialShips = function()
 	Core.params.spawn_in = {{"inbound", ships_in_space}, {"hyperspace", ships_in_cloud}, {"docked", ships_docked}}
 	utils.normWeights(spawn_in)
 
-	-- generating ships (capped for lively 1:1 real-time Supercruise traffic density)
-	local totalSpawn = math.min(28, math.max(10, math.floor(ships_in_space + ships_in_cloud + ships_docked + 0.5)))
-	local spawnedInbound = 0
-	local targetMinInbound = (#routes_variants > 0) and math.min(12, math.max(5, #port_summary * 2)) or 0
-	for _ = 1, totalSpawn do
-		-- Guarantee active inbound Supercruise traffic along shipping lanes before filling docked/cloud slots
-		local place = (spawnedInbound < targetMinInbound) and "inbound" or utils.chooseNormalized(spawn_in).place
+	-- generating ships (guarantee docked presence, active Supercruise lane traffic, and arrival clouds)
+	Core.log:add(nil, string.format('spawnInitialShips: %d ports, %d routes, %d clouds', #port_summary, #routes_variants, #cloud_variants))
 
-		if place == "inbound" then
+	-- 1. Docked Ships at Every Station (occupy 30-55% of docks while leaving at least 1-2 pads free)
+	local dockedVariantsByPort = {}
+	for _, dv in ipairs(docked_variants) do
+		dockedVariantsByPort[dv.port] = dockedVariantsByPort[dv.port] or {}
+		table.insert(dockedVariantsByPort[dv.port], dv)
+	end
+	for _, portParam in ipairs(port_summary) do
+		local portBody = portParam.port
+		local candidates = dockedVariantsByPort[portBody]
+		local ndocks = portParam.ndocks or portBody.numDocks or 0
+		if candidates and #candidates > 0 and ndocks > 1 then
+			local minLeaveFree = (ndocks >= 4) and 2 or 1
+			local maxAllowed = math.max(1, ndocks - minLeaveFree)
+			local targetDocked = math.clamp(math.ceil(ndocks * 0.40), 2, maxAllowed)
+			if ndocks <= 2 then
+				targetDocked = 1
+			end
+			for i = 1, targetDocked do
+				local pick = utils.chooseNormalized(candidates)
+				local ship = Space.SpawnShipDocked(pick.id, portBody)
+				if ship then
+					Core.ships[ship] = { ts_error = "OK", status = 'docked', starport = portBody, ship_name = pick.id }
+					ship:SetLabel(Ship.MakeRandomLabel())
+					Trader.addEquip(ship)
+					local undockDelay = Engine.rand:Number(25, 240) + (i - 1) * 18
+					Trader.assignTask(ship, Game.time + undockDelay, 'doUndock')
+				end
+			end
+		end
+	end
+
+	-- 2. Active Supercruise Ships Along Shipping Lanes
+	if #routes_variants > 0 then
+		local targetInbound = math.clamp(#port_summary * 3 + 4, 8, 18)
+		for _ = 1, targetInbound do
 			local params = utils.chooseNormalized(routes_variants)
 			local hj_route = utils.chooseEqual(hyper_routes[params.id])
 
 			local ship = Space.SpawnShip(params.id, 9, 11, {hj_route.from, params.from:GetSystemBody().path, 0.0})
 			ship:SetLabel(Ship.MakeRandomLabel())
-			Core.ships[ship] = { ts_error = "OK", status = 'inbound', starport = params.to, ship_name	= params.id}
+			Core.ships[ship] = { ts_error = "OK", status = 'inbound', starport = params.to, ship_name = params.id }
 
 			Trader.addEquip(ship)
 			Trader.addHyperdriveFuel(ship, hj_route.fuel)
 			Trader.addCargo(ship, 'import')
 
-			Space.PutShipOnRoute(ship, params.to, Engine.rand:Number(0.05, 0.80)) -- place along active Supercruise lane
+			Space.PutShipOnRoute(ship, params.to, Engine.rand:Number(0.15, 0.85))
 			ship:AIDockWith(params.to)
-			spawnedInbound = spawnedInbound + 1
+		end
+	end
 
-		elseif place == "hyperspace" then
-			-- choose random source system, and ship
+	-- 3. Short-Fuse Arrival Hyperspace Clouds
+	if #cloud_variants > 0 then
+		local numClouds = Engine.rand:Integer(4, 6)
+		for _ = 1, numClouds do
 			local cloud = utils.chooseNormalized(cloud_variants)
 			local route = utils.chooseNormalized(Core.params.local_routes[cloud.ship])
-			Trader.spawnInCloud(cloud.ship, cloud, route, Game.time + Engine.rand:Integer(1, cloud.cloud_duration))
-
-		else -- docked
-			local params = utils.chooseNormalized(docked_variants)
-			local ship = Space.SpawnShipDocked(params.id, params.port)
-			-- if can't spawn - just skip
-			if ship then
-				Core.ships[ship] = { ts_error = "OK", status = 'docked', starport = params.port, ship_name = params.id }
-				ship:SetLabel(Ship.MakeRandomLabel())
-				Trader.addEquip(ship)
-				Trader.assignTask(ship, Game.time + utils.deviation(Core.params.port_params[params.port].time * 3600, 0.8), 'doUndock')
-			end
+			local dest_time = Game.time + Engine.rand:Number(12, 75)
+			Trader.spawnInCloud(cloud.ship, cloud, route, dest_time)
 		end
 	end
 	return ships_in_space
@@ -540,15 +563,15 @@ end
 Flow.run = function()
 	local activeCount = 0
 	for _ in pairs(Core.ships) do activeCount = activeCount + 1 end
-	if activeCount < 36 then
+	if activeCount < Core.MAX_SHIPS then
 		local ship_name = utils.chooseEqual(Core.params.ship_names)
 		local cloud = utils.chooseEqual(Core.params.hyper_routes[ship_name])
 		-- we immediately choose the local route, because it depends on which star to
 		-- jump to in the multiple system
 		local route = utils.chooseNormalized(Core.params.local_routes[ship_name])
-		Trader.spawnInCloud(ship_name, cloud, route, Game.time + utils.deviation(cloud.cloud_duration, 0.1))
+		Trader.spawnInCloud(ship_name, cloud, route, Game.time + Engine.rand:Number(15, 45))
 	end
-	Core.last_spawn_interval = math.min(90.0, utils.deviation(3600 / Core.params.total_flow, 0.7)) -- for debug info
+	Core.last_spawn_interval = Engine.rand:Number(20, 45) -- steady real-time arrival cadence
 	Trader.callInThisSystem(Game.time + Core.last_spawn_interval, Flow.run)
 end
 

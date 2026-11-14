@@ -58,19 +58,38 @@ end
 
 local function assignSupercruiseRoute(ship)
 	if not Game.system then return end
+	local candidates = {}
 	local stations = Game.system:GetStationPaths()
-	if stations and #stations > 0 then
-		local path = stations[Engine.rand:Integer(1, #stations)]
-		local body = Space.GetBody(path.bodyIndex)
-		if body then
-			ship:AIFlyTo(body)
-			return
+	if stations then
+		for _, path in ipairs(stations) do
+			local body = Space.GetBody(path.bodyIndex)
+			if body and ship:DistanceTo(body) > 500000 then
+				table.insert(candidates, body)
+			end
 		end
 	end
-	local planets = Game.system:GetBodyPaths()
-	if planets and #planets > 0 then
-		local path = planets[Engine.rand:Integer(1, #planets)]
-		local body = Space.GetBody(path.bodyIndex)
+	local bodies = Game.system:GetBodyPaths()
+	if bodies then
+		for _, path in ipairs(bodies) do
+			local sb = path:GetSystemBody()
+			if sb and sb.body and (sb.superType == 'ROCKY_PLANET' or sb.superType == 'GAS_GIANT') then
+				if ship:DistanceTo(sb.body) > 500000 then
+					table.insert(candidates, sb.body)
+				end
+			end
+		end
+	end
+	if #candidates > 0 then
+		ship:AIFlyTo(candidates[Engine.rand:Integer(1, #candidates)])
+		return
+	end
+	if stations and #stations > 0 then
+		local body = Space.GetBody(stations[Engine.rand:Integer(1, #stations)].bodyIndex)
+		if body then
+			ship:AIFlyTo(body)
+		end
+	elseif bodies and #bodies > 0 then
+		local body = Space.GetBody(bodies[Engine.rand:Integer(1, #bodies)].bodyIndex)
 		if body then
 			ship:AIFlyTo(body)
 		end
@@ -225,42 +244,57 @@ local onJettison = function (ship, cargo)
 end
 
 ---@param player Player
-local onEnterSystem = function (player)
-	local system = assert(Game.system)
+local function spawnAmbientPatrols(system)
+	if not system then return end
 	local policeId = system.faction.policeShip
 
 	-- Spawn ambient Supercruise police patrols in policed systems
 	if system.lawlessness < 0.75 and system.population > 0 then
 		local stations = system:GetStationPaths()
 		if stations and #stations > 0 then
-			local numPatrols = math.min(4, math.max(2, math.floor((1.0 - system.lawlessness) * 3.0 + #stations * 0.5)))
+			local numPatrols = math.min(5, math.max(2, math.floor((1.0 - system.lawlessness) * 3.0 + #stations * 0.5)))
 			local threat = 20.0 + 30.0 * (1.0 - system.lawlessness)
 			local scTemplate = MissionUtils.ShipTemplates.PolicePatrol:clone {
 				shipId = policeId,
 				label = system.faction.policeName
 			}
+			local stars = system:GetStars()
+			local primaryStar = stars and stars[1]
 			for i = 1, numPatrols do
 				local stPath = stations[((i - 1) % #stations) + 1]
 				local stBody = Space.GetBody(stPath.bodyIndex)
-				local spawnHost = stBody
-				local nearDist, farDist = 12000.0, 25000.0
-				if stBody and stBody.type == "STARPORT_SURFACE" then
-					local parentSb = stBody:GetSystemBody() and stBody:GetSystemBody().parent
-					if parentSb and parentSb.body then
-						spawnHost = parentSb.body
-						nearDist = parentSb.radius * 1.2
-						farDist = parentSb.radius * 2.5
-					else
-						spawnHost = nil
+				local pShip
+				if stBody and (i % 2 == 0) and primaryStar and primaryStar.body and stBody ~= primaryStar.body then
+					-- Place half along active Supercruise lanes heading toward stations
+					local starRadius = math.max(primaryStar.radius or 7e8, 7e8)
+					pShip = ShipBuilder.MakeShipOrbit(primaryStar.body, scTemplate, threat, starRadius * 4.0, starRadius * 8.0)
+					if pShip then
+						Space.PutShipOnRoute(pShip, stBody, Engine.rand:Number(0.15, 0.80))
+						pShip:AIFlyTo(stBody)
+					end
+				else
+					local spawnHost = stBody
+					local nearDist, farDist = 12000.0, 25000.0
+					if stBody and stBody.type == "STARPORT_SURFACE" then
+						local parentSb = stBody:GetSystemBody() and stBody:GetSystemBody().parent
+						if parentSb and parentSb.body then
+							spawnHost = parentSb.body
+							nearDist = parentSb.radius * 1.2
+							farDist = parentSb.radius * 2.5
+						else
+							spawnHost = nil
+						end
+					end
+					if spawnHost then
+						pShip = ShipBuilder.MakeShipOrbit(spawnHost, scTemplate, threat, nearDist, farDist)
+						if pShip then
+							assignSupercruiseRoute(pShip)
+						end
 					end
 				end
-				if spawnHost then
-					local pShip = ShipBuilder.MakeShipOrbit(spawnHost, scTemplate, threat, nearDist, farDist)
-					if pShip then
-						equipInterdictor(pShip)
-						table.insert(patrol, pShip)
-						assignSupercruiseRoute(pShip)
-					end
+				if pShip then
+					equipInterdictor(pShip)
+					table.insert(patrol, pShip)
 				end
 			end
 			if #patrol > 0 then
@@ -268,6 +302,13 @@ local onEnterSystem = function (player)
 			end
 		end
 	end
+end
+
+local onEnterSystem = function (player)
+	local system = assert(Game.system)
+	local policeId = system.faction.policeShip
+
+	spawnAmbientPatrols(system)
 
 	if not hasIllegalGoods(Commodities) then return end
 
@@ -409,12 +450,16 @@ end
 local loaded_data
 
 local onGameStart = function ()
+	local wasLoaded = loaded_data ~= nil
 	if loaded_data then
 		patrol = loaded_data.patrol
 		showMercy = loaded_data.showMercy
 		piracy = loaded_data.piracy
 		target = loaded_data.target
 		loaded_data = nil
+	end
+	if not wasLoaded and #patrol == 0 and Game.system then
+		spawnAmbientPatrols(Game.system)
 	end
 	if #patrol > 0 then
 		startPatrolHunterTimer()

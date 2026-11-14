@@ -313,7 +313,7 @@ trader_task.hyperjumpAtDistance = function(ship)
 		if trader.starport ~= nil then
 			-- if trader has not started to hyperjump
 			if trader.hyperjumpDist == nil then
-				trader.hyperjumpDist = Engine.rand:Integer(20000, 240000)
+				trader.hyperjumpDist = Engine.rand:Integer(500000, 1500000)
 			end
 			if Trader.checkDistBetweenStarport(ship) then
 				-- if distance is large enough attempt to hyperjump

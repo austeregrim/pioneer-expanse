@@ -42,7 +42,7 @@ Equipment.Register("misc.trade_computer", EquipType.New {
 
 Equipment.Register("misc.fsd_interdictor_1", EquipType.New {
 	l10n_key="FSD_INTERDICTOR_1",
-	price=6500, purchasable=true, tech_level=5,
+	price=6500, purchasable=true, tech_level=2,
 	slot={ type="computer.interdictor", size=1 },
 	mass=1.2, volume=2.0, capabilities={ fsd_interdictor=1 },
 	icon_name="equip_radar"

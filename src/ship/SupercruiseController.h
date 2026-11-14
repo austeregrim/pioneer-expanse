@@ -78,6 +78,7 @@ public:
 	void SetThrottle(double throttle);
 	void ChangeThrottle(double delta);
 	double GetSpeed() const { return m_speed; }
+	void SetSpeed(double speed);
 	double GetMaxEnvSpeed() const { return m_maxEnvSpeed; }
 	double GetDesiredSpeed() const { return m_desiredSpeed; }
 	double GetGravityStrain() const { return m_gravityStrain; }
@@ -99,6 +100,7 @@ public:
 	bool StartCharge();
 	void AbortCharge(const std::string &reason = "");
 	void EnterSupercruise();
+	void EnterSupercruiseImmediate(double initialSpeed = MIN_SPEED);
 	void EnterSupercruiseOnHyperspaceExit();
 	void SafeDisengage();
 	void NormalDrop(const std::string &reason = "");

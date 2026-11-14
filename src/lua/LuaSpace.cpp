@@ -22,6 +22,7 @@
 #include "SpaceStation.h"
 #include "profiler/Profiler.h"
 #include "ship/PrecalcPath.h"
+#include "ship/SupercruiseController.h"
 
 /*
  * Interface: Space
@@ -244,6 +245,7 @@ static int l_space_put_ship_on_route(lua_State *l)
 	const double t_ratio = LuaPull<double>(l, 3);
 	const ShipType *st = ship->GetShipType();
 	const shipstats_t ss = ship->GetStats();
+	const vector3d startPosRoot = ship->GetPositionRelTo(Pi::game->GetSpace()->GetRootFrame());
 	const vector3d route = targetbody->GetPositionRelTo(ship->GetFrame()) - ship->GetPosition();
 	PrecalcPath pp(
 		route.Length(), // distance
@@ -301,6 +303,36 @@ static int l_space_put_ship_on_route(lua_State *l)
 		}
 		// update velocity direction
 		ship->SetVelocity((targpos - ship->GetPosition()).Normalized() * pp.getVel() + targetbody->GetVelocityRelTo(ship->GetFrame()));
+	}
+
+	// If placed well outside both start and destination gravity/station envelopes, engage Supercruise immediately facing destination
+	const vector3d finalToDest = targetbody->GetPositionRelTo(ship->GetFrame()) - ship->GetPosition();
+	const double finalDistToDest = finalToDest.Length();
+	const double distFromStart = (ship->GetPositionRelTo(Pi::game->GetSpace()->GetRootFrame()) - startPosRoot).Length();
+	if (finalDistToDest > 150000.0 && distFromStart > 150000.0 && ship->GetSupercruise() && !ship->IsType(ObjectType::PLAYER)) {
+		if (finalDistToDest > 5000000.0) {
+			const vector3d dir = finalToDest / finalDistToDest;
+			vector3d ortho = MathUtil::OrthogonalDirection(dir).NormalizedSafe();
+			if (ortho.LengthSqr() > 0.1) {
+				ortho = matrix3x3d::Rotate(Pi::rng.Double(0.0, 2.0 * M_PI), dir) * ortho;
+				ship->SetPosition(ship->GetPosition() + ortho * Pi::rng.Double(200000.0, 1500000.0));
+			}
+		}
+		const vector3d aimToDest = targetbody->GetPositionRelTo(ship->GetFrame()) - ship->GetPosition();
+		const double aimDist = aimToDest.Length();
+		const vector3d fwd = aimToDest.NormalizedSafe();
+		if (fwd.LengthSqr() > 0.1) {
+			const vector3d zAxis = -fwd;
+			const vector3d up(0.0, 1.0, 0.0);
+			vector3d xAxis = up.Cross(zAxis).NormalizedSafe();
+			if (xAxis.LengthSqr() < 0.01)
+				xAxis = MathUtil::OrthogonalDirection(zAxis).Normalized();
+			const vector3d yAxis = zAxis.Cross(xAxis).Normalized();
+			ship->SetOrient(matrix3x3d::FromVectors(xAxis, yAxis, zAxis));
+		}
+		ship->SetFuel(1.0);
+		const double initSpeed = Clamp(aimDist * 0.08, 30000.0, 15.0 * SupercruiseController::LIGHT_SPEED);
+		ship->GetSupercruise()->EnterSupercruiseImmediate(initSpeed);
 	}
 
 	LUA_DEBUG_END(l, 0);
@@ -1048,6 +1080,78 @@ static int l_space_dump_frames(lua_State *l)
 	return 0;
 }
 
+static int l_space_put_ship_in_supercruise_behind(lua_State *l)
+{
+	if (!Pi::game || !Pi::game->GetSpace())
+		return luaL_error(l, "Game is not started");
+
+	LUA_DEBUG_START(l);
+	Ship *ship = LuaObject<Ship>::CheckFromLua(1);
+	const Body *target = LuaObject<Body>::CheckFromLua(2);
+	const double minLs = luaL_checknumber(l, 3);
+	const double maxLs = luaL_checknumber(l, 4);
+
+	if (!ship || !target || ship->IsType(ObjectType::PLAYER) || !ship->GetSupercruise()) {
+		LUA_DEBUG_END(l, 0);
+		return 0;
+	}
+
+	const FrameId rootId = Pi::game->GetSpace()->GetRootFrame();
+	const vector3d targetPosRoot = target->GetPositionRelTo(rootId);
+	const matrix3x3d targetOrientRoot = target->GetOrientRelTo(rootId);
+	const vector3d targetFwd = (-targetOrientRoot.VectorZ()).NormalizedSafe();
+
+	const double dist = Pi::rng.Double(minLs, std::max(minLs, maxLs)) * SupercruiseController::LIGHT_SPEED;
+	vector3d side = MathUtil::OrthogonalDirection(targetFwd).NormalizedSafe();
+	if (side.LengthSqr() > 0.1)
+		side = matrix3x3d::Rotate(Pi::rng.Double(0.0, 2.0 * M_PI), targetFwd) * side;
+
+	vector3d posRoot = targetPosRoot - targetFwd * dist + side * (dist * Pi::rng.Double(0.06, 0.22));
+
+	// Push outside any celestial exclusion zone
+	for (Body *b : Pi::game->GetSpace()->GetBodies()) {
+		if (!b || !b->IsType(ObjectType::TERRAINBODY))
+			continue;
+		const double exclR = SupercruiseController::GetExclusionZoneRadius(b);
+		if (exclR <= 0.0)
+			continue;
+		const vector3d bPos = b->GetPositionRelTo(rootId);
+		const vector3d away = posRoot - bPos;
+		const double safeR = exclR * 1.45 + 150000.0;
+		if (away.LengthSqr() < safeR * safeR) {
+			const vector3d dir = away.NormalizedSafe();
+			posRoot = bPos + ((dir.LengthSqr() > 0.1) ? dir : targetFwd) * safeR;
+		}
+	}
+
+	ship->SwitchToFrame(rootId);
+	ship->SetPosition(posRoot);
+	ship->UpdateFrame();
+
+	const vector3d toTarget = (target->GetPositionRelTo(ship->GetFrame()) - ship->GetPosition()).NormalizedSafe();
+	if (toTarget.LengthSqr() > 0.1) {
+		const vector3d zAxis = -toTarget;
+		const vector3d up(0.0, 1.0, 0.0);
+		vector3d xAxis = up.Cross(zAxis).NormalizedSafe();
+		if (xAxis.LengthSqr() < 0.01)
+			xAxis = MathUtil::OrthogonalDirection(zAxis).Normalized();
+		const vector3d yAxis = zAxis.Cross(xAxis).Normalized();
+		ship->SetOrient(matrix3x3d::FromVectors(xAxis, yAxis, zAxis));
+	}
+
+	double initSpeed = SupercruiseController::MIN_SPEED * 2.0;
+	if (target->IsType(ObjectType::SHIP)) {
+		const Ship *tShip = static_cast<const Ship *>(target);
+		if (tShip->GetSupercruise() && tShip->GetSupercruise()->IsActive())
+			initSpeed = std::max(initSpeed, tShip->GetSupercruise()->GetSpeed() * 1.15);
+	}
+	ship->SetFuel(1.0);
+	ship->GetSupercruise()->EnterSupercruiseImmediate(initSpeed);
+
+	LUA_DEBUG_END(l, 0);
+	return 0;
+}
+
 static int l_space_attr_root_system_body(lua_State *l)
 {
 	if (!Pi::game) {
@@ -1083,6 +1187,7 @@ void LuaSpace::Register()
 		{ "SpawnShipOrbit", l_space_spawn_ship_orbit },
 		{ "PutShipOnRoute", l_space_put_ship_on_route },
 		{ "PutShipIntoOrbit", l_put_ship_into_orbit },
+		{ "PutShipInSupercruiseBehind", l_space_put_ship_in_supercruise_behind },
 
 		{ "GetBody", l_space_get_body },
 		{ "GetNumBodies", l_space_get_num_bodies },

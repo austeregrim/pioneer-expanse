@@ -299,6 +299,11 @@ void SupercruiseController::ChangeThrottle(double delta)
 	SetThrottle(m_throttle + delta);
 }
 
+void SupercruiseController::SetSpeed(double speed)
+{
+	m_speed = Clamp(speed, MIN_SPEED, MAX_SPEED);
+}
+
 bool SupercruiseController::HasAssistModule() const
 {
 	if (!m_ship)
@@ -441,6 +446,39 @@ void SupercruiseController::EnterSupercruise()
 
 	Sound::BodyMakeNoise(m_ship, "Hyperdrive_Jump", 1.0f);
 	ShowStatusMessage("SUPERCRUISE ENGAGED", 3.5f);
+}
+
+void SupercruiseController::EnterSupercruiseImmediate(double initialSpeed)
+{
+	if (!m_ship)
+		return;
+
+	m_charging = false;
+	m_chargeCountdown = 0.0f;
+	m_cooldown = 0.0f;
+
+	while (Frame *f = Frame::GetFrame(m_ship->GetFrame())) {
+		const bool isStationFrame = f->GetBody() && f->GetBody()->IsType(ObjectType::SPACESTATION);
+		if ((f->IsRotFrame() || isStationFrame) && f->GetParent().valid()) {
+			m_ship->SwitchToFrame(f->GetParent());
+		} else {
+			break;
+		}
+	}
+
+	m_ship->SetFlightState(Ship::SUPERCRUISE);
+	m_speed = Clamp(initialSpeed, MIN_SPEED, MAX_SPEED);
+	m_throttle = 0.75;
+	m_desiredSpeed = m_speed;
+
+	m_ship->SetAngVelocity(vector3d(0.0));
+	m_ship->SetVelocity(-m_ship->GetOrient().VectorZ() * m_speed);
+
+	m_trailPositions.clear();
+	m_trailSampleTimer = 0.0f;
+	if (Pi::game && Pi::game->GetSpace()) {
+		m_trailPositions.push_front(m_ship->GetPositionRelTo(Pi::game->GetSpace()->GetRootFrame()));
+	}
 }
 
 void SupercruiseController::EnterSupercruiseOnHyperspaceExit()

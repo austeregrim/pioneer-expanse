@@ -160,8 +160,42 @@ Event.Register("onShipDocked", onShipDocked)
 local onShipUndocked = function (ship, starport)
 	if Core.ships[ship] == nil then return end
 	local trader = Core.ships[ship]
-	ship:AIEnterLowOrbit(trader.starport:GetSystemBody().system:GetStars()[1].body)
-	Trader.assignTask(ship, Game.time + 10, 'hyperjumpAtDistance')
+	local Engine = require 'Engine'
+	local Space = require 'Space'
+
+	-- Gather acceptable alternative stations for in-system Supercruise trade hops
+	local ports = (Core.params and Core.params.ports) or Space.GetBodies("SpaceStation")
+	local altPorts = {}
+	for _, port in ipairs(ports) do
+		if port:exists() and port ~= starport and Trader.isStarportAcceptableForShip(port, ship) then
+			table.insert(altPorts, port)
+		end
+	end
+
+	-- Roughly 55% of undocking ships in multi-station systems perform an in-system hop
+	if #altPorts > 0 and Engine.rand:Number(1) < 0.55 then
+		local nextPort = altPorts[Engine.rand:Integer(1, #altPorts)]
+		trader['starport'] = nextPort
+		trader['status'] = 'inbound'
+		ship:AIDockWith(nextPort)
+		return
+	end
+
+	-- Outbound ships enter Supercruise toward a distant body before hyperjumping clear of gravity
+	local farBodies = {}
+	if Game.system then
+		for _, path in ipairs(Game.system:GetBodyPaths()) do
+			local sb = path:GetSystemBody()
+			if sb and sb.body and sb.body ~= starport and ship:DistanceTo(sb.body) > 5e7 then
+				table.insert(farBodies, sb.body)
+			end
+		end
+	end
+	local farBody = (#farBodies > 0 and farBodies[Engine.rand:Integer(1, #farBodies)])
+		or trader.starport:GetSystemBody().system:GetStars()[1].body
+
+	ship:AIFlyTo(farBody)
+	Trader.assignTask(ship, Game.time + Engine.rand:Number(25, 45), 'hyperjumpAtDistance')
 	trader['status'] = 'outbound'
 end
 Event.Register("onShipUndocked", onShipUndocked)

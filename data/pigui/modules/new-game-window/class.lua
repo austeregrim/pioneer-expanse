@@ -143,6 +143,7 @@ local CAREER_ROLES = {
 		equipment = {
 			[1]            = "misc.laser_cooling_booster",
 			computer_1     = "misc.autopilot",
+			computer_2     = "misc.fsd_interdictor_1",
 			laser_front_s2 = "laser.pulsecannon_2mw",
 			shield_s1_1    = "shield.basic_s1",
 			shield_s1_2    = "shield.basic_s1",
