@@ -28,20 +28,32 @@ local function computeKeyFingerprint(label)
 	return string.format("%04X-%04X", h1, h2)
 end
 
-function StationSig.New(id)
+function StationSig.New(id, mode)
 	local self = {
 		id = id,
+		mode = mode or "signature", -- "signature" or "encryption"
 		startTime = ui.getTime(),
 		keyFingerprint = "0000-0000",
 	}
-	return setmetatable(self, StationSig)
+	self = setmetatable(self, StationSig)
+	self:reset(mode)
+	return self
 end
 
-function StationSig:reset()
+function StationSig:reset(mode)
+	if mode then self.mode = mode end
 	self.startTime = ui.getTime()
 	local station = Game.player and Game.player:GetDockedWith()
-	local label = station and station.label or "STATION"
-	self.keyFingerprint = computeKeyFingerprint(label)
+	local seedStr
+	if self.mode == "encryption" then
+		local p = Game.player
+		local ship = p and p.shipName or "VESSEL"
+		local sys = Game.system and Game.system.name or "SECTOR"
+		seedStr = (station and station.label or "SYS") .. ":" .. ship .. ":" .. sys .. ":" .. tostring(self.id)
+	else
+		seedStr = (station and station.label or "STATION") .. ":" .. tostring(self.id)
+	end
+	self.keyFingerprint = computeKeyFingerprint(seedStr)
 end
 
 function StationSig:render(drawContentFn)
@@ -49,8 +61,26 @@ function StationSig:render(drawContentFn)
 	local frac = math.clamp((now - self.startTime) / VERIFICATION_DURATION, 0, 1)
 	local verified = (frac >= 1)
 
-	local statusLabel = verified and l.SIG_VERIFIED or l.SIG_VERIFYING
-	local statusColor = verified and (styleColors.success_300 or colors.econMajorImport) or (colors.maneuver or colors.font)
+	local isEnc = (self.mode == "encryption")
+	local statusLabel, rightText, statusColor
+
+	if isEnc then
+		statusLabel = verified and (l.COMM_ENCRYPTED_SECURE or "SECURE ENCRYPTED CHANNEL ESTABLISHED")
+			or (l.COMM_ENCRYPTING or "ESTABLISHING QUANTUM-ENCRYPTED LINK...")
+		statusColor = verified and (colors.uiPrimaryLight or styleColors.success_300) or (colors.maneuver or colors.font)
+		rightText = "CIPHER " .. self.keyFingerprint .. "  ·  4096-bit AES-GCM / Post-Quantum Kyber-1024"
+	else
+		statusLabel = verified and (l.SIG_VERIFIED or "STATION PUBKEY VERIFIED")
+			or (l.SIG_VERIFYING or "VERIFYING STATION PUBKEY SIGNATURE...")
+		statusColor = verified and (styleColors.success_300 or colors.econMajorImport) or (colors.maneuver or colors.font)
+		rightText = "KEY " .. self.keyFingerprint .. "  ·  " .. (l.SIG_PROTOCOL or "Post-quantum ECDSA-521")
+	end
+
+	ui.dummy(Vector2(0, 1))
+
+	local padX = ui.rescaleUI(Vector2(4, 0), Vector2(1920, 1080)).x
+	ui.dummy(Vector2(padX, 0))
+	ui.sameLine()
 
 	ui.withFont(pionillium.details, function()
 		local lineH = ui.getTextLineHeight()
@@ -59,8 +89,7 @@ function StationSig:render(drawContentFn)
 		ui.textColored(statusColor, statusLabel)
 		ui.sameLine()
 
-		local rightText = "KEY " .. self.keyFingerprint .. "  ·  " .. l.SIG_PROTOCOL
-		local avail = ui.getContentRegion().x
+		local avail = ui.getContentRegion().x - padX
 		local rightW = ui.calcTextSize(rightText).x
 		if avail > rightW then
 			ui.addCursorPos(Vector2(avail - rightW, 0))
@@ -68,23 +97,22 @@ function StationSig:render(drawContentFn)
 		ui.textColored(colors.fontDim, rightText)
 	end)
 
-	local barStart = ui.getCursorScreenPos()
-	local barWidth = ui.getContentRegion().x
+	local barStart = ui.getCursorScreenPos() + Vector2(padX, 0)
+	local barWidth = ui.getContentRegion().x - padX * 2
 	local barHeight = math.max(2, ui.rescaleUI(Vector2(0, 2), Vector2(1920, 1080)).y)
 	ui.addRectFilled(barStart, barStart + Vector2(barWidth, barHeight), colors.tableBackground, 0, ui.RoundCornersNone)
 	if barWidth > 0 then
 		ui.addRectFilled(barStart, barStart + Vector2(barWidth * frac, barHeight), statusColor, 0, ui.RoundCornersNone)
 	end
-	ui.dummy(Vector2(0, barHeight + ui.rescaleUI(Vector2(0, 6), Vector2(1920, 1080)).y))
+	ui.dummy(Vector2(0, barHeight + ui.rescaleUI(Vector2(0, 4), Vector2(1920, 1080)).y))
 
 	local contentPos = ui.getCursorScreenPos()
 	local contentSize = ui.getContentRegion()
-	ui.child("##stationSigContent_" .. self.id, contentSize, drawContentFn)
+	ui.child("##stationSigContent_" .. tostring(self.id), contentSize, drawContentFn)
 
 	if not verified and contentSize.x > 0 and contentSize.y > 0 then
-		ui.addRectFilled(contentPos, contentPos + contentSize, colors.windowBackground:opacity(0.40 * (1 - frac)), 0, ui.RoundCornersNone)
+		ui.addRectFilled(contentPos, contentPos + contentSize, colors.windowBackground:opacity(0.35 * (1 - frac)), 0, ui.RoundCornersNone)
 	end
 end
 
 return StationSig
-
