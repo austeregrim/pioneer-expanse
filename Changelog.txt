@@ -29,6 +29,16 @@ Volumetric Planetary Rings, Ring Mining, Active FSD Interdictions & SAR Overhaul
       and free docking bay selection so exterior station views render properly.
     - Preserved player crew roster on ship destruction and added self-healing crew
       checks so rescued/rebought ships never suffer crew launch lockouts.
+  * Multi-Ship Ownership, Station Hangars & X4-Style Fleet Autonomy (Plan A):
+    - Added persistent PlayerFleet module (`PlayerFleet.lua`) enabling multi-ship
+      ownership alongside Ship Market 'Buy & Store Current' and 'Buy into Hangar'.
+    - Added Station Hangar & Fleet Bay tab (`13-hangar.lua`) for vessel inspection,
+      renaming, flagship swapping, repairs, refueling, cargo transfers, selling, and
+      remote ferry recalls.
+    - Added Captain/crew recruitment and transfers (`05-crew.lua`) with skill XP
+      progression, InfoView Fleet Command (`07-fleet.lua`) for autonomous Standing
+      Orders (Escort, Dock, Auto-Trade, Auto-Mine, Patrol), and Fleet Mission
+      Delegation (`04-missions.lua`) with dual In-System and Out-of-System simulation.
   * Master Roadmap Expansion (Plans A-H):
     - Reorganized standalone pillar plans into lettered plans A-H, adding Plan A
       (Multi-Ship Ownership, Station Hangars, Crewed Fleet & X4-Style Autonomy)
