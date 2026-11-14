@@ -52,7 +52,8 @@ Always consult these plans when implementing features across any phase:
   ```bash
   cmake --build build --target unittest && ./build/unittest
   ```
-* **Run Game on Dedicated GPU (NVIDIA MX450)**:
+* **Run Game**:
   ```bash
-  __NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia __VK_LAYER_NV_optimus=NVIDIA_only ./build/pioneer
+  ./build/pioneer
   ```
+  *(Automatic dedicated GPU detection is built into the engine on Linux: NVIDIA Optimus and AMD PRIME hardware are automatically detected and used without requiring manual offload flags).*
