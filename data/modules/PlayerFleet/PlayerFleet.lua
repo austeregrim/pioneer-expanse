@@ -22,6 +22,7 @@ local HullConfig      = require 'HullConfig'
 local Equipment       = require 'Equipment'
 local EquipSet        = require 'EquipSet'
 local Commodities     = require 'Commodities'
+local CommodityType   = require 'CommodityType'
 local Economy         = require 'Economy'
 local Format          = require 'Format'
 local Comms           = require 'Comms'
@@ -2244,7 +2245,7 @@ function PlayerFleet.OrderSellCargo(uid)
 	end
 
 	-- If currently docked at a station, sell immediately
-	if entry.status == "DOCKED" and entry.locationPath and entry.locationPath:IsStation() then
+	if entry.status == "DOCKED" then
 		local totalSale, totalTons = liquidateCargoAtCurrentStation(entry)
 		return true, string.format("Sold %dt of cargo for %s (credited directly to your bank).", totalTons, Format.Money(totalSale, false))
 	end
