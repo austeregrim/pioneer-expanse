@@ -16,6 +16,9 @@
 #include <SDL.h>
 #include <cstdio>
 #include <cstdlib>
+#if defined(__linux__)
+#include <unistd.h>
+#endif
 
 enum RunMode {
 	MODE_GAME,
@@ -35,6 +38,20 @@ extern "C" int main(int argc, char **argv)
 	/* SDL2 does not enable Wayland by default, but we want to prefer it
 	 * when available, over X11 */
 	SDL_setenv("SDL_VIDEODRIVER", "windows,wayland,x11", 0);
+
+#if defined(__linux__)
+	// On Linux systems with hybrid graphics (NVIDIA Optimus / PRIME),
+	// automatically detect dedicated NVIDIA/AMD GPU and enable offload so the game
+	// natively utilizes dedicated hardware without requiring launch wrappers.
+	// Preserves user overrides if already set in environment.
+	if (access("/dev/nvidiactl", F_OK) == 0 || access("/proc/driver/nvidia/version", F_OK) == 0) {
+		SDL_setenv("__NV_PRIME_RENDER_OFFLOAD", "1", 0);
+		SDL_setenv("__GLX_VENDOR_LIBRARY_NAME", "nvidia", 0);
+		SDL_setenv("__VK_LAYER_NV_optimus", "NVIDIA_only", 0);
+	} else if (access("/dev/dri/renderD129", F_OK) == 0) {
+		SDL_setenv("DRI_PRIME", "1", 0);
+	}
+#endif
 
 	OS::SetDPIAware();
 
