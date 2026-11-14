@@ -1794,6 +1794,9 @@ bool Ship::Undock()
 void Ship::SetDockedWith(SpaceStation *s, int port)
 {
 	if (s) {
+		if (GetFrame() != s->GetFrame()) {
+			SetFrame(s->GetFrame());
+		}
 		m_dockedWith = s;
 		m_dockedWithPort = port;
 		m_wheelTransition = 0;

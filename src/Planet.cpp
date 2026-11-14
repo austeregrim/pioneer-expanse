@@ -220,6 +220,7 @@ void Planet::GenerateRings(Graphics::Renderer *renderer)
 	rsd.blendMode = Graphics::BLEND_ALPHA_PREMULT;
 	rsd.cullMode = Graphics::CULL_NONE;
 	rsd.primitiveType = Graphics::TRIANGLE_STRIP;
+	rsd.depthWrite = false;
 
 	m_ringMaterial.reset(renderer->CreateMaterial("planetrings", desc, rsd, m_ringMesh->GetFormat()));
 	m_ringMaterial->SetTexture("texture0"_hash, m_ringTexture.Get());
@@ -240,9 +241,9 @@ void Planet::DrawGasGiantRings(Renderer *renderer, const matrix4x4d &modelView)
 void Planet::SubRender(Renderer *r, const matrix4x4d &viewTran, const vector3d &camPos)
 {
 	if (GetSystemBody()->HasRings()) {
-		DrawGasGiantRings(r, viewTran);
 		if (m_ringField) {
 			m_ringField->Render(r, viewTran, camPos);
 		}
+		DrawGasGiantRings(r, viewTran);
 	}
 }

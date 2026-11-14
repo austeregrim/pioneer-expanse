@@ -38,6 +38,10 @@ void main(void)
 
 	//noise detail texturing - compute a "density map" for the ring
 	float detailDist = length(varyingEyepos);
+	float closeFade = smoothstep(10000.0, 55000.0, detailDist);
+	if (closeFade <= 0.001)
+		discard;
+
 	vec2 noiseCoord = texCoord1.xz; // using the texCoord1 (a_vertex aka position) probably isn't perfect
 	float coarseNoise = 0.3 + 0.7 * clamp(octaveNoise(noiseCoord * 15.0, 0.3, 1.1, 4.0), 0.0, 1.0); // first-level octave noise
 	float fineNoise = texture(texture1, noiseCoord * 2000.0).r; //finer detail
@@ -81,6 +85,6 @@ void main(void)
 	}
 	col.a = texCol.a;
 
-	// multiply the colour by the greyscale detail
-	frag_color = col * (0.2 + 0.8 * density);
+	// multiply the colour by the greyscale detail and fade out near the camera so 3D rocks dominate up close
+	frag_color = col * (0.2 + 0.8 * density) * closeFade;
 }

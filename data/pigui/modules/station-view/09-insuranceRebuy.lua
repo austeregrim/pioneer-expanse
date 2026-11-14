@@ -58,9 +58,19 @@ local function drawClaimPending(claim)
 		end)
 		ui.spacing()
 
+		local days = claim.recoveryDays or 0.5
+		local recoveryTimeStr
+		if days < 1.0 then
+			recoveryTimeStr = string.format("%.1f Hours (%.2f Days)", days * 24.0, days)
+		elseif days >= 365.25 then
+			recoveryTimeStr = string.format("%.1f Years (%.0f Days)", days / 365.25, days)
+		else
+			recoveryTimeStr = string.format("%.1f Standard Days", days)
+		end
+
 		textTable.draw({
 			{ "SAR Facility", claim.stationName or "Starport Medical Ward" },
-			{ "Cryo-Stasis Duration", string.format("%.1f Standard Days", claim.recoveryDays or 18.0) },
+			{ "Cryo-Stasis Duration", recoveryTimeStr },
 			{ "Patient Vitals", "Resuscitated & Stabilized" },
 			{ "Distress Incident System", claim.systemName or "Unknown Sector" },
 			{ "Policy Coverage", "95% (Deductible: 5%)" },

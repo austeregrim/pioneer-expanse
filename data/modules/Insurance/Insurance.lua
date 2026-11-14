@@ -10,6 +10,7 @@ local Commodities = require 'Commodities'
 local PlayerState = require 'PlayerState'
 local Serializer  = require 'Serializer'
 local HullConfig  = require 'HullConfig'
+local Character   = require 'Character'
 
 local Insurance = {}
 
@@ -89,6 +90,22 @@ function Insurance.GetPolicyInfo()
 	}
 end
 
+local function ensureMinimumCrew(player)
+	if not player then return end
+	if Character.persistent and Character.persistent.player then
+		Character.persistent.player.dead = false
+		Character.persistent.player.player = true
+		player:Enroll(Character.persistent.player)
+	end
+	local def = ShipDef[player.shipId]
+	local minCrew = (def and def.minCrew) or 1
+	while player:CrewNumber() < minCrew do
+		local newCrew = Character.New()
+		newCrew:RollNew(true)
+		if not player:Enroll(newCrew) then break end
+	end
+end
+
 -- Rebuy option: Player pays 5% deductible to restore their exact ship and outfitting
 function Insurance.RebuyShip()
 	if not activeClaim or not activeClaim.pending then
@@ -127,6 +144,7 @@ function Insurance.RebuyShip()
 	end
 
 	player:SetFuelPercent(100)
+	ensureMinimumCrew(player)
 
 	activeClaim.pending = false
 	activeClaim.resolved = true
@@ -145,12 +163,12 @@ function Insurance.ClaimPayoutAndLoaner()
 	end
 
 	local player = Game.player
-	player:SetShipType('sinclair')
+	player:SetShipType('coronatrix')
 	player:SetLabel("Free Trader")
 
 	local equipSet = player:GetComponent('EquipSet')
 	if equipSet then
-		local hullConfig = HullConfig.GetHullConfig('sinclair')
+		local hullConfig = HullConfig.GetHullConfig('coronatrix')
 		if hullConfig and hullConfig.slots then
 			for slotId, slot in pairs(hullConfig.slots) do
 				if slot.default then
@@ -169,6 +187,7 @@ function Insurance.ClaimPayoutAndLoaner()
 	end
 
 	player:SetFuelPercent(100)
+	ensureMinimumCrew(player)
 
 	activeClaim.pending = false
 	activeClaim.resolved = true

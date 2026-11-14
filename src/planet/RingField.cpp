@@ -324,12 +324,11 @@ void RingField::GatherCellRocks(int64_t gx, int64_t gz, double cellSize, bool co
 
 	int count = 0;
 	if (coarse) {
-		const double prob = Clamp(0.55 * tau * edgeFade, 0.15, 0.95);
-		if (NextRand01(state) < prob) {
-			count = (NextRand01(state) < 0.35 * tau) ? 2 : 1;
-		}
+		const double avgCoarse = Clamp(2.6 * tau * edgeFade, 0.8, 4.5);
+		const int baseCount = int(avgCoarse);
+		count = baseCount + (NextRand01(state) < (avgCoarse - baseCount) ? 1 : 0);
 	} else {
-		const double avgCount = Clamp(1.6 * tau * edgeFade, 0.5, 4.0);
+		const double avgCount = Clamp(3.8 * tau * edgeFade, 1.5, 7.0);
 		const int baseCount = int(avgCount);
 		count = baseCount + (NextRand01(state) < (avgCount - baseCount) ? 1 : 0);
 	}
@@ -351,8 +350,8 @@ void RingField::GatherCellRocks(int64_t gx, int64_t gz, double cellSize, bool co
 
 		const double rScale = NextRand01(state);
 		const double scale = coarse
-			? (24.0 + std::pow(rScale, 1.5) * 68.0)
-			: (5.5 + std::pow(rScale, 1.8) * 34.0);
+			? (14.0 + std::pow(rScale, 1.5) * 52.0)
+			: (3.0 + std::pow(rScale, 1.7) * 38.0);
 
 		const uint64_t rockId = SplitMix64(HashCell(gx, gz, m_baseSeed, coarse ? 1000U + uint32_t(i) : uint32_t(i)));
 
@@ -532,59 +531,59 @@ void RingField::Render(Graphics::Renderer *r, const matrix4x4d &viewTran, const 
 	std::vector<RockInstance> visibleRocks;
 	visibleRocks.reserve(MAX_VISIBLE_ROCKS);
 
-	// Pass 1: Fine local asteroid field (up to 3.4 km)
+	// Pass 1: Fine local asteroid field (up to 2.2 km, densely packed)
 	{
 		const int64_t cx = FloorCell(camInRing.x, CELL_FINE);
 		const int64_t cz = FloorCell(camInRing.z, CELL_FINE);
 		const int range = 11;
 		std::vector<RockInstance> cellRocks;
-		cellRocks.reserve(8);
+		cellRocks.reserve(10);
 
 		for (int64_t dz = -range; dz <= range; ++dz) {
 			for (int64_t dx = -range; dx <= range; ++dx) {
 				const double distSqGuess = (double(dx) * CELL_FINE) * (double(dx) * CELL_FINE) +
 					(double(dz) * CELL_FINE) * (double(dz) * CELL_FINE);
-				if (distSqGuess > 3600.0 * 3600.0)
+				if (distSqGuess > 2300.0 * 2300.0)
 					continue;
 
 				cellRocks.clear();
 				GatherCellRocks(cx + dx, cz + dz, CELL_FINE, false, cellRocks);
 				for (const RockInstance &inst : cellRocks) {
 					const double d2 = (inst.pos - camInRing).LengthSqr();
-					if (d2 > 3500.0 * 3500.0)
+					if (d2 > 2200.0 * 2200.0)
 						continue;
 					visibleRocks.push_back(inst);
-					if (int(visibleRocks.size()) >= MAX_VISIBLE_ROCKS - 140)
+					if (int(visibleRocks.size()) >= MAX_VISIBLE_ROCKS - 450)
 						break;
 				}
-				if (int(visibleRocks.size()) >= MAX_VISIBLE_ROCKS - 140)
+				if (int(visibleRocks.size()) >= MAX_VISIBLE_ROCKS - 450)
 					break;
 			}
-			if (int(visibleRocks.size()) >= MAX_VISIBLE_ROCKS - 140)
+			if (int(visibleRocks.size()) >= MAX_VISIBLE_ROCKS - 450)
 				break;
 		}
 	}
 
-	// Pass 2: Coarse horizon boulders (1.8 km to 18 km)
+	// Pass 2: Coarse horizon boulders (1.6 km to 12.5 km)
 	{
 		const int64_t cx = FloorCell(camInRing.x, CELL_COARSE);
 		const int64_t cz = FloorCell(camInRing.z, CELL_COARSE);
-		const int range = 14;
+		const int range = 15;
 		std::vector<RockInstance> cellRocks;
-		cellRocks.reserve(4);
+		cellRocks.reserve(6);
 
 		for (int64_t dz = -range; dz <= range; ++dz) {
 			for (int64_t dx = -range; dx <= range; ++dx) {
 				const double d2Guess = (double(dx) * CELL_COARSE) * (double(dx) * CELL_COARSE) +
 					(double(dz) * CELL_COARSE) * (double(dz) * CELL_COARSE);
-				if (d2Guess > 18500.0 * 18500.0)
+				if (d2Guess > 13000.0 * 13000.0)
 					continue;
 
 				cellRocks.clear();
 				GatherCellRocks(cx + dx, cz + dz, CELL_COARSE, true, cellRocks);
 				for (const RockInstance &inst : cellRocks) {
 					const double d2 = (inst.pos - camInRing).LengthSqr();
-					if (d2 < 1600.0 * 1600.0 || d2 > 18000.0 * 18000.0)
+					if (d2 < 1600.0 * 1600.0 || d2 > 12500.0 * 12500.0)
 						continue;
 					visibleRocks.push_back(inst);
 					if (int(visibleRocks.size()) >= MAX_VISIBLE_ROCKS)

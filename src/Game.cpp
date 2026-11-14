@@ -686,47 +686,73 @@ void Game::TriggerPlayerEscapePodRecovery()
 {
 	if (!m_player) return;
 
-	// 1. Advance simulation clock by 14-28 in-game days (simulating cryo-stasis & SAR transit)
-	const double recoveryDays = 14.0 + Pi::rng.Double() * 14.0;
-	const double recoverySeconds = recoveryDays * 86400.0;
-	m_time += recoverySeconds;
-
-	// 2. Locate nearest starport in the current system
+	// 1. Locate the nearest starport in the current system
 	SpaceStation *targetStation = nullptr;
+	double bestStationDistSq = 1e36;
 	for (Body *b : m_space->GetBodies()) {
 		if (b && b->IsType(ObjectType::SPACESTATION) && !b->IsDead()) {
-			targetStation = static_cast<SpaceStation *>(b);
-			break;
+			const double dSq = m_player->GetPositionRelTo(b).LengthSqr();
+			if (dSq < bestStationDistSq) {
+				bestStationDistSq = dSq;
+				targetStation = static_cast<SpaceStation *>(b);
+			}
 		}
 	}
 
-	// 3. If no station in the current system, relocate to nearest inhabited system
-	if (!targetStation) {
+	double recoveryDays = 0.5;
+
+	// 2. Compute SAR recovery time and relocate if no station exists in the current system
+	if (targetStation) {
+		// In-system SAR recovery: ~4 to 36 hours depending on AU distance to nearest station
+		const double distAU = std::sqrt(bestStationDistSq) / AU;
+		recoveryDays = 0.15 + Pi::rng.Double() * 0.15 + std::min(1.5, distAU * 0.04);
+	} else {
 		const SystemPath currentPath = m_space->GetStarSystem()->GetPath();
 		SystemPath nearestInhabited = currentPath;
 		double bestDistSq = 1e18;
 
-		RefCountedPtr<const Sector> sec = m_galaxy->GetSector(currentPath);
-		if (sec) {
-			for (size_t i = 0; i < sec->m_systems.size(); ++i) {
-				const Sector::System &sys = sec->m_systems[i];
-				if (sys.GetPopulation() > 0) {
-					float dSq = Sector::DistanceBetweenSqr(sec, currentPath.systemIndex, sec, i);
-					if (dSq < bestDistSq) {
-						bestDistSq = dSq;
-						nearestInhabited = SystemPath(currentPath.sectorX, currentPath.sectorY, currentPath.sectorZ, i);
+		RefCountedPtr<const Sector> curSec = m_galaxy->GetSector(currentPath);
+		for (int dz = -3; dz <= 3; ++dz) {
+			for (int dy = -3; dy <= 3; ++dy) {
+				for (int dx = -3; dx <= 3; ++dx) {
+					SystemPath secPath(currentPath.sectorX + dx, currentPath.sectorY + dy, currentPath.sectorZ + dz);
+					RefCountedPtr<const Sector> sec = m_galaxy->GetSector(secPath);
+					if (!sec) continue;
+					for (size_t i = 0; i < sec->m_systems.size(); ++i) {
+						const Sector::System &sys = sec->m_systems[i];
+						if (sys.GetPopulation() > 0 && sys.GetNumStars() > 0) {
+							float dSq = curSec
+								? Sector::DistanceBetweenSqr(curSec, currentPath.systemIndex, sec, i)
+								: float((dx * dx + dy * dy + dz * dz) * Sector::SIZE * Sector::SIZE);
+							if (dSq < bestDistSq) {
+								bestDistSq = dSq;
+								nearestInhabited = SystemPath(secPath.sectorX, secPath.sectorY, secPath.sectorZ, i);
+							}
+						}
 					}
 				}
 			}
 		}
 
-		if (bestDistSq >= 1e17) {
+		double distLy = 10.0;
+		if (bestDistSq < 1e17) {
+			distLy = std::max(1.0, std::sqrt(bestDistSq));
+		} else {
 			nearestInhabited = SystemPath(0, 0, 0, 0); // Sol fallback
+			const double dx = double(currentPath.sectorX - nearestInhabited.sectorX) * Sector::SIZE;
+			const double dy = double(currentPath.sectorY - nearestInhabited.sectorY) * Sector::SIZE;
+			const double dz = double(currentPath.sectorZ - nearestInhabited.sectorZ) * Sector::SIZE;
+			distLy = std::max(1.0, std::sqrt(dx * dx + dy * dy + dz * dz));
 		}
 
+		// Cross-system SAR jump/relay transit (~0.365 days/ly -> 1000 ly ~ 1 yr, 80,000 ly across galaxy ~ 30 yrs)
+		recoveryDays = 0.5 + Pi::rng.Double() * 0.5 + distLy * 0.365;
+
+		LuaEvent::Queue("onLeaveSystem", m_player.get());
 		m_space->RemoveBody(m_player.get());
 		m_space.reset();
 		m_space.reset(new Space(this, m_galaxy, nearestInhabited, nullptr));
+		m_space->GetBackground()->SetDrawFlags(Background::Container::DRAW_SKYBOX | Background::Container::DRAW_STARS);
 		m_player->SetFrame(m_space->GetRootFrame());
 		m_space->AddBody(m_player.get());
 
@@ -736,12 +762,22 @@ void Game::TriggerPlayerEscapePodRecovery()
 				break;
 			}
 		}
+
+		LuaEvent::Queue("onEnterSystem", m_player.get());
 	}
 
-	// 4. Revive player and dock at station
+	// 3. Advance simulation clock by calculated SAR recovery duration
+	m_time += recoveryDays * 86400.0;
+
+	// 4. Revive player and dock at station in the station's frame
 	m_player->Revive();
 	if (targetStation) {
-		m_player->SetDockedWith(targetStation, 0);
+		m_player->SetFrame(targetStation->GetFrame());
+		int port = targetStation->GetFreeDockingPort(m_player.get());
+		if (port < 0) port = 0;
+		m_player->SetDockedWith(targetStation, port);
+		m_player->UpdateInterpTransform(1.0);
+		Frame::GetFrame(m_player->GetFrame())->GetCollisionSpace()->RebuildObjectTrees();
 	}
 
 	// 5. Reset flash and switch to Station View

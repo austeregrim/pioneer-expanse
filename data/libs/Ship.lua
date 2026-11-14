@@ -542,6 +542,28 @@ Ship.Dismiss = function (self,crewMember)
 	return false
 end
 
+local ensurePlayerInCrew = function (ship)
+	if not ship or not ship:IsPlayer() then return end
+	if not Character.persistent or not Character.persistent.player then return end
+	Character.persistent.player.player = true
+	Character.persistent.player.dead = false
+	if not CrewRoster[ship] then
+		CrewRoster[ship] = {}
+	end
+	for _, member in ipairs(CrewRoster[ship]) do
+		if member == Character.persistent.player or member.player then
+			member.dead = false
+			return
+		end
+	end
+	local maxCrew = (ShipDef[ship.shipId] and ShipDef[ship.shipId].maxCrew) or 1
+	while #CrewRoster[ship] >= maxCrew do
+		local removed = table.remove(CrewRoster[ship])
+		if not removed then break end
+	end
+	table.insert(CrewRoster[ship], 1, Character.persistent.player)
+end
+
 --
 -- Method: GenerateCrew
 --
@@ -551,8 +573,10 @@ end
 -- > ship:GenerateCrew()
 --
 Ship.GenerateCrew = function (self)
-	if CrewRoster[self] then return end -- Bottle out if there's ever been a crew
+	ensurePlayerInCrew(self)
+	if CrewRoster[self] and #CrewRoster[self] >= ShipDef[self.shipId].minCrew then return end
 	for i = 1, ShipDef[self.shipId].maxCrew do
+		if CrewRoster[self] and #CrewRoster[self] >= ShipDef[self.shipId].maxCrew then break end
 		local newCrew = Character.New()
 		newCrew:RollNew(true)
 		self:Enroll(newCrew)
@@ -567,6 +591,7 @@ end
 -- > ship:CrewNumber()
 --
 Ship.CrewNumber = function (self)
+	ensurePlayerInCrew(self)
 	return CrewRoster[self] and #CrewRoster[self] or 0
 end
 
@@ -582,6 +607,7 @@ end
 --   crew - A [Character], once per crew member per call
 --
 Ship.EachCrewMember = function (self)
+	ensurePlayerInCrew(self)
 	-- If there's no crew, magic one up.
 	if not CrewRoster[self] then self:GenerateCrew() end
 	-- Initialise and return enclosed iterator
@@ -604,6 +630,7 @@ end
 --   canLaunch - Boolean, true if ship has minimum required crew for launch, otherwise false/nil
 --
 Ship.HasCorrectCrew = function (self)
+	ensurePlayerInCrew(self)
 	return (CrewRoster[self] and (
 		#CrewRoster[self] >= ShipDef[self.shipId].minCrew and
 		#CrewRoster[self] <= ShipDef[self.shipId].maxCrew
@@ -618,6 +645,9 @@ local onGameStart = function ()
 	if loaded_data then
 		CrewRoster = loaded_data
 		Event.Queue('crewAvailable') -- Signal any scripts that depend on initialised crew
+	end
+	if Game.player then
+		ensurePlayerInCrew(Game.player)
 	end
 
 	loaded_data = nil
@@ -659,6 +689,10 @@ local onShipEnterSystem = function (ship)
 end
 
 local onShipDestroyed = function (ship, attacker)
+	if ship:IsPlayer() then
+		ensurePlayerInCrew(ship)
+		return
+	end
 	-- When a ship is destroyed, mark is crew as dead
 	-- and remove the ship's crew from CrewRoster
 	if CrewRoster[ship] then

@@ -19,6 +19,7 @@ local Comms = require 'Comms'
 local pirates = {}
 local planets = {}
 local playerSCStartTime = nil
+local nextPlayerSCCheckTime = 0
 local nextPlayerInterdictTime = 0
 
 local function equipInterdictor(ship, threat)
@@ -62,18 +63,33 @@ end
 
 local pirateIsInterested = function (player)
 	if not player or not player:exists() then return false end
-	local lawlessness = (Game.system and Game.system.lawlessness) or 0.3
+	local lawlessness = (Game.system and Game.system.lawlessness) or 0.0
 	local cargoTons = player.usedCargo or 0
+	-- In high-security systems (lawlessness < 0.15), pirates rarely ambush in normal space
+	if lawlessness < 0.15 then
+		if cargoTons <= 0 then return false end
+		return Engine.rand:Number(1) <= (lawlessness * 0.4 + math.min(0.08, cargoTons * 0.002))
+	end
+	local baseProb = (lawlessness - 0.10) * 0.65
+	local cargoBonus = math.min(0.25, cargoTons * 0.008)
+	return Engine.rand:Number(1) <= math.min(0.75, baseProb + cargoBonus)
+end
 
-	if player:GetFlightState() == "SUPERCRUISE" then
-		local prob = math.min(0.95, 0.18 + 0.55 * lawlessness + math.min(0.35, cargoTons * 0.05))
+local shouldInterdictPlayerInSC = function (player)
+	if not player or not player:exists() then return false end
+	local lawlessness = (Game.system and Game.system.lawlessness) or 0.0
+	local cargoTons = player.usedCargo or 0
+	if lawlessness < 0.15 then
+		if cargoTons <= 0 then return false end
+		local prob = math.min(0.06, lawlessness * 0.25 + math.min(0.04, cargoTons * 0.002))
 		return Engine.rand:Number(1) <= prob
+	elseif lawlessness < 0.40 then
+		local prob = 0.03 + (lawlessness - 0.15) * 0.35 + math.min(0.12, cargoTons * 0.005)
+		return Engine.rand:Number(1) <= math.min(0.25, prob)
+	else
+		local prob = 0.14 + (lawlessness - 0.40) * 0.65 + math.min(0.25, cargoTons * 0.008)
+		return Engine.rand:Number(1) <= math.min(0.65, prob)
 	end
-
-	if cargoTons >= 1 then
-		return true
-	end
-	return Engine.rand:Number(1) <= math.min(0.85, 0.25 + 0.50 * lawlessness)
 end
 
 local calculateThreat = function (lawlessness)
@@ -131,14 +147,28 @@ local function spawnSystemPirates(player)
 	if #orbitalHosts == 0 then return end
 
 	local hasStations = stationPaths and #stationPaths > 0
-	local max_pirates = math.min(6, math.max(1, 2 + math.floor(lawlessness * 4.0)))
-	local spawnChance = math.min(0.95, 0.45 + lawlessness * 0.65)
+	local max_pirates
+	if lawlessness < 0.15 then
+		max_pirates = 1
+	elseif lawlessness < 0.40 then
+		max_pirates = 2
+	else
+		max_pirates = math.min(6, 2 + math.floor(lawlessness * 4.0))
+	end
 	local stars = Game.system:GetStars()
 	local primaryStar = stars and stars[1]
 
 	for i = 1, max_pirates do
-		local mustSpawn = (i == 1 and population > 0 and hasStations)
-		if mustSpawn or Engine.rand:Number(1) < spawnChance then
+		local mustSpawn = (i == 1 and lawlessness >= 0.40 and population > 0 and hasStations)
+		local spawnChance
+		if lawlessness < 0.15 then
+			spawnChance = lawlessness * 2.0
+		elseif lawlessness < 0.40 then
+			spawnChance = 0.20 + lawlessness * 0.70
+		else
+			spawnChance = math.min(0.90, 0.35 + lawlessness * 0.65)
+		end
+		if mustSpawn or Engine.rand:Number(1) <= spawnChance then
 			local threat = calculateThreat(lawlessness)
 			local hostSb = orbitalHosts[Engine.rand:Integer(1, #orbitalHosts)]:GetSystemBody()
 			local ship
@@ -180,6 +210,7 @@ end
 
 local onEnterSystem = function (player)
 	playerSCStartTime = nil
+	nextPlayerSCCheckTime = 0
 	nextPlayerInterdictTime = 0
 	spawnSystemPirates(player)
 end
@@ -188,6 +219,7 @@ local onLeaveSystem = function ()
 	pirates = {}
 	planets = {}
 	playerSCStartTime = nil
+	nextPlayerSCCheckTime = 0
 	nextPlayerInterdictTime = 0
 end
 
@@ -224,6 +256,7 @@ end
 
 local onPlayerDocked = function ()
 	playerSCStartTime = nil
+	nextPlayerSCCheckTime = 0
 	for p, s in pairs(pirates) do
 		if p:exists() and (s.status == 'ATTACK' or s.status == 'INTERDICT_PLAYER') then
 			s.planet = assignSupercruisePatrol(p, s.planet)
@@ -263,6 +296,7 @@ local loaded_data
 local onGameStart = function ()
 	local wasLoaded = loaded_data ~= nil
 	playerSCStartTime = nil
+	nextPlayerSCCheckTime = 0
 	nextPlayerInterdictTime = (loaded_data and loaded_data.nextPlayerInterdictTime) or 0
 	if loaded_data and loaded_data.pirates and loaded_data.planets then
 		pirates = loaded_data.pirates
@@ -289,9 +323,11 @@ local onGameStart = function ()
 		if playerInSC then
 			if not playerSCStartTime then
 				playerSCStartTime = Game.time
+				nextPlayerSCCheckTime = Game.time + 40.0
 			end
 		else
 			playerSCStartTime = nil
+			nextPlayerSCCheckTime = 0
 		end
 		local playerBusy = playerInSC and Game.player.IsBeingInterdicted and Game.player:IsBeingInterdicted()
 
@@ -305,7 +341,7 @@ local onGameStart = function ()
 					s.status = 'ORBIT'
 					s.target = nil
 					s.warned = false
-					nextPlayerInterdictTime = math.max(nextPlayerInterdictTime, Game.time + 90)
+					nextPlayerInterdictTime = math.max(nextPlayerInterdictTime, Game.time + 180.0)
 					s.planet = assignSupercruisePatrol(p, s.planet)
 				elseif s.target == Game.player or (p.GetInterdictionPeer and p:GetInterdictionPeer() == Game.player) then
 					playerHunterActive = true
@@ -313,16 +349,19 @@ local onGameStart = function ()
 			end
 		end
 
-		-- Require at least 24s in Supercruise and respect post-interdiction cooldown before ambushing player
-		local scGraceElapsed = playerSCStartTime and (Game.time - playerSCStartTime >= 24)
+		-- Require at least 40s in Supercruise, evaluate at most once per 75s, and respect 180s post-interdiction cooldown
+		local scGraceElapsed = playerSCStartTime and (Game.time - playerSCStartTime >= 40.0)
+		local scCheckDue = Game.time >= nextPlayerSCCheckTime
 		local cooldownElapsed = Game.time >= nextPlayerInterdictTime
 
 		-- Actively pursue and interdict the player when flying in Supercruise
-		if playerInSC and scGraceElapsed and cooldownElapsed and not playerBusy and not playerHunterActive then
-			for p, s in pairs(pirates) do
-				if p:exists() and s.status ~= 'ATTACK' and s.status ~= 'INTERDICT_PLAYER' and s.hasInterdictor ~= false then
-					if p:GetFlightState() == "SUPERCRUISE" or p:GetFlightState() == "FLYING" then
-						if s.status == 'LURK' or pirateIsInterested(Game.player) then
+		if playerInSC and scGraceElapsed and scCheckDue and cooldownElapsed and not playerBusy and not playerHunterActive then
+			nextPlayerSCCheckTime = Game.time + 75.0
+			local wantPlayerAmbush = shouldInterdictPlayerInSC(Game.player)
+			if wantPlayerAmbush then
+				for p, s in pairs(pirates) do
+					if p:exists() and s.status ~= 'ATTACK' and s.status ~= 'INTERDICT_PLAYER' and s.hasInterdictor ~= false then
+						if p:GetFlightState() == "SUPERCRUISE" or p:GetFlightState() == "FLYING" then
 							if p:DistanceTo(Game.player) > 120 * LIGHT_SPEED or p:GetFlightState() ~= "SUPERCRUISE" then
 								Space.PutShipInSupercruiseBehind(p, Game.player, 35, 65)
 							end
@@ -332,7 +371,7 @@ local onGameStart = function ()
 							end
 							s.status = 'INTERDICT_PLAYER'
 							s.target = Game.player
-							nextPlayerInterdictTime = Game.time + 90
+							nextPlayerInterdictTime = Game.time + 180.0
 							p:AIKill(Game.player)
 							break
 						end
@@ -371,6 +410,7 @@ local onGameEnd = function ()
 	pirates = {}
 	planets = {}
 	playerSCStartTime = nil
+	nextPlayerSCCheckTime = 0
 	nextPlayerInterdictTime = 0
 end
 

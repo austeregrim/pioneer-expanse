@@ -52,9 +52,9 @@ private:
 	};
 
 	static constexpr int NUM_VARIANTS = 8;
-	static constexpr int MAX_VISIBLE_ROCKS = 750;
-	static constexpr double CELL_FINE = 320.0;
-	static constexpr double CELL_COARSE = 1280.0;
+	static constexpr int MAX_VISIBLE_ROCKS = 2800;
+	static constexpr double CELL_FINE = 210.0;
+	static constexpr double CELL_COARSE = 850.0;
 
 	void InitGraphics(Graphics::Renderer *r);
 	std::unique_ptr<Graphics::MeshObject> BuildRockMesh(Graphics::Renderer *r, uint32_t seed) const;
