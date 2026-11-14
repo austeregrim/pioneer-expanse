@@ -35,7 +35,7 @@ runs:
         chmod a+x linuxdeploy-x86_64.AppImage
         ARCH=x86_64 LDAI_OUTPUT="Pioneer_Expanse-x86_64.AppImage" ./linuxdeploy-x86_64.AppImage --appdir "out/install/pioneer-$BUILD_SLUG" --output appimage
         for f in Pioneer*:*AppImage; do
-          [ -e "$f" ] && mv "$f" "${f//:/}"
+          if [ -e "$f" ]; then mv "$f" "${f//:/}"; fi
         done
 
     - name: Upload Artifact
