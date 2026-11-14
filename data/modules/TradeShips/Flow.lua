@@ -26,7 +26,7 @@ end
 -- change of the standard parameter depending on local factors
 local function localFactors(param, system)
 	-- we only take into account the criminal situation
-	return param * (1 - system.lawlessness)
+	return param * math.max(0.1, 1 - system.lawlessness)
 end
 
 -- return an array of names of ships that (at first sight) can be traders
@@ -466,6 +466,7 @@ Flow.spawnInitialShips = function()
 		local candidates = dockedVariantsByPort[portBody]
 		local ndocks = portParam.ndocks or portBody.numDocks or 0
 		if candidates and #candidates > 0 and ndocks > 1 then
+			utils.normWeights(candidates)
 			local minLeaveFree = (ndocks >= 4) and 2 or 1
 			local maxAllowed = math.max(1, ndocks - minLeaveFree)
 			local targetDocked = math.clamp(math.ceil(ndocks * 0.40), 2, maxAllowed)
@@ -474,7 +475,7 @@ Flow.spawnInitialShips = function()
 			end
 			for i = 1, targetDocked do
 				local pick = utils.chooseNormalized(candidates)
-				local ship = Space.SpawnShipDocked(pick.id, portBody)
+				local ship = pick and Space.SpawnShipDocked(pick.id, portBody)
 				if ship then
 					Core.ships[ship] = { ts_error = "OK", status = 'docked', starport = portBody, ship_name = pick.id }
 					ship:SetLabel(Ship.MakeRandomLabel())
@@ -491,18 +492,22 @@ Flow.spawnInitialShips = function()
 		local targetInbound = math.clamp(#port_summary * 3 + 4, 8, 18)
 		for _ = 1, targetInbound do
 			local params = utils.chooseNormalized(routes_variants)
-			local hj_route = utils.chooseEqual(hyper_routes[params.id])
+			local hj_route = params and hyper_routes[params.id] and utils.chooseEqual(hyper_routes[params.id])
 
-			local ship = Space.SpawnShip(params.id, 9, 11, {hj_route.from, params.from:GetSystemBody().path, 0.0})
-			ship:SetLabel(Ship.MakeRandomLabel())
-			Core.ships[ship] = { ts_error = "OK", status = 'inbound', starport = params.to, ship_name = params.id }
+			if params and hj_route then
+				local ship = Space.SpawnShip(params.id, 9, 11, {hj_route.from, params.from:GetSystemBody().path, 0.0})
+				if ship then
+					ship:SetLabel(Ship.MakeRandomLabel())
+					Core.ships[ship] = { ts_error = "OK", status = 'inbound', starport = params.to, ship_name = params.id }
 
-			Trader.addEquip(ship)
-			Trader.addHyperdriveFuel(ship, hj_route.fuel)
-			Trader.addCargo(ship, 'import')
+					Trader.addEquip(ship)
+					Trader.addHyperdriveFuel(ship, hj_route.fuel)
+					Trader.addCargo(ship, 'import')
 
-			Space.PutShipOnRoute(ship, params.to, Engine.rand:Number(0.15, 0.85))
-			ship:AIDockWith(params.to)
+					Space.PutShipOnRoute(ship, params.to, Engine.rand:Number(0.15, 0.85))
+					ship:AIDockWith(params.to)
+				end
+			end
 		end
 	end
 
@@ -511,9 +516,12 @@ Flow.spawnInitialShips = function()
 		local numClouds = Engine.rand:Integer(4, 6)
 		for _ = 1, numClouds do
 			local cloud = utils.chooseNormalized(cloud_variants)
-			local route = utils.chooseNormalized(Core.params.local_routes[cloud.ship])
-			local dest_time = Game.time + Engine.rand:Number(12, 75)
-			Trader.spawnInCloud(cloud.ship, cloud, route, dest_time)
+			local routesForShip = cloud and Core.params.local_routes[cloud.ship]
+			local route = routesForShip and #routesForShip > 0 and utils.chooseNormalized(routesForShip)
+			if cloud and route then
+				local dest_time = Game.time + Engine.rand:Number(12, 75)
+				Trader.spawnInCloud(cloud.ship, cloud, route, dest_time)
+			end
 		end
 	end
 	return ships_in_space
@@ -561,15 +569,20 @@ Flow.setPlayerAsTraderInbound = function()
 end
 
 Flow.run = function()
+	if not Core.params or not Core.params.ship_names or #Core.params.ship_names == 0 then return end
 	local activeCount = 0
 	for _ in pairs(Core.ships) do activeCount = activeCount + 1 end
 	if activeCount < Core.MAX_SHIPS then
 		local ship_name = utils.chooseEqual(Core.params.ship_names)
-		local cloud = utils.chooseEqual(Core.params.hyper_routes[ship_name])
+		local hyperRoutes = ship_name and Core.params.hyper_routes[ship_name]
+		local localRoutes = ship_name and Core.params.local_routes[ship_name]
+		local cloud = hyperRoutes and #hyperRoutes > 0 and utils.chooseEqual(hyperRoutes)
 		-- we immediately choose the local route, because it depends on which star to
 		-- jump to in the multiple system
-		local route = utils.chooseNormalized(Core.params.local_routes[ship_name])
-		Trader.spawnInCloud(ship_name, cloud, route, Game.time + Engine.rand:Number(15, 45))
+		local route = localRoutes and #localRoutes > 0 and utils.chooseNormalized(localRoutes)
+		if ship_name and cloud and route then
+			Trader.spawnInCloud(ship_name, cloud, route, Game.time + Engine.rand:Number(15, 45))
+		end
 	end
 	Core.last_spawn_interval = Engine.rand:Number(20, 45) -- steady real-time arrival cadence
 	Trader.callInThisSystem(Game.time + Core.last_spawn_interval, Flow.run)

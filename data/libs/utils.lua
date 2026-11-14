@@ -890,12 +890,20 @@ end
 --  nothing
 --
 utils.normWeights = function(array)
+	if not array or #array == 0 then return end
 	local sum = 0
 	for _,v in ipairs(array) do
-		sum = sum + v.weight
+		sum = sum + (v.weight or 0)
+	end
+	if sum <= 0 then
+		local uniform = 1 / #array
+		for _,v in ipairs(array) do
+			v.weight = uniform
+		end
+		return
 	end
 	for _,v in ipairs(array) do
-		v.weight = v.weight / sum
+		v.weight = (v.weight or 0) / sum
 	end
 end
 
@@ -922,12 +930,14 @@ end
 --   a random element of the array, with the probability specified in the weight key
 --
 utils.chooseNormalized = function(array, rand)
+	if not array or #array == 0 then return nil end
 	if not rand then rand = Engine.rand end
 	local choice, sum = rand:Number(1.0), 0.0
 	for _, option in ipairs(array) do
-		sum = sum + option.weight
+		sum = sum + (option.weight or 0)
 		if choice <= sum then return option end
 	end
+	return array[#array]
 end
 
 --

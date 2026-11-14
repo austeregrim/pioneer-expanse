@@ -206,23 +206,27 @@ local onShipDestroyed = function (ship)
 		pirates[ship] = nil
 
 		-- Spawn a new pirate
+		if #planets == 0 or not Game.system then return end
 		local threat = calculateThreat(Game.system.lawlessness)
 		local planet = planets[Engine.rand:Integer(1, #planets)]:GetSystemBody()
-		local star = planet.nearestJumpable
+		local star = planet and planet.nearestJumpable
+		if not star or not star.body then return end
 		local newPirate = ShipBuilder.MakeShipOrbit(star.body, MissionUtils.ShipTemplates.GenericPirate, threat, star.radius * 1.2, star.radius * 3.5)
-		newPirate:SetWanted(true, math.floor(1500 + threat * 150))
-		local hasInterdictor = equipInterdictor(newPirate, threat)
+		if newPirate then
+			newPirate:SetWanted(true, math.floor(1500 + threat * 150))
+			local hasInterdictor = equipInterdictor(newPirate, threat)
 
-		pirates[newPirate] = { status = 'ORBIT', planet = planet.body, hasInterdictor = hasInterdictor, warned = false, target = nil }
-		assignSupercruisePatrol(newPirate, planet.body)
+			pirates[newPirate] = { status = 'ORBIT', planet = planet.body, hasInterdictor = hasInterdictor, warned = false, target = nil }
+			assignSupercruisePatrol(newPirate, planet.body)
+		end
 	end
 end
 
 local onPlayerDocked = function ()
 	playerSCStartTime = nil
 	for p, s in pairs(pirates) do
-		if s.status == 'ATTACK' or s.status == 'INTERDICT_PLAYER' then
-			enterOrbit(p, s.planet)
+		if p:exists() and (s.status == 'ATTACK' or s.status == 'INTERDICT_PLAYER') then
+			s.planet = assignSupercruisePatrol(p, s.planet)
 		end
 		s.status = 'ORBIT'
 		s.target = nil
@@ -279,7 +283,7 @@ local onGameStart = function ()
 
 	Timer:CallEvery(8, function ()
 		if not Game.system or not Game.player or not Game.player:exists() then return end
-		local policeId = Game.system.faction.policeShip
+		local policeId = Game.system.faction and Game.system.faction.policeShip
 		local allShips = Space.GetBodies("Ship")
 		local playerInSC = Game.player:GetFlightState() == "SUPERCRUISE"
 		if playerInSC then

@@ -246,7 +246,8 @@ end
 ---@param player Player
 local function spawnAmbientPatrols(system)
 	if not system then return end
-	local policeId = system.faction.policeShip
+	local policeId = system.faction and system.faction.policeShip
+	if not policeId then return end
 
 	-- Spawn ambient Supercruise police patrols in policed systems
 	if system.lawlessness < 0.75 and system.population > 0 then
@@ -306,7 +307,8 @@ end
 
 local onEnterSystem = function (player)
 	local system = assert(Game.system)
-	local policeId = system.faction.policeShip
+	local policeId = system.faction and system.faction.policeShip
+	if not policeId then return end
 
 	spawnAmbientPatrols(system)
 
