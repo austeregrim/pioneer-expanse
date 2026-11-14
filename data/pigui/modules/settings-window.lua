@@ -247,7 +247,7 @@ local function showVideoOptions()
 		Engine.SetMultisampling(aa)
 	end
 
-	c,selectedAniso = combo(lui.ANISOTROPIC_FILTERING or lui.ENABLE_ANISOTROPIC_FILTERING, selectedAniso, anisoLabels, lui.ANISOTROPIC_FILTERING_DESC)
+	c,selectedAniso = combo(lui.ENABLE_ANISOTROPIC_FILTERING, selectedAniso, anisoLabels, lui.ANISOTROPIC_FILTERING_DESC)
 	if c then
 		Engine.SetAnisoFiltering(anisoModes[selectedAniso+1])
 	end

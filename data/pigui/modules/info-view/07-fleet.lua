@@ -8,6 +8,7 @@ local Format      = require 'Format'
 local ShipDef     = require 'ShipDef'
 local Commodities = require 'Commodities'
 local InfoView    = require 'pigui.views.info-view'
+local PlayerState = require 'PlayerState'
 local PlayerFleet = require 'modules.PlayerFleet.PlayerFleet'
 
 local l = Lang.GetResource("ui-core")
