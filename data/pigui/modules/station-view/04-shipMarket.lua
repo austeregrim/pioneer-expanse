@@ -15,6 +15,7 @@ local EquipSet = require 'EquipSet'
 local HullConfig = require 'HullConfig'
 local PlayerState= require 'PlayerState'
 local Passengers = require 'Passengers'
+local PlayerFleet = require 'modules.PlayerFleet.PlayerFleet'
 
 local ui = require 'pigui'
 
@@ -470,13 +471,33 @@ local tradeMenu = function()
 				ui.sameLine()
 				manufacturerIcon(selectedItem.def.manufacturer)
 				local shipBought = false
+				local shipStoredAndBought = false
+				local shipBoughtToHangar = false
 				ui.withFont(pionillium.body, function()
 					shipBought = ui.button(l.BUY_SHIP, widgetSizes.buyButton)
 				end)
 				ui.columns(1, "")
 
+				ui.withFont(pionillium.body, function()
+					shipStoredAndBought = ui.button("Buy & Store Current (" .. Format.Money(cost, false) .. ")", Vector2(0, 0))
+					ui.sameLine()
+					shipBoughtToHangar = ui.button("Buy into Hangar (" .. Format.Money(cost, false) .. ")", Vector2(0, 0))
+				end)
+
 				if shipBought then
 					buyShip(shipMarket, selectedItem)
+					return
+				elseif shipStoredAndBought then
+					local ok, msg = PlayerFleet.StorePlayerShipAndBuy(selectedItem, advertDataCache[selectedItem])
+					if ok then refreshShipMarket() end
+					shipMarket.popup.msg = msg
+					shipMarket.popup:open()
+					return
+				elseif shipBoughtToHangar then
+					local ok, msg = PlayerFleet.BuyShipToHangar(selectedItem, advertDataCache[selectedItem])
+					if ok then refreshShipMarket() end
+					shipMarket.popup.msg = msg
+					shipMarket.popup:open()
 					return
 				end
 

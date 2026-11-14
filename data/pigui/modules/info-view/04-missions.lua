@@ -10,6 +10,7 @@ local ui		= require 'pigui'
 local textTable	= require 'pigui.libs.text-table'
 local PiGuiFace	= require 'pigui.libs.face'
 local InfoView	= require 'pigui.views.info-view'
+local PlayerFleet = require 'modules.PlayerFleet.PlayerFleet'
 
 local pionillium = ui.fonts.pionillium
 local orbiteer = ui.fonts.orbiteer
@@ -101,6 +102,37 @@ local function drawMissionDescription(missionDesc)
 							rowCache = nil
 						end
 					end
+				end
+			end
+		end
+
+		-- Fleet autonomous mission delegation (Plan A)
+		local missionObj = activeMission and activeMission._mission
+		if missionObj then
+			ui.newLine()
+			ui.separator()
+			ui.spacing()
+			ui.withFont(orbiteer.body, function()
+				ui.textColored(ui.theme.colors.uiPrimaryLight, "FLEET MISSION DELEGATION")
+			end)
+			local assignedShip = PlayerFleet.GetMissionAssignedShip(missionObj)
+			if assignedShip then
+				ui.textColored(ui.theme.colors.econProfit, string.format("Assigned Vessel: %s (%s)", assignedShip.shipName, assignedShip.orderPhase or "In Progress"))
+				ui.progressBar(assignedShip.orderProgress or 0, Vector2(-1, ui.rescaleUI(14, Vector2(1920, 1080))), "")
+			else
+				local eligible, reason = PlayerFleet.GetEligibleShipsForMission(missionObj)
+				if #eligible > 0 then
+					for _, opt in ipairs(eligible) do
+						local e = opt.entry
+						if ui.button(string.format("Delegate to %s (%s)##fleet_del_%d", e.shipName, opt.note, e.uid), Vector2(0, 0)) then
+							local ok, msg = PlayerFleet.AssignMission(e.uid, missionObj)
+							if msg then
+								ui.playSfx(ok and "OK" or "Cancel")
+							end
+						end
+					end
+				elseif reason then
+					ui.textColored(ui.theme.colors.fontDim, reason)
 				end
 			end
 		end

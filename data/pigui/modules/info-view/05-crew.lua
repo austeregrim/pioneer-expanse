@@ -9,6 +9,7 @@ local InfoView	= require 'pigui.views.info-view'
 local PiGuiFace = require 'pigui.libs.face'
 local Commodities = require 'Commodities'
 local PlayerState = require 'PlayerState'
+local PlayerFleet = require 'modules.PlayerFleet.PlayerFleet'
 
 local ui = require 'pigui'
 local textTable = require 'pigui.libs.text-table'
@@ -254,6 +255,23 @@ local function drawCrewInfo(crew)
 
 			if Game.player.flightState == 'DOCKED' then
 				if ui.button(l.DISMISS, Vector2(0, 0)) then dismissButton(crew) end
+
+				local station = Game.player:GetDockedWith()
+				local dockedShips = station and PlayerFleet.GetShipsAtStation(station.path) or {}
+				if #dockedShips > 0 then
+					ui.newLine()
+					ui.withFont(orbiteer.body, function() ui.textColored(colors.uiPrimaryLight, "TRANSFER TO DOCKED FLEET VESSEL") end)
+					for _, shipEntry in ipairs(dockedShips) do
+						if ui.button("Assign as Captain -> " .. shipEntry.shipName .. "##cap_" .. shipEntry.uid, Vector2(0, 0)) then
+							local ok, msg = PlayerFleet.AssignCrewFromPlayerShip(shipEntry.uid, crew, true)
+							lastTaskResult = msg or ""
+							if ok then
+								cachedCrewList = nil
+								inspectingCrewMember = nil
+							end
+						end
+					end
+				end
 			end
 
 			if false then -- TODO: implement me!
