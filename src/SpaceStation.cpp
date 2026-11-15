@@ -783,8 +783,10 @@ static const double SQRMAXCITYDIST = 1e5 * 1e5;
 
 void SpaceStation::Render(Graphics::Renderer *r, const Camera *camera, const vector3d &viewCoords, const matrix4x4d &viewTransform)
 {
-	Body *b = Frame::GetFrame(GetFrame())->GetBody();
-	assert(b);
+	Frame *frame = Frame::GetFrame(GetFrame());
+	if (!frame) return;
+	Body *b = frame->GetBody();
+	if (!b) return;
 
 	if (!b->IsType(ObjectType::PLANET)) {
 		// orbital spaceport -- don't make city turds or change lighting based on atmosphere

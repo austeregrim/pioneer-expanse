@@ -94,7 +94,7 @@ ShipTemplates.StationPolice = ShipBuilder.Template:clone {
 		OutfitRules.ModerateWeapon,
 		OutfitRules.EasyWeapon,
 		OutfitRules.ModerateShieldGen,
-		-- Always has laser cooling but no need for hyperdrive
+		OutfitRules.DefaultHyperdrive,
 		OutfitRules.DefaultLaserCooling,
 		OutfitRules.DefaultAtmoShield,
 		OutfitRules.DefaultAutopilot,
@@ -114,6 +114,7 @@ ShipTemplates.PolicePatrol = ShipBuilder.Template:clone {
 		OutfitRules.EasyWeapon,
 		OutfitRules.ModerateShieldGen,
 		OutfitRules.EasyShieldGen,
+		OutfitRules.DefaultHyperdrive,
 		OutfitRules.DefaultAtmoShield,
 		OutfitRules.DefaultAutopilot,
 		OutfitRules.DefaultRadar,

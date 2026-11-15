@@ -31,6 +31,12 @@ local TraderTemplate = ShipBuilder.Template:clone {
 		{ equip = "misc.cargo_life_support" },
 		-- Defensive equipment is applied based on system lawlessness and a little luck
 		utils.mixin(OutfitRules.EasyWeapon, { randomChance = 0.8 }),
+		{
+			slot = "weapon.mining",
+			filter = "weapon.energy.mining",
+			limit = 2,
+			randomChance = 1.0,
+		},
 		utils.mixin(OutfitRules.DefaultShieldGen, { randomChance = 1.0 }),
 		utils.mixin(OutfitRules.DefaultShieldBooster, { randomChance = 0.4 }),
 		-- ECM can't be used by NPC ships... yet

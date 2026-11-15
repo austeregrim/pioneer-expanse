@@ -29,7 +29,7 @@ OutfitRules.DifficultWeapon = {
 OutfitRules.ModerateWeapon = {
 	slot = "weapon",
 	limit = 2,
-	maxSize = 3,
+	maxSize = 4,
 	minThreat = 30.0,
 	maxThreatFactor = 0.6,
 	balance = true,
@@ -37,7 +37,7 @@ OutfitRules.ModerateWeapon = {
 
 OutfitRules.EasyWeapon = {
 	slot = "weapon",
-	maxSize = 2,
+	maxSize = 4,
 	maxThreatFactor = 0.5,
 	balance = true,
 }
@@ -46,7 +46,7 @@ OutfitRules.PulsecannonModerateWeapon = {
 	slot = "weapon",
 	filter = "weapon.energy.pulsecannon",
 	limit = 2,
-	maxSize = 3,
+	maxSize = 4,
 	minThreat = 30.0,
 	maxThreatFactor = 0.6,
 	balance = true
@@ -56,7 +56,7 @@ OutfitRules.PulsecannonEasyWeapon = {
 	slot = "weapon",
 	filter = "weapon.energy.pulsecannon",
 	limit = 2,
-	maxSize = 3,
+	maxSize = 4,
 	maxThreatFactor = 0.5,
 	balance = true
 }

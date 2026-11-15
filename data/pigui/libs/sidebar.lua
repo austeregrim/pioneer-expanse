@@ -62,7 +62,7 @@ function Sidebar:Constructor(id, side, offset)
 	self.pivot = Vector2(0, 0)
 	self.active = nil
 	self.nextActive = nil
-	self.bgColor = colors.overlayWindowBg
+	self.bgColor = ui.theme.styleColors.panel_900 or colors.overlayWindowBg
 
 	self.buttonPos = Vector2(0, 0)
 	self.buttonSize = Vector2(0, 0)
@@ -103,7 +103,8 @@ function Sidebar:UpdateCoords()
 	local spacing = ui.getItemSpacing()
 	local padding = ui.getWindowPadding()
 
-	local buttonWidth = #self.modules * (buttonSize + spacing.x) - spacing.x
+	local visibleModules = utils.filter_array(self.modules, function(v) return not v.hidden end)
+	local buttonWidth = math.max(1, #visibleModules) * (buttonSize + spacing.x) - spacing.x
 
 	self.buttonSize = Vector2(buttonWidth, buttonSize) + padding * 2
 
@@ -122,20 +123,25 @@ function Sidebar:DrawButtons()
 	ui.setNextWindowPos(self.buttonPos, "Always", self.pivot)
 	ui.setNextWindowSize(self.buttonSize, "Always")
 	ui.window(self.id .. "@Buttons", windowFlags, function()
+		local first = true
 		for i, v in ipairs(self.modules) do
-			if ui.mainMenuButton(v.icon, v.tooltip, v.active) then
-				local exclusive = self.active and self.active.exclusive or v.exclusive
-				if v ~= self.active and exclusive then
-					self.nextActive = v
-				else
-					v.closing = v.active
-					v.active = true
+			if not v.hidden then
+				if not first then
+					ui.sameLine()
+				end
+				first = false
+				if ui.mainMenuButton(v.icon, v.tooltip, v.active) then
+					local exclusive = self.active and self.active.exclusive or v.exclusive
+					if v ~= self.active and exclusive then
+						self.nextActive = v
+					else
+						v.closing = v.active
+						v.active = true
 
-					if not v.closing then self:SafeCall(v, v.refresh) end
+						if not v.closing then self:SafeCall(v, v.refresh) end
+					end
 				end
 			end
-
-			ui.sameLine()
 		end
 	end)
 end
@@ -166,11 +172,13 @@ function Sidebar:DrawModule(module)
 	local iconSize = frameSize - mainButtonPadding * 2
 
 	local iconBg = buttonColors.selected.normal
-	local titleBg = buttonColors.default.normal
+	local titleBg = ui.theme.styleColors.panel_900 or colors.windowBackground
+	local outlineCol = ui.theme.styleColors.primary_500 or colors.windowFrame
 
-	-- Draw backgrounds for title area and icon
+	-- Draw backgrounds for title area and icon, plus blue outline
 	ui.addRectFilled(screenPos, screenPos + Vector2(ui.getContentRegion().x, frameSize), titleBg, 0, ui.RoundCornersNone)
 	ui.addRectFilled(screenPos, screenPos + Vector2(frameSize), iconBg, 0, ui.RoundCornersNone)
+	ui.addRect(screenPos, screenPos + Vector2(ui.getContentRegion().x, frameSize), outlineCol, 0, ui.RoundCornersNone, 1.0)
 
 	local iconPos = screenPos + Vector2(mainButtonPadding)
 	ui.addIconSimple(iconPos, module.icon, Vector2(iconSize), colors.white, module.tooltip)
@@ -183,7 +191,7 @@ function Sidebar:DrawModule(module)
 		if module.drawTitle then
 			self:SafeCall(module, module.drawTitle)
 		else
-			ui.text(module.title or "")
+			ui.textColored(colors.white, module.title or "")
 		end
 	end)
 
@@ -206,7 +214,7 @@ function Sidebar:Draw()
 		self:SafeCall(module, module.update)
 	end
 
-	local activeModules = utils.filter_array(self.modules, function(v) return v.active and not v.disabled end)
+	local activeModules = utils.filter_array(self.modules, function(v) return v.active and not v.disabled and not v.hidden end)
 
 	self:UpdateCoords()
 
@@ -262,7 +270,8 @@ function Sidebar:Draw()
 
 	-- Animate the window's fade in/out
 	local a = math.max(self.displayAlpha, 0.001) -- if Alpha == 0, window logic does not run
-	ui.withStyleColorsAndVars({ WindowBg = self.bgColor }, { Alpha = a }, function()
+	local sidebarBorder = ui.theme.styleColors.primary_500 or colors.windowFrame
+	ui.withStyleColorsAndVars({ WindowBg = self.bgColor, Border = sidebarBorder }, { Alpha = a, WindowBorderSize = 1.0 }, function()
 
 		-- Draw the sidebar contents
 		ui.setNextWindowPadding(Vector2(0, 0))
@@ -297,7 +306,7 @@ end
 -- Trigger the refresh event for all active sidebar modules
 -- (expected to be triggered when the entire sidebar becomes visible)
 function Sidebar:Refresh()
-	local activeModules = utils.filter_array(self.modules, function(v) return v.active and not v.disabled end)
+	local activeModules = utils.filter_array(self.modules, function(v) return v.active and not v.disabled and not v.hidden end)
 
 	for i, v in ipairs(activeModules) do
 		-- note that we cannot and should not use ui.pcall here as Refresh() is
@@ -324,7 +333,7 @@ function Sidebar:Reset()
 	self.active = nil
 	self.nextActive = nil
 
-	local activeModules = utils.filter_array(self.modules, function(v) return v.active and not v.disabled end)
+	local activeModules = utils.filter_array(self.modules, function(v) return v.active and not v.disabled and not v.hidden end)
 	for i, v in ipairs(activeModules) do
 		v.active = false
 		v.closing = false

@@ -133,8 +133,8 @@ bool GunManager::AddWeaponMount(const StringName &id, const StringName &tagName,
 		tan(DEG2RAD(gimbalLimit.y))
 	);
 
-	auto result = m_mounts.try_emplace(id, mount);
-	return result.second;
+	m_mounts.insert_or_assign(id, mount);
+	return true;
 }
 
 bool GunManager::RemoveWeaponMount(const StringName &id)

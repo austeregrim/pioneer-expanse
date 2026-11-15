@@ -113,8 +113,9 @@ void AmbientSounds::Update()
 
 		// lets try something random for the time being
 		if (!s_planetSurfaceNoise.IsPlaying()) {
-			const SystemBody *sbody = Frame::GetFrame(Pi::player->GetFrame())->GetSystemBody();
-			assert(sbody);
+			Frame *pFrame = Frame::GetFrame(Pi::player->GetFrame());
+			const SystemBody *sbody = pFrame ? pFrame->GetSystemBody() : nullptr;
+			if (!sbody) return;
 			const char *sample = 0;
 
 			if (sbody->GetLifeAsFixed() > fixed(1, 5)) {
@@ -132,9 +133,9 @@ void AmbientSounds::Update()
 	} else if (s_planetSurfaceNoise.IsPlaying()) {
 		// s_planetSurfaceNoise.IsPlaying() - if player is no longer on the ground then stop playing
 		Frame *playerFrame = Frame::GetFrame(Pi::player->GetFrame());
-		if (playerFrame->IsRotFrame()) {
+		if (playerFrame && playerFrame->IsRotFrame()) {
 			const Body *astro = playerFrame->GetBody();
-			if (astro->IsType(ObjectType::PLANET)) {
+			if (astro && astro->IsType(ObjectType::PLANET)) {
 				const double dist = Pi::player->GetPosition().Length();
 				double pressure, density;
 				static_cast<const Planet *>(astro)->GetAtmosphericState(dist, &pressure, &density);

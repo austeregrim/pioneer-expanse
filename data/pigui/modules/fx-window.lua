@@ -50,7 +50,8 @@ local function buttons_map(current_view)
 	ui.sameLine()
 	local isOrrery = Game.systemView:GetDisplayMode() == "Orrery"
 	active = current_view == "SystemView" and isOrrery
-	if ui.mainMenuButton(icons.system_map, lui.HUD_BUTTON_SWITCH_TO_SYSTEM_MAP, active) or (onmap and ui.noModifierHeld() and ui.isKeyReleased(ui.keys.f6)) then
+	local orreryTip = lui.HUD_BUTTON_SWITCH_TO_SYSTEM_MAP or "Orrery View (F6)"
+	if ui.mainMenuButton(icons.system_map, orreryTip, active) or (onmap and ui.noModifierHeld() and ui.isKeyReleased(ui.keys.f6)) then
 		if not active then
 			Game.systemView:SetDisplayMode('Orrery')
 			Game.SetView("SystemView")
@@ -60,7 +61,8 @@ local function buttons_map(current_view)
 
 	ui.sameLine()
 	active = current_view == "SystemView" and not isOrrery
-	if ui.mainMenuButton(icons.system_overview, lui.HUD_BUTTON_SWITCH_TO_SYSTEM_OVERVIEW, active) or (onmap and ui.noModifierHeld() and ui.isKeyReleased(ui.keys.f7)) then
+	local hierTip = lui.HUD_BUTTON_SWITCH_TO_SYSTEM_OVERVIEW or "Hierarchical Tree View (F7)"
+	if ui.mainMenuButton(icons.system_overview, hierTip, active) or (onmap and ui.noModifierHeld() and ui.isKeyReleased(ui.keys.f7)) then
 		if not active then
 			Game.systemView:SetDisplayMode('Atlas')
 			Game.SetView("SystemView")

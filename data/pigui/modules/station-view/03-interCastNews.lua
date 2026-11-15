@@ -36,11 +36,11 @@ local face = nil
 local lastFaceArticleId = nil
 
 local CATEGORIES = {
-	{ id = "ALL", label = "ALL NEWS" },
-	{ id = "FRONTLINE", label = "FRONTLINE" },
-	{ id = "HUMANITARIAN", label = "HUMANITARIAN" },
-	{ id = "MARKET", label = "MARKET WATCH" },
-	{ id = "POLITICS", label = "POLITICS" },
+	{ id = "ALL", label = "All News" },
+	{ id = "FRONTLINE", label = "Frontline" },
+	{ id = "HUMANITARIAN", label = "Humanitarian" },
+	{ id = "MARKET", label = "Market Watch" },
+	{ id = "POLITICS", label = "Politics" },
 }
 
 local function getCategoryColor(cat)
@@ -67,8 +67,8 @@ local function updateFace(art)
 	face = PiGuiFace.New(
 		Character.New({
 			name = art.bureau,
-			title = "CORRESPONDENT",
-			org = "INTERCAST WIRE SERVICE",
+			title = "Correspondent",
+			org = "InterCast Wire Service",
 			role = "journalist"
 		}, rand),
 		{ itemSpacing = widgetSizes.itemSpacing }
@@ -224,57 +224,103 @@ local function drawInterCastNews()
 
 		updateFace(activeArticle)
 
-		-- Left Column: BBS-matching 45% filter bar & dispatches list
-		ui.child("NewsListLeft", Vector2(leftWidth, 0), function()
-			renderFilterBar()
-			ui.spacing()
-			newsTable.style.size = Vector2(ui.getContentRegion().x, 0)
-			newsTable.items = filteredArticles
-			newsTable.selectedItem = activeArticle
-			newsTable:render()
-		end)
+		local panelStyleColors = {
+			WindowBg = ui.theme.styleColors.panel_900 or colors.windowBackground,
+			Border = ui.theme.styleColors.primary_500 or colors.windowFrame,
+		}
 
-		ui.sameLine()
+		ui.withStyleColors(panelStyleColors, function()
+			-- Left Column: BBS-matching 45% filter bar & dispatches list
+			ui.child("NewsListLeft", Vector2(leftWidth, 0), nil, commsChildFlags, function()
+				local screenPos = ui.getCursorScreenPos()
+				local font = pionillium.heading
+				local frameSize = font.size + widgetSizes.itemSpacing.y * 2
+				local iconSize = frameSize - 4
+				local iconBg = ui.theme.buttonColors.selected.normal
+				local titleBg = ui.theme.styleColors.panel_900 or colors.windowBackground
+				local outlineCol = ui.theme.styleColors.primary_500 or colors.windowFrame
 
-		-- Right Column: BBS-matching details child with borders and padding
-		ui.child("NewsDetailsComms", Vector2(0, 0), nil, commsChildFlags, function()
-			if not activeArticle then
-				ui.withFont(pionillium.details, function()
-					local lineH = ui.getTextLineHeight()
-					ui.icon(icons.comms, Vector2(lineH), colors.fontDim)
+				ui.addRectFilled(screenPos, screenPos + Vector2(ui.getContentRegion().x, frameSize), titleBg, 0, ui.RoundCornersNone)
+				ui.addRectFilled(screenPos, screenPos + Vector2(frameSize), iconBg, 0, ui.RoundCornersNone)
+				ui.addRect(screenPos, screenPos + Vector2(ui.getContentRegion().x, frameSize), outlineCol, 0, ui.RoundCornersNone, 1.0)
+
+				local iconPos = screenPos + Vector2(2, 2)
+				ui.addIconSimple(iconPos, icons.bbs or icons.comms, Vector2(iconSize), colors.white)
+
+				ui.withFont(font, function()
+					ui.dummy(Vector2(frameSize))
 					ui.sameLine()
-					ui.textColored(colors.fontDim, "INTERCAST WIRE SERVICE STANDBY")
+					ui.alignTextToLineHeight()
+					ui.textColored(colors.white, "Wire Dispatches")
 				end)
+				ui.spacing()
 				ui.separator()
 				ui.spacing()
-				ui.textColored(colors.fontDim, "Select a news bulletin from the left dispatch ledger to read the full report.")
-				return
-			end
 
-			local catColor = getCategoryColor(activeArticle.category)
-
-			-- Top Comms header line
-			ui.withFont(pionillium.details, function()
-				local lineH = ui.getTextLineHeight()
-				ui.icon(icons.comms, Vector2(lineH), colors.uiPrimaryLight)
-				ui.sameLine()
-				ui.textColored(colors.uiPrimaryLight, string.format("INTERCAST WIRE SERVICE   ·   [%s BULLETIN]", activeArticle.category))
-				if activeArticle.urgent then
-					ui.sameLine()
-					ui.textColored(colors.alertRed, "·  [FLASH]")
-				end
-
-				local rightText = "SUB-SPACE RELAY   ·   " .. activeArticle.date
-				local avail = ui.getContentRegion().x
-				local rightW = ui.calcTextSize(rightText).x
-				if avail > rightW then
-					ui.sameLine(avail - rightW)
-				end
-				ui.textColored(colors.fontDim, rightText)
+				renderFilterBar()
+				ui.spacing()
+				newsTable.style.size = Vector2(ui.getContentRegion().x, 0)
+				newsTable.items = filteredArticles
+				newsTable.selectedItem = activeArticle
+				newsTable:render()
 			end)
 
-			ui.separator()
-			ui.spacing()
+			ui.sameLine()
+
+			-- Right Column: BBS-matching details child with borders and padding
+			ui.child("NewsDetailsComms", Vector2(0, 0), nil, commsChildFlags, function()
+				local screenPos = ui.getCursorScreenPos()
+				local font = pionillium.heading
+				local frameSize = font.size + widgetSizes.itemSpacing.y * 2
+				local iconSize = frameSize - 4
+				local iconBg = ui.theme.buttonColors.selected.normal
+				local titleBg = ui.theme.styleColors.panel_900 or colors.windowBackground
+				local outlineCol = ui.theme.styleColors.primary_500 or colors.windowFrame
+
+				ui.addRectFilled(screenPos, screenPos + Vector2(ui.getContentRegion().x, frameSize), titleBg, 0, ui.RoundCornersNone)
+				ui.addRectFilled(screenPos, screenPos + Vector2(frameSize), iconBg, 0, ui.RoundCornersNone)
+				ui.addRect(screenPos, screenPos + Vector2(ui.getContentRegion().x, frameSize), outlineCol, 0, ui.RoundCornersNone, 1.0)
+
+				local iconPos = screenPos + Vector2(2, 2)
+				ui.addIconSimple(iconPos, icons.comms, Vector2(iconSize), colors.white)
+
+				if not activeArticle then
+					ui.withFont(font, function()
+						ui.dummy(Vector2(frameSize))
+						ui.sameLine()
+						ui.alignTextToLineHeight()
+						ui.textColored(colors.white, "InterCast Wire Service Standby")
+					end)
+					ui.spacing()
+					ui.separator()
+					ui.spacing()
+					ui.textColored(colors.fontDim, "Select a news bulletin from the left dispatch ledger to read the full report.")
+					return
+				end
+
+				-- Top Comms header line
+				ui.withFont(font, function()
+					ui.dummy(Vector2(frameSize))
+					ui.sameLine()
+					ui.alignTextToLineHeight()
+					ui.textColored(colors.white, string.format("INTERCAST WIRE SERVICE   ·   [%s BULLETIN]", activeArticle.category))
+					if activeArticle.urgent then
+						ui.sameLine()
+						ui.textColored(colors.alertRed, "·  [FLASH]")
+					end
+
+					local rightText = "SUB-SPACE RELAY   ·   " .. activeArticle.date
+					local avail = ui.getContentRegion().x
+					local rightW = ui.calcTextSize(rightText).x
+					if avail > rightW + frameSize + 10 then
+						ui.sameLine(avail - rightW)
+						ui.textColored(colors.fontDim, rightText)
+					end
+				end)
+
+				ui.spacing()
+				ui.separator()
+				ui.spacing()
 
 			-- Reader Body & Face layout
 			local availableRegion = ui.getContentRegion()
@@ -335,6 +381,7 @@ local function drawInterCastNews()
 					face:render()
 				end
 			end)
+		end)
 		end)
 	end)
 end

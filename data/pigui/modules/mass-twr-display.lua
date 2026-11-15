@@ -22,9 +22,11 @@ local function shouldShowDisplay()
 	if not Game.player then return false end
 	local view = Game.CurrentView()
 	if not view then return false end
-	-- These sreens already have something in the bottom right, so we don't show the widget on them
+	-- These screens already have something in the bottom right, or use the full content area, so we don't show the widget on them
 	if view == "SectorView" then return false end
 	if view == "WorldView" then return false end
+	if view == "StationView" then return false end
+	if view == "InfoView" then return false end
 	-- We want to show on the system overview (Atlas) but not on the system map (Orrery)
 	if view == "SystemView" and Game.systemView:GetDisplayMode() == "Orrery" then return false end
 	return true

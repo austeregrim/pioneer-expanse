@@ -6,7 +6,14 @@ local ui = require 'pigui'
 local TabView = require 'pigui.views.tab-view'
 
 local infoView = TabView.New("InfoView")
-infoView.windowPadding = ui.rescaleUI(Vector2(18, 18))
+infoView.windowPadding = ui.rescaleUI(Vector2(12, 12), Vector2(1920, 1080))
+
+local useWindowPadding = ui.ChildFlags { 'AlwaysUseWindowPadding' }
+function infoView:renderTab(tabFn)
+	ui.withStyleVars({WindowPadding = self.windowPadding}, function()
+		ui.child("InfoContainer", Vector2(0, 0), nil, useWindowPadding, tabFn)
+	end)
+end
 
 ui.registerHandler("InfoView", function(delta_t, refresh)
 	infoView:renderTabView(refresh)

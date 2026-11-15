@@ -550,6 +550,7 @@ end
 
 ---@type UI.Sidebar.Module
 local overviewView = {
+	title = "Hierarchical Tree",
 	showInHyperspace = false,
 	icon = icons.system_overview,
 	tooltip = luc.TOGGLE_OVERVIEW_WINDOW,
@@ -559,7 +560,9 @@ local overviewView = {
 		if Windows.unexplored.visible then
 			ui.text(lc.UNEXPLORED_SYSTEM_NO_SYSTEM_VIEW)
 		else
-			systemOverviewWidget:displaySidebarTitle(systemView:GetSystem())
+			ui.text("Hierarchical Tree")
+			ui.sameLine()
+			systemOverviewWidget:displaySidebarControls()
 		end
 	end,
 
@@ -568,6 +571,12 @@ local overviewView = {
 		if not system or Windows.unexplored.visible then
 			return
 		end
+
+		ui.withFont(ui.fonts.pionillium.small, function()
+			ui.textColored(colors.fontDim, system.name or "")
+		end)
+		ui.separator()
+		ui.spacing()
 
 		systemOverviewWidget:displaySearch()
 
@@ -659,12 +668,7 @@ local infoView = {
 	--exclusive = true,
 
 	drawTitle = function()
-		local obj = systemView:GetSelectedObject()
-		if obj ~= nil and obj.ref ~= nil then
-			local isSystemBody = obj.base == Projectable.SYSTEMBODY
-			local body = obj.ref
-			ui.text(ui.get_icon_glyph(getBodyIcon(obj)) .. " " .. (isSystemBody and body.name or body.label))
-		end
+		ui.text(lc.OBJECT_INFO or "Object Info")
 	end,
 
 	drawBody = function()
@@ -673,6 +677,14 @@ local infoView = {
 		if obj ~= nil and obj.ref ~= nil then
 			local isSystemBody = obj.base == Projectable.SYSTEMBODY
 			local body = obj.ref
+
+			local iconGlyph = ui.get_icon_glyph(getBodyIcon(obj))
+			local objName = isSystemBody and body.name or body.label
+			ui.withFont(ui.fonts.pionillium.small, function()
+				ui.textColored(colors.fontDim, iconGlyph .. "  " .. objName)
+			end)
+			ui.separator()
+			ui.spacing()
 
 			if isSystemBody then
 				ui.textWrapped(body.astroDescription)
@@ -684,6 +696,11 @@ local infoView = {
 			local data = getObjectData(obj)
 			tabular(data, 0)
 		else
+			ui.withFont(ui.fonts.pionillium.small, function()
+				ui.textColored(colors.fontDim, "No Object Selected")
+			end)
+			ui.separator()
+			ui.spacing()
 			ui.textColored(colors.fontDim, lc.SELECT_A_TARGET .. "...")
 		end
 	end
@@ -837,7 +854,9 @@ function Windows.systemName.Show()
 	else
 		path = systemView:GetSystem().path
 	end
-	ui.text(ui.Format.SystemPath(path))
+	local isOrrery = systemView:GetDisplayMode() == "Orrery"
+	local modeName = isOrrery and "Orrery View" or "Hierarchical Tree View"
+	ui.text(ui.Format.SystemPath(path) .. "  •  " .. modeName)
 end
 
 local function drawGroupIcons(coords, icon, color, iconSize, group, isSelected)
@@ -1178,7 +1197,12 @@ local function displaySystemViewUI(delta_t, refresh)
 		systemViewLayout.enabled = not systemViewLayout.enabled
 	end
 
-	plannerView.disabled = systemView:GetDisplayMode() ~= "Orrery"
+	local isOrrery = systemView:GetDisplayMode() == "Orrery"
+	plannerView.disabled = not isOrrery
+	plannerView.hidden = not isOrrery
+	if not isOrrery and rightSidebar.active == plannerView then
+		rightSidebar.active = nil
+	end
 	plannerView.icon = plannerView.disabled and icons.square_dashed or icons.semi_major_axis
 
 	systemViewLayout:display()

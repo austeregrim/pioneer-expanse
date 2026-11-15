@@ -47,6 +47,7 @@
 		},
 		"hyperdrive": {
 			"type": "hyperdrive",
+			"default": "hyperspace.hyperdrive_1",
 			"size": 1,
 			"size_min": 1
 		},
@@ -63,7 +64,7 @@
 	"effective_exhaust_velocity": 10900000,
 	"thruster_fuel_use": -1.0,
 	"fuel_tank_mass": 5,
-	"hyperdrive_class": 0,
+	"hyperdrive_class": 1,
 
 	"forward_thrust": 280000,
 	"forward_acceleration_cap": 14.715,

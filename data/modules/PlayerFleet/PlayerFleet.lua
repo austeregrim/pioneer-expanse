@@ -1107,8 +1107,12 @@ end
 function PlayerFleet.RenameShip(uid, newName)
 	local _, entry = findShipIndex(uid)
 	if not entry then return false end
-	local trimmed = tostring(newName or ""):gsub("^%s*(.-)%s*$", "%1")
-	if trimmed == "" then return false end
+	local cleaned = tostring(newName or ""):gsub("[%c]", "")
+	local trimmed = cleaned:match("^%s*(.-)%s*$")
+	if not trimmed or trimmed == "" then return false end
+	if #trimmed > 48 then
+		trimmed = trimmed:sub(1, 48):match("^%s*(.-)%s*$")
+	end
 	entry.shipName = trimmed
 	if entry.liveShip and entry.liveShip:exists() then
 		entry.liveShip:SetShipName("[FLEET] " .. trimmed)

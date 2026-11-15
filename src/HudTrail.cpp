@@ -52,7 +52,9 @@ void HudTrail::Update(float time)
 	if (m_updateTime > UPDATE_INTERVAL) {
 		m_updateTime = 0.f;
 		// Always use a non-rotating frame, so that the relative positions are un-rotated
-		FrameId nrf = Frame::GetFrame(Pi::player->GetFrame())->GetNonRotFrame();
+		Frame *pFrame = Frame::GetFrame(Pi::player->GetFrame());
+		if (!pFrame) return;
+		FrameId nrf = pFrame->GetNonRotFrame();
 		m_trailPoints.emplace_back(m_body->GetInterpPositionRelTo(nrf) - Pi::player->GetInterpPositionRelTo(nrf));
 	}
 
@@ -84,7 +86,9 @@ void HudTrail::Render(Graphics::Renderer *r)
 	if (m_trailPoints.size() > 1) {
 		// Set up a transform that includes the player's current position, so that everything we draw is relative to that
 		// Always use a non-rotating frame, so that the relative positions are un-rotated
-		FrameId nrf = Frame::GetFrame(Pi::player->GetFrame())->GetNonRotFrame();
+		Frame *pFrame = Frame::GetFrame(Pi::player->GetFrame());
+		if (!pFrame) return;
+		FrameId nrf = pFrame->GetNonRotFrame();
 		const vector3d vpos = m_transform * Pi::player->GetInterpPositionRelTo(nrf);
 		m_transform[12] = vpos.x;
 		m_transform[13] = vpos.y;

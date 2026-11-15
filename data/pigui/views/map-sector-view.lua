@@ -194,8 +194,23 @@ local function getHyperspaceDetails(path)
 	local p = path.sectorX .. "/" .. path.sectorY .. "/" .. path.sectorZ .. "/" .. path.systemIndex
 	local it = hyperspaceDetailsCache[p]
 	if not it then
-		local jumpStatus, distance, fuelRequired, duration = player:GetHyperspaceDetails(path)
-		it = { jumpStatus = jumpStatus, distance = distance, fuelRequired = fuelRequired, duration = duration, path = path }
+		local pObj = player or Game.player
+		local jumpStatus, distance, fuelRequired, duration
+		if pObj then
+			jumpStatus, distance, fuelRequired, duration = pObj:GetHyperspaceDetails(path)
+		else
+			jumpStatus = "NO_DRIVE"
+			distance = 0
+			fuelRequired = 0
+			duration = 0
+		end
+		it = {
+			jumpStatus = jumpStatus or "OUT_OF_RANGE",
+			distance = distance or 0,
+			fuelRequired = fuelRequired or 0,
+			duration = duration or 0,
+			path = path
+		}
 		hyperspaceDetailsCache[p] = it
 	end
 	return it
@@ -207,15 +222,19 @@ local statusIcons = {
 	CURRENT_SYSTEM = { icon = icons.navtarget },
 	INSUFFICIENT_FUEL = { icon = icons.fuel },
 	OUT_OF_RANGE = { icon = icons.alert_generic },
-	NO_DRIVE = { icon = icons.hyperspace_off }
+	NO_DRIVE = { icon = icons.hyperspace_off },
+	SAFETY_LOCKOUT = { icon = icons.alert_generic },
+	OBSCURED = { icon = icons.alert_generic }
 }
 
 local function draw_jump_status(item)
-	textIcon(statusIcons[item.jumpStatus].icon, lui[item.jumpStatus])
+	local statusEntry = statusIcons[item.jumpStatus] or statusIcons.OUT_OF_RANGE
+	local statusText = lui[item.jumpStatus] or item.jumpStatus or ""
+	textIcon(statusEntry.icon, statusText)
 	ui.text(string.format("%.2f%s  %s %.1f%s  %s %s",
-		item.distance, lc.UNIT_LY,
-		ui.get_icon_glyph(icons.fuel), item.fuelRequired, lc.UNIT_TONNES,
-		ui.get_icon_glyph(icons.clock), ui.Format.Duration(item.duration, 2)))
+		item.distance or 0, lc.UNIT_LY or "ly",
+		ui.get_icon_glyph(icons.fuel), item.fuelRequired or 0, lc.UNIT_TONNES or "t",
+		ui.get_icon_glyph(icons.clock), ui.Format.Duration(item.duration or 0, 2)))
 end
 
 local function calc_star_dist(star)
@@ -229,19 +248,21 @@ end
 
 local function drawSearchResults(systempaths)
 	local data = {}
-	for _,path in pairs(systempaths) do table.insert(data, getHyperspaceDetails(path)) end
+	for _,path in pairs(systempaths or {}) do table.insert(data, getHyperspaceDetails(path)) end
 
 	ui.child("search_results", function ()
 		table.sort(data, function(a,b)
-			return a.path ~= b.path and (not a.path:IsSameSystem(b.path)) and a.distance < b.distance
+			return (a.distance or 0) < (b.distance or 0)
 		end)
 		for i, item in pairs(data) do
 			local system = item.path:GetStarSystem()
-			if ui.selectable(system.name .. "##" .. i, false, {}) then
-				sectorView:SwitchToPath(item.path)
+			if system then
+				if ui.selectable(system.name .. "##" .. i, false, {}) then
+					sectorView:SwitchToPath(item.path)
+				end
+				ui.sameLine()
+				ui.withFont(smallfont, function() draw_jump_status(item) end)
 			end
-			ui.sameLine()
-			ui.withFont(smallfont, function() draw_jump_status(item) end)
 		end
 	end)
 end
@@ -479,14 +500,14 @@ local infoView = {
 	drawTitle = function(self)
 		local map = sectorView:GetMap()
 		if map:GetMacroAlpha() >= 0.45 then
-			ui.text("GALACTIC OVERVIEW")
+			ui.text("Galactic Overview")
 			return
 		end
 
 		local iconSize = Vector2(ui.getButtonHeight())
 		local path = sectorView:GetSelectedSystemPath() ---@type SystemPath
 
-		ui.text(path:GetStarSystem().name)
+		ui.text(lui.SYSTEM_INFORMATION or "System Information")
 		ui.sameLine(ui.getContentRegion().x - iconSize.x * 2, 0)
 
 		local padding = ui.theme.styles.ItemInnerSpacing
@@ -516,6 +537,15 @@ local infoView = {
 
 		local path = sectorView:GetSelectedSystemPath()
 		if not path then return end
+
+		local sys = path:GetStarSystem()
+		if sys then
+			ui.withFont(ui.fonts.pionillium.small, function()
+				ui.textColored(colors.fontDim, sys.name)
+			end)
+			ui.separator()
+			ui.spacing()
+		end
 
 		sidebarStyle:push()
 
@@ -692,31 +722,42 @@ local infoView = {
 -- Search bar module
 ---@type UI.Sidebar.Module
 local searchBar = {
+	title = lc.SEARCH or "Search",
 	searchText = "",
 	systemPaths = nil, ---@type table?
 	icon = icons.search_lens,
-	tooltip = lc.SEARCH,
+	tooltip = lc.SEARCH or "Search",
 	exclusive = true,
 
 	drawTitle = function(self)
-
-		ui.withFont(pionillium.body, function()
-
-			ui.addCursorPos(Vector2(0, 0.5 * (ui.getLineHeight() - ui.getFrameHeight())))
-			self:updateSearch(ui.inputText("##searchText", self.searchText, lc.SEARCH, {}))
-
-		end)
-
+		ui.text(lc.SEARCH or "Search")
 	end,
 
 	drawBody = function(self)
+		ui.withFont(pionillium.body, function()
+			local clearBtnWidth = self.searchText ~= "" and ui.rescaleUI(28) or 0
+			local inputWidth = ui.getContentRegion().x - (clearBtnWidth > 0 and (clearBtnWidth + ui.theme.styles.ItemSpacing.x) or 0)
+			ui.nextItemWidth(inputWidth)
+			local newText, changed = ui.inputText("##searchText", self.searchText, "Enter system name...", {})
+			if newText ~= self.searchText then
+				self:updateSearch(newText, false)
+			end
+			if clearBtnWidth > 0 then
+				ui.sameLine()
+				if ui.button("X##clearSearch", Vector2(clearBtnWidth, ui.getFrameHeight())) then
+					self:updateSearch("", false)
+				end
+			end
+		end)
+		ui.spacing()
 
-		if not self.systemPaths or #self.systemPaths == 0 then
-			ui.text(lc.NOT_FOUND)
+		if self.searchText == "" then
+			ui.textColored(colors.fontDim, "Type a system name to begin searching...")
+		elseif not self.systemPaths or #self.systemPaths == 0 then
+			ui.text(lc.NOT_FOUND or "Not Found")
 		else
 			drawSearchResults(self.systemPaths)
 		end
-
 	end,
 
 	---@param search string

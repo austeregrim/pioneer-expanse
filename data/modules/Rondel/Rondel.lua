@@ -34,6 +34,7 @@ local HaberPatrolCraft = ShipBuilder.Template:clone {
 		OutfitRules.EasyWeapon,
 		OutfitRules.ModerateShieldGen,
 		OutfitRules.EasyShieldGen,
+		OutfitRules.DefaultHyperdrive,
 		OutfitRules.DefaultAtmoShield,
 		OutfitRules.DefaultAutopilot
 	}

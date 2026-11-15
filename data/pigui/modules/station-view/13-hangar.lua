@@ -188,6 +188,17 @@ local function drawCargoTransferPane(entry, station)
 	ui.columns(1)
 end
 
+local function sanitizeShipName(raw)
+	if not raw then return nil end
+	local cleaned = tostring(raw):gsub("[%c]", "")
+	cleaned = cleaned:match("^%s*(.-)%s*$")
+	if not cleaned or cleaned == "" then return nil end
+	if #cleaned > 48 then
+		cleaned = cleaned:sub(1, 48):match("^%s*(.-)%s*$")
+	end
+	return cleaned
+end
+
 local function drawFleetShipDetail(entry, station)
 	ui.child("##HangarShipDetails", Vector2(-1, -1), nil, childFlags, function()
 		if not entry then
@@ -200,27 +211,41 @@ local function drawFleetShipDetail(entry, station)
 
 		ui.withFont(orbiteer.title, function()
 			ui.text(entry.shipName or (def and def.name or entry.shipId))
+			ui.sameLine()
+			local btnSz = Vector2(ui.getTextLineHeight())
+			if ui.iconButton("##editShipNameHangar", icons.pencil, "Rename Vessel", nil, btnSz) then
+				renameUid = entry.uid
+				renameBuffer = entry.shipName or ""
+				ui.openPopup("rename_ship_popup_hangar")
+			end
 		end)
+
+		ui.popup("rename_ship_popup_hangar", function()
+			ui.text("Rename Vessel:")
+			ui.spacing()
+			ui.pushItemWidth(ui.rescaleUI(260, Vector2(1920, 1080)))
+			local newText, entered = ui.inputText("##RenameHangarShipInput", renameBuffer, "Enter vessel name...", {"EnterReturnsTrue"})
+			ui.popItemWidth()
+			renameBuffer = newText
+			ui.spacing()
+			if ui.button("Save", Vector2(0, 0)) or entered then
+				local sanitized = sanitizeShipName(renameBuffer)
+				if sanitized then
+					if PlayerFleet.RenameShip(entry.uid, sanitized) then
+						setStatus("Vessel renamed to " .. sanitized)
+					end
+				end
+				ui.closeCurrentPopup()
+			end
+			ui.sameLine()
+			if ui.button("Cancel", Vector2(0, 0)) then
+				ui.closeCurrentPopup()
+			end
+		end)
+
 		ui.textColored(colors.fontDim, string.format("%s   |   Callsign: %s   |   Location: %s",
 			def and def.name or entry.shipId, entry.label or "----", entry.locationName or "Unknown"
 		))
-
-		if renameUid ~= entry.uid then
-			renameUid = entry.uid
-			renameBuffer = entry.shipName or ""
-		end
-		ui.text("Rename:")
-		ui.sameLine()
-		ui.pushItemWidth(ui.rescaleUI(220, Vector2(1920, 1080)))
-		local newText, changed = ui.inputText("##RenameHangarShip", renameBuffer, {})
-		if changed then renameBuffer = newText end
-		ui.popItemWidth()
-		ui.sameLine()
-		if ui.button("Apply Name", Vector2(0, 0)) then
-			if PlayerFleet.RenameShip(entry.uid, renameBuffer) then
-				setStatus("Vessel renamed to " .. renameBuffer)
-			end
-		end
 
 		ui.separator()
 		ui.spacing()

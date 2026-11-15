@@ -17,11 +17,11 @@ local selectedCategory = "ALL"
 local expandedArticleId = nil
 
 local CATEGORIES = {
-	{ id = "ALL", label = "ALL" },
-	{ id = "FRONTLINE", label = "COMBAT" },
-	{ id = "HUMANITARIAN", label = "RELIEF" },
-	{ id = "MARKET", label = "MARKET" },
-	{ id = "POLITICS", label = "POLITICS" },
+	{ id = "ALL", label = "All" },
+	{ id = "FRONTLINE", label = "Combat" },
+	{ id = "HUMANITARIAN", label = "Relief" },
+	{ id = "MARKET", label = "Market" },
+	{ id = "POLITICS", label = "Politics" },
 }
 
 local function getCategoryColor(cat)
@@ -50,7 +50,7 @@ gameView.registerSidebarModule("intercast-news", {
 	end,
 
 	drawTitle = function()
-		ui.textColored(colors.uiPrimaryLight, "INTERCAST WIRE DISPATCH")
+		ui.textColored(colors.white, "InterCast Wire Dispatch")
 	end,
 
 	drawBody = function()

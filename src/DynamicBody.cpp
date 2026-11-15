@@ -102,10 +102,13 @@ void DynamicBody::SaveToJson(Json &jsonObj, Space *space)
 
 void DynamicBody::GetCurrentAtmosphericState(double &pressure, double &density) const
 {
+	pressure = density = 0;
 	Frame *f = Frame::GetFrame(GetFrame());
+	if (!f) {
+		return;
+	}
 	Body *body = f->GetBody();
 	if (!body || !f->IsRotFrame() || !body->IsType(ObjectType::PLANET)) {
-		pressure = density = 0;
 		return;
 	}
 	Planet *planet = static_cast<Planet *>(body);

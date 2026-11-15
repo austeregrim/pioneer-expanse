@@ -148,8 +148,8 @@ function PiGuiTabView.renderTabView(self, refresh)
 	end
 
 	local styleColors = {
-		WindowBg = colors.windowBackground,
-		Border = colors.windowFrame,
+		WindowBg = ui.theme.styleColors.panel_900 or colors.windowBackground,
+		Border = ui.theme.styleColors.primary_500 or colors.windowFrame,
 	}
 	local styleVars = {
 		WindowRounding = 0,
@@ -166,9 +166,9 @@ function PiGuiTabView.renderTabView(self, refresh)
 			ui.setNextWindowPos(self.viewWindowPos, "Always")
 			ui.setNextWindowSize(self.viewWindowSize, "Always")
 			ui.window(self.name .. "-Content", mainWindowFlags, function()
-				local sig = self:getSig(tab)
-				sig:render(function()
-					self:renderTab(function()
+				self:renderTab(function()
+					local sig = self:getSig(tab)
+					sig:render(function()
 						tab.showView, tab.err = ui.pcall(tab.draw, tab)
 					end)
 				end)
@@ -211,21 +211,21 @@ function PiGuiTabView.renderTabView(self, refresh)
 	local activeBg = ui.theme.styleColors.panel_900 or Color(10, 14, 20, 245)
 	local activeVariant = {
 		normal = activeBg,
-		hovered = ui.theme.styleColors.primary_700 or activeBg,
+		hovered = activeBg,
 		active = activeBg,
 	}
 
 	-- Calculate exact width required by the tab buttons so the window doesn't cover center navigation buttons
 	local currentTabW = 0
 	if self.tabs[self.currentTab] then
-		ui.withFont(pionillium.medium, function()
-			currentTabW = ui.calcTextSize(self.tabs[self.currentTab].name).x + 16 * rescaleVector.x
+		ui.withFont(pionillium.heading, function()
+			currentTabW = ui.calcTextSize(self.tabs[self.currentTab].name).x + 18 * rescaleVector.x
 		end)
 	end
 	local prevTabW = 0
 	if self.prevTab and self.tabs[self.prevTab] and animProgress < 1 then
-		ui.withFont(pionillium.medium, function()
-			prevTabW = ui.calcTextSize(self.tabs[self.prevTab].name).x + 16 * rescaleVector.x
+		ui.withFont(pionillium.heading, function()
+			prevTabW = ui.calcTextSize(self.tabs[self.prevTab].name).x + 18 * rescaleVector.x
 		end)
 	end
 	local animatedExpansion = currentTabW * ease + prevTabW * (1 - ease)
@@ -244,12 +244,12 @@ function PiGuiTabView.renderTabView(self, refresh)
 					local iconH = bigButtonSize.y - bigButtonFramePadding.y * 2
 					local textW = 0
 					local textH = 0
-					ui.withFont(pionillium.medium, function()
+					ui.withFont(pionillium.heading, function()
 						textW = ui.calcTextSize(v.name).x
 						textH = ui.getTextLineHeight()
 					end)
 
-					local fullW = bigButtonSize.x + textW + 16 * rescaleVector.x
+					local fullW = bigButtonSize.x + textW + 18 * rescaleVector.x
 					fullW = math.max(bigButtonSize.x, fullW)
 
 					local btnW = bigButtonSize.x
@@ -259,36 +259,45 @@ function PiGuiTabView.renderTabView(self, refresh)
 						btnW = bigButtonSize.x + (fullW - bigButtonSize.x) * (1 - ease)
 					end
 
-					local textColor = isActive and colors.uiPrimaryLight or colors.fontDim
+					local textColor = isActive and colors.white or colors.fontDim
 
 					ui.withStyleColors({ Border = activeBorder }, function()
 						ui.withStyleVars({ FrameBorderSize = 1.0, FramePadding = bigButtonFramePadding }, function()
-							ui.button("##tabBtn_" .. v.id, Vector2(btnW, bigButtonSize.y), activeVariant, v.name)
+							if ui.button("##tabBtn_" .. v.id, Vector2(btnW, bigButtonSize.y), activeVariant, v.name) then
+								if isPrev then
+									self:SwitchTo(v.id)
+								end
+							end
 						end)
 					end)
 
 					local minPos, maxPos = ui.getItemRect()
 
-					ui.withClipRect(minPos, maxPos, function()
-						-- 1. Draw the icon on the left: same size and color as original button
-						local iconPos = Vector2(minPos.x + bigButtonFramePadding.x, minPos.y + bigButtonFramePadding.y)
-						ui.addIconSimple(iconPos, v.icon, Vector2(iconH, iconH), colors.font)
+					-- 1. Draw the icon on the left in its fixed square
+					local iconBoxSize = Vector2(bigButtonSize.y, bigButtonSize.y)
+					local iconBg = isActive and ui.theme.buttonColors.selected.normal or ui.theme.buttonColors.deselected.normal
+					ui.addRectFilled(minPos, minPos + iconBoxSize, iconBg, 0, ui.RoundCornersNone)
+					local iconPos = Vector2(minPos.x + bigButtonFramePadding.x, minPos.y + bigButtonFramePadding.y)
+					ui.addIconSimple(iconPos, v.icon, Vector2(iconH, iconH), colors.white)
 
-						-- 2. Draw the text right-justified inside the expanded button with padding
-						local rightMargin = 12 * rescaleVector.x
-						if btnW > bigButtonSize.x + 8 * rescaleVector.x then
-							ui.withFont(pionillium.medium, function()
+					-- 2. Draw the text strictly inside a clipping boundary that starts at the right edge of the icon box.
+					-- This ensures text NEVER appears behind or over the icon or adjacent buttons during shrinking or expanding.
+					local textClipMin = Vector2(minPos.x + iconBoxSize.x, minPos.y)
+					local textClipMax = Vector2(maxPos.x, maxPos.y)
+					if textClipMax.x > textClipMin.x + 2 * rescaleVector.x then
+						ui.withClipRect(textClipMin, textClipMax, function()
+							ui.withFont(pionillium.heading, function()
 								local textPos = Vector2(
-									minPos.x + btnW - textW - rightMargin,
+									minPos.x + iconBoxSize.x + 8 * rescaleVector.x,
 									minPos.y + (bigButtonSize.y - textH) * 0.5
 								)
 								ui.addText(textPos, textColor, v.name)
 							end)
-						end
-					end)
+						end)
+					end
 
 					if isActive then
-						ui.addRectFilled(minPos, Vector2(maxPos.x, minPos.y + 2), colors.uiPrimaryLight, 0, ui.RoundCornersNone)
+						ui.addRectFilled(minPos, Vector2(maxPos.x, minPos.y + 2), activeBorder, 0, ui.RoundCornersNone)
 					end
 				else
 					if ui.iconButton(v.id, v.icon, v.name, false, bigButtonSize, bigButtonFramePadding) then

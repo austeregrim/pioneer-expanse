@@ -846,6 +846,9 @@ void Pi::App::HandleRequests()
 			m_gameLoop->RequestEndLifecycle();
 		} break;
 		case InternalRequests::QUIT_GAME: {
+			Pi::GetMusicPlayer().Stop();
+			Sound::Pause(1);
+			Sound::DestroyAllEvents();
 			GetActiveLifecycle()->RequestEndLifecycle();
 			RequestQuit();
 		} break;

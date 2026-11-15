@@ -425,8 +425,10 @@ void Camera::CalcLighting(const Body *b, double &ambient, double &direct) const
 	ambient = minAmbient;
 	direct = 1.0;
 
-	Body *astro = Frame::GetFrame(b->GetFrame())->GetBody();
-	if (!astro)
+	Frame *bFrame = Frame::GetFrame(b->GetFrame());
+	if (!bFrame) return;
+	Body *astro = bFrame->GetBody();
+	if (!astro || !astro->IsType(ObjectType::PLANET))
 		return;
 
 	Planet *planet = static_cast<Planet *>(astro);

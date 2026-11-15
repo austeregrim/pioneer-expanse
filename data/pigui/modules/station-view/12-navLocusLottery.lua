@@ -247,7 +247,7 @@ local function drawNavLocusLottery()
 	local allPoints = NavLocusLottery.GetAllActivePoints()
 
 	ui.withFont(orbiteer.title, function()
-		ui.textColored(colors.compareBetter, "PAN-GALACTIC NAV-LOCUS SWEEPSTAKES AUTHORITY")
+		ui.textColored(colors.compareBetter, "Pan-Galactic Nav-Locus Sweepstakes Authority")
 	end)
 	ui.textColored(colors.fontDim, "Synchronized Astrogation Coordinate Lottery — Weekly Tuesday 18:00:00 GST Drawing")
 	ui.separator()
@@ -256,7 +256,7 @@ local function drawNavLocusLottery()
 	-- Giant Progressive Jackpot Banner with Scheduled Tuesday 18:00 GST Countdown
 	ui.child("##jackpotBanner", Vector2(ui.getContentRegion().x, 68), nil, childFlags, function()
 		ui.withFont(orbiteer.heading, function()
-			ui.textColored(Color(255, 215, 50, 255), string.format("GRAND PROGRESSIVE JACKPOT: %s", formatCr(drawState.jackpotPool)))
+			ui.textColored(Color(255, 215, 50, 255), string.format("Grand Progressive Jackpot: %s", formatCr(drawState.jackpotPool)))
 		end)
 
 		local timeStr = string.format("Next Synchronized Drawing in: %dD %02dH %02dM %02dS (Cycle #%d — Tuesday 18:00 GST)",
@@ -269,7 +269,7 @@ local function drawNavLocusLottery()
 		-- Recent winner / rollover status line
 		if drawState.lastWinner then
 			local lw = drawState.lastWinner
-			local winTag = lw.isPlayer and "COMMANDER CLAIMED" or "NPC CLAIMED"
+			local winTag = lw.isPlayer and "Commander Claimed" or "NPC Claimed"
 			ui.textColored(Color(120, 245, 140, 255), string.format("Cycle #%d Grand Winner (%s): %s (%s) in %s [%s]",
 				lw.drawNumber, winTag, lw.name, lw.faction, lw.system, formatCr(lw.amount)))
 		else
@@ -282,10 +282,10 @@ local function drawNavLocusLottery()
 	-- Sub tabs
 	ui.group(function()
 		local tabs = {
-			{ id = "TICKET", label = "3D ASTROLABE TICKET & BUY" },
-			{ id = "BATCH", label = "BULK BATCH DISPATCH" },
-			{ id = "MYTICKETS", label = string.format("MY REGISTERED LOCI (%d)", #activeTickets) },
-			{ id = "RULES", label = "ODDS & PAYOUT SCHEDULE" },
+			{ id = "TICKET", label = "3D Astrolabe Ticket & Buy" },
+			{ id = "BATCH", label = "Bulk Batch Dispatch" },
+			{ id = "MYTICKETS", label = string.format("My Registered Loci (%d)", #activeTickets) },
+			{ id = "RULES", label = "Odds & Payout Schedule" },
 		}
 		for _, t in ipairs(tabs) do
 			local isSel = (currentSubTab == t.id)
@@ -464,10 +464,10 @@ local function drawNavLocusLottery()
 			}
 
 			ui.columns(4, "##batchCols", true)
-			ui.text("BUNDLE NAME") ui.nextColumn()
-			ui.text("COORDINATE VOLUME") ui.nextColumn()
-			ui.text("TOTAL COST") ui.nextColumn()
-			ui.text("ACTION") ui.nextColumn()
+			ui.text("Bundle Name") ui.nextColumn()
+			ui.text("Coordinate Volume") ui.nextColumn()
+			ui.text("Total Cost") ui.nextColumn()
+			ui.text("Action") ui.nextColumn()
 			ui.separator()
 
 			for _, b in ipairs(batches) do
@@ -478,7 +478,7 @@ local function drawNavLocusLottery()
 				ui.nextColumn()
 				ui.text(formatCr(b.cost))
 				ui.nextColumn()
-				if ui.button(string.format("PURCHASE %s CR##BuyB%d", formatCr(b.cost), b.count), Vector2(170, 34)) then
+				if ui.button(string.format("Purchase %s Cr##BuyB%d", formatCr(b.cost), b.count), Vector2(170, 34)) then
 					local ok, msg = NavLocusLottery.BuyBatchTickets(b.count)
 					statusMessage = msg
 					statusTime = ui.getTime()
@@ -498,7 +498,7 @@ local function drawNavLocusLottery()
 		-- Left Pane: Dedicated 3D Astrolabe Viewport showing ALL owned tickets
 		ui.child("##myTickets3D", Vector2(leftW, -1), nil, childFlags, function()
 			ui.withFont(orbiteer.heading, function()
-				ui.textColored(colors.uiPrimaryLight, "ASTROLABE COORDINATE SWARM")
+				ui.textColored(colors.uiPrimaryLight, "Astrolabe Coordinate Swarm")
 			end)
 			ui.textColored(colors.fontDim, string.format("Visualizing %d registered loci across celestial sphere", #allPoints))
 			ui.separator()
@@ -604,25 +604,25 @@ local function drawNavLocusLottery()
 	elseif currentSubTab == "RULES" then
 		ui.child("##rulesView", Vector2(-1, -1), nil, childFlags, function()
 			ui.withFont(orbiteer.heading, function()
-				ui.textColored(colors.uiPrimaryLight, "OFFICIAL ASTROGATION LOCUS PAYOUT SCHEDULE")
+				ui.textColored(colors.uiPrimaryLight, "Official Astrogation Locus Payout Schedule")
 			end)
 			ui.textColored(colors.fontDim, "Mathematical Vector Odds calculated across 90,770,400,000,000 Total Combinations:")
 			ui.separator()
 			ui.spacing()
 
 			ui.columns(4, "##payoutCols", true)
-			ui.text("TIER") ui.nextColumn()
-			ui.text("MATCH CRITERIA") ui.nextColumn()
-			ui.text("PROBABILITY") ui.nextColumn()
-			ui.text("PAYOUT") ui.nextColumn()
+			ui.text("Tier") ui.nextColumn()
+			ui.text("Match Criteria") ui.nextColumn()
+			ui.text("Probability") ui.nextColumn()
+			ui.text("Payout") ui.nextColumn()
 			ui.separator()
 
 			local schedule = {
-				{ tier = "Tier 1", criteria = "All 5 Vectors Matched Exactly", odds = "1 in 90.7 Trillion", payout = "GRAND PROGRESSIVE POOL (500M+ Cr)" },
+				{ tier = "Tier 1", criteria = "All 5 Vectors Matched Exactly", odds = "1 in 90.7 Trillion", payout = "Grand Progressive Pool (500M+ Cr)" },
 				{ tier = "Tier 2", criteria = "Any 4 of 5 Vectors Matched", odds = "1 in 50 Million", payout = "2,500,000 Cr" },
 				{ tier = "Tier 3", criteria = "Any 3 of 5 Vectors Matched", odds = "1 in 5,040,000", payout = "75,000 Cr" },
 				{ tier = "Tier 4", criteria = "Any 2 Vectors Matched", odds = "1 in 140,000", payout = "1,500 Cr" },
-				{ tier = "Tier 5", criteria = "Sector Ring OR Stellar Class", odds = "1 in 10", payout = "15 Cr (Cost Recovery)" },
+				{ tier = "Tier 5", criteria = "Sector Ring Matched Exactly", odds = "1 in 100", payout = "40 Cr (4 to 1 Return)" },
 			}
 
 			for _, s in ipairs(schedule) do

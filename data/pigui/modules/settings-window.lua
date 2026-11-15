@@ -766,7 +766,6 @@ local function makeConfirmModal(name, promptText, confirmLabel, onConfirm)
 			ui.spacing()
 			optionTextButton(confirmLabel, nil, true, function()
 				win:close()
-				ui.optionsWindow:close()
 				onConfirm()
 			end)
 			ui.sameLine()
@@ -790,6 +789,40 @@ local quitConfirmWindow = makeConfirmModal("QuitConfirm", lui.QUIT_CONFIRM_PROMP
 end)
 
 ui.optionsWindow = ModalWindow.New("Options", function()
+	-- Standardized Title Bar: blue icon badge, white icon, white text, grey background, blue outline
+	local screenPos = ui.getCursorScreenPos()
+	local font = pionillium.heading
+	local frameSize = font.size + ui.theme.styles.ButtonPadding.y * 2
+	local iconSize = frameSize - 4
+	local iconBg = ui.theme.buttonColors.selected.normal
+	local titleBg = ui.theme.styleColors.panel_900 or colors.windowBackground
+	local outlineCol = ui.theme.styleColors.primary_500 or colors.windowFrame
+
+	ui.addRectFilled(screenPos, screenPos + Vector2(ui.getContentRegion().x, frameSize), titleBg, 0, ui.RoundCornersNone)
+	ui.addRectFilled(screenPos, screenPos + Vector2(frameSize), iconBg, 0, ui.RoundCornersNone)
+	ui.addRect(screenPos, screenPos + Vector2(ui.getContentRegion().x, frameSize), outlineCol, 0, ui.RoundCornersNone, 1.0)
+
+	local iconPos = screenPos + Vector2(2, 2)
+	ui.addIconSimple(iconPos, icons.settings, Vector2(iconSize), colors.white)
+
+	ui.withFont(font, function()
+		ui.dummy(Vector2(frameSize))
+		ui.sameLine()
+		ui.alignTextToLineHeight()
+		ui.textColored(colors.white, lui.GAME_OPTIONS or "Game Options")
+
+		local closeBtnSz = Vector2(frameSize - 4, frameSize - 4)
+		local availX = ui.getContentRegion().x
+		ui.sameLine(availX - closeBtnSz.x)
+		if ui.button("X##closeOptionsTitleBar", closeBtnSz, ui.theme.buttonColors.default) then
+			ui.optionsWindow:close()
+		end
+	end)
+
+	ui.spacing()
+	ui.separator()
+	ui.spacing()
+
 	ui.horizontalGroup(function()
 		mainButton(icons.view_sidereal, lui.VIDEO, showTab=='video', function()
 			showTab = 'video'
@@ -814,7 +847,8 @@ ui.optionsWindow = ModalWindow.New("Options", function()
 	ui.separator()
 
 	-- I count the separator as two item spacings
-	local other_height = mainButtonSize.y + optionButtonSize.y  + ui.getItemSpacing().y * 4 + ui.getWindowPadding().y * 2
+	local titleBarHeight = frameSize + ui.getItemSpacing().y * 2 + 8
+	local other_height = titleBarHeight + mainButtonSize.y + optionButtonSize.y + ui.getItemSpacing().y * 4 + ui.getWindowPadding().y * 2
 	ui.child("options_tab", Vector2(-1, optionsWinSize.y - other_height), function()
 		optionsTabs[showTab]()
 	end)
@@ -857,7 +891,14 @@ ui.optionsWindow = ModalWindow.New("Options", function()
 end, function (_, drawPopupFn)
 	ui.setNextWindowSize(optionsWinSize, 'Always')
 	ui.setNextWindowPosCenter('Always')
-	ui.withStyleColors({ PopupBg = ui.theme.colors.modalBackground }, drawPopupFn)
+	local styleColors = {
+		PopupBg = ui.theme.styleColors.panel_900 or ui.theme.colors.modalBackground,
+		Border = ui.theme.styleColors.primary_500 or colors.windowFrame,
+	}
+	local styleVars = {
+		WindowBorderSize = 1.0,
+	}
+	ui.withStyleColorsAndVars(styleColors, styleVars, drawPopupFn)
 end)
 
 function ui.optionsWindow:changeState()

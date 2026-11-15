@@ -80,6 +80,8 @@ Sound::SdlAudioBackend::SdlAudioBackend()
 
 Sound::SdlAudioBackend::~SdlAudioBackend()
 {
+	SDL_PauseAudioDevice(m_audioDevice, 1);
+	DestroyAllEvents();
 	SDL_CloseAudioDevice(m_audioDevice);
 
 	Output("Destroyed SDL audio backend");

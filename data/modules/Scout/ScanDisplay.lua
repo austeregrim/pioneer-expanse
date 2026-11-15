@@ -20,9 +20,10 @@ local pionillium = ui.fonts.pionillium
 local gameView = require 'pigui.views.game'
 
 local scanDisplay = {
+	title = ls.SCAN_MANAGER or "Scan Manager",
 	side = "left",
 	icon = icons.equip_orbit_scanner,
-	tooltip = ls.SCAN_MANAGER,
+	tooltip = ls.SCAN_MANAGER or "Scan Manager",
 	exclusive = false,
 
 	debugReload = function()
@@ -745,19 +746,24 @@ function scanDisplay:drawCompletedData()
 end
 
 function scanDisplay:drawTitle()
-	local state = self.scanMgr:GetState()
-	local stateText = ls["STATE_" .. state] or state
-	local color = colors.font
-	if state == "SCANNING" then
-		color = colors.econMajorImport
-	elseif state == "MIN_ALTITUDE" or state == "OUT_OF_RANGE" then
-		color = colors.alertYellow
-	elseif state == "NO_SENSORS" then
-		color = colors.alertRed
-	end
-
-	ui.textColored(color, stateText)
+	ui.text(ls.SCAN_MANAGER or "Scan Manager")
 	ui.sameLine()
+
+	if self.scanMgr then
+		local state = self.scanMgr:GetState()
+		local stateText = ls["STATE_" .. state] or state
+		local color = colors.fontDim
+		if state == "SCANNING" then
+			color = colors.econMajorImport
+		elseif state == "MIN_ALTITUDE" or state == "OUT_OF_RANGE" then
+			color = colors.alertYellow
+		elseif state == "NO_SENSORS" then
+			color = colors.alertRed
+		end
+
+		ui.textColored(color, "(" .. stateText .. ")")
+		ui.sameLine()
+	end
 
 	-- Draw debug display button
 	if self.showDebug or (ui.shiftHeld() and ui.altHeld()) then

@@ -578,7 +578,8 @@ void GasGiant::GenerateTexture()
 		assert(!m_gpuJob.HasJob());
 
 		Random rng(GetSystemBody()->GetSeed() + 4609837);
-		const std::string parentname = GetSystemBody()->GetParent()->GetName();
+		const SystemBody *parent = GetSystemBody()->GetParent();
+		const std::string parentname = parent ? parent->GetName() : "";
 		const float hueShift = (parentname == "Sol") ? 0.0f : float(((rng.Double() * 2.0) - 1.0) * 0.9);
 
 		GasGiantJobs::GenFaceQuad *pQuad = new GasGiantJobs::GenFaceQuad(Pi::renderer, vector2f(s_texture_size_gpu[Pi::detail.planets], s_texture_size_gpu[Pi::detail.planets]), GasGiantType);

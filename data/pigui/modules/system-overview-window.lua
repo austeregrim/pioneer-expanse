@@ -200,12 +200,28 @@ function SystemOverviewWidget:drawControlButtons()
 end
 
 function SystemOverviewWidget:displaySearch()
-	local filterText = ui.inputText("##FilterText", self.filterText, {})
+	local filterText = ui.inputText("##FilterText", self.filterText, "Filter bodies or stations...", {})
 	self.filterText = filterText
 	self.focusSearchResults = filterText and filterText ~= ""
 
 	ui.sameLine()
 	ui.icon(icons.filter_bodies, style.buttonSize, colors.frame, lui.OVERVIEW_NAME_FILTER)
+end
+
+function SystemOverviewWidget:displaySidebarControls()
+	local spacing = styles.ItemInnerSpacing
+	local numButtons = self.shouldDisplayPlayerDistance and 3 or 2
+	local button_width = (ui.getLineHeight() + spacing.x) * numButtons - spacing.x
+
+	local pos = ui.getCursorPos() + Vector2(ui.getContentRegion().x - button_width, 0)
+	self.buttonSize = Vector2(ui.getLineHeight())
+
+	ui.setCursorPos(pos)
+	ui.withStyleVars({ ItemSpacing = spacing }, function()
+		ui.withFont(ui.fonts.pionillium.medium, function()
+			self:drawControlButtons()
+		end)
+	end)
 end
 
 function SystemOverviewWidget:display(system, root, selected)

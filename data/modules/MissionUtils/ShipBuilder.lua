@@ -366,7 +366,7 @@ function ShipBuilder.ApplyEquipmentRule(shipPlan, rule, rand, hullThreat)
 				end
 
 				if shipPlan.freeVolume >= inst.volume then
-					shipPlan:AddEquipToPlan(equip, slot, threat)
+					shipPlan:AddEquipToPlan(inst, slot, threat)
 				end
 
 				numInstalled = numInstalled + 1
@@ -447,6 +447,7 @@ function ShipBuilder.ApplyEquipmentRule(shipPlan, rule, rand, hullThreat)
 				rule.apply(inst)
 			end
 
+			threatCache[inst] = threat
 			return shipPlan.freeVolume >= inst.volume and inst or nil
 		end)
 
@@ -679,6 +680,130 @@ function ShipBuilder.MakePlan(template, shipConfig, threat)
 
 		end
 
+	end
+
+	-- Post-rule pass: Ensure essential systems are installed on NPC ships
+
+	-- 1. Hyperdrive & Fuel: Every ship with a hyperdrive slot gets a drive and full fuel unless explicitly noHyperdrive
+	if not template.noHyperdrive then
+		for _, slot in pairs(shipPlan.slots) do
+			if EquipSet.SlotTypeMatches(slot.type, "hyperdrive") then
+				local driveInst = shipPlan.filled[slot.id]
+				if not driveInst then
+					local defaultDriveId = slot.default or ("hyperspace.hyperdrive_" .. tostring(slot.size))
+					local proto = Equipment.Get(defaultDriveId)
+					if not proto then
+						for _, eq in pairs(Equipment.new) do
+							if EquipSet.CompatibleWithSlot(eq, slot) and eq.slot and eq.slot.type:match("%.civilian") then
+								if not proto or eq.slot.size > proto.slot.size then
+									proto = eq
+								end
+							end
+						end
+					end
+					if proto then
+						driveInst = proto:Instance()
+						if driveInst.SpecializeForShip then
+							driveInst:SpecializeForShip(shipPlan.config)
+						end
+						if shipPlan.freeVolume >= driveInst.volume then
+							shipPlan:AddEquipToPlan(driveInst, slot)
+						end
+					end
+				end
+				if driveInst and driveInst.SetFuel then
+					driveInst:SetFuel(nil, driveInst:GetMaxFuel())
+				end
+			end
+		end
+	end
+
+	-- 2. Sensor / Radar: Ensure radar is installed if sensor slot is empty
+	for _, slot in pairs(shipPlan.slots) do
+		if EquipSet.SlotTypeMatches(slot.type, "sensor") and not shipPlan.filled[slot.id] then
+			local radar = Equipment.Get("sensor.radar")
+			if radar and EquipSet.CompatibleWithSlot(radar, slot) and shipPlan.freeVolume >= radar.volume then
+				local inst = radar:Instance()
+				shipPlan:AddEquipToPlan(inst, slot)
+			end
+		end
+	end
+
+	-- 3. Autopilot: Ensure autopilot is installed if computer slot is available and none installed
+	local hasAutopilot = false
+	for _, inst in pairs(shipPlan.filled) do
+		if inst.id and inst.id:match("autopilot") then
+			hasAutopilot = true
+			break
+		end
+	end
+	if not hasAutopilot then
+		for _, slot in pairs(shipPlan.slots) do
+			if EquipSet.SlotTypeMatches(slot.type, "computer") and not shipPlan.filled[slot.id] then
+				local ap = Equipment.Get("misc.autopilot")
+				if ap and EquipSet.CompatibleWithSlot(ap, slot) and shipPlan.freeVolume >= ap.volume then
+					local inst = ap:Instance()
+					shipPlan:AddEquipToPlan(inst, slot)
+					hasAutopilot = true
+					break
+				end
+			end
+		end
+	end
+
+	-- 4. Atmospheric shielding: Ensure atmospheric shielding is installed if hull slot available
+	local hasAtmoShield = false
+	for _, inst in pairs(shipPlan.filled) do
+		if inst.id and inst.id:match("atmospheric_shielding") then
+			hasAtmoShield = true
+			break
+		end
+	end
+	if not hasAtmoShield then
+		for _, slot in pairs(shipPlan.slots) do
+			if EquipSet.SlotTypeMatches(slot.type, "hull") and not shipPlan.filled[slot.id] then
+				local atmoId = "hull.atmospheric_shielding_s" .. tostring(slot.size)
+				local atmo = Equipment.Get(atmoId)
+				if atmo and EquipSet.CompatibleWithSlot(atmo, slot) and shipPlan.freeVolume >= atmo.volume then
+					local inst = atmo:Instance()
+					shipPlan:AddEquipToPlan(inst, slot)
+					hasAtmoShield = true
+					break
+				end
+			end
+		end
+	end
+
+	-- 5. Hardpoint Weapons: If ship is not marked unarmed, ensure weapon hardpoints have appropriate weapons installed
+	if not template.unarmed then
+		for _, slot in pairs(shipPlan.slots) do
+			if slot.hardpoint and not shipPlan.filled[slot.id] then
+				if EquipSet.SlotTypeMatches(slot.type, "weapon.mining") then
+					local miningId = slot.size >= 4 and "laser.miningcannon_17mw" or "laser.miningcannon_5mw"
+					local proto = Equipment.Get(miningId)
+					if proto and EquipSet.CompatibleWithSlot(proto, slot) and shipPlan.freeVolume >= proto.volume then
+						local inst = proto:Instance()
+						shipPlan:AddEquipToPlan(inst, slot)
+					end
+				elseif EquipSet.SlotTypeMatches(slot.type, "weapon") then
+					local weaponId
+					if slot.size >= 4 then
+						weaponId = "laser.pulsecannon_10mw"
+					elseif slot.size == 3 then
+						weaponId = "laser.pulsecannon_4mw"
+					elseif slot.size == 2 then
+						weaponId = "laser.pulsecannon_2mw"
+					else
+						weaponId = "laser.pulsecannon_1mw"
+					end
+					local proto = Equipment.Get(weaponId)
+					if proto and EquipSet.CompatibleWithSlot(proto, slot) and shipPlan.freeVolume >= proto.volume then
+						local inst = proto:Instance()
+						shipPlan:AddEquipToPlan(inst, slot)
+					end
+				end
+			end
+		end
 	end
 
 	shipPlan.label = template.label or Ship.MakeRandomLabel()

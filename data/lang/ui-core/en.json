@@ -1164,12 +1164,12 @@
     "message": "Switch to selected system"
   },
   "HUD_BUTTON_SWITCH_TO_SYSTEM_MAP": {
-    "description": "Tooltip: Switch to system map",
-    "message": "Switch to system map"
+    "description": "Tooltip: Switch to orrery view",
+    "message": "Orrery View (F6)"
   },
   "HUD_BUTTON_SWITCH_TO_SYSTEM_OVERVIEW": {
-    "description": "Tooltip: Switch to system overview",
-    "message": "Switch to system overview"
+    "description": "Tooltip: Switch to hierarchical tree view",
+    "message": "Hierarchical Tree View (F7)"
   },
   "HUD_BUTTON_SWITCH_TO_WORLD_VIEW": {
     "description": "Tooltip: Switch to world view",
@@ -2530,6 +2530,14 @@
   "SHOW_AUTOSAVES": {
     "description": "Button tooltip indicating whether to show autosave files",
     "message": "Show Autosaves"
+  },
+  "COMM_ENCRYPTED_SECURE": {
+    "description": "Status indicator when secure encrypted communications channel is established",
+    "message": "SECURE ENCRYPTED CHANNEL ESTABLISHED"
+  },
+  "COMM_ENCRYPTING": {
+    "description": "Status indicator while establishing secure quantum-encrypted link",
+    "message": "ESTABLISHING QUANTUM-ENCRYPTED LINK..."
   },
   "SIG_PROTOCOL": {
     "description": "Post-quantum digital signature protocol badge for station public market feeds",

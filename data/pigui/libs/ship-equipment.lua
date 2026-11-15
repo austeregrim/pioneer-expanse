@@ -204,8 +204,23 @@ function EquipmentWidget:onSelectSlot(slotData, children)
 	end
 end
 
+local function sanitizeShipName(raw)
+	if not raw then return nil end
+	local cleaned = tostring(raw):gsub("[%c]", "")
+	cleaned = cleaned:match("^%s*(.-)%s*$")
+	if not cleaned or cleaned == "" then return nil end
+	if #cleaned > 48 then
+		cleaned = cleaned:sub(1, 48):match("^%s*(.-)%s*$")
+	end
+	return cleaned
+end
+
 function EquipmentWidget:onSetShipName(newName)
-	self.ship:SetShipName(newName)
+	local sanitized = sanitizeShipName(newName)
+	if sanitized and sanitized ~= "" then
+		self.ship:SetShipName(sanitized)
+		self.shipNameBuffer = sanitized
+	end
 end
 
 -- Return the translated name of a slot, falling back to a generic name for the
@@ -537,12 +552,17 @@ function EquipmentWidget:drawShipSpinner()
 				ui.text(shipname)
 				ui.sameLine()
 
-				ui.pushItemWidth(-1.0)
-				local entry, apply = ui.inputText("##ShipNameEntry", self.ship.shipName, ui.InputTextFlags {"EnterReturnsTrue"})
+				self.shipNameBuffer = self.shipNameBuffer or (self.ship.shipName or "")
+				local btnW = 54
+				local avail = ui.getContentRegion().x
+				ui.pushItemWidth(avail - btnW - ui.getItemSpacing().x)
+				local entry, apply = ui.inputText("##ShipNameEntry", self.shipNameBuffer, ui.InputTextFlags {"EnterReturnsTrue"})
 				ui.popItemWidth()
+				self.shipNameBuffer = entry
 
-				if (apply) then
-					self:message("onSetShipName", entry)
+				ui.sameLine()
+				if ui.button("Save##SaveShipNameEquip", Vector2(btnW, 0)) or apply then
+					self:message("onSetShipName", self.shipNameBuffer)
 				end
 
 			else
@@ -613,6 +633,7 @@ function EquipmentWidget:refresh()
 	self.selectedEquip = nil
 	self.selectedSlot = nil
 	self.selectionActive = false
+	self.shipNameBuffer = self.ship and (self.ship.shipName or "")
 
 	local shipDef = ShipDef[self.ship.shipId]
 	self.modelSpinner:setModel(shipDef.modelName, self.ship:GetSkin(), self.ship.model.pattern)

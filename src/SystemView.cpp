@@ -88,9 +88,11 @@ void SystemView::CalculateShipPositionAtTime(const Ship *s, const Orbit &o, doub
 {
 	pos = vector3d(0., 0., 0.);
 	FrameId shipFrameId = s->GetFrame();
-	FrameId shipNonRotFrameId = Frame::GetFrame(shipFrameId)->GetNonRotFrame();
+	Frame *sFrame = Frame::GetFrame(shipFrameId);
+	if (!sFrame) return;
+	FrameId shipNonRotFrameId = sFrame->GetNonRotFrame();
 	// if the ship is in a rotating frame, we will rotate it with the frame
-	if (Frame::GetFrame(shipFrameId)->IsRotFrame()) {
+	if (sFrame->IsRotFrame()) {
 		vector3d rpos(0.0);
 		Frame *rotframe = Frame::GetFrame(shipFrameId);
 		if (t == m_game->GetTime()) {

@@ -795,7 +795,9 @@ int CheckCollision(DynamicBody *dBody, const vector3d &pathdir, double pathdist,
 
 	// ship is in obstructor's frame anyway, so is tpos
 	if (pathdist < 100.0) return 0;
-	Body *body = Frame::GetFrame(dBody->GetFrame())->GetBody();
+	Frame *dFrame = Frame::GetFrame(dBody->GetFrame());
+	if (!dFrame) return 0;
+	Body *body = dFrame->GetBody();
 	if (!body) return 0;
 	vector3d spos = dBody->GetPosition();
 	double slen = spos.Length();
@@ -1238,7 +1240,8 @@ bool AICmdFlyTo::TimeStepUpdate()
 	vector3d relpos = targpos - m_dBody->GetPosition();
 	double targdist = relpos.Length();
 
-	Body* planetNear = Frame::GetFrame(m_dBody->GetFrame())->GetBody();
+	Frame *dFrame = Frame::GetFrame(m_dBody->GetFrame());
+	Body* planetNear = dFrame ? dFrame->GetBody() : nullptr;
 	double targetAlt = targpos.Length();
 
 	if(planetNear) {

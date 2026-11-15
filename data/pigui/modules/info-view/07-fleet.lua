@@ -24,6 +24,8 @@ local rosterWidth = ui.rescaleUI(460, Vector2(1920, 1080))
 
 local selectedUid = nil
 local statusMsg = nil
+local renameUid = nil
+local renameBuffer = ""
 
 local ORDER_COLOR_MAP = {
 	IDLE       = colors.fontDim,
@@ -100,7 +102,7 @@ end
 local function drawFleetRoster(ships)
 	ui.child("##FleetRosterPane", Vector2(rosterWidth, -1), nil, childFlags, function()
 		ui.withFont(orbiteer.heading, function()
-			ui.textColored(colors.uiPrimaryLight, "COMMISSIONED VESSELS")
+			ui.textColored(colors.uiPrimaryLight, "Commissioned Vessels")
 		end)
 		ui.separator()
 		ui.spacing()
@@ -135,6 +137,17 @@ local function drawFleetRoster(ships)
 	end)
 end
 
+local function sanitizeShipName(raw)
+	if not raw then return nil end
+	local cleaned = tostring(raw):gsub("[%c]", "")
+	cleaned = cleaned:match("^%s*(.-)%s*$")
+	if not cleaned or cleaned == "" then return nil end
+	if #cleaned > 48 then
+		cleaned = cleaned:sub(1, 48):match("^%s*(.-)%s*$")
+	end
+	return cleaned
+end
+
 local function drawSkillBar(label, value)
 	ui.text(string.format("%-12s %2d", label .. ":", value))
 	ui.sameLine()
@@ -145,7 +158,7 @@ local function drawCommandDeck(entry)
 	ui.child("##FleetCommandDeck", Vector2(-1, -1), nil, childFlags, function()
 		if not entry then
 			ui.withFont(orbiteer.heading, function()
-				ui.textColored(colors.uiPrimaryLight, "RECENT FLEET OPERATIONS LOG")
+				ui.textColored(colors.uiPrimaryLight, "Recent Fleet Operations Log")
 			end)
 			ui.separator()
 			local logs = PlayerFleet.GetLogs() or {}
@@ -170,7 +183,38 @@ local function drawCommandDeck(entry)
 		local def = ShipDef[entry.shipId]
 		ui.withFont(orbiteer.title, function()
 			ui.text(entry.shipName or (def and def.name or entry.shipId))
+			ui.sameLine()
+			local btnSz = Vector2(ui.getTextLineHeight())
+			if ui.iconButton("##editShipNameFleet", icons.pencil, "Rename Vessel", nil, btnSz) then
+				renameUid = entry.uid
+				renameBuffer = entry.shipName or ""
+				ui.openPopup("rename_ship_popup_fleet")
+			end
 		end)
+
+		ui.popup("rename_ship_popup_fleet", function()
+			ui.text("Rename Vessel:")
+			ui.spacing()
+			ui.pushItemWidth(ui.rescaleUI(260, Vector2(1920, 1080)))
+			local newText, entered = ui.inputText("##RenameFleetShipInput", renameBuffer, "Enter vessel name...", {"EnterReturnsTrue"})
+			ui.popItemWidth()
+			renameBuffer = newText
+			ui.spacing()
+			if ui.button("Save", Vector2(0, 0)) or entered then
+				local sanitized = sanitizeShipName(renameBuffer)
+				if sanitized then
+					if PlayerFleet.RenameShip(entry.uid, sanitized) then
+						statusMsg = "Vessel renamed to " .. sanitized
+					end
+				end
+				ui.closeCurrentPopup()
+			end
+			ui.sameLine()
+			if ui.button("Cancel", Vector2(0, 0)) then
+				ui.closeCurrentPopup()
+			end
+		end)
+
 		ui.textColored(colors.fontDim, string.format("Hull: %s   |   Callsign: %s   |   Location: %s   |   Jump Range: %d ly   |   Combat Score: %d",
 			def and def.name or entry.shipId,
 			entry.label or "----",
@@ -183,7 +227,7 @@ local function drawCommandDeck(entry)
 
 		-- Autonomous Order Command Console
 		ui.withFont(orbiteer.heading, function()
-			ui.textColored(colors.uiPrimaryLight, "STANDING AUTONOMOUS ORDERS")
+			ui.textColored(colors.uiPrimaryLight, "Standing Autonomous Orders")
 		end)
 		local directiveCol = STATUS_COLOR_MAP[entry.status or ""] or ORDER_COLOR_MAP[entry.order or "IDLE"] or colors.font
 		ui.textColored(directiveCol, "Current Directive: " .. (entry.orderPhase or "Standby"))
@@ -341,7 +385,7 @@ local function drawCommandDeck(entry)
 
 		ui.spacing()
 		ui.withFont(orbiteer.body, function()
-			ui.textColored(colors.uiPrimaryLight, "RECENT FLEET OPERATIONS LOG")
+			ui.textColored(colors.uiPrimaryLight, "Recent Fleet Operations Log")
 		end)
 		ui.child("##FleetLogMini", Vector2(-1, ui.rescaleUI(220, Vector2(1920, 1080))), nil, childFlags, function()
 			local logs = PlayerFleet.GetLogs() or {}

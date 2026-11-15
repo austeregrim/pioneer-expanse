@@ -55,7 +55,8 @@ void SpeedLines::Update(float time)
 	// don't show if
 	//   vel < 100m/s
 	//   in rotating frame (near station or planet surface)
-	if (absVelD < 100.0 || Frame::GetFrame(m_ship->GetFrame())->IsRotFrame()) {
+	const Frame *frame = Frame::GetFrame(m_ship->GetFrame());
+	if (absVelD < 100.0 || (frame && frame->IsRotFrame())) {
 		m_visible = false;
 		return;
 	}

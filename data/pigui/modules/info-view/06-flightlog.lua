@@ -2,7 +2,7 @@
 -- Licensed under the terms of the GPL v3. See licenses/GPL-3.txt
 
 local ui = require 'pigui'
-local layout = require 'pigui.libs.window-layout'
+local Table = require 'pigui.libs.table'
 local InfoView = require 'pigui.views.info-view'
 local Lang = require 'Lang'
 local FlightLog = require 'modules.FlightLog.FlightLog'
@@ -12,200 +12,389 @@ local Vector2 = _G.Vector2
 
 local pionillium = ui.fonts.pionillium
 local icons = ui.theme.icons
-
-local gray = Color(145, 145, 145)
+local colors = ui.theme.colors
 
 local l = Lang.GetResource("ui-core")
 
-local iconSize = ui.rescaleUI(Vector2(28, 28))
+local widgetSizes = ui.rescaleUI({
+	itemSpacing = Vector2(14, 3),
+	itemInnerSpacing = Vector2(6, 3),
+	rowVerticalSpacing = Vector2(0, 3),
+	controlSpacing = Vector2(6, 6),
+	clearButtonWidth = 64,
+	filterPillHeight = 22,
+}, Vector2(1920, 1080))
 
-local earliestFirst = true
+local commsChildFlags = ui.ChildFlags { 'AlwaysUseWindowPadding', 'Borders' }
+
+local earliestFirst = false
 local exportHtml = true
-local includedSet = { System = true, Custom = true, Station = true }
-
-local function writeLogEntry( entry, formatter, write_header )
-	if write_header then
-		formatter:write( entry:GetLocalizedName() ):newline()
-	end
-
-	for _, pair in ipairs( entry:GetDataPairs( earliestFirst ) ) do
-		formatter:headerText( pair[1], pair[2] )
-	end
-end
-
-local ui_formatter = {}
-function ui_formatter:headerText(title, text, wrap)
-	-- Title text is gray, followed by the variable text:
-	if not text then return end
-	ui.textColored(gray, string.gsub(title, ":", "") .. ":")
-	ui.sameLine()
-	if wrap then
-		-- TODO: limit width of text box!
-		ui.textWrapped(text)
-	else
-		ui.text(text)
-	end
-end
-
-function ui_formatter:write( string )
-	ui.text( string )
-	ui.sameLine()
-	return self
-end
-
-function ui_formatter:newline()
-	ui.text( "" )
-	return self
-end
-
-
+local filterCategory = "ALL"
+local searchText = ""
+local selectedLogIndex = nil
 local entering_text = false
 
--- Display Entry text, and Edit button, to update flightlog
-local function inputText(entry, counter, entering_text, str)
-
-	if entering_text == counter then
-		ui.spacing()
-		ui.pushItemWidth(-1.0)
-		local updated_entry, return_pressed = ui.inputText("##" ..str..counter, entry:GetEntry(), {"EnterReturnsTrue"})
-		ui.popItemWidth()
-		if return_pressed then
-			entry:UpdateEntry(updated_entry)
-			entering_text = -1
-		end
-	elseif entry:HasEntry() then
-		ui_formatter:headerText(l.ENTRY, entry:GetEntry(), true)
-	end
-
-	ui.spacing()
-	return entering_text
+local function getEntryTime(entry)
+	if entry.time then return entry.formatDate(entry.time) end
+	if entry.arrtime then return entry.formatDate(entry.arrtime) end
+	if entry.deptime then return entry.formatDate(entry.deptime) end
+	return ""
 end
 
-local function renderLog( formatter )
+local function getEntryTitle(entry)
+	local eType = entry:GetType()
+	if eType == "System" then
+		return entry.systemp and ui.Format.SystemPath(entry.systemp) or entry:GetLocalizedName()
+	elseif eType == "Station" then
+		if entry.systemp and entry.systemp:IsBodyPath() then
+			local system = entry.systemp:GetStarSystem()
+			local body = system:GetBodyByPath(entry.systemp)
+			if body then return body.name end
+		end
+		return entry.systemp and ui.Format.SystemPath(entry.systemp) or entry:GetLocalizedName()
+	elseif eType == "Custom" then
+		if entry.entry and entry.entry ~= "" then
+			return entry.entry
+		elseif entry.location and entry.location[1] then
+			return entry.composeLocationString(entry.location)
+		else
+			return entry:GetLocalizedName()
+		end
+	end
+	return entry:GetLocalizedName()
+end
+
+local function getEntryCategoryBadge(eType)
+	if eType == "System" then
+		return "[SYSTEM]", colors.uiPrimaryLight
+	elseif eType == "Station" then
+		return "[STATION]", colors.econProfit
+	elseif eType == "Custom" then
+		return "[CAPTAIN'S LOG]", colors.maneuver
+	end
+	return "[" .. string.upper(eType) .. "]", colors.fontDim
+end
+
+local function getEntryIcon(eType)
+	if eType == "System" then
+		return icons.navigation_hyperspace or icons.system_map or icons.distance
+	elseif eType == "Station" then
+		return icons.comms or icons.bbs or icons.docking
+	elseif eType == "Custom" then
+		return icons.bookmark or icons.pencil
+	end
+	return icons.bookmark
+end
+
+local function renderFilterBar()
+	ui.horizontalGroup(function()
+		local pillLabels = {
+			{ id = "ALL", label = "All Logs" },
+			{ id = "System", label = l.LOG_SYSTEM or "Systems" },
+			{ id = "Station", label = l.LOG_STATION or "Stations" },
+			{ id = "Custom", label = l.LOG_CUSTOM or "Captain's Entries" },
+		}
+
+		for _, cat in ipairs(pillLabels) do
+			local selected = (filterCategory == cat.id)
+			local btnVariant = selected and ui.theme.buttonColors.selected or ui.theme.buttonColors.default
+			if ui.button(cat.label .. "##filterPill_" .. cat.id, Vector2(0, 0), btnVariant) then
+				filterCategory = cat.id
+			end
+			ui.sameLine(0, widgetSizes.controlSpacing.x)
+		end
+
+		local sortLabel = earliestFirst and (l.LOG_EARLIEST_FIRST or "Earliest First") or "Latest First"
+		if ui.button(sortLabel .. "##sortOrderBtn", Vector2(0, 0)) then
+			earliestFirst = not earliestFirst
+		end
+
+		ui.sameLine(0, widgetSizes.controlSpacing.x)
+
+		if ui.button((l.LOG_EXPORT or "Export") .. "##exportBtn", Vector2(0, 0)) then
+			local incSet = { System = true, Custom = true, Station = true }
+			FlightLogExporter.Export(incSet, earliestFirst, true, exportHtml)
+		end
+	end)
 
 	ui.spacing()
-	-- input field for custom log:
-	ui_formatter:headerText(l.LOG_NEW, "")
-	ui.sameLine()
-	local text, changed = ui.inputText("##inputfield", "", {"EnterReturnsTrue"})
-	if changed then
-		FlightLog.MakeCustomEntry(text)
-	end
-	ui.separator()
 
-	local counter = 0
-	local entry_to_remove = nil
-	for entry in FlightLog:GetLogEntries(includedSet, nil, earliestFirst ) do
-	 	counter = counter + 1
-		local id = "##custom" .. counter
-		local iconSize = ui.theme.styles.MainButtonSize
+	-- Quick Search Bar & Add Custom Log Entry
+	ui.horizontalGroup(function()
+		ui.icon(icons.search_lens, Vector2(ui.getTextLineHeight()), colors.fontDim)
+		ui.sameLine(0, widgetSizes.itemInnerSpacing.x)
+		ui.pushItemWidth(ui.getContentRegion().x - widgetSizes.clearButtonWidth - widgetSizes.controlSpacing.x)
+		local val, changed = ui.inputText("##logSearch", searchText, "Search flight logs or enter query...", {})
+		ui.popItemWidth()
+		if changed then searchText = val end
 
-		 writeLogEntry( entry, formatter, true )
+		ui.sameLine(0, widgetSizes.controlSpacing.x)
+		if ui.button("Clear##clearLogSearch", Vector2(widgetSizes.clearButtonWidth, 0)) then
+			searchText = ""
+		end
+	end)
 
-		 if entry:CanHaveEntry() then
-			entering_text = inputText(entry, counter,
-				entering_text, "custom")
-			ui.nextColumn()
+	ui.spacing()
 
-			if ui.iconButton("Edit" .. id, icons.pencil, l.EDIT) then
-				entering_text = counter
-			end
-		else
-			ui.nextColumn()
+	-- New entry row
+	ui.horizontalGroup(function()
+		ui.icon(icons.pencil, Vector2(ui.getTextLineHeight()), colors.uiPrimaryLight)
+		ui.sameLine(0, widgetSizes.itemInnerSpacing.x)
+		ui.pushItemWidth(-1)
+		local text, entered = ui.inputText("##newLogEntry", "", "New entry: type note and press Enter to save to log...", {"EnterReturnsTrue"})
+		ui.popItemWidth()
+		if entered and text ~= "" then
+			FlightLog.MakeCustomEntry(text)
+		end
+	end)
+end
+
+local logTable = Table.New("FlightLogTable", false, {
+	columnCount = 1,
+	iterator = ipairs,
+	initTable = function(self)
+		ui.setColumnWidth(0, self.style.size.x)
+	end,
+	renderItem = function(self, item, key)
+		if key == 1 then
+			ui.dummy(Vector2(0, 0))
 		end
 
-		if entry:CanBeRemoved() then
-			if ui.iconButton("Remove" .. id, icons.trashcan, l.REMOVE) then
-				entry_to_remove = entry
-			end
-		end
+		local entry = item.entry
+		local isSelected = (selectedLogIndex == item.idx)
+		local textColor = isSelected and colors.uiPrimaryLight or colors.font
+		local region = ui.getContentRegion()
+		local eType = entry:GetType()
 
-		ui.nextColumn()
+		ui.icon(getEntryIcon(eType), Vector2(ui.getTextLineHeight()), textColor)
+		ui.sameLine(0, widgetSizes.itemInnerSpacing.x)
+
+		ui.withStyleColorsAndVars({ Text = textColor }, { ItemSpacing = widgetSizes.rowVerticalSpacing }, function()
+			-- Line 1: Log Title in pionillium.heading
+			ui.withFont(pionillium.heading, function()
+				ui.text(item.title)
+			end)
+
+			-- Line 2: Details Metadata (Date/Time, System Path / Category Badge)
+			ui.withFont(pionillium.details, function()
+				local textHeight = ui.getTextLineHeight()
+				local iconSize = Vector2(textHeight)
+
+				ui.icon(icons.clock, iconSize, textColor)
+				ui.sameLine()
+				ui.text(item.timeStr ~= "" and item.timeStr or "---")
+
+				if entry.systemp then
+					ui.sameLine()
+					ui.icon(icons.distance, iconSize, textColor)
+					ui.sameLine()
+					ui.text(ui.Format.SystemPath(entry.systemp))
+				end
+
+				local catBadge, catColor = getEntryCategoryBadge(eType)
+				local catW = ui.calcTextSize(catBadge).x
+				if region.x > catW then
+					ui.sameLine(region.x - catW)
+					ui.textColored(catColor, catBadge)
+				end
+			end)
+
+			-- Line 3: Summary text preview
+			ui.withFont(pionillium.body, function()
+				local preview = entry.entry or ""
+				if preview == "" and eType == "Custom" and entry.location and entry.location[1] then
+					preview = entry.composeLocationString(entry.location)
+				elseif preview == "" and eType == "Station" and entry.systemp then
+					preview = entry:GetLocalizedName() .. " - " .. ui.Format.SystemPath(entry.systemp)
+				elseif preview == "" and eType == "System" and entry.systemp then
+					preview = entry:GetLocalizedName() .. " - " .. ui.Format.SystemPath(entry.systemp)
+				end
+				ui.text(preview)
+				ui.dummy(widgetSizes.rowVerticalSpacing)
+			end)
+			ui.nextColumn()
+		end)
+
+		return isSelected and colors.tableSelection or colors.tableHighlight
+	end,
+	onClickItem = function(self, item, key)
+		selectedLogIndex = item.idx
+	end,
+})
+
+local function renderDetailsPanel(activeItem)
+	if not activeItem or not activeItem.entry then
+		ui.withFont(pionillium.details, function()
+			local lineH = ui.getTextLineHeight()
+			ui.icon(icons.bookmark, Vector2(lineH), colors.fontDim)
+			ui.sameLine()
+			ui.textColored(colors.fontDim, "Flight Log Standby")
+		end)
 		ui.separator()
 		ui.spacing()
+		ui.textColored(colors.fontDim, "Select an entry from the flight history ledger to inspect navigation records.")
+		return
 	end
-	if entry_to_remove then
-		FlightLog:RemoveEntry( entry_to_remove )
-		-- if we were already in edit mode, reset it, or else it carries over to next iteration
-		entering_text = false
-	end
-end
 
-local Windows = {
-	exportButtonWindow = layout.NewWindow(l.LOG_EXPORT, nil, ui.WindowFlags {"AlwaysAutoResize", "NoFocusOnAppearing", "NoBringToFrontOnFocus", "NoSavedSettings"}),
-}
+	local entry = activeItem.entry
+	local eType = entry:GetType()
+	local catBadge, catColor = getEntryCategoryBadge(eType)
 
-local flightlogWindowsLayout = layout.New(Windows)
-flightlogWindowsLayout.mainFont = pionillium.medium
+	-- Header line
+	ui.withFont(pionillium.details, function()
+		ui.textColored(catColor, catBadge)
+		ui.sameLine()
+		ui.textColored(colors.fontDim, "Record #" .. tostring(activeItem.idx) .. "  |  Origin: " .. (entry.systemp and ui.Format.SystemPath(entry.systemp) or "Unknown"))
+	end)
 
-Windows.exportButtonWindow.anchors = { ui.anchor.right,  ui.anchor.bottom }
-
---- start with this window collapsed
-Windows.exportButtonWindow:Collapse()
-
-function Windows.exportButtonWindow.ShouldShow()
-	return true
-end
-
-function Windows.exportButtonWindow.Show()
-	local c
-	c,exportHtml = ui.checkbox(l.LOG_HTML, exportHtml)
-	ui.sameLine()
-	if ui.button(l.SAVE) then
-		FlightLogExporter.Export( includedSet, earliestFirst, true, exportHtml)
-	end
-end
-
-
-local function displayFilterOptions()
 	ui.spacing()
-	local c
-	local flight_log = true;
 
-	c,includedSet.Custom = ui.checkbox(l.LOG_CUSTOM, includedSet.Custom)
-	c,includedSet.Station = ui.checkbox(l.LOG_STATION, includedSet.Station)
-	c,includedSet.System = ui.checkbox(l.LOG_SYSTEM, includedSet.System)
+	-- Large Headline
+	ui.withFont(pionillium.heading, function()
+		ui.text(activeItem.title)
+	end)
+
+	ui.spacing()
 	ui.separator()
-	c,earliestFirst = ui.checkbox(l.LOG_EARLIEST_FIRST, earliestFirst)
-end
+	ui.spacing()
 
-
-local function drawFlightHistory()
+	-- Telemetry Data Pairs
+	ui.withFont(pionillium.body, function()
+		local pairs = entry:GetDataPairs(earliestFirst)
+		for _, pair in ipairs(pairs) do
+			if pair[1] and pair[2] then
+				ui.textColored(colors.fontDim, string.gsub(pair[1], ":", "") .. ":")
+				ui.sameLine()
+				ui.text(pair[2])
+			end
+		end
+	end)
 
 	ui.spacing()
-	-- reserve a narrow right column for edit / remove icon
-	local width = ui.getContentRegion().x
+	ui.separator()
+	ui.spacing()
 
+	-- Custom User Note / Annotation
+	ui.withFont(pionillium.heading, function()
+		ui.textColored(colors.uiPrimaryLight, l.ENTRY or "CAPTAIN'S LOG ENTRY:")
+	end)
+	ui.spacing()
 
-	ui.columns(2, "##flightLogColumns", false)
-	ui.setColumnWidth(0, width - (iconSize.x*3)/2)
-	ui.setColumnWidth(1, (iconSize.x*3)/2)
+	if entry:CanHaveEntry() then
+		if entering_text == activeItem.idx then
+			ui.pushItemWidth(-1)
+			local updated, done = ui.inputText("##editEntry_" .. activeItem.idx, entry:GetEntry(), {"EnterReturnsTrue"})
+			ui.popItemWidth()
+			if done then
+				entry:UpdateEntry(updated)
+				entering_text = false
+			end
+			ui.spacing()
+			if ui.button("Save Entry##saveEntryBtn", Vector2(0, 0)) then
+				entry:UpdateEntry(updated)
+				entering_text = false
+			end
+		else
+			local note = entry:GetEntry()
+			if note and note ~= "" then
+				ui.withFont(pionillium.body, function()
+					ui.textWrapped(note)
+				end)
+			else
+				ui.textColored(colors.fontDim, "No supplementary notes attached to this record.")
+			end
+			ui.spacing()
+			if ui.button((l.EDIT or "Edit Note") .. "##editNoteBtn", Vector2(0, 0)) then
+				entering_text = activeItem.idx
+			end
+		end
+	end
 
-	renderLog(ui_formatter)
+	-- Deletion action
+	if entry:CanBeRemoved() then
+		ui.spacing()
+		ui.separator()
+		ui.spacing()
+		if ui.button((l.REMOVE or "Remove Record") .. "##delEntryBtn", Vector2(0, 0), ui.theme.buttonColors.danger) then
+			FlightLog:RemoveEntry(entry)
+			selectedLogIndex = nil
+			entering_text = false
+		end
+	end
 end
 
 local function drawScreen()
+	local allEntries = {}
+	local incSet = { System = true, Custom = true, Station = true }
+	local idx = 0
+	for entry in FlightLog:GetLogEntries(incSet, nil, earliestFirst) do
+		idx = idx + 1
+		local eType = entry:GetType()
+		if filterCategory == "ALL" or filterCategory == eType then
+			local title = getEntryTitle(entry)
+			local timeStr = getEntryTime(entry)
+			local note = entry:GetEntry()
+			local match = true
+			if searchText ~= "" then
+				local query = string.lower(searchText)
+				match = string.find(string.lower(title or ""), query, 1, true)
+					or string.find(string.lower(timeStr or ""), query, 1, true)
+					or string.find(string.lower(note or ""), query, 1, true)
+			end
+			if match then
+				table.insert(allEntries, {
+					idx = idx,
+					entry = entry,
+					title = title,
+					timeStr = timeStr,
+				})
+			end
+		end
+	end
 
-	local width = ui.getContentRegion().x
+	-- Auto-select first if none selected or selection invalid
+	if #allEntries > 0 then
+		local found = false
+		for _, item in ipairs(allEntries) do
+			if item.idx == selectedLogIndex then
+				found = true
+				break
+			end
+		end
+		if not found then
+			selectedLogIndex = allEntries[1].idx
+		end
+	else
+		selectedLogIndex = nil
+	end
 
-	ui.columns(2, "flightLogTop", false)
+	local activeItem = nil
+	for _, item in ipairs(allEntries) do
+		if item.idx == selectedLogIndex then
+			activeItem = item
+			break
+		end
+	end
 
-	ui.setColumnWidth(0, (width*3)/4)
+	local region = ui.getContentRegion()
+	local leftWidth = region.x * 0.45
 
-	ui.child( "FlightLogList", function()
-		ui.withFont(pionillium.body, function()
-			drawFlightHistory()
-		end)
+	-- Left Column: BBS/News matching 45% filter bar & log list
+	ui.child("FlightLogListLeft", Vector2(leftWidth, 0), function()
+		renderFilterBar()
+		ui.spacing()
+		logTable.style.size = Vector2(ui.getContentRegion().x, 0)
+		logTable.items = allEntries
+		logTable.selectedItem = activeItem
+		logTable:render()
 	end)
-	ui.nextColumn()
-	ui.child( "FlightLogConfig", function()
-		ui.withFont(pionillium.body, function()
-			displayFilterOptions()
-		end)
+
+	ui.sameLine()
+
+	-- Right Column: Report Page details
+	ui.child("FlightLogDetailsRight", Vector2(0, 0), nil, commsChildFlags, function()
+		renderDetailsPanel(activeItem)
 	end)
-
---	exportButtonWindow.Show()
-
 end
 
 InfoView:registerView({
@@ -216,7 +405,7 @@ InfoView:registerView({
 	draw = drawScreen,
 	refresh = function() end,
 	debugReload = function()
+		package.reimport('pigui.libs.table')
 		package.reimport()
 	end,
-	windows = flightlogWindowsLayout
 })
