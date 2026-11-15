@@ -333,7 +333,8 @@ void Pi::App::OnStartup()
 		Log::GetLog()->SetSeverity(Log::Severity::Verbose);
 
 	std::string version(PIONEER_VERSION);
-	if (strlen(PIONEER_EXTRAVERSION)) version += " (" PIONEER_EXTRAVERSION ")";
+	if (strlen(PIONEER_EXTRAVERSION) && version.find(PIONEER_EXTRAVERSION) == std::string::npos)
+		version += " (" PIONEER_EXTRAVERSION ")";
 	const char *platformName = SDL_GetPlatform();
 	if (platformName)
 		Output("ver %s on: %s\n\n", version.c_str(), platformName);

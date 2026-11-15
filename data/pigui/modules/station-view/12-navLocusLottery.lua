@@ -27,6 +27,9 @@ local customRA = 284.5
 local customDec = 14.2
 local customEpoch = 8092
 
+local lastSpinTime = 0
+local spinBurstAngle = 0.0
+
 -- True astrophysical spectral colors for the 14 stellar classes
 local STELLAR_COLORS = {
 	O = Color(110, 180, 255, 255),  -- Electric cyan-blue
@@ -63,7 +66,10 @@ local function draw3DCelestialSphere(canvasOrigin, width, height, targetLocus, e
 	local radius = height * (options.radiusScale or 0.34)
 
 	local t = ui.getTime()
-	local rotY = t * (options.rotSpeed or 0.40)
+	local spinDecay = math.max(0.0, 1.0 - (t - lastSpinTime) * 0.9)
+	local spinKick = spinDecay * spinDecay * 15.0
+	local targetLon = targetLocus and targetLocus.ra and math.rad(targetLocus.ra) or 0.0
+	local rotY = (t * (options.rotSpeed or 0.35)) - (targetLon * 0.65) + spinKick
 	local tiltX = 0.38 -- Celestial axial tilt (~22 degrees)
 
 	-- Project 3D spherical coordinate (lon in radians, lat in radians, radius) to 2D canvas
@@ -344,72 +350,81 @@ local function drawNavLocusLottery()
 				ui.separator()
 				ui.spacing()
 
-				-- Dial 1: Sector Ring
+				-- Dial 1: Sector Ring (00-99)
 				ui.text("Vector 1: Sector Ring (00–99):")
-				ui.sameLine(rightX + 225)
-				ui.textColored(Color(65, 235, 255, 255), string.format("[ RING %02d ]", customRing))
-				ui.sameLine()
-				if ui.button("-10##R10", Vector2(36, 22)) then customRing = math.max(0, customRing - 10) end
+				ui.nextItemWidth(170)
+				local newRing, ringChanged = ui.sliderInt("##RingSlider", customRing, 0, 99, "%02d")
+				if ringChanged then customRing = newRing end
+				ui.sameLine(nil, 6)
+				if ui.button("-1##R1", Vector2(28, 22)) then customRing = math.max(0, customRing - 1) end
 				ui.sameLine(nil, 4)
-				if ui.button("-1##R1", Vector2(30, 22)) then customRing = math.max(0, customRing - 1) end
-				ui.sameLine(nil, 4)
-				if ui.button("+1##R1P", Vector2(30, 22)) then customRing = math.min(99, customRing + 1) end
+				if ui.button("+1##R1P", Vector2(28, 22)) then customRing = math.min(99, customRing + 1) end
 				ui.sameLine(nil, 4)
 				if ui.button("+10##R10P", Vector2(36, 22)) then customRing = math.min(99, customRing + 10) end
 
-				-- Dial 2: Stellar Class (with visual spectral color chips)
+				-- Dial 2: Stellar Spectral Class (Interactive Spectrum Palette)
 				local curClass = stellarClasses[customClassIdx] or "G"
 				local curColor = STELLAR_COLORS[curClass] or colors.white
 				ui.text("Vector 2: Stellar Class:")
-				ui.sameLine(rightX + 225)
-				ui.textColored(curColor, string.format("[ CLASS %s ]", curClass))
 				ui.sameLine()
-				if ui.button("<##ClassPrev", Vector2(30, 22)) then
-					customClassIdx = (customClassIdx > 1) and (customClassIdx - 1) or #stellarClasses
+				ui.textColored(curColor, string.format("[ %s ]", curClass))
+				ui.sameLine(nil, 8)
+				-- Render clickable chips for all stellar classes
+				for cIdx, sClass in ipairs(stellarClasses) do
+					local sCol = STELLAR_COLORS[sClass] or colors.white
+					local isSel = (cIdx == customClassIdx)
+					local btnStyle = isSel
+						and { Button = sCol, Text = Color(15, 15, 20, 255), ButtonHovered = sCol }
+						or { Button = Color(sCol.r, sCol.g, sCol.b, 45), Text = sCol }
+					ui.withStyleColors(btnStyle, function()
+						if ui.button(sClass .. "##Chip" .. sClass, Vector2(24, 20)) then
+							customClassIdx = cIdx
+						end
+					end)
+					if cIdx < #stellarClasses then ui.sameLine(nil, 3) end
 				end
-				ui.sameLine(nil, 4)
-				if ui.button(">##ClassNext", Vector2(30, 22)) then
-					customClassIdx = (customClassIdx < #stellarClasses) and (customClassIdx + 1) or 1
-				end
 
-				-- Dial 3: Right Ascension
-				ui.text("Vector 3: Right Ascension (0–360°):")
-				ui.sameLine(rightX + 225)
-				ui.textColored(Color(65, 235, 255, 255), string.format("[ %05.1f° ]", customRA))
-				ui.sameLine()
-				if ui.button("-10°##RA10", Vector2(38, 22)) then customRA = (customRA - 10.0 + 360.0) % 360.0 end
+				-- Dial 3: Right Ascension (0.0° - 359.9°)
+				ui.text("Vector 3: Right Ascension (0.0°–359.9°):")
+				ui.nextItemWidth(170)
+				local newRA, raChanged = ui.sliderFloat("##RASlider", customRA, 0.0, 359.9, "%.1f°")
+				if raChanged then customRA = math.floor(newRA * 10) / 10 end
+				ui.sameLine(nil, 6)
+				if ui.button("-10°##RA10", Vector2(36, 22)) then customRA = (customRA - 10.0 + 360.0) % 360.0 end
 				ui.sameLine(nil, 4)
-				if ui.button("-1°##RA1", Vector2(32, 22)) then customRA = (customRA - 1.0 + 360.0) % 360.0 end
+				if ui.button("-1°##RA1", Vector2(30, 22)) then customRA = (customRA - 1.0 + 360.0) % 360.0 end
 				ui.sameLine(nil, 4)
-				if ui.button("+1°##RA1P", Vector2(32, 22)) then customRA = (customRA + 1.0) % 360.0 end
+				if ui.button("+1°##RA1P", Vector2(30, 22)) then customRA = (customRA + 1.0) % 360.0 end
 				ui.sameLine(nil, 4)
-				if ui.button("+10°##RA10P", Vector2(38, 22)) then customRA = (customRA + 10.0) % 360.0 end
+				if ui.button("+10°##RA10P", Vector2(36, 22)) then customRA = (customRA + 10.0) % 360.0 end
 
-				-- Dial 4: Declination
-				ui.text("Vector 4: Declination (-90–+90°):")
-				ui.sameLine(rightX + 225)
-				ui.textColored(Color(65, 235, 255, 255), string.format("[ %+05.1f° ]", customDec))
-				ui.sameLine()
-				if ui.button("-10°##DEC10", Vector2(38, 22)) then customDec = math.max(-90.0, customDec - 10.0) end
+				-- Dial 4: Declination (-90.0° - +90.0°)
+				ui.text("Vector 4: Declination (-90.0°–+90.0°):")
+				ui.nextItemWidth(170)
+				local newDec, decChanged = ui.sliderFloat("##DecSlider", customDec, -90.0, 90.0, "%+.1f°")
+				if decChanged then customDec = math.floor(newDec * 10) / 10 end
+				ui.sameLine(nil, 6)
+				if ui.button("-10°##DEC10", Vector2(36, 22)) then customDec = math.max(-90.0, customDec - 10.0) end
 				ui.sameLine(nil, 4)
-				if ui.button("-1°##DEC1", Vector2(32, 22)) then customDec = math.max(-90.0, customDec - 1.0) end
+				if ui.button("-1°##DEC1", Vector2(30, 22)) then customDec = math.max(-90.0, customDec - 1.0) end
 				ui.sameLine(nil, 4)
-				if ui.button("+1°##DEC1P", Vector2(32, 22)) then customDec = math.min(90.0, customDec + 1.0) end
+				if ui.button("+1°##DEC1P", Vector2(30, 22)) then customDec = math.min(90.0, customDec + 1.0) end
 				ui.sameLine(nil, 4)
-				if ui.button("+10°##DEC10P", Vector2(38, 22)) then customDec = math.min(90.0, customDec + 10.0) end
+				if ui.button("+10°##DEC10P", Vector2(36, 22)) then customDec = math.min(90.0, customDec + 10.0) end
 
-				-- Dial 5: Epoch Vector
+				-- Dial 5: Epoch Vector (#0000–#9999)
 				ui.text("Vector 5: Epoch (#0000–#9999):")
-				ui.sameLine(rightX + 225)
-				ui.textColored(Color(65, 235, 255, 255), string.format("[ #%04d ]", customEpoch))
-				ui.sameLine()
-				if ui.button("-500##EP500", Vector2(44, 22)) then customEpoch = (customEpoch - 500 + 10000) % 10000 end
+				ui.nextItemWidth(170)
+				local newEpoch, epochChanged = ui.sliderInt("##EpochSlider", customEpoch, 0, 9999, "#%04d")
+				if epochChanged then customEpoch = newEpoch end
+				ui.sameLine(nil, 6)
+				if ui.button("-500##EP500", Vector2(42, 22)) then customEpoch = (customEpoch - 500 + 10000) % 10000 end
 				ui.sameLine(nil, 4)
 				if ui.button("-50##EP50", Vector2(34, 22)) then customEpoch = (customEpoch - 50 + 10000) % 10000 end
 				ui.sameLine(nil, 4)
 				if ui.button("+50##EP50P", Vector2(34, 22)) then customEpoch = (customEpoch + 50) % 10000 end
 				ui.sameLine(nil, 4)
-				if ui.button("+500##EP500P", Vector2(44, 22)) then customEpoch = (customEpoch + 500) % 10000 end
+				if ui.button("+500##EP500P", Vector2(42, 22)) then customEpoch = (customEpoch + 500) % 10000 end
 
 				ui.spacing()
 				ui.separator()
@@ -427,6 +442,8 @@ local function drawNavLocusLottery()
 					customRA = math.floor(rand:Number(0.0, 359.9) * 10) / 10
 					customDec = math.floor(rand:Number(-90.0, 90.0) * 10) / 10
 					customEpoch = rand:Integer(0, 9999)
+					lastSpinTime = ui.getTime()
+					ui.playBoinkNoise()
 				end
 
 				ui.sameLine(nil, 12)
@@ -442,6 +459,7 @@ local function drawNavLocusLottery()
 					local ok, msg = NavLocusLottery.BuySingleTicket(locus)
 					statusMessage = msg
 					statusTime = ui.getTime()
+					if ok then ui.playBoinkNoise() end
 				end
 			end)
 		end)
@@ -648,7 +666,7 @@ end
 StationView:registerView({
 	id = "navLocusLottery",
 	name = "Nav-Locus Lottery",
-	icon = icons.galaxy_map or icons.bbs,
+	icon = icons.lottery or icons.galaxy_map or icons.bbs,
 	showView = true,
 	draw = drawNavLocusLottery,
 	refresh = function(self) end,

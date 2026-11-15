@@ -8,6 +8,7 @@ local ShipDef    = require 'ShipDef'
 local Vector2    = _G.Vector2
 
 local utils = require 'utils'
+local Serializer = require 'Serializer'
 
 local lc  = Lang.GetResource("core")
 local lui = Lang.GetResource("ui-core")
@@ -18,6 +19,45 @@ local Notification = require 'pigui.libs.notification'
 local ModalWindow = require 'pigui.libs.modal-win'
 local MessageBox = require 'pigui.libs.message-box'
 local NewGameWindow = require 'pigui.modules.new-game-window.class'
+
+-- Persistent campaign save tracking
+local currentCampaignSaveName = nil
+local campaignStartTimestamp = nil
+
+local function getCampaignTimestamp()
+	local ok, startTime = pcall(function() return util.standardGameStartTime() end)
+	if not ok or not startTime then
+		startTime = Game.time or 0
+	end
+	local okParts, y, m, d, h, min = pcall(function() return util.gameTimeToTimeParts(startTime) end)
+	if okParts and y and m and d and h and min then
+		local realYear = y - 1200
+		return string.format("%04d%02d%02d-%02d%02d", realYear, m, d, h, min)
+	end
+	return "20261115-0915"
+end
+
+Event.Register("onGameStart", function()
+	if not campaignStartTimestamp then
+		campaignStartTimestamp = getCampaignTimestamp()
+	end
+end)
+
+local function serialize()
+	return {
+		saveName = currentCampaignSaveName,
+		campaignStart = campaignStartTimestamp or getCampaignTimestamp(),
+	}
+end
+
+local function unserialize(data)
+	if data then
+		currentCampaignSaveName = data.saveName
+		campaignStartTimestamp = data.campaignStart
+	end
+end
+
+Serializer:Register("CampaignSaveMetadata", serialize, unserialize)
 
 local minSearchTextLength = 1
 
@@ -311,11 +351,15 @@ function SaveLoadWindow:makeFileList()
 end
 
 function SaveLoadWindow:loadSelectedSave()
-	local success, err = pcall(Game.LoadGame, self.selectedFile)
+	local selected = self.selectedFile
+	local success, err = pcall(Game.LoadGame, selected)
 
 	if not success then
-		Notification.add(Notification.Type.Error, lui.COULD_NOT_LOAD_GAME .. self.selectedFile, err)
+		Notification.add(Notification.Type.Error, lui.COULD_NOT_LOAD_GAME .. tostring(selected), err)
 	else
+		if selected and not selected:match("^_") then
+			currentCampaignSaveName = selected
+		end
 		self:close()
 	end
 end
@@ -338,6 +382,9 @@ function SaveLoadWindow:saveToFilePath()
 	if not success then
 		Notification.add(Notification.Type.Error, lui.COULD_NOT_SAVE_GAME .. self.savePath, err)
 	else
+		if self.savePath and not self.savePath:match("^_") then
+			currentCampaignSaveName = self.savePath
+		end
 		self:close()
 	end
 end
@@ -361,7 +408,15 @@ end
 
 function SaveLoadWindow:onOpen()
 	self.selectedFile = nil
-	self.savePath = ""
+	if self.mode == SaveLoadWindow.Modes.Save then
+		local defaultName = currentCampaignSaveName
+		if not defaultName or #defaultName == 0 then
+			defaultName = campaignStartTimestamp or getCampaignTimestamp()
+		end
+		self.savePath = defaultName
+	else
+		self.savePath = ""
+	end
 	self:makeFileList()
 end
 

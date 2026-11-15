@@ -235,7 +235,8 @@ local function seedEmergentCrisis(preferredSystem)
 
 	if #eligible == 0 then return nil end
 
-	local rand = Rand.New(math.floor(Game.time or os.time()) + #activeCrises)
+	local seed = math.floor(Game.time or 98765) + #activeCrises
+	local rand = Rand.New(seed)
 	local targetSys = preferredSystem or eligible[rand:Integer(1, #eligible)]
 
 	local typeKeys = { "OUTBREAK", "FAMINE", "BLOCKADE", "INSURGENCY", "MINERAL_RUSH", "LABOR_STRIKE" }

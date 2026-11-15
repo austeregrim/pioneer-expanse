@@ -327,11 +327,6 @@ StationView:registerView({
 	showView = true,
 	draw = drawPlayerInfo,
 	refresh = function()
-		if Insurance.ShouldOpenModal() then
-			StationView:SwitchTo("insurance")
-			return
-		end
-
 		local station = Game.player:GetDockedWith()
 		shipDef = ShipDef[Game.player.shipId]
 
@@ -345,6 +340,11 @@ StationView:registerView({
 			hyperdrive = Game.player:GetInstalledHyperdrive()
 			hyperdrive_fuel = hyperdrive and hyperdrive.fuel or Commodities.hydrogen
 			hyperdriveIcon = PiImage.New("icons/goods/" .. hyperdrive_fuel.icon_name .. ".png")
+		end
+
+		if Insurance.ShouldOpenModal() then
+			StationView:SwitchTo("insurance")
+			return
 		end
 	end,
 	debugReload = function()

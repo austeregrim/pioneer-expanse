@@ -30,7 +30,7 @@ Layout.UpdateOrder = {
 	Summary.Description
 }
 
-Layout.Tabs = { Summary, Crew, Ship, Location, FlightLog }
+Layout.Tabs = { Summary, Crew, Ship, Location }
 
 function Layout.updateLayout(contentRegion)
 

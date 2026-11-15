@@ -700,6 +700,13 @@ void Ship::Explode()
 		Sound::BodyMakeNoise(this, "Explosion_1", 1.0f);
 	}
 	ClearThrusterState();
+	AIClearInstructions();
+	if (m_supercruise) {
+		m_supercruise->Reset();
+	}
+	if (IsType(ObjectType::PLAYER) && Pi::input) {
+		Pi::input->SetCapturingMouse(false);
+	}
 }
 
 void Ship::Revive()
@@ -714,8 +721,12 @@ void Ship::Revive()
 	SetVelocity(vector3d::Zero);
 	SetAngVelocity(vector3d::Zero);
 	SetTorque(vector3d::Zero);
+	AIClearInstructions();
 	if (m_supercruise) {
-		m_supercruise->SetFsdOffline(false);
+		m_supercruise->Reset();
+	}
+	if (IsType(ObjectType::PLAYER) && Pi::input) {
+		Pi::input->SetCapturingMouse(false);
 	}
 }
 

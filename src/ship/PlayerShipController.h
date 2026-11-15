@@ -86,6 +86,7 @@ public:
 	void SetSpeedLimiterActive(bool active) { m_speedLimiterActive = active; }
 	bool IsSpeedLimiterActive() const { return m_speedLimiterActive; }
 	bool IsShipDrifting(); // 'setted' speed is very different from real speed
+	void ResetMouseCapture();
 
 private:
 	struct InputBinding : public Input::InputFrame {

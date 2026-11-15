@@ -541,35 +541,42 @@ end
 
 function EquipmentWidget:drawShipSpinner()
 	local shipDef = ShipDef[self.ship.shipId]
+	local hullName = ls[shipDef.i18n_key] or (shipDef and shipDef.name) or self.ship.shipId
+	local displayName = (self.ship.shipName and self.ship.shipName ~= "") and self.ship.shipName or hullName
 
 	ui.group(function ()
 
 		ui.withFont(ui.fonts.orbiteer.large, function()
-			shipname = ls[shipDef.i18n_key]
+			ui.text(displayName)
 			if self.showShipNameEdit then
-
-				ui.alignTextToFramePadding()
-				ui.text(shipname)
 				ui.sameLine()
-
-				self.shipNameBuffer = self.shipNameBuffer or (self.ship.shipName or "")
-				local btnW = 54
-				local avail = ui.getContentRegion().x
-				ui.pushItemWidth(avail - btnW - ui.getItemSpacing().x)
-				local entry, apply = ui.inputText("##ShipNameEntry", self.shipNameBuffer, ui.InputTextFlags {"EnterReturnsTrue"})
-				ui.popItemWidth()
-				self.shipNameBuffer = entry
-
-				ui.sameLine()
-				if ui.button("Save##SaveShipNameEquip", Vector2(btnW, 0)) or apply then
-					self:message("onSetShipName", self.shipNameBuffer)
+				local btnSz = Vector2(ui.getTextLineHeight())
+				if ui.iconButton("##editShipNameEquip", icons.pencil, "Rename Vessel", nil, btnSz) then
+					self.shipNameBuffer = self.ship.shipName or ""
+					ui.openPopup("rename_ship_popup_equip")
 				end
-
-			else
-				ui.text(shipname)
 			end
-
 		end)
+
+		if self.showShipNameEdit then
+			ui.popup("rename_ship_popup_equip", function()
+				ui.text("Rename Vessel:")
+				ui.spacing()
+				ui.pushItemWidth(ui.rescaleUI(260, Vector2(1920, 1080)))
+				local newText, entered = ui.inputText("##RenameEquipShipInput", self.shipNameBuffer or "", "Enter vessel name...", {"EnterReturnsTrue"})
+				ui.popItemWidth()
+				self.shipNameBuffer = newText
+				ui.spacing()
+				if ui.button("Save", Vector2(0, 0)) or entered then
+					self:message("onSetShipName", self.shipNameBuffer)
+					ui.closeCurrentPopup()
+				end
+				ui.sameLine()
+				if ui.button("Cancel", Vector2(0, 0)) then
+					ui.closeCurrentPopup()
+				end
+			end)
+		end
 
 		local startPos = ui.getCursorScreenPos()
 

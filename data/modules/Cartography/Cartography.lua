@@ -15,6 +15,8 @@ local l = Lang.GetResource("module-system")
 ---@class Cartography
 local Cartography = {}
 
+Cartography.MIN_SALE_DISTANCE_LY = 10.0
+
 local DISCOVERY_CHARGE_TIME = 3.0
 
 -- Persistent state (saved with game)
@@ -331,6 +333,13 @@ local function computeSystemPayout(rec)
 		fullSystemBonus = math.floor((discoveryPay + bodyTotal) * 0.25)
 	end
 
+	local currentSys = Game.system
+	local dist = 0.0
+	if currentSys and rec.systemPath then
+		dist = currentSys:DistanceTo(rec.systemPath)
+	end
+	local isEligibleDistance = (dist >= Cartography.MIN_SALE_DISTANCE_LY)
+
 	local total = discoveryPay + bodyTotal + fullSystemBonus
 	return {
 		key = rec.key,
@@ -345,6 +354,8 @@ local function computeSystemPayout(rec)
 		isKnownSystem = isKnownSys,
 		bodies = bodyList,
 		totalPay = total,
+		distance = dist,
+		isEligibleDistance = isEligibleDistance,
 	}
 end
 
@@ -362,18 +373,26 @@ end
 
 function Cartography.GetTotalUnsoldValue()
 	local total = 0
+	local eligibleTotal = 0
 	for _, rec in pairs(state.unsoldSystems) do
-		total = total + computeSystemPayout(rec).totalPay
+		local item = computeSystemPayout(rec)
+		total = total + item.totalPay
+		if item.isEligibleDistance then
+			eligibleTotal = eligibleTotal + item.totalPay
+		end
 	end
-	return total
+	return total, eligibleTotal
 end
 
 function Cartography.SellSystem(sysKey)
 	local rec = state.unsoldSystems[sysKey]
-	if not rec then return 0 end
+	if not rec then return 0, "No data found" end
 
 	local payout = computeSystemPayout(rec)
-	if payout.totalPay <= 0 then return 0 end
+	if payout.totalPay <= 0 then return 0, "No survey value" end
+	if not payout.isEligibleDistance then
+		return 0, string.format("Too close to station (%.1f ly / min %.1f ly required)", payout.distance, Cartography.MIN_SALE_DISTANCE_LY)
+	end
 
 	local sold = getSoldRecord(sysKey)
 	if rec.discovered then
@@ -401,8 +420,11 @@ function Cartography.SellAll()
 	local total = 0
 	local soldItems = {}
 	local keys = {}
-	for k in pairs(state.unsoldSystems) do
-		table.insert(keys, k)
+	for k, rec in pairs(state.unsoldSystems) do
+		local item = computeSystemPayout(rec)
+		if item.isEligibleDistance and item.totalPay > 0 then
+			table.insert(keys, k)
+		end
 	end
 	for _, k in ipairs(keys) do
 		local rec = state.unsoldSystems[k]

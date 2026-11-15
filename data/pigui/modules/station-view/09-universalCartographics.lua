@@ -129,7 +129,7 @@ local function drawUniversalCartographics()
 
 			local stats = Cartography.GetStats()
 			local unsoldList = Cartography.GetUnsoldList()
-			local totalUnsold = Cartography.GetTotalUnsoldValue()
+			local totalUnsold, eligibleUnsold = Cartography.GetTotalUnsoldValue()
 
 			ui.withFont(pionillium.details, function()
 				ui.textColored(colors.fontDim, string.format(
@@ -150,25 +150,38 @@ local function drawUniversalCartographics()
 				ui.spacing()
 			end
 
-			-- Top Action Bar: Total Unsold + Sell All
+			-- Top Action Bar: Total Unsold + Eligible + Sell All
 			ui.withFont(orbiteer.medium, function()
-				ui.text("Available Cartographic Data: " .. Format.Money(totalUnsold))
+				if eligibleUnsold < totalUnsold then
+					ui.text(string.format("Available Cartographic Data: %s (Eligible: %s)", Format.Money(totalUnsold), Format.Money(eligibleUnsold)))
+				else
+					ui.text("Available Cartographic Data: " .. Format.Money(totalUnsold))
+				end
 			end)
 
-			if totalUnsold > 0 then
+			if eligibleUnsold > 0 then
 				ui.sameLine()
 				local avail = ui.getContentRegion().x
 				if avail > widgetSizes.sellAllSize.x then
 					ui.addCursorPos(Vector2(avail - widgetSizes.sellAllSize.x, 0))
 				end
-				if ui.button("Sell All Data (" .. Format.Money(totalUnsold) .. ")", widgetSizes.sellAllSize) then
-					local earned = Cartography.SellAll()
+				if ui.button("Sell Eligible Data (" .. Format.Money(eligibleUnsold) .. ")", widgetSizes.sellAllSize) then
+					local earned, soldItems = Cartography.SellAll()
 					if earned > 0 then
-						lastSaleBanner = "Signature verified. Transmitted all cartographic data for " .. Format.Money(earned) .. "."
+						lastSaleBanner = string.format("Signature verified. Transmitted %d eligible system survey(s) for %s.", #soldItems, Format.Money(earned))
 						animStartTime = ui.getTime()
 						ui.playSfx("OK")
 					end
 				end
+			elseif totalUnsold > 0 then
+				ui.sameLine()
+				local avail = ui.getContentRegion().x
+				if avail > widgetSizes.sellAllSize.x then
+					ui.addCursorPos(Vector2(avail - widgetSizes.sellAllSize.x, 0))
+				end
+				ui.withStyleColors({ Button = ui.theme.buttonColors.disabled.normal, Text = colors.fontDim }, function()
+					ui.button("Data Within 10 ly (Ineligible)", widgetSizes.sellAllSize)
+				end)
 			end
 
 			ui.spacing()
@@ -189,6 +202,15 @@ local function drawUniversalCartographics()
 							ui.text(sys.name)
 							ui.sameLine()
 							ui.textColored(colors.uiPrimaryLight, " (" .. Format.Money(sys.totalPay) .. ")")
+							ui.sameLine()
+							ui.withFont(pionillium.details, function()
+								local distStr = string.format("[%.1f ly]", sys.distance or 0)
+								if sys.isEligibleDistance then
+									ui.textColored(colors.econProfit, distStr)
+								else
+									ui.textColored(colors.alertYellow, distStr .. " (Min 10 ly required)")
+								end
+							end)
 							if sys.isKnownSystem then
 								ui.sameLine()
 								ui.withFont(pionillium.details, function()
@@ -202,13 +224,21 @@ local function drawUniversalCartographics()
 						if avail > widgetSizes.buttonSize.x then
 							ui.addCursorPos(Vector2(avail - widgetSizes.buttonSize.x, 0))
 						end
-						if ui.button("Sell System##" .. sys.key, widgetSizes.buttonSize) then
-							local earned = Cartography.SellSystem(sys.key)
-							if earned > 0 then
-								lastSaleBanner = "Verified & sold " .. sys.name .. " survey data for " .. Format.Money(earned) .. "."
-								animStartTime = ui.getTime()
-								ui.playSfx("OK")
+						if sys.isEligibleDistance then
+							if ui.button("Sell System##" .. sys.key, widgetSizes.buttonSize) then
+								local earned, msg = Cartography.SellSystem(sys.key)
+								if earned > 0 then
+									lastSaleBanner = "Verified & sold " .. sys.name .. " survey data for " .. Format.Money(earned) .. "."
+									animStartTime = ui.getTime()
+									ui.playSfx("OK")
+								else
+									lastSaleBanner = msg or "Unable to sell system data."
+								end
 							end
+						else
+							ui.withStyleColors({ Button = ui.theme.buttonColors.disabled.normal, Text = colors.fontDim }, function()
+								ui.button("Too Close (<10 ly)##" .. sys.key, widgetSizes.buttonSize)
+							end)
 						end
 
 						if ui.beginTable("CartoSys_" .. sys.key, 3, { "BordersInnerV" }) then

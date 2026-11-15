@@ -23,6 +23,7 @@ public:
 
 	bool Connect(const char *host, uint16_t port);
 	void Disconnect();
+	bool IsConnected() const { return m_connected; }
 
 	const State *GetHeadState() const;
 

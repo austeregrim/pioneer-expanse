@@ -106,6 +106,7 @@ public:
 	void SafeDisengage();
 	void NormalDrop(const std::string &reason = "");
 	void EmergencyDrop(const std::string &reason = "");
+	void Reset();
 	void OnEnterHyperspace();
 
 	// Per-frame updates

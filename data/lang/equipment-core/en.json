@@ -76,12 +76,12 @@
     "message": "Auxiliary Cargo Rack"
   },
   "AUXILIARY_CARGO_RACK_DESCRIPTION": {
-    "description": "Equipment description for a cargo-carrying rack installed as a cabin module",
-    "message": "Additional cargo space mounted inside the ship's pressurized habitat."
+    "description": "Equipment description for a cargo-carrying rack installed as an internal compartment module",
+    "message": "Additional cargo space mounted inside the ship's internal compartment."
   },
   "AUXILIARY_CARGO_RACK_FLAVOURTEXT": {
-    "description": "Equipment description for a cargo-carrying rack installed as a cabin module",
-    "message": "Put your unneeded habitat space to work for you! This conversion kit fits a wide variety of ship hulls. Manufactured by Seversk a.k."
+    "description": "Equipment description for a cargo-carrying rack installed as an internal compartment module",
+    "message": "Put your unneeded compartment space to work for you! This conversion kit fits a wide variety of ship hulls. Manufactured by Seversk a.k."
   },
   "BEAMLASER_1MW": {
     "description": "",
@@ -136,8 +136,8 @@
     "message": "Concealed Cargo Rack"
   },
   "CONCEALED_CARGO_RACK_DESCRIPTION": {
-    "description": "Equipment description for a cargo-carrying smuggler's hold installed as a cabin module",
-    "message": "Shielded cargo space disguised as an innocuous habitat wall. Hides the contents from police scans."
+    "description": "Equipment description for a cargo-carrying smuggler's hold installed as an internal compartment module",
+    "message": "Shielded cargo space disguised as an innocuous internal bulkhead. Hides the contents from police scans."
   },
   "CONCEALED_CARGO_RACK_FLAVOURTEXT": {
     "description": "Equipment description for a cargo-carrying smuggler's hold installed as a cabin module",
@@ -440,8 +440,8 @@
     "message": "Permits scooping hydrogen fuel from gas giant planets."
   },
   "HABITAT": {
-    "description": "Category header for pressurized habitat slots",
-    "message": "Habitat"
+    "description": "Category header for internal compartment and storage slots",
+    "message": "Internal Compartments"
   },
   "HARDPOINT_FUEL_SCOOP": {
     "description": "Name for the 'Fuel Scoop' equipment hardpoint",
@@ -980,16 +980,16 @@
     "message": "Slotless"
   },
   "SLOT_CABIN": {
-    "description": "Name for a generic room slot inside the pressurized living space",
-    "message": "Cabin"
+    "description": "Name for a generic internal compartment slot",
+    "message": "Internal Compartment"
   },
   "SLOT_CABIN_FORE": {
-    "description": "Name for a cabin slot towards the front of the ship",
-    "message": "Fore Cabin"
+    "description": "Name for an internal compartment slot towards the front of the ship",
+    "message": "Fore Compartment"
   },
   "SLOT_CABIN_REAR": {
-    "description": "Name for a cabin slot towards the rear of the ship",
-    "message": "Rear Cabin"
+    "description": "Name for an internal compartment slot towards the rear of the ship",
+    "message": "Rear Compartment"
   },
   "SLOT_COMPUTER": {
     "description": "Name for a generic computer equipment slot",

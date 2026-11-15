@@ -723,6 +723,36 @@ void SupercruiseController::EmergencyDrop(const std::string &reason)
 	ShowStatusMessage(reason.empty() ? "EMERGENCY DROP — SHIELD OVERLOAD & FSD COOLDOWN" : reason, 6.0f);
 }
 
+void SupercruiseController::Reset()
+{
+	ClearInterdiction();
+	m_charging = false;
+	m_chargeCountdown = 0.0f;
+	m_cooldown = 0.0f;
+	m_assistActive = false;
+	m_dockOnArrival = false;
+	m_speed = 0.0;
+	m_desiredSpeed = 0.0;
+	m_throttle = 0.5;
+	m_safeDisengageReady = false;
+	m_slowDownWarning = false;
+	m_ringDropPlanet = nullptr;
+	m_ringImmersionPlanet = nullptr;
+	m_target = nullptr;
+	m_targetIndex = 0;
+	m_targetFrame = FrameId::Invalid;
+	m_targetOffset = vector3d(0.0);
+	m_interdictPeer = nullptr;
+	m_interdictRole = INTERDICT_NONE;
+	m_interdictPeerIndex = 0;
+	m_trailPositions.clear();
+	ResetFuelScoopState();
+	m_fsdOffline = false;
+	m_heatSpike = 0.0;
+	m_statusMessage.clear();
+	m_statusMessageTimer = 0.0f;
+}
+
 void SupercruiseController::OnEnterHyperspace()
 {
 	ClearInterdiction();

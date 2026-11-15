@@ -125,7 +125,8 @@ static int l_engine_attr_pigui(lua_State *l)
 static int l_engine_attr_version(lua_State *l)
 {
 	std::string version(PIONEER_VERSION);
-	if (strlen(PIONEER_EXTRAVERSION)) version += " (" PIONEER_EXTRAVERSION ")";
+	if (strlen(PIONEER_EXTRAVERSION) && version.find(PIONEER_EXTRAVERSION) == std::string::npos)
+		version += " (" PIONEER_EXTRAVERSION ")";
 	lua_pushlstring(l, version.c_str(), version.size());
 	return 1;
 }
@@ -608,6 +609,22 @@ static int l_engine_set_reset_view_on_hyperspace_exit(lua_State *l)
 		return luaL_error(l, "SetResetViewOnHyperspaceExit takes one boolean argument");
 	const bool enabled = lua_toboolean(l, 1);
 	Pi::config->SetInt("ResetViewOnHyperspaceExit", (enabled ? 1 : 0));
+	return 0;
+}
+
+static int l_engine_get_headtracking_enabled(lua_State *l)
+{
+	lua_pushboolean(l, Pi::config->Int("EnableHeadtracking", 0) != 0);
+	return 1;
+}
+
+static int l_engine_set_headtracking_enabled(lua_State *l)
+{
+	if (lua_isnone(l, 1))
+		return luaL_error(l, "SetHeadtrackingEnabled takes one boolean argument");
+	const bool enabled = lua_toboolean(l, 1);
+	Pi::config->SetInt("EnableHeadtracking", (enabled ? 1 : 0));
+	Pi::config->Save();
 	return 0;
 }
 
@@ -1141,6 +1158,9 @@ void LuaEngine::Register()
 
 		{ "GetResetViewOnHyperspaceExit", l_engine_get_reset_view_on_hyperspace_exit },
 		{ "SetResetViewOnHyperspaceExit", l_engine_set_reset_view_on_hyperspace_exit },
+
+		{ "GetHeadtrackingEnabled", l_engine_get_headtracking_enabled },
+		{ "SetHeadtrackingEnabled", l_engine_set_headtracking_enabled },
 
 		{ "GetDisplayHudTrails", l_engine_get_display_hud_trails },
 		{ "SetDisplayHudTrails", l_engine_set_display_hud_trails },

@@ -67,6 +67,15 @@ end
 
 local overlayWindowFlags = ui.WindowFlags {"NoTitleBar", "NoResize", "NoFocusOnAppearing", "NoBringToFrontOnFocus", "AlwaysAutoResize"}
 local mainMenuFlags = ui.WindowFlags{"NoTitleBar", "NoResize", "NoFocusOnAppearing", "NoBringToFrontOnFocus"}
+
+local mainLogo = nil
+local function getMainLogo()
+	if not mainLogo then
+		mainLogo = ui.loadTextureFromSVG(ui.dataDirPath({"icons", "logo.svg"}), 1024, 1024)
+	end
+	return mainLogo
+end
+
 local function showMainMenu()
 	if not hasMusicList then
 		hasMusicList = true
@@ -80,10 +89,31 @@ local function showMainMenu()
 
 	local winPos = Vector2(ui.screenWidth - mainButtonSize.x - 100, ui.screenHeight/2 - (buttons * mainButtonSize.y)/2 - (2*mainButtonSize.y)/2 - 8)
 
-	ui.setNextWindowPos(Vector2(110,65),'Always')
-	ui.withStyleColors({WindowBg=colors.transparent}, function()
-		ui.window("headingWindow", overlayWindowFlags, function()
-			ui.withFont(orbiteer.xlarge, function() ui.text("Pioneer: Expanse") end)
+	-- Logo where the title text previously was, sized to ~1/3 screen height
+	local logo = getMainLogo()
+	if logo then
+		local logoDim = math.floor(ui.screenHeight / 3)
+		local logoSize = Vector2(logoDim, logoDim)
+		local logoPos = Vector2(ui.rescaleUI(110), ui.rescaleUI(40))
+		ui.setNextWindowPos(logoPos, 'Always')
+		ui.withStyleColorsAndVars({WindowBg = colors.transparent}, {WindowPadding = Vector2(0, 0)}, function()
+			ui.window("mainMenuLogo", overlayWindowFlags, function()
+				ui.image(logo, logoSize, Vector2(0.0, 0.0), Vector2(1.0, 1.0), colors.white)
+			end)
+		end)
+	end
+
+	-- Center "Pioneer: Expanse" title text to the screen
+	local titleText = "Pioneer: Expanse"
+	ui.withFont(orbiteer.xlarge, function()
+		local textSize = ui.calcTextSize(titleText)
+		local titleY = ui.rescaleUI(65)
+		local titlePos = Vector2((ui.screenWidth - textSize.x) * 0.5, titleY)
+		ui.setNextWindowPos(titlePos, 'Always')
+		ui.withStyleColorsAndVars({WindowBg = colors.transparent}, {WindowPadding = Vector2(0, 0)}, function()
+			ui.window("headingWindow", overlayWindowFlags, function()
+				ui.text(titleText)
+			end)
 		end)
 	end)
 	if Engine.IsIntroZooming() then

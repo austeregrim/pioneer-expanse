@@ -686,17 +686,43 @@ void Game::TriggerPlayerEscapePodRecovery()
 {
 	if (!m_player) return;
 
-	// 1. Locate the nearest starport in the current system
+	// Clear targets, AI, supercruise, and input state from previous life/system
+	m_player->AIClearInstructions();
+	if (m_player->GetSupercruise()) {
+		m_player->GetSupercruise()->Reset();
+	}
+	if (PlayerShipController *psc = m_player->GetPlayerController()) {
+		psc->ResetMouseCapture();
+	}
+	m_player->SetNavTarget(nullptr);
+	m_player->SetCombatTarget(nullptr);
+	m_player->SetFollowTarget(nullptr);
+	if (Pi::input) {
+		Pi::input->SetCapturingMouse(false);
+	}
+
+	// 1. Locate the nearest starport in the current system (preferring orbital stations)
 	SpaceStation *targetStation = nullptr;
+	SpaceStation *firstOrbital = nullptr;
 	double bestStationDistSq = 1e36;
+	double bestOrbitalDistSq = 1e36;
 	for (Body *b : m_space->GetBodies()) {
 		if (b && b->IsType(ObjectType::SPACESTATION) && !b->IsDead()) {
+			SpaceStation *st = static_cast<SpaceStation *>(b);
 			const double dSq = m_player->GetPositionRelTo(b).LengthSqr();
+			if (!st->IsGroundStation() && dSq < bestOrbitalDistSq) {
+				bestOrbitalDistSq = dSq;
+				firstOrbital = st;
+			}
 			if (dSq < bestStationDistSq) {
 				bestStationDistSq = dSq;
-				targetStation = static_cast<SpaceStation *>(b);
+				targetStation = st;
 			}
 		}
+	}
+	if (firstOrbital) {
+		targetStation = firstOrbital;
+		bestStationDistSq = bestOrbitalDistSq;
 	}
 
 	double recoveryDays = 0.5;
@@ -756,12 +782,20 @@ void Game::TriggerPlayerEscapePodRecovery()
 		m_player->SetFrame(m_space->GetRootFrame());
 		m_space->AddBody(m_player.get());
 
+		SpaceStation *foundOrbital = nullptr;
+		SpaceStation *foundStation = nullptr;
 		for (Body *b : m_space->GetBodies()) {
 			if (b && b->IsType(ObjectType::SPACESTATION) && !b->IsDead()) {
-				targetStation = static_cast<SpaceStation *>(b);
-				break;
+				SpaceStation *st = static_cast<SpaceStation *>(b);
+				if (!st->IsGroundStation() && !foundOrbital) {
+					foundOrbital = st;
+				}
+				if (!foundStation) {
+					foundStation = st;
+				}
 			}
 		}
+		targetStation = foundOrbital ? foundOrbital : foundStation;
 
 		LuaEvent::Queue("onEnterSystem", m_player.get());
 	}
@@ -778,6 +812,9 @@ void Game::TriggerPlayerEscapePodRecovery()
 		m_player->SetDockedWith(targetStation, port);
 		m_player->UpdateInterpTransform(1.0);
 		Frame::GetFrame(m_player->GetFrame())->GetCollisionSpace()->RebuildObjectTrees();
+	}
+	if (Pi::input) {
+		Pi::input->SetCapturingMouse(false);
 	}
 
 	// 5. Reset flash and switch to Station View

@@ -6,6 +6,7 @@
 #include "Camera.h"
 #include "Game.h"
 #include "GameConfig.h"
+#include "Input.h"
 #include "Pi.h"
 #include "Player.h"
 #include "graphics/Graphics.h"
@@ -39,6 +40,9 @@ void DeathView::Init()
 	m_cameraContext->SetCameraPosition(Pi::player->GetInterpPosition() + vector3d(0, 0, m_cameraDist));
 	m_cameraContext->SetCameraOrient(matrix3x3d::Identity);
 	m_deathTimer = 0.0f;
+	if (Pi::input) {
+		Pi::input->SetCapturingMouse(false);
+	}
 }
 
 void DeathView::OnSwitchTo()

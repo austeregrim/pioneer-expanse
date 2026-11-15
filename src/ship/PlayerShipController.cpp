@@ -618,8 +618,17 @@ void PlayerShipController::StaticUpdate(const float timeStep)
 		// TODO: this is a bit monkey-patched, but calling from SetFlightControlState doesn't properly clear the mouse capture state.
 		// Do it here so we properly react to becoming docked while holding the mouse button down
 		if (m_ship->GetFlightState() == Ship::DOCKED && m_mouseActive) {
+			ResetMouseCapture();
+		}
+	}
+}
+
+void PlayerShipController::ResetMouseCapture()
+{
+	if (m_mouseActive) {
+		m_mouseActive = false;
+		if (Pi::input) {
 			Pi::input->SetCapturingMouse(false);
-			m_mouseActive = false;
 		}
 	}
 }
@@ -658,7 +667,10 @@ static double clipmouse(double cur, double inp)
 
 void PlayerShipController::PollControls(const float timeStep, int *mouseMotion, TotalDesiredAction &outParams)
 {
-	if (AreControlsLocked()) return;
+	if (AreControlsLocked()) {
+		ResetMouseCapture();
+		return;
+	}
 
 	const float thrustPower = (InputBindings.thrustLowPower->IsActive() ? m_lowThrustPower : 1.0f);
 	outParams.angPower.x = outParams.angPower.y = outParams.angPower.z = thrustPower;

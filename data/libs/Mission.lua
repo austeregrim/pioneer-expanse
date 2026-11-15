@@ -154,7 +154,7 @@ Mission = {
 -- >      'client'      = Character.New()
 -- >      'due'         = Game.time + 3*24*60*60,    -- three days
 -- >      'reward'      = 123.45,
--- >      'destination' = SystemPath:New(0,0,0,0,16),  -- Mars High, Sol
+-- >      'destination' = SystemPath:New(0,0,0,0,16),  -- Mars High Orbit, Sol
 -- >      'status'      = 'ACTIVE',
 -- >  })
 --

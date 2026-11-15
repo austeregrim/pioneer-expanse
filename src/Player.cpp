@@ -54,6 +54,19 @@ Player::Player(const Json &jsonObj, Space *space) :
 void Player::Revive()
 {
 	Ship::Revive();
+	SetNavTarget(nullptr);
+	SetCombatTarget(nullptr);
+	SetFollowTarget(nullptr);
+	if (m_controller) {
+		m_controller->SetFlightControlState(CONTROL_MANUAL);
+	}
+	if (PlayerShipController *psc = GetPlayerController()) {
+		psc->SetSpeedLimiterActive(false);
+		psc->ResetMouseCapture();
+	}
+	if (Pi::input) {
+		Pi::input->SetCapturingMouse(false);
+	}
 }
 
 void Player::SetShipType(const ShipType::Id &shipId)

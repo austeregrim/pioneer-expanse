@@ -145,6 +145,8 @@ function PiGuiTabView.renderTabView(self, refresh)
 	-- refresh the tab since we're swapping back to the view
 	if refresh then
 		self:refreshTab(self.currentTab)
+		tab = self.tabs[self.currentTab]
+		if not tab then return end
 	end
 
 	local styleColors = {

@@ -116,11 +116,12 @@ void ShipViewController::Init()
 	// TODO: expose this via UI once setting/updating config values from Lua is nicer
 	m_internalCameraController->SetSmoothingEnabled(Pi::config->Int("CameraSmoothing", 0));
 
-	std::string headtrackingIP = Pi::config->String("HeadtrackingIP", "");
-	int port = Pi::config->Int("HeadtrackingPort", 4242);
-
 	m_headtrackingManager.reset(new HeadtrackingManager());
-	m_headtrackingManager->Connect(headtrackingIP.c_str(), port);
+	if (Pi::config->Int("EnableHeadtracking", 0) != 0) {
+		std::string headtrackingIP = Pi::config->String("HeadtrackingIP", "");
+		int port = Pi::config->Int("HeadtrackingPort", 4242);
+		m_headtrackingManager->Connect(headtrackingIP.c_str(), port);
+	}
 }
 
 void ShipViewController::Activated()
@@ -200,6 +201,15 @@ void ShipViewController::Update()
 {
 	auto *cam = static_cast<MoveableCameraController *>(m_activeCameraController);
 	auto frameTime = Pi::GetFrameTime();
+
+	bool enableHeadtracking = Pi::config->Int("EnableHeadtracking", 0) != 0;
+	if (enableHeadtracking && !m_headtrackingManager->IsConnected()) {
+		std::string headtrackingIP = Pi::config->String("HeadtrackingIP", "");
+		int port = Pi::config->Int("HeadtrackingPort", 4242);
+		m_headtrackingManager->Connect(headtrackingIP.c_str(), port);
+	} else if (!enableHeadtracking && m_headtrackingManager->IsConnected()) {
+		m_headtrackingManager->Disconnect();
+	}
 
 	m_headtrackingManager->Update();
 

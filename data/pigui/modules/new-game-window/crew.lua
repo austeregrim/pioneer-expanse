@@ -34,6 +34,9 @@ end
 
 function PlayerChar:fromStartVariant(variant)
 	self.lock = false
+	if variant.faction then
+		self.value.factionName = variant.faction
+	end
 end
 
 function PlayerChar:isValid()
@@ -481,7 +484,7 @@ Crew.reader = Helpers.versioned {{
 	end
 }}
 
-Crew.TabName = lui.CREW
+Crew.TabName = lui.COMMANDER or "Commander"
 Crew.Player = {
 	Char = PlayerChar,
 	Money = PlayerMoney,

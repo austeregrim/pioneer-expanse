@@ -302,7 +302,8 @@ start:
 
 	case MODE_VERSION: {
 		std::string version(PIONEER_VERSION);
-		if (strlen(PIONEER_EXTRAVERSION)) version += " (" PIONEER_EXTRAVERSION ")";
+		if (strlen(PIONEER_EXTRAVERSION) && version.find(PIONEER_EXTRAVERSION) == std::string::npos)
+			version += " (" PIONEER_EXTRAVERSION ")";
 		printf("modelcompiler %s\n", version.c_str());
 		break;
 	}

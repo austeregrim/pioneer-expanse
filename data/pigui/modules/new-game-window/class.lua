@@ -27,40 +27,76 @@ local roleCombo = { items = {}, actions = {}, selected = 0 }
 
 local ALLEGIANCES = {
 	{
-		id       = "solfed",
-		name     = "Solar Federation (Sol — Mars)",
-		faction  = "Solar Federation",
-		location = SystemPath.New(0, 0, 0, 0, 18), -- Cydonia, Mars
-		desc     = "ALLEGIANCE: Solar Federation (Sol System — Cydonia, Mars)\nThe historical cradle of humanity and seat of Federal power. Sol features dense orbital infrastructure, reliable commodity markets, and strictSolFed Military & Police patrols. Ideal for pilots who prefer high-security core worlds.",
-		logPrefix = "Commissioned at Cydonia Spaceport, Mars (Sol) under Solar Federation registry.",
+		id        = "solfed",
+		name      = "Solar Federation (Sol — Mars High Orbit | Core Worlds, 0 ly)",
+		faction   = "Solar Federation",
+		location  = SystemPath.New(0, 0, 0, 0, 20), -- Mars High Orbit, Sol
+		desc      = "STARTING FACTION: Solar Federation (Sol System — Mars High Orbit Station | 0 ly)\nThe historical cradle of humanity and administrative core of Federal space. Features dense orbital infrastructure, established commodities markets, and strict SolFed Military & Police patrols. Ideal for commanders who prefer high-security core worlds and reliable commercial trade routes.",
+		logPrefix = "Commissioned at Mars High Orbit Station (Sol) under Solar Federation registry.",
 		trimColor = Color('3A7BD5'),
 	},
 	{
-		id       = "ciw",
-		name     = "Commonwealth of Independent Worlds (New Hope)",
-		faction  = "Commonwealth of Independent Worlds",
-		location = SystemPath.New(1, -1, -1, 0, 4), -- New Hope, Epsilon Eridani
-		desc     = "ALLEGIANCE: Commonwealth of Independent Worlds (Epsilon Eridani — New Hope)\nA prosperous democratic confederation of frontier and core worlds. Epsilon Eridani is a major commercial crossroads with open trade laws, high-tech shipyards, and balanced Confederal Police security.",
-		logPrefix = "Commissioned at New Hope Spaceport (Epsilon Eridani) within the Commonwealth of Independent Worlds.",
+		id        = "ciw",
+		name      = "Commonwealth of Independent Worlds (Eridani Commercial Center | ~10 ly)",
+		faction   = "Commonwealth of Independent Worlds",
+		location  = SystemPath.New(1, -1, -1, 0, 8), -- Eridani Commercial Center, Epsilon Eridani
+		desc      = "STARTING FACTION: Commonwealth of Independent Worlds (Epsilon Eridani — Eridani Commercial Center | ~10 ly from Sol)\nA prosperous democratic confederation of core and mid-frontier systems. Eridani Commercial Center is a bustling orbital hub above New Hope with open trade laws, advanced shipyard drydocks, and balanced Confederal Police security.",
+		logPrefix = "Commissioned at Eridani Commercial Center (Epsilon Eridani) within the Commonwealth of Independent Worlds.",
 		trimColor = Color('2ECC71'),
 	},
 	{
-		id       = "haber",
-		name     = "Haber Corporation (Zekonbur — Fort Gaillard)",
-		faction  = "Haber Corporation",
-		location = SystemPath.New(4, -9, -17, 0, 28), -- Fort Gaillard, Zekonbur
-		desc     = "ALLEGIANCE: Haber Corporation (Zekonbur System — Fort Gaillard)\nA heavily industrialized corporate conglomerate governed by a board of directors. Corporate space prioritizes mineral extraction, heavy freight logistics, and private security enforcement.",
-		logPrefix = "Cleared from Fort Gaillard Corporate Port (Zekonbur) under Haber Corporation charter.",
+		id        = "haber",
+		name      = "Haber Corporation (Zekonbur — Gaillard Orbital Platform | ~20 ly)",
+		faction   = "Haber Corporation",
+		location  = SystemPath.New(4, -9, -17, 0, 29), -- Gaillard Orbital Platform, Zekonbur
+		desc      = "STARTING FACTION: Haber Corporation (Zekonbur System — Gaillard Orbital Platform | ~20 ly from Sol)\nA heavily industrialized corporate conglomerate governed by a board of directors. Corporate orbital platforms prioritize mineral processing, heavy manufacturing, and private corporate security enforcement.",
+		logPrefix = "Cleared from Gaillard Orbital Platform (Zekonbur) under Haber Corporation charter.",
 		trimColor = Color('E67E22'),
 	},
 	{
-		id       = "independent",
-		name     = "Independent Frontier (Barnard's Star — Orbital)",
-		faction  = "Independent",
-		location = SystemPath.New(-1, 0, 0, 0, 16), -- System Administration Resting, Barnard's Star
-		desc     = "ALLEGIANCE: Independent Frontier (Barnard's Star — System Admin. Resting)\nAn orbital frontier staging post surrounded by resource-rich asteroid bodies and nearby interstellar jump routes. Suited for independent operators, prospectors, and deep-space couriers.",
-		logPrefix = "Departing System Administration Resting orbital station (Barnard's Star) as an independent operator.",
+		id        = "independent",
+		name      = "Independent Frontier (Barnard's Star — Orbital | ~6 ly)",
+		faction   = "Independent",
+		location  = SystemPath.New(-1, 0, 0, 0, 16), -- System Administration Resting, Barnard's Star
+		desc      = "STARTING FACTION: Independent Frontier (Barnard's Star — System Admin. Resting | ~6 ly from Sol)\nAn autonomous orbital frontier station surrounded by resource-rich asteroid bodies and close jump corridors to Sol. Suited for freelance couriers, prospectors, and independent operators outside superpower bureaucracy.",
+		logPrefix = "Departing System Administration Resting orbital station (Barnard's Star) as an independent commander.",
 		trimColor = Color('D4AC0D'),
+	},
+	{
+		id        = "rim_commonwealth",
+		name      = "Rim Commonwealth (Orthethio — van der Linden Orbital | ~37 ly)",
+		faction   = "Rim Commonwealth",
+		location  = SystemPath.New(-2, -26, -26, 0, 32), -- van der Linden Orbital, Orthethio
+		desc      = "STARTING FACTION: Rim Commonwealth (Orthethio System — van der Linden Orbital | ~37 ly from Sol)\nA thriving Rim territory confederation with extensive orbital commerce and frontier trade networks. Distant from Core politics, Orthethio features bustling commodity depots, orbital staging platforms, and active Alliance Security.",
+		logPrefix = "Commissioned at van der Linden Orbital (Orthethio) in Rim Commonwealth space.",
+		trimColor = Color('8E44AD'),
+	},
+	{
+		id        = "druello_pirates",
+		name      = "Druello Pirates (Anvisium — Karlsen Orbital Haven | ~61 ly)",
+		faction   = "Druello Pirates",
+		location  = SystemPath.New(-57, 9, -21, 2, 28), -- Karlsen Orbital Haven, Anvisium
+		desc      = "STARTING FACTION: Druello Pirates (Anvisium System — Karlsen Orbital Haven | ~61 ly from Sol)\nA lawless deep-space pirate enclave established by Captain Oren Druello, a defector SolFed naval commander. Far outside the reach of Core authorities, this orbital haven offers illicit black market trade, untaxed equipment outfitting, and lucrative privateering contracts for outlaws and mercenaries.",
+		logPrefix = "Departing Karlsen Orbital Haven (Anvisium) under the Druello Pirate black flag.",
+		trimColor = Color('C0392B'),
+	},
+	{
+		id        = "free_systems",
+		name      = "Free Systems (Torashay — Orbital Gateway | ~81 ly)",
+		faction   = "Free Systems",
+		location  = SystemPath.New(-18, -56, -56, 0, 32), -- Torashay Orbital Gateway, Torashay
+		desc      = "STARTING FACTION: Free Systems (Torashay System — Torashay Orbital Gateway | ~81 ly from Sol)\nA fiercely sovereign league of frontier systems located over 80 light years from Sol. Known for raw ore extraction, rugged orbital staging platforms, and open borders with the deep unexplored expanse.",
+		logPrefix = "Cleared from Torashay Orbital Gateway (Torashay) on the outer Free Systems frontier.",
+		trimColor = Color('16A085'),
+	},
+	{
+		id        = "obsidian_worlds",
+		name      = "Obsidian Worlds (Hagildrorn — Meyer Anchorage | ~86 ly)",
+		faction   = "Obsidian Worlds",
+		location  = SystemPath.New(-60, -44, -44, 0, 13), -- Meyer Anchorage, Hagildrorn
+		desc      = "STARTING FACTION: Obsidian Worlds (Hagildrorn System — Meyer Anchorage | ~86 ly from Sol)\nA remote, heavily fortified sector perched on the edge of charted space ~86 light years from Sol. Known for stark extraction facilities, autonomous defense syndicates, and high bounties on perimeter threats.",
+		logPrefix = "Departing Meyer Anchorage (Hagildrorn) in the deep Obsidian Worlds rim.",
+		trimColor = Color('5D6D7E'),
 	},
 }
 
@@ -70,7 +106,7 @@ local CAREER_ROLES = {
 		name     = "Trader / Hauler (Sinonatrix)",
 		shipType = "sinonatrix",
 		money    = 1000,
-		desc     = "CAREER BUILDOUT: Commercial Trader & Hauler\nOutfitted with a medium OPLI Sinonatrix freighter/courier (32t total cargo capacity with auxiliary rack), Class 2 Hyperdrive, Trade Computer, Autopilot, and Class 2 Shielding, plus 1,000 Cr working capital for immediate commodity trading.",
+		desc     = "CAREER BUILDOUT: Commercial Trader & Merchant Hauler\nOutfitted with a medium OPLI Sinonatrix freighter (32t total cargo capacity with auxiliary rack), Class 2 Hyperdrive, Class 2 Shielding, 1MW Pulse Cannon, Autopilot, Trade Computer, and Atmospheric Shielding S2, plus 1,000 Cr working capital for immediate commodity trading.",
 		logRole  = "Vessel outfitted for commercial freight and interstellar commodity trade.",
 		equipment = {
 			computer       = "misc.autopilot",
@@ -92,7 +128,7 @@ local CAREER_ROLES = {
 		name     = "Miner / Prospector (Coronatrix)",
 		shipType = "coronatrix",
 		money    = 600,
-		desc     = "CAREER BUILDOUT: Asteroid Miner & Prospector\nEquipped with an OPLI Coronatrix hull mounting a heavy 5MW Mining Cannon, Cargo Scoop for ore recovery, Fuel Scoop, Trade Computer, Autopilot, and a Class 2 Hyperdrive.",
+		desc     = "CAREER BUILDOUT: Asteroid Miner & Prospector\nEquipped with an agile OPLI Coronatrix hull mounting a heavy 5MW Mining Cannon, Cargo Scoop for ore recovery, Fuel Scoop for deep-field refueling, Class 2 Hyperdrive, Trade Computer, Autopilot, and an Auxiliary Cargo Rack in the internal storage compartment (24t total cargo space).",
 		logRole  = "Vessel configured for asteroid extraction and mineral prospecting.",
 		equipment = {
 			[1]            = "misc.cargo_scoop",
@@ -105,6 +141,7 @@ local CAREER_ROLES = {
 			hull_1         = "hull.atmospheric_shielding_s1",
 			hyperdrive     = "hyperspace.hyperdrive_2",
 			thruster       = "thruster.default_s1",
+			cabin_s1_1     = "misc.cabin_hold_s1",
 		},
 		cargo   = {},
 		pattern = 2,
@@ -112,22 +149,23 @@ local CAREER_ROLES = {
 	},
 	{
 		id       = "explorer",
-		name     = "Explorer / Pathfinder (Coronatrix)",
-		shipType = "coronatrix",
+		name     = "Explorer / Pathfinder (Skipjack)",
+		shipType = "skipjack",
 		money    = 600,
-		desc     = "CAREER BUILDOUT: Deep-Space Explorer & Survey Vessel\nEquipped with a long-range Class 2 Hyperdrive, Fuel Scoop for stellar refueling, Orbital & Surface Planet Scanners for survey contracts, Autopilot Mk 2 (Supercruise Assist), and defensive pulse laser.",
-		logRole  = "Vessel equipped with orbital/surface survey scanners, Supercruise Assist, and fuel scoop for deep-space exploration.",
+		desc     = "CAREER BUILDOUT: Deep-Space Explorer & Survey Vessel\nOutfitted with a sleek Kaluri Skipjack long-range exploration ship featuring a pressurized Passenger Cabin (living quarters) in the internal storage compartment, long-range Class 2 Hyperdrive, Fuel Scoop for stellar refueling, Orbital & Surface Planet Scanners for survey contracts, Autopilot Mk 2 (Supercruise Assist), and Class 2 Shielding.",
+		logRole  = "Vessel equipped with orbital/surface survey scanners, Supercruise Assist, fuel scoop, and living quarters for deep-space exploration.",
 		equipment = {
-			computer_1     = "misc.autopilot_mk2",
-			laser_front_s2 = "laser.pulsecannon_1mw",
-			shield_s1_1    = "shield.basic_s1",
-			utility_s1_1   = "misc.orbitscanner",
-			utility_s1_2   = "misc.planetscanner",
-			fuel_scoop_s1  = "misc.fuel_scoop_s1",
-			sensor         = "sensor.radar",
-			hull_1         = "hull.atmospheric_shielding_s1",
-			hyperdrive     = "hyperspace.hyperdrive_2",
-			thruster       = "thruster.default_s1",
+			computer           = "misc.autopilot_mk2",
+			weapon_s2_1        = "laser.pulsecannon_1mw",
+			shield_s2          = "shield.basic_s2",
+			utility_s1_1       = "misc.orbitscanner",
+			utility_s1_2       = "misc.planetscanner",
+			fuel_scoop_s1_left = "misc.fuel_scoop_s1",
+			sensor             = "sensor.radar",
+			hull_1             = "hull.atmospheric_shielding_s2",
+			hyperdrive         = "hyperspace.hyperdrive_2",
+			thruster           = "thruster.default_s3",
+			cabin_s1_1         = "misc.cabin_s1",
 		},
 		cargo   = {},
 		pattern = 1,
@@ -135,26 +173,26 @@ local CAREER_ROLES = {
 	},
 	{
 		id       = "mercenary",
-		name     = "Mercenary / Escort (Coronatrix)",
-		shipType = "coronatrix",
+		name     = "Mercenary / Escort (Wave)",
+		shipType = "wave",
 		money    = 500,
-		desc     = "CAREER BUILDOUT: Tactical Mercenary & Combat Escort\nCombat-ready OPLI Coronatrix armed with a 2MW Pulse Cannon, Laser Cooling Booster, dual S1 Shield Generators, Target Scanner, Basic ECM, internal missile bays, and a Class 2 Hyperdrive.",
-		logRole  = "Vessel armed and shielded for security escort, patrol, and bounty operations.",
+		desc     = "CAREER BUILDOUT: Tactical Mercenary & Combat Escort\nCombat-heavy Auronox Wave medium fighter armed with a heavy 2MW center Pulse Cannon, dual 1MW wing Pulse Cannons, dual S2 Shield Generators, Laser Cooling Booster, Target Scanner, Basic ECM, FSD Interdictor, Autopilot, and Class 2 Hyperdrive.",
+		logRole  = "Vessel armed and shielded for combat escort, bounty hunting, and interdiction operations.",
 		equipment = {
 			[1]            = "misc.laser_cooling_booster",
 			computer_1     = "misc.autopilot",
 			computer_2     = "misc.fsd_interdictor_1",
 			laser_front_s2 = "laser.pulsecannon_2mw",
-			shield_s1_1    = "shield.basic_s1",
-			shield_s1_2    = "shield.basic_s1",
+			weapon_left_s1 = "laser.pulsecannon_1mw",
+			weapon_right_s1= "laser.pulsecannon_1mw",
+			shield_s2_1    = "shield.basic_s2",
+			shield_s2_2    = "shield.basic_s2",
 			utility_s1_1   = "misc.target_scanner",
 			utility_s1_2   = "misc.ecm_basic",
 			sensor         = "sensor.radar",
-			hull_1         = "hull.atmospheric_shielding_s1",
+			hull_1         = "hull.atmospheric_shielding_s2",
 			hyperdrive     = "hyperspace.hyperdrive_2",
-			thruster       = "thruster.default_s1",
-			missile_bay_1  = "missile_bay.opli_internal_s2",
-			missile_bay_2  = "missile_bay.opli_internal_s2",
+			thruster       = "thruster.default_s2",
 		},
 		cargo   = {},
 		pattern = 1,
@@ -174,6 +212,7 @@ local function composeStartVariant(allegianceIdx, roleIdx)
 		name      = allegiance.name .. " — " .. role.name,
 		desc      = allegiance.desc .. "\n\n" .. role.desc,
 		location  = allegiance.location,
+		faction   = allegiance.faction,
 		logmsg    = allegiance.logPrefix .. " " .. role.logRole,
 		shipType  = role.shipType,
 		money     = role.money,
@@ -430,7 +469,7 @@ NewGameWindow = ModalWindow.New("New Game", function()
 		if NewGameWindow.mode == 'RECOVER' then
 			ui.text(lui.RECOVER_SAVEGAME)
 		else
-			local comboWidth = math.floor(Defs.winSize.x * 0.34)
+			local comboWidth = math.floor(Defs.winSize.x * 0.38)
 			ui.text((lui.ALLEGIANCE or "Allegiance") .. ":")
 			ui.sameLine()
 			ui.nextItemWidth(comboWidth)

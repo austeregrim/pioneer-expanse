@@ -186,7 +186,8 @@ function NavLocusLottery.BuySingleTicket(customLocus)
 	end
 
 	PlayerState.AddMoney(-cost)
-	local rand = Rand.New(math.floor((Game.time or os.time()) + #playerTickets * 17))
+	local randSeed = math.floor((Game.time or 12345) + #playerTickets * 17)
+	local rand = Rand.New(randSeed)
 	local locus = customLocus or generateRandomLocus(rand)
 
 	local ticket = {
@@ -210,7 +211,7 @@ function NavLocusLottery.BuyBatchTickets(count)
 	end
 
 	PlayerState.AddMoney(-cost)
-	local seed = math.floor((Game.time or os.time()) + #playerTickets * 31)
+	local seed = math.floor((Game.time or 54321) + #playerTickets * 31)
 
 	-- Pre-sample 60 points for instantaneous 3D star-cloud visualization
 	local samplePoints = {}

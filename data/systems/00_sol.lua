@@ -170,7 +170,7 @@ local mars_starports = {
 		:seed(3046926584)
 		:latitude(math.deg2rad(25.60955))
 		:longitude(math.deg2rad(-41.35269)),
-	CustomSystemBody:new('Mars High', 'STARPORT_ORBITAL')
+	CustomSystemBody:new('Mars High Orbit', 'STARPORT_ORBITAL')
 		:semi_major_axis(f(5068,100000000))
 		:rotation_period(f(11,24)),
 }

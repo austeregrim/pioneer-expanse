@@ -19,6 +19,10 @@ NameGen = {
 	rockPlanetFormats = {},
 
 	orbitalStarportFormats = {},
+	researchOrbitalFormats = {},
+	agriculturalOrbitalFormats = {},
+	industrialOrbitalFormats = {},
+	gasGiantOrbitalFormats = {},
 	surfaceStarportFormats = {},
 	asteroidStarportFormats = {},
 
@@ -171,7 +175,25 @@ NameGen = {
 
 		local name = NameGen.Surname(rand, ascii)
 		if body.type == "STARPORT_ORBITAL" then
-			return string.interp(r(NameGen.orbitalStarportFormats, rand), { name = name, number = number })
+			local formats = NameGen.orbitalStarportFormats
+			local p = body.parent
+			if p then
+				-- Tier 2 Economic Archetype Coupling based on host planetary context:
+				-- 1. Agricultural / Hydroponic Stations (food, grain, aquaponics)
+				if (p.agricultural and p.agricultural > 0.35) or (p.life and p.life > 0.4) then
+					formats = NameGen.agriculturalOrbitalFormats
+				-- 2. Industrial / Smelting / Extraction / Mining Platforms (ores, metals, rings)
+				elseif (p.hasRings and p.ringType == 1) or (p.metallicity and p.metallicity > 0.55) or p.type == "PLANET_ASTEROID" then
+					formats = NameGen.industrialOrbitalFormats
+				-- 3. Gas Giant Harvesting / Atmospheric Siphon / Fuel Depots
+				elseif p.type == "PLANET_GAS_GIANT" then
+					formats = NameGen.gasGiantOrbitalFormats
+				-- 4. High-Tech Science, Research & Laboratories
+				elseif rand:Number() < 0.22 then
+					formats = NameGen.researchOrbitalFormats
+				end
+			end
+			return string.interp(r(formats, rand), { name = name, number = number })
 		end
 
 		if body.type == "STARPORT_SURFACE" then
@@ -222,42 +244,63 @@ NameGen.rockPlanetFormats = {
 }
 
 NameGen.orbitalStarportFormats = {
-	"{name}{number}",
-	"{name}{number}",
-	"{name}{number}",
-	"{name}{number}",
-	"{name} Spaceport",
-	"{name} High",
-	"{name} Orbiter",
-	"{name} Base",
+	"{name} High Orbit",
+	"{name} Orbital",
+	"{name} Platform",
+	"{name} Gateway",
+	"{name} Array",
 	"{name} Station",
 	"{name} Outpost",
 	"{name} Citadel",
-	"{name} Platform",
 	"{name} Ring",
-	"{name} Residence",
-	"{name} Orbital",
-	"{name} Habitat",
 	"{name} Hub",
 	"{name} Terminal",
 	"{name} Trade Center",
 	"{name} Commercial Center",
-	"{name} Science Station",
-	"{name} Observation Post",
-	"{name} Facility",
-	"{name} Industrial Center",
-	"{name} Refinery",
 	"{name} Dock",
 	"{name} Depot",
 	"{name} Anchorage",
-	"{name} Junction",
-	"{name} Connection",
-	"{name} Academy",
-	"{name} University",
 	"{name} Waystation",
-	"{name} Laboratory",
 	"{name} Station{number}",
-	"{name} Citadel",
+}
+
+NameGen.researchOrbitalFormats = {
+	"{name} Laboratories",
+	"{name} Research Complex",
+	"{name} Observatory",
+	"{name} Science Station",
+	"{name} Science Array",
+	"{name} Bio-Labs",
+	"{name} Development Center",
+	"{name} Research Platform",
+}
+
+NameGen.agriculturalOrbitalFormats = {
+	"{name} Hydroponics Ring",
+	"{name} Agri-Hub",
+	"{name} Biosphere",
+	"{name} Orbital Farm",
+	"{name} Aquaponics Platform",
+	"{name} Cultivation Ring",
+	"{name} Habitat Ring",
+}
+
+NameGen.industrialOrbitalFormats = {
+	"{name} Smelting Platform",
+	"{name} Ore Terminal",
+	"{name} Extraction Complex",
+	"{name} Refinery",
+	"{name} Foundry",
+	"{name} Industrial Center",
+	"{name} Processing Station",
+}
+
+NameGen.gasGiantOrbitalFormats = {
+	"{name} Fuel Depot",
+	"{name} Atmospheric Siphon",
+	"{name} Gas Processing Platform",
+	"{name} Energy Station",
+	"{name} Refinery",
 }
 
 NameGen.surfaceStarportFormats = {

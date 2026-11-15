@@ -737,6 +737,7 @@ end
 local function showGameOptions()
 	local enableAutoSave = Engine.GetAutosaveEnabled()
 	local resetViewOnHyperspaceExit = Engine.GetResetViewOnHyperspaceExit()
+	local enableHeadtracking = Engine.GetHeadtrackingEnabled()
 	local c
 
 	c,enableAutoSave = checkbox(lui.ENABLE_AUTOSAVE, enableAutoSave, lui.ENABLE_AUTOSAVE_DESC)
@@ -747,6 +748,11 @@ local function showGameOptions()
 	c,resetViewOnHyperspaceExit = checkbox(lui.RESET_VIEW_ON_HYPERSPACE_EXIT, resetViewOnHyperspaceExit, lui.RESET_VIEW_ON_HYPERSPACE_EXIT_DESC)
 	if c then
 		Engine.SetResetViewOnHyperspaceExit(resetViewOnHyperspaceExit)
+	end
+
+	c,enableHeadtracking = checkbox("Enable Head Tracking (OpenTrack UDP)", enableHeadtracking, "Listen for UDP head tracking telemetry packets on port 4242.")
+	if c then
+		Engine.SetHeadtrackingEnabled(enableHeadtracking)
 	end
 end
 

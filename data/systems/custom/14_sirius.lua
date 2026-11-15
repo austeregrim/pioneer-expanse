@@ -225,7 +225,7 @@ local siriusaXbb3_starports = {
 	CustomSystemBody:new("Shawish", 'STARPORT_SURFACE')
 		:latitude(math.deg2rad(0))
 		:longitude(math.deg2rad(0)),
-	CustomSystemBody:new("Dojama High", 'STARPORT_ORBITAL')
+	CustomSystemBody:new("Dojama High Orbit", 'STARPORT_ORBITAL')
 		:seed(575259125)
 		:temp(122)
 		:semi_major_axis(f(160,1000000))

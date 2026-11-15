@@ -591,7 +591,14 @@ function ShipEquip:draw()
 			ui.tableNextRow()
 			ui.tableNextColumn()
 
-			if v.errorString then ui.raw.PushStyleColor("Text", ui.theme.colors.alertRed) end
+			local isErr = v.errorString ~= nil
+			local isEmpty = v.itemID == nil
+
+			if isErr then
+				ui.raw.PushStyleColor("Text", ui.theme.colors.alertRed)
+			elseif isEmpty then
+				ui.raw.PushStyleColor("Text", ui.theme.colors.textMuted or Color(130, 140, 150))
+			end
 
 			local indent = Defs.gap.x * 2
 			local depth = #v.path - 1
@@ -599,7 +606,13 @@ function ShipEquip:draw()
 			if depth > 0 then
 				ui.addCursorPos(Vector2(depth * indent, 0))
 			end
-			if (ui.selectable(v.itemName .. "##" .. tostring(i), i == selectedRow , { "SpanAllColumns" })) then
+
+			local displayItemName = v.itemName
+			if isEmpty then
+				displayItemName = "<" .. (leq.EMPTY_SLOT or "Empty") .. ">"
+			end
+
+			if (ui.selectable(displayItemName .. "##" .. tostring(i), i == selectedRow , { "SpanAllColumns" })) then
 				selectedRow = i
 			end
 
@@ -622,7 +635,7 @@ function ShipEquip:draw()
 			-- add some spaces, because imgui does not do external padding unless you draw borders
 			ui.text(safeFormat(v.mass, function(x) return ui.Format.Mass(x * 1000, 0) end) .. "  ")
 
-			if v.errorString then ui.raw.PopStyleColor(1) end
+			if isErr or isEmpty then ui.raw.PopStyleColor(1) end
 		end
 		ui.endTable()
 	end)
@@ -706,11 +719,11 @@ function ShipEquip:viewDataForItem(itemID, path)
 		errorString = leq.REQUIRED_SLOT_IS_EMPTY
 	end
 
-	if not errorString and not itemID then
+	if not errorString and not itemID and (not slot or not slot.object) and not isPathSlotless(path) then
 		errorString = leq.EMPTY_EQUIPMENT_PROVIDING_SLOTS
 	end
 
-	if not errorString and not self:canPutItemOnSlot(itemID, path) and not isEquipmentSlotless(itemID) and not isPathSlotless(path) then
+	if not errorString and itemID and not self:canPutItemOnSlot(itemID, path) and not isEquipmentSlotless(itemID) and not isPathSlotless(path) then
 		errorString = leq.EQUIPMENT_DOES_NOT_FIT_INTO_THE_SLOT
 	end
 
@@ -1036,9 +1049,7 @@ function ShipEquip:update()
 
 		local sorted = {}
 		for id, node in pairs(slots) do
-			if node.object and node.object.required or node.installed then
-				table.insert(sorted, id)
-			end
+			table.insert(sorted, id)
 		end
 		table.sort(sorted, slotLess)
 
@@ -1822,15 +1833,47 @@ end
 -- prepare a table for output and at the same time check the parameters
 function ShipSummary:prepareAndValidateParamList()
 	local def = ShipDef[ShipType.value]
-	local freeCargo = def.cargo
+	local baseCargo = def.cargo or 0
+	local cargoRackBonus = 0
+	local extraCabins = 0
+
+	for _, item in ipairs(ShipEquip.viewData) do
+		if item.itemID then
+			local obj = Equipment.Get(item.itemID)
+			if obj and obj.capabilities then
+				if obj.capabilities.cargo then
+					cargoRackBonus = cargoRackBonus + obj.capabilities.cargo
+				end
+				if obj.capabilities.cabin then
+					extraCabins = extraCabins + obj.capabilities.cabin
+				end
+			end
+		end
+	end
+
+	local totalCargo = baseCargo + cargoRackBonus
+	local totalBerths = (def.maxCrew or 1) + extraCabins
+
 	self.cargo.valid = true
 	self.equip.valid = true
 	local eq_n_cargo = { valid = true }
-	freeCargo = math.max(freeCargo, 0)
+
+	local cargoStr = string.format("%d t", totalCargo)
+	if cargoRackBonus > 0 then
+		cargoStr = string.format("%d t (Base: %d + Racks: %d)", totalCargo, baseCargo, cargoRackBonus)
+	end
+
+	local crewStr = string.format("%d (Commander)", totalBerths)
+	if extraCabins > 0 then
+		crewStr = string.format("%d Berths (1 + %d Quarters)", totalBerths, extraCabins)
+	elseif totalBerths > 1 then
+		crewStr = string.format("%d Berths", totalBerths)
+	end
+
 	local paramList = {
 		rowWithAlert(self.equip, lui.EQUIPMENT, ShipEquip.volume, def.equipCapacity, greater, lc.UNIT_CUBIC_METERS, "%.1f"),
-		rowWithAlert(self.cargo, lui.CARGO_SPACE, ShipCargo.mass, freeCargo, greater, 't'),
-		rowWithAlert(self.equip, lui.CREW_CABINS, #Crew.value + 1, def.maxCrew, greater),
+		{ lui.CARGO_SPACE .. ":", cargoStr, color = nil },
+		{ (lui.CREW_CABINS or "Living Space") .. ":", crewStr, color = nil },
 	}
 	self.cargo.valid = self.cargo.valid and eq_n_cargo.valid
 	self.equip.valid = self.equip.valid and eq_n_cargo.valid
@@ -1893,9 +1936,8 @@ function ShipSummary:draw()
 		local p1 = ui.getCursorPos()
 		textTable.drawTable(2, { self.layout.width - self.valueWidth, self.valueWidth }, {
 		{ lui.ALL_UP_WEIGHT..":", string.format("%d t", mass_with_fuel ) },
-		{ lui.HYPERSPACE_RANGE..":", string.format("%.1f / %.1f " .. lui.LY, hyper_range, range_max) },
+		{ lui.HYPERSPACE_RANGE..":", string.format("%.1f " .. lui.LY, range_max) },
 		{ lui.DELTA_V..":",      string.format("%s %s", ui.Format.SpeedUnit(delta_v)) },
-		{ lui.REFUEL .. " " .. lui.DELTA_V..":", string.format("%s %s", ui.Format.SpeedUnit(p_delta_v)) },
 		{ lui.FORWARD_ACCEL..":",  string.format("%.1f / %.1f g", fwd_acc / 9.81, fwd_cap / 9.81) },
 		{ lui.UP_ACCEL..":",       string.format("%.1f / %.1f g", up_acc / 9.81, up_cap / 9.81) },
 		})
@@ -1917,8 +1959,6 @@ local function draw()
 		ShipFuel:draw()
 		ui.text("")
 		ShipSummary:draw()
-		ui.text("")
-		ShipCargo:draw()
 
 	end)
 

@@ -8,6 +8,33 @@ set(CMAKE_CXX_STANDARD 17)
 # Dynamically determine version from git tags if available
 find_package(Git QUIET)
 if (GIT_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
+	# Determine git directory (handles normal git repo or worktrees)
+	execute_process(
+		COMMAND ${GIT_EXECUTABLE} rev-parse --git-dir
+		WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+		OUTPUT_VARIABLE GIT_DIR
+		OUTPUT_STRIP_TRAILING_WHITESPACE
+	)
+	if (NOT IS_ABSOLUTE "${GIT_DIR}")
+		set(GIT_DIR "${PROJECT_SOURCE_DIR}/${GIT_DIR}")
+	endif()
+
+	# Track git HEAD and active ref so CMake automatically reconfigures on git commits
+	set(GIT_CONFIG_DEPS "${GIT_DIR}/HEAD")
+	if (EXISTS "${GIT_DIR}/HEAD")
+		file(READ "${GIT_DIR}/HEAD" GIT_HEAD_CONTENT)
+		if (GIT_HEAD_CONTENT MATCHES "ref: (.*)")
+			string(STRIP "${CMAKE_MATCH_1}" GIT_REF)
+			if (EXISTS "${GIT_DIR}/${GIT_REF}")
+				list(APPEND GIT_CONFIG_DEPS "${GIT_DIR}/${GIT_REF}")
+			endif()
+		endif()
+	endif()
+	if (EXISTS "${GIT_DIR}/packed-refs")
+		list(APPEND GIT_CONFIG_DEPS "${GIT_DIR}/packed-refs")
+	endif()
+	set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${GIT_CONFIG_DEPS})
+
 	execute_process(
 		COMMAND ${GIT_EXECUTABLE} describe --tags --always --match "v*"
 		WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
@@ -146,9 +173,18 @@ if (GIT_FOUND AND EXISTS ${PROJECT_SOURCE_DIR}/.git)
 	)
 endif()
 
+set(PIONEER_EXTRAVERSION_VAL "")
 if(DEFINED PROJECT_VERSION_GIT)
-	string(JOIN " " PROJECT_VERSION_INFO ${PROJECT_VERSION_GIT} ${PROJECT_VERSION_INFO})
+	set(PIONEER_EXTRAVERSION_VAL "${PROJECT_VERSION_GIT}")
 endif()
+if(PROJECT_VERSION_INFO)
+	if(PIONEER_EXTRAVERSION_VAL)
+		string(JOIN " " PIONEER_EXTRAVERSION_VAL ${PIONEER_EXTRAVERSION_VAL} ${PROJECT_VERSION_INFO})
+	else()
+		set(PIONEER_EXTRAVERSION_VAL "${PROJECT_VERSION_INFO}")
+	endif()
+endif()
+set(PROJECT_VERSION_INFO "${PIONEER_EXTRAVERSION_VAL}")
 
 if (MINGW)
 	# Enable PRIxYY macros on MinGW
