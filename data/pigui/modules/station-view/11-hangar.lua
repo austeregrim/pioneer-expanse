@@ -17,7 +17,7 @@ local pionillium = ui.fonts.pionillium
 local orbiteer = ui.fonts.orbiteer
 local Vector2 = _G.Vector2
 
-local childFlags = ui.ChildFlags { 'Borders' }
+local childFlags = ui.ChildFlags { 'AlwaysUseWindowPadding', 'Borders' }
 local spacing = ui.rescaleUI(Vector2(10, 8), Vector2(1920, 1080))
 local listWidth = ui.rescaleUI(460, Vector2(1920, 1080))
 
@@ -41,6 +41,12 @@ local function drawFlagshipBanner(station)
 	ui.child("##HangarFlagshipHeader", Vector2(-1, ui.rescaleUI(68, Vector2(1920, 1080))), nil, childFlags, function()
 		ui.withFont(orbiteer.heading, function()
 			ui.textColored(colors.uiPrimaryLight, string.format("ACTIVE FLAGSHIP: %s [%s]", def and def.name or player.shipId, player.label or ""))
+			if statusMsg then
+				ui.sameLine(0, ui.rescaleUI(24, Vector2(1920, 1080)))
+				ui.withFont(pionillium.body, function()
+					ui.textColored(colors.econProfit, "• " .. statusMsg)
+				end)
+			end
 		end)
 		ui.withFont(pionillium.body, function()
 			ui.text(string.format("Docked at: %s   |   Hull: %.0f%%   |   Fuel: %.0f%%   |   Cargo: %dt / %dt   |   Crew: %d / %d",
@@ -56,8 +62,8 @@ local function drawFlagshipBanner(station)
 	end)
 end
 
-local function drawFleetShipList(ships, station)
-	ui.child("##HangarShipList", Vector2(listWidth, -1), nil, childFlags, function()
+local function drawFleetShipList(ships, station, customListWidth)
+	ui.child("##HangarShipList", Vector2(customListWidth or listWidth, -1), nil, childFlags, function()
 		ui.withFont(orbiteer.heading, function()
 			ui.textColored(colors.uiPrimaryLight, string.format("OWNED FLEET (%d SHIPS)", #ships))
 		end)
@@ -397,14 +403,11 @@ local function drawHangarView()
 
 	ui.withFont(pionillium.body, function()
 		drawFlagshipBanner(station)
-
-		if statusMsg then
-			ui.textColored(colors.econProfit, statusMsg)
-		end
-
 		ui.spacing()
+		local region = ui.getContentRegion()
+		local listW = math.floor(region.x * 0.45)
 		local selectedEntry = selectedUid and PlayerFleet.GetShipByUid(selectedUid) or nil
-		drawFleetShipList(ships, station)
+		drawFleetShipList(ships, station, listW)
 		ui.sameLine(0, spacing.x)
 		drawFleetShipDetail(selectedEntry, station)
 	end)
@@ -414,6 +417,7 @@ StationView:registerView({
 	id = "hangarView",
 	name = "Hangar & Fleet",
 	icon = icons.heavy_cargo_shuttle or icons.ship,
+	securityMode = "encryption",
 	showView = true,
 	draw = drawHangarView,
 	refresh = function()

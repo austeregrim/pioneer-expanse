@@ -1,4 +1,47 @@
 ================================================================================
+Pioneer: Expanse v2026.11.11-expanse (November 2026)
+================================================================================
+Station & Personal UI Polish, Semantic Security Links, Taxation & Stability:
+  * Station View Organization & Market UI Polish:
+    - Reordered starport tabs for streamlined flow: Lobby, Police (2nd), Insurance &
+      SAR (3rd), Universal Cartographics (4th), Bulletin Board, InterCast News,
+      Commodity Market, Ship Market, Equipment, Repairs, Hangar, Stock Exchange, Lottery.
+    - Standardized 45% / 55% panel split ratios, borders, and typography across Commodity
+      Market, Ship Market, Bulletin Board, and InterCast News.
+    - Simplified Commodity Market buying and selling interaction; condensed table font
+      sizes and optimized column widths.
+    - Aligned and evenly distributed purchase buttons, increment/decrement controls,
+      and investment sliders across ISX Stock Exchange and Nav-Locus Lottery.
+    - Nav-Locus Lottery: removed artificial 60-locus visualization limit to render all
+      owned tickets; corrected 3D celestial coordinates to represent actual floating
+      orbital ring vectors; fixed transient notification text layout shift on ticket purchase.
+  * Personal Screen (InfoView) Navigation & Rebranding:
+    - Reordered InfoView tabs to prioritize pilot data: Commander (1st), Missions (2nd),
+      Ship Information (3rd), Flight Log (4th), Fleet Command (5th), Crew Roster (6th),
+      and Fuel and Weight (7th).
+    - Renamed "Personal Information" tab to "Commander".
+    - Renamed "Economy and Trade" tab to "Fuel and Weight", keeping hyperdrive manual fuel
+      transfer and propellant telemetry readily accessible.
+  * Contextual Security & Verification Architecture:
+    - Personal Screen: Enforced signature verification animations across all shipboard
+      terminals ("SHIP SYSTEM PUBKEY VERIFIED" // "LOCAL NODE") to reflect an internal
+      shipboard network rather than an external encrypted link.
+    - Starport Comms: Implemented semantic authentication modes:
+      • Public Information (Lobby, News): Verified via "STATION PUBKEY VERIFIED" ECDSA-521.
+      • Private Comms & Transaction Responses (Police, BBS, Insurance, Cartographics):
+        Secured with quantum encryption ("SECURE ENCRYPTED CHANNEL ESTABLISHED") and cipher
+        text decryption animations.
+      • Commercial Markets (Commodities, Ships, Equipment, Repairs, Stocks, Lottery):
+        Protected with 4096-bit AES-GCM / Post-Quantum Kyber-1024 encryption banners.
+  * Civil Administration & Taxation:
+    - Added Interstellar Revenue Service & Civil Administration system in Starport Lobby
+      with citizenship residency registration, faction privileges, and jurisdiction tax assessments.
+  * Macro Galaxy Simulation & Stability Fixes:
+    - Fixed fatal new-game Lua crash in MacroGalaxyEngine:seedEmergentCrisis caused by
+      printf formatting errors on text containing percentage signs (e.g. 25% import tariffs).
+    - Relocated Escape/Pause Menu Quit button to the lower-right corner with danger styling.
+
+================================================================================
 Pioneer: Expanse v2026.11.5-expanse (November 2026)
 ================================================================================
 Volumetric Planetary Rings, Ring Mining, Active FSD Interdictions & SAR Overhaul:
@@ -35,10 +78,10 @@ Volumetric Planetary Rings, Ring Mining, Active FSD Interdictions & SAR Overhaul
     - Added Station Hangar & Fleet Bay tab (`13-hangar.lua`) for vessel inspection,
       renaming, flagship swapping, repairs, refueling, cargo transfers, selling, and
       remote ferry recalls.
-    - Added Captain/crew recruitment and transfers (`05-crew.lua`) with skill XP
-      progression, InfoView Fleet Command (`07-fleet.lua`) for autonomous Standing
+    - Added Captain/crew recruitment and transfers (`06-crew.lua`) with skill XP
+      progression, InfoView Fleet Command (`05-fleet.lua`) for autonomous Standing
       Orders (Escort, Dock, Auto-Trade, Auto-Mine, Patrol), and Fleet Mission
-      Delegation (`04-missions.lua`) with dual In-System and Out-of-System simulation.
+      Delegation (`02-missions.lua`) with dual In-System and Out-of-System simulation.
   * Master Roadmap Expansion (Plans A-H):
     - Reorganized standalone pillar plans into lettered plans A-H, adding Plan A
       (Multi-Ship Ownership, Station Hangars, Crewed Fleet & X4-Style Autonomy)

@@ -380,7 +380,7 @@ local function drawScreen()
 	local leftWidth = region.x * 0.45
 
 	-- Left Column: BBS/News matching 45% filter bar & log list
-	ui.child("FlightLogListLeft", Vector2(leftWidth, 0), function()
+	ui.child("FlightLogListLeft", Vector2(leftWidth, 0), nil, commsChildFlags, function()
 		renderFilterBar()
 		ui.spacing()
 		logTable.style.size = Vector2(ui.getContentRegion().x, 0)

@@ -26,12 +26,14 @@ local l = Lang.GetResource("ui-core")
 local ls = Lang.GetResource("ships")
 local Vector2 = _G.Vector2
 
+local commsChildFlags = ui.ChildFlags { 'AlwaysUseWindowPadding', 'Borders' }
+
 local vZero = Vector2(0,0)
 local widgetSizes = ui.rescaleUI({
-	iconSize = Vector2(52, 52),
+	iconSize = Vector2(34, 34),
 	buyButton = Vector2(88, 32),
 	confirmButtonSize = Vector2(320, 40),
-	itemSpacing = Vector2(14, 4),
+	itemSpacing = Vector2(10, 4),
 }, Vector2(1920, 1080))
 widgetSizes.iconSpacer = (widgetSizes.buyButton - widgetSizes.iconSize)/2
 
@@ -120,7 +122,7 @@ local function refreshModelSpinner()
 end
 
 local function refreshShipMarket()
-	widgetSizes.rowVerticalSpacing = Vector2(0, (widgetSizes.iconSize.y + widgetSizes.itemSpacing.y - pionillium.large.size)/2)
+	widgetSizes.rowVerticalSpacing = Vector2(0, math.max(0, (widgetSizes.iconSize.y + widgetSizes.itemSpacing.y - pionillium.body.size)/2))
 
 	local station = Game.player:GetDockedWith()
 	if station then
@@ -443,7 +445,7 @@ end
 local tradeMenu = function()
 	if(selectedItem) then
 		ui.withStyleVars({ ItemSpacing = shipMarket.style.itemSpacing}, function()
-			ui.child("TradeMenu", Vector2(0,0), function()
+			ui.child("TradeMenu", Vector2(0,0), nil, commsChildFlags, function()
 				local colHeadingWidth = ui.getContentRegion().x - widgetSizes.buyButton.x
 				local def = selectedItem.def
 
@@ -478,9 +480,10 @@ local tradeMenu = function()
 				ui.columns(1, "")
 
 				ui.withFont(pionillium.body, function()
-					shipStoredAndBought = ui.button("Buy & Store Current (" .. Format.Money(cost, false) .. ")", Vector2(0, 0))
-					ui.sameLine()
-					shipBoughtToHangar = ui.button("Buy into Hangar (" .. Format.Money(cost, false) .. ")", Vector2(0, 0))
+					local actBtnW = math.floor((ui.getContentRegion().x - 8) / 2)
+					shipStoredAndBought = ui.button("Buy & Store Current (" .. Format.Money(cost, false) .. ")", Vector2(actBtnW, 32))
+					ui.sameLine(nil, 8)
+					shipBoughtToHangar = ui.button("Buy into Hangar (" .. Format.Money(cost, false) .. ")", Vector2(actBtnW, 32))
 				end)
 
 				if shipBought then
@@ -540,17 +543,24 @@ local tradeMenu = function()
 end
 
 shipMarket = Table.New("shipMarketWidget", false, {
+	borders = true,
 	columnCount = 4,
 	initTable = function(self)
-		local iconColumnWidth = widgetSizes.iconSize.x + widgetSizes.itemSpacing.x
-		local columnWidth = (self.style.size.x - iconColumnWidth) / (self.columnCount-1)
-		ui.setColumnWidth(0, widgetSizes.iconSize.x + widgetSizes.itemSpacing.x)
-		ui.setColumnWidth(1, columnWidth)
-		ui.setColumnWidth(2, columnWidth)
-		ui.setColumnWidth(3, columnWidth)
+		local scrollPad = 16
+		local availableW = self.style.size.x - scrollPad
+		local col0W = widgetSizes.iconSize.x + widgetSizes.itemSpacing.x
+		local remainingW = availableW - col0W - 1
+		local col1W = math.floor(remainingW * 0.40)
+		local col2W = math.floor(remainingW * 0.35)
+		local col3W = remainingW - col1W - col2W
+		ui.setColumnWidth(0, col0W)
+		ui.setColumnWidth(1, col1W)
+		ui.setColumnWidth(2, col2W)
+		ui.setColumnWidth(3, col3W)
+		ui.setColumnWidth(4, 1)
 	end,
 	renderHeaderRow = function(_)
-		ui.withFont(orbiteer.heading, function()
+		ui.withFont(pionillium.body, function()
 			ui.text('')
 			ui.nextColumn()
 			ui.text(l.SHIP)
@@ -604,9 +614,14 @@ StationView:registerView({
 	id = "shipMarketView",
 	name = l.SHIP_MARKET,
 	icon = ui.theme.icons.ship,
+	securityMode = "encryption",
 	showView = true,
 	draw = function()
-		ui.withFont(pionillium.heading, function()
+		local region = ui.getContentRegion()
+		local leftWidth = math.floor(region.x * 0.45)
+		shipMarket.style.size = Vector2(leftWidth, region.y)
+
+		ui.withFont(pionillium.body, function()
 			shipMarket:render()
 		end)
 

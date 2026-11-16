@@ -328,6 +328,14 @@ local function formatCurrentDate()
 	return string.format("%04d-%02d-%02d", year, month, day)
 end
 
+local function formatSystemText(template, sysName)
+	if not template then return "" end
+	if string.find(template, "%%s") then
+		return (template:gsub("%%s", function() return tostring(sysName) end))
+	end
+	return template
+end
+
 local function seedEmergentCrisis(preferredSystem)
 	local usedSystems = {}
 	for _, c in ipairs(activeCrises) do
@@ -366,9 +374,9 @@ local function seedEmergentCrisis(preferredSystem)
 		severity = 1,
 		progress = 0.0,
 		progressRate = rand:Number(6.0, 14.0), -- 6% to 14% per day
-		headline = string.format(stage1.headline, string.upper(targetSys)),
-		summary = string.format(stage1.summary, targetSys),
-		body = string.format(stage1.body, targetSys),
+		headline = formatSystemText(stage1.headline, string.upper(targetSys)),
+		summary = formatSystemText(stage1.summary, targetSys),
+		body = formatSystemText(stage1.body, targetSys),
 		urgent = stage1.urgent or false,
 		daysActive = 0,
 	}
@@ -426,9 +434,9 @@ function MacroGalaxyEngine.AdvanceMacroTick(deltaDays)
 				crisis.severity = expectedStage
 				local nextStage = def.stages[crisis.severity]
 				if nextStage then
-					crisis.headline = string.format(nextStage.headline, string.upper(crisis.system))
-					crisis.summary = string.format(nextStage.summary, crisis.system)
-					crisis.body = string.format(nextStage.body, crisis.system)
+					crisis.headline = formatSystemText(nextStage.headline, string.upper(crisis.system))
+					crisis.summary = formatSystemText(nextStage.summary, crisis.system)
+					crisis.body = formatSystemText(nextStage.body, crisis.system)
 					crisis.urgent = nextStage.urgent or false
 
 					-- Emit InterCast update bulletin

@@ -14,6 +14,7 @@ local Format = require "Format"
 local Character = require "Character"
 local Commodities = require 'Commodities'
 local PlayerState = require 'PlayerState'
+local EncryptedText = require 'pigui.libs.encrypted-text'
 local l = Lang.GetResource("ui-core")
 
 local ModalWindow = require 'pigui.libs.modal-win'
@@ -22,8 +23,10 @@ local rescaleVector = ui.rescaleUI(Vector2(1, 1), Vector2(1920, 1080), true)
 
 local pionillium = ui.fonts.pionillium
 local orbiteer = ui.fonts.orbiteer
+local commsChildFlags = ui.ChildFlags { 'AlwaysUseWindowPadding', 'Borders' }
 local face = nil
 local stationSeed = false
+local commsText = EncryptedText.New("", 0.50)
 
 local crimeTableID = "##CrimeTable"
 
@@ -232,6 +235,7 @@ local policeTabs = {
 }
 
 local function drawPolice()
+	local now = ui.getTime()
 	local intro_txt = string.interp(l.THIS_IS_FACTION_POLICE,
 		{ faction_police = Game.system.faction.policeName, faction = Game.system.faction.name})
 
@@ -240,16 +244,20 @@ local function drawPolice()
 		local infoColumnWidth = ui.getContentRegion().x
 			- widgetSizes.faceSize.x - padding.x * 2
 
-		ui.child("CrimeStats", Vector2(infoColumnWidth, 0), function()
+		ui.child("CrimeStats", Vector2(infoColumnWidth, 0), nil, commsChildFlags, function()
+			commsText:renderCommsHeader(now, "POLICE-SEC // 4096-BIT")
 			ui.withFont(pionillium.heading, function ()
-				ui.text(intro_txt)
+				ui.textWrapped(commsText:get(now))
 			end)
+			ui.spacing()
 
 			ui.tabBarFont("tabs", policeTabs, pionillium.heading)
 		end)
 
 		ui.sameLine(0, padding.x * 2)
-		if(face ~= nil) then face:render() end
+		ui.child("PoliceContactPane", Vector2(0, 0), nil, commsChildFlags, function()
+			if(face ~= nil) then face:render() end
+		end)
 	end)
 end
 
@@ -257,6 +265,7 @@ view = StationView:registerView({
 	id = "police",
 	name = l.POLICE,
 	icon = ui.theme.icons.police_tab_normal,
+	securityMode = "encryption",
 	showView = true,
 	draw = drawPolice,
 	refresh = function(self)
@@ -270,6 +279,9 @@ view = StationView:registerView({
 			end
 		end
 
+		local intro_txt = string.interp(l.THIS_IS_FACTION_POLICE,
+			{ faction_police = Game.system.faction.policeName, faction = Game.system.faction.name})
+		commsText:reset(intro_txt)
 		refreshStatusIcon()
 	end,
 	debugReload = function()

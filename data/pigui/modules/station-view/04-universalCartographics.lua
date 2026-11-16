@@ -9,6 +9,7 @@ local Lang = require 'Lang'
 local Format = require 'Format'
 local Character = require 'Character'
 local PiGuiFace = require 'pigui.libs.face'
+local EncryptedText = require 'pigui.libs.encrypted-text'
 local Cartography = require 'modules.Cartography.Cartography'
 require 'modules.Cartography.Missions'
 
@@ -19,13 +20,14 @@ local icons = ui.theme.icons
 local pionillium = ui.fonts.pionillium
 local orbiteer = ui.fonts.orbiteer
 
-local DECRYPT_DURATION = 0.30
-local CIPHER_GLYPHS = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F", "#", "@", "%", "&", "*" }
+local commsChildFlags = ui.ChildFlags { 'AlwaysUseWindowPadding', 'Borders' }
 
 local face = nil
 local stationSeed = false
-local animStartTime = 0
 local lastSaleBanner = nil
+
+local INTRO_TEXT = "Universal Cartographics encrypted telemetry uplink established. All stellar discoveries, orbital surveys, and detailed surface surveys from uncharted systems are eligible for immediate credit payout."
+local commsText = EncryptedText.New(INTRO_TEXT, 0.50)
 
 local widgetSizes = ui.rescaleUI({
 	itemSpacing = Vector2(4, 7),
@@ -36,89 +38,25 @@ local widgetSizes = ui.rescaleUI({
 	barHeight = Vector2(0, 2),
 }, Vector2(1920, 1080))
 
-local function splitUtf8Chars(str)
-	local chars = {}
-	for ch in string.gmatch(str, "[\0-\127\194-\244][\128-\191]*") do
-		chars[#chars + 1] = ch
-	end
-	return chars
-end
-
-local INTRO_TEXT = "Universal Cartographics encrypted telemetry uplink established. All stellar discoveries, orbital surveys, and detailed surface surveys from uncharted systems are eligible for immediate credit payout."
-local INTRO_CHARS = splitUtf8Chars(INTRO_TEXT)
-
-local function getDecryptedText(now)
-	local progress = math.clamp((now - animStartTime) / DECRYPT_DURATION, 0, 1)
-	if progress >= 1 then
-		return INTRO_TEXT, 1
-	end
-
-	local tick = math.floor(now * 55)
-	local buf = {}
-	local total = #INTRO_CHARS
-	for i = 1, total do
-		local ch = INTRO_CHARS[i]
-		if ch == "\n" or ch == " " or ch == "\t" then
-			buf[i] = ch
-		else
-			local threshold = (i / total) * 0.72 + ((i * 37) % 13) / 50
-			if progress >= threshold then
-				buf[i] = ch
-			else
-				buf[i] = CIPHER_GLYPHS[((i * 7 + tick) % #CIPHER_GLYPHS) + 1]
-			end
-		end
-	end
-	return table.concat(buf), progress
-end
-
-local function renderCommsHeader(decryptProgress)
-	local statusLabel = l.COMMS_CHANNEL_OPEN or "ENCRYPTED CHANNEL VERIFIED"
-	local statusColor = colors.econMajorImport or colors.font
-
-	if decryptProgress < 1 then
-		statusLabel = l.COMMS_DECRYPTING or "DECRYPTING SIGNATURE..."
-		statusColor = colors.maneuver or colors.font
-	end
-
-	ui.withFont(pionillium.details, function()
-		local lineH = ui.getTextLineHeight()
-		ui.icon(icons.comms, Vector2(lineH), statusColor)
-		ui.sameLine()
-		ui.textColored(statusColor, statusLabel)
-		ui.sameLine()
-		local protoText = l.COMMS_PROTOCOL or "UC-SIG // AES-512"
-		local avail = ui.getContentRegion().x
-		local protoW = ui.calcTextSize(protoText).x
-		if avail > protoW then
-			ui.addCursorPos(Vector2(avail - protoW, 0))
-		end
-		ui.textColored(colors.fontDim, protoText)
-	end)
-
-	local barStart = ui.getCursorScreenPos()
-	local barWidth = ui.getContentRegion().x
-	local barHeight = math.max(2, widgetSizes.barHeight.y)
-	ui.addRectFilled(barStart, barStart + Vector2(barWidth, barHeight), colors.tableBackground, 0, ui.RoundCornersNone)
-	if barWidth > 0 then
-		ui.addRectFilled(barStart, barStart + Vector2(barWidth * decryptProgress, barHeight), statusColor, 0, ui.RoundCornersNone)
-	end
-	ui.dummy(Vector2(0, barHeight + 6))
-end
-
 local function drawUniversalCartographics()
 	local now = ui.getTime()
-	local displayIntro, decryptProgress = getDecryptedText(now)
+	local displayIntro = commsText:get(now)
 
 	ui.withStyleVars({ ItemSpacing = widgetSizes.itemSpacing }, function()
 		local padding = ui.getWindowPadding()
 		local infoColumnWidth = ui.getContentRegion().x - widgetSizes.faceSize.x - padding.x * 2
 
-		ui.child("CartographyPanel", Vector2(infoColumnWidth, 0), function()
-			renderCommsHeader(decryptProgress)
+		ui.child("CartographyPanel", Vector2(infoColumnWidth, 0), nil, commsChildFlags, function()
+			commsText:renderCommsHeader(now, "UC-SIG // AES-512")
 
 			ui.withFont(orbiteer.heading, function()
 				ui.text("UNIVERSAL CARTOGRAPHICS")
+				if lastSaleBanner then
+					ui.sameLine(0, 18)
+					ui.withFont(pionillium.body, function()
+						ui.textColored(colors.econMajorImport or colors.uiPrimaryLight, "• " .. lastSaleBanner)
+					end)
+				end
 			end)
 			ui.spacing()
 
@@ -144,11 +82,6 @@ local function drawUniversalCartographics()
 			ui.spacing()
 			ui.separator()
 			ui.spacing()
-
-			if lastSaleBanner then
-				ui.textColored(colors.econMajorImport or colors.uiPrimaryLight, lastSaleBanner)
-				ui.spacing()
-			end
 
 			-- Top Action Bar: Total Unsold + Eligible + Sell All
 			ui.withFont(orbiteer.medium, function()
@@ -294,7 +227,9 @@ local function drawUniversalCartographics()
 		end)
 
 		ui.sameLine(0, padding.x * 2)
-		if face ~= nil then face:render() end
+		ui.child("CartographyContactPane", Vector2(0, 0), nil, commsChildFlags, function()
+			if face ~= nil then face:render() end
+		end)
 	end)
 end
 
@@ -302,10 +237,11 @@ StationView:registerView({
 	id = "universalCartographics",
 	name = "Universal Cartographics",
 	icon = icons.galaxy_map,
+	securityMode = "encryption",
 	showView = true,
 	draw = drawUniversalCartographics,
 	refresh = function(self)
-		animStartTime = ui.getTime()
+		commsText:reset()
 		lastSaleBanner = nil
 		local station = Game.player:GetDockedWith()
 		if station then

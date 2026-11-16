@@ -39,6 +39,8 @@ local widgetSizes = ui.rescaleUI({
 widgetSizes.itemSpacing = Vector2(math.ceil(widgetSizes.itemSpacing.x), math.ceil(widgetSizes.itemSpacing.y))
 widgetSizes.buttonLaunchSize = Vector2(widgetSizes.buttonSizeBase.x*5, widgetSizes.buttonSizeBase.y)
 
+local commsChildFlags = ui.ChildFlags { 'AlwaysUseWindowPadding', 'Borders' }
+
 local face = nil
 local stationSeed = false
 local shipDef
@@ -98,11 +100,6 @@ local function drawCivilAdministrationSection(station)
 	ui.spacing()
 	ui.separator()
 	ui.spacing()
-
-	if taxStatusBanner then
-		ui.textColored(taxBannerColor, taxStatusBanner)
-		ui.spacing()
-	end
 
 	-- Header
 	ui.withFont(orbiteer.medlarge, function()
@@ -280,6 +277,12 @@ local function drawCivilAdministrationSection(station)
 	end)
 
 	ui.columns(1, "LobbyCivilTaxEnd", false)
+
+	-- Status feedback displayed at bottom so administrative headers/columns never shift
+	if taxStatusBanner then
+		ui.spacing()
+		ui.textColored(taxBannerColor, taxStatusBanner)
+	end
 end
 
 local function drawPlayerInfo()
@@ -324,7 +327,7 @@ local function drawPlayerInfo()
 			ui.child("Wrapper", Vector2(0, 0), function()
 				-- face display has 1:1 aspect ratio, and we need size for a launch button underneath
 				local infoColumnWidth = -math.min(ui.getContentRegion().y - buttonSizeSpacing, widgetSizes.faceSize.x) - widgetSizes.itemSpacing.x
-				ui.child("StationCivilInfo", Vector2(infoColumnWidth, 0), function()
+				ui.child("StationCivilInfo", Vector2(infoColumnWidth, 0), nil, commsChildFlags, function()
 					ui.spacing()  -- Extra padding for umlaut and other signs on top of the station label.
 					textTable.withHeading(station.label, orbiteer.title, {
 						{ tech_certified, "" },
@@ -338,8 +341,33 @@ local function drawPlayerInfo()
 
 				ui.sameLine()
 
-				ui.group(function()
+				ui.child("StationLobbyContact", Vector2(0, 0), nil, commsChildFlags, function()
 					if(face ~= nil) then face:render() end
+
+					local now = ui.getTime()
+					ui.spacing()
+					ui.separator()
+					ui.spacing()
+					ui.withFont(pionillium.details, function()
+						local lineH = ui.getTextLineHeight()
+						ui.icon(icons.comms, Vector2(lineH), colors.uiPrimaryLight)
+						ui.sameLine()
+						ui.textColored(colors.uiPrimaryLight, "PORT-OPS // TRAFFIC-CTRL")
+						ui.sameLine()
+						local rightText = "STARPORT FLIGHT OPERATIONS // TELEMETRY LINK"
+						local avail = ui.getContentRegion().x
+						local rw = ui.calcTextSize(rightText).x
+						if avail > rw then
+							ui.addCursorPos(Vector2(avail - rw, 0))
+						end
+						ui.textColored(colors.fontDim, rightText)
+					end)
+					ui.separator()
+					ui.spacing()
+					ui.withFont(pionillium.body, function()
+						ui.textWrapped("Starport Flight Operations telemetry link verified. Docking bay clearance and orbital traffic monitoring standing by. Request departure clearance when pre-flight checks are complete.")
+					end)
+					ui.spacing()
 
 					ui.withFont(orbiteer.title, function()
 						local size = Vector2(ui.getContentRegion().x, widgetSizes.buttonLaunchSize.y)
@@ -366,6 +394,7 @@ StationView:registerView({
 	id = "lobby",
 	name = l.LOBBY,
 	icon = ui.theme.icons.info,
+	securityMode = "signature",
 	showView = true,
 	draw = drawPlayerInfo,
 	refresh = function()

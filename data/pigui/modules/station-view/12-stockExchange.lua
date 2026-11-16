@@ -21,7 +21,7 @@ local selectedTimeframe = "30D" -- "7D", "14D", "30D", "ALL"
 local chartMode = "AREA"        -- "AREA" or "CANDLES"
 local statusMessage = nil
 local statusTime = 0
-local childFlags = ui.ChildFlags { 'Borders' }
+local childFlags = ui.ChildFlags { 'AlwaysUseWindowPadding', 'Borders' }
 
 local function formatCr(val)
 	val = math.floor(val)
@@ -275,25 +275,23 @@ local function drawStockExchange()
 			{ id = "LOCAL", label = "LOCAL SYSTEM ENTERPRISES" },
 			{ id = "PORTFOLIO", label = "MY PORTFOLIO & HOLDINGS" },
 		}
-		for _, t in ipairs(tabs) do
+		local totalTabW = ui.getContentRegion().x
+		local tabSp = 8
+		local tabW = math.floor((totalTabW - (#tabs - 1) * tabSp) / #tabs)
+		for i, t in ipairs(tabs) do
 			local isSel = (currentTab == t.id)
 			local tabStyle = isSel and { Button = colors.uiPrimary or colors.white, Text = colors.black } or {}
 			ui.withStyleColors(tabStyle, function()
-				if ui.button(t.label .. "##Tab", Vector2(230, 32)) then
+				if ui.button(t.label .. "##Tab", Vector2(tabW, 32)) then
 					currentTab = t.id
 				end
 			end)
-			ui.sameLine(nil, 8)
+			if i < #tabs then ui.sameLine(nil, tabSp) end
 		end
 		ui.newLine()
 	end)
 
 	ui.spacing()
-
-	if statusMessage and (ui.getTime() - statusTime < 6.0) then
-		ui.textColored(colors.alertYellow, statusMessage)
-		ui.spacing()
-	end
 
 	-- Tab 1: Galactic Megacorporations (Super High Value & Fractional Shares)
 	if currentTab == "MEGACORPS" then
@@ -430,34 +428,50 @@ local function drawStockExchange()
 				ui.textColored(Color(65, 235, 255, 255), "CREDIT-BASED FRACTIONAL INVESTING DESK:")
 				ui.textColored(colors.fontDim, "Invest any credit amount to purchase exact fractional micro-shares of this megacorp:")
 
-				-- Credit Amount Presets
+				local panelW = ui.getContentRegion().x
+
+				-- Credit Amount Presets (Distributed evenly across panel)
 				local creditPresets = { 20, 50, 100, 250, 500, 1000, 5000, 25000 }
-				for _, cp in ipairs(creditPresets) do
+				local numPresets = #creditPresets
+				local preSp = 6
+				local preW = math.floor((panelW - (numPresets - 1) * preSp) / numPresets)
+				for i, cp in ipairs(creditPresets) do
 					local isSel = (math.abs(investCreditAmount - cp) < 0.5)
 					local bStyle = isSel and { Button = colors.uiPrimaryLight, Text = colors.black } or {}
 					ui.withStyleColors(bStyle, function()
-						if ui.button(formatCr(cp) .. " Cr##CValBtn", Vector2(72, 26)) then
+						if ui.button(formatCr(cp) .. " Cr##CValBtn", Vector2(preW, 26)) then
 							investCreditAmount = cp
 						end
 					end)
-					ui.sameLine(nil, 6)
+					if i < numPresets then ui.sameLine(nil, preSp) end
 				end
 				ui.newLine()
 
-				-- Slider & Fine Adjustment Nudge Buttons
-				ui.nextItemWidth(200)
+				-- Slider & Fine Adjustment Nudge Buttons (Decreases on Left, Slider in Middle, Increases on Right)
+				local nudgeSp = 6
+				local decBtnW = math.max(48, math.floor(panelW * 0.08))
+				local incBtnW1 = math.max(48, math.floor(panelW * 0.08))
+				local incBtnW2 = math.max(48, math.floor(panelW * 0.08))
+				local incBtnW3 = math.max(56, math.floor(panelW * 0.09))
+				local fixedBtnsW = decBtnW * 2 + incBtnW1 + incBtnW2 + incBtnW3 + 5 * nudgeSp
+				local sliderW = math.max(160, panelW - fixedBtnsW)
+
+				if ui.button("-50##N50", Vector2(decBtnW, 24)) then investCreditAmount = math.max(5.0, investCreditAmount - 50.0) end
+				ui.sameLine(nil, nudgeSp)
+				if ui.button("-10##N10", Vector2(decBtnW, 24)) then investCreditAmount = math.max(5.0, investCreditAmount - 10.0) end
+				ui.sameLine(nil, nudgeSp)
+
+				ui.nextItemWidth(sliderW)
 				local newAmt, amtChanged = ui.sliderFloat("##InvestCreditsSlider", investCreditAmount, 5.0, 50000.0, "%.0f Cr")
 				if amtChanged then investCreditAmount = math.floor(newAmt * 100) / 100 end
-				ui.sameLine(nil, 6)
-				if ui.button("-50##N50", Vector2(36, 22)) then investCreditAmount = math.max(5.0, investCreditAmount - 50.0) end
-				ui.sameLine(nil, 4)
-				if ui.button("-10##N10", Vector2(34, 22)) then investCreditAmount = math.max(5.0, investCreditAmount - 10.0) end
-				ui.sameLine(nil, 4)
-				if ui.button("+10##N10P", Vector2(34, 22)) then investCreditAmount = investCreditAmount + 10.0 end
-				ui.sameLine(nil, 4)
-				if ui.button("+50##N50P", Vector2(36, 22)) then investCreditAmount = investCreditAmount + 50.0 end
-				ui.sameLine(nil, 4)
-				if ui.button("+500##N500P", Vector2(44, 22)) then investCreditAmount = investCreditAmount + 500.0 end
+				ui.sameLine(nil, nudgeSp)
+
+				if ui.button("+10##N10P", Vector2(incBtnW1, 24)) then investCreditAmount = investCreditAmount + 10.0 end
+				ui.sameLine(nil, nudgeSp)
+				if ui.button("+50##N50P", Vector2(incBtnW2, 24)) then investCreditAmount = investCreditAmount + 50.0 end
+				ui.sameLine(nil, nudgeSp)
+				if ui.button("+500##N500P", Vector2(incBtnW3, 24)) then investCreditAmount = investCreditAmount + 500.0 end
+				ui.newLine()
 
 				ui.spacing()
 
@@ -477,11 +491,6 @@ local function drawStockExchange()
 
 				local buyLabel = string.format("BUY %s OF %s (%s SHARES)##BuyCreditBtn",
 					formatMoney(investCreditAmount), corp.ticker, shareCalcStr)
-				if ui.button(buyLabel, Vector2(math.min(rightW - 24, 380), 34)) then
-					local ok, msg = StockExchange.BuySharesByCredits(corp, investCreditAmount)
-					statusMessage = msg
-					statusTime = ui.getTime()
-				end
 
 				if h and h.shares > 0 then
 					local positionVal = h.shares * corp.price
@@ -489,31 +498,51 @@ local function drawStockExchange()
 					local sellShares = math.min(h.shares, sellCredit / corp.price)
 					local sellShareStr = (sellShares < 0.001) and string.format("%.6f", sellShares) or string.format("%.4f", sellShares)
 
+					local actionBtnW = math.floor((panelW - 12) / 2)
+					if ui.button(buyLabel, Vector2(actionBtnW, 36)) then
+						local ok, msg = StockExchange.BuySharesByCredits(corp, investCreditAmount)
+						statusMessage = msg
+						statusTime = ui.getTime()
+					end
 					ui.sameLine(nil, 12)
 					local sellLabel = string.format("LIQUIDATE %s (%s SHARES)##SellCreditBtn",
 						formatMoney(sellCredit), sellShareStr)
-					if ui.button(sellLabel, Vector2(math.min(rightW - 24, 380), 34)) then
+					if ui.button(sellLabel, Vector2(actionBtnW, 36)) then
 						local ok, msg = StockExchange.SellSharesByCredits(corp, sellCredit)
 						statusMessage = msg
 						statusTime = ui.getTime()
 					end
 
-					-- Quick percentage liquidation bar
+					-- Quick percentage liquidation bar (Distributed evenly across panel)
 					ui.spacing()
 					ui.textColored(colors.fontDim, "Quick Position Liquidation:")
-					ui.sameLine()
 					local pctButtons = { { 0.25, "25%" }, { 0.50, "50%" }, { 0.75, "75%" }, { 1.00, "100% (ALL)" } }
-					for _, pb in ipairs(pctButtons) do
+					local numPct = #pctButtons
+					local pctSp = 6
+					local pctW = math.floor((panelW - (numPct - 1) * pctSp) / numPct)
+					for i, pb in ipairs(pctButtons) do
 						local pFrac, pName = pb[1], pb[2]
-						if ui.button(pName .. "##SellPct", Vector2(75, 24)) then
+						if ui.button(pName .. "##SellPct", Vector2(pctW, 26)) then
 							local sellQty = h.shares * pFrac
 							local ok, msg = StockExchange.SellShares(corp, sellQty)
 							statusMessage = msg
 							statusTime = ui.getTime()
 						end
-						ui.sameLine(nil, 6)
+						if i < numPct then ui.sameLine(nil, pctSp) end
 					end
 					ui.newLine()
+				else
+					if ui.button(buyLabel, Vector2(panelW, 36)) then
+						local ok, msg = StockExchange.BuySharesByCredits(corp, investCreditAmount)
+						statusMessage = msg
+						statusTime = ui.getTime()
+					end
+				end
+
+				-- Order confirmation displayed under buttons so panels never shift
+				if statusMessage and (ui.getTime() - statusTime < 6.0) then
+					ui.spacing()
+					ui.textColored(colors.alertYellow, statusMessage)
 				end
 			end
 		end)
@@ -661,15 +690,20 @@ local function drawStockExchange()
 				ui.textColored(Color(255, 215, 60, 255), "WHOLE SHARE TRANSACTION DESK:")
 				ui.textColored(colors.fontDim, "Local system enterprise shares must be transacted in whole integer units (minimum 1 share):")
 
-				-- Whole Share Presets
+				local panelW = ui.getContentRegion().x
+
+				-- Whole Share Presets (Distributed evenly across panel)
 				local localPresets = { 1, 5, 10, 50, 100, 500 }
-				for _, sz in ipairs(localPresets) do
+				local numLPre = #localPresets
+				local lPreSp = 6
+				local lPreW = math.floor((panelW - (numLPre - 1) * lPreSp) / numLPre)
+				for i, sz in ipairs(localPresets) do
 					local isSel = (math.floor(tradeCount) == sz)
 					local bStyle = isSel and { Button = colors.uiPrimaryLight, Text = colors.black } or {}
 					ui.withStyleColors(bStyle, function()
-						if ui.button(tostring(sz) .. "##LocalBatch", Vector2(50, 26)) then tradeCount = sz end
+						if ui.button(tostring(sz) .. "##LocalBatch", Vector2(lPreW, 26)) then tradeCount = sz end
 					end)
-					ui.sameLine(nil, 6)
+					if i < numLPre then ui.sameLine(nil, lPreSp) end
 				end
 				ui.newLine()
 
@@ -679,19 +713,32 @@ local function drawStockExchange()
 				ui.text(string.format("Order: %d whole shares @ %s = %s", intTradeCount, formatMoney(selectedLocal.price), formatMoney(totalOrderCost)))
 				ui.spacing()
 
-				if ui.button(string.format("BUY %d SHARES##BuyLocalBtn", intTradeCount), Vector2(185, 34)) then
-					local ok, msg = StockExchange.BuyShares(selectedLocal, intTradeCount)
-					statusMessage = msg
-					statusTime = ui.getTime()
-				end
-				ui.sameLine(nil, 12)
 				if h and h.shares > 0 then
+					local btnW = math.floor((panelW - 12) / 2)
+					if ui.button(string.format("BUY %d SHARES##BuyLocalBtn", intTradeCount), Vector2(btnW, 36)) then
+						local ok, msg = StockExchange.BuyShares(selectedLocal, intTradeCount)
+						statusMessage = msg
+						statusTime = ui.getTime()
+					end
+					ui.sameLine(nil, 12)
 					local sellAmount = math.min(math.floor(h.shares), intTradeCount)
-					if ui.button(string.format("SELL %d SHARES##SellLocalBtn", sellAmount), Vector2(185, 34)) then
+					if ui.button(string.format("SELL %d SHARES##SellLocalBtn", sellAmount), Vector2(btnW, 36)) then
 						local ok, msg = StockExchange.SellShares(selectedLocal, sellAmount)
 						statusMessage = msg
 						statusTime = ui.getTime()
 					end
+				else
+					if ui.button(string.format("BUY %d SHARES##BuyLocalBtn", intTradeCount), Vector2(panelW, 36)) then
+						local ok, msg = StockExchange.BuyShares(selectedLocal, intTradeCount)
+						statusMessage = msg
+						statusTime = ui.getTime()
+					end
+				end
+
+				-- Order confirmation displayed under buttons so panels never shift
+				if statusMessage and (ui.getTime() - statusTime < 6.0) then
+					ui.spacing()
+					ui.textColored(colors.alertYellow, statusMessage)
 				end
 			end
 		end)
@@ -913,12 +960,17 @@ local function drawStockExchange()
 				ui.textColored(Color(255, 95, 95, 255), "LIQUIDATION & EXIT DESK:")
 				ui.textColored(colors.fontDim, "Execute sell order via GalNet clearinghouse (accessible across all civilized space):")
 
-				-- Quick percentage liquidation bar
+				local panelW = ui.getContentRegion().x
+
+				-- Quick percentage liquidation bar (Distributed evenly across panel)
 				local pctButtons = { { 0.25, "25%" }, { 0.50, "50%" }, { 0.75, "75%" }, { 1.00, "100% (ALL)" } }
-				for _, pb in ipairs(pctButtons) do
+				local numPct = #pctButtons
+				local pctSp = 6
+				local pctW = math.floor((panelW - (numPct - 1) * pctSp) / numPct)
+				for i, pb in ipairs(pctButtons) do
 					local pFrac, pName = pb[1], pb[2]
 					local estProceeds = curVal * pFrac
-					if ui.button(string.format("SELL %s (%s)##PortSellPct", pName, formatMoney(estProceeds)), Vector2(170, 28)) then
+					if ui.button(string.format("SELL %s (%s)##PortSellPct", pName, formatMoney(estProceeds)), Vector2(pctW, 28)) then
 						local sellQty
 						if selectedHolding.isMegacorp then
 							sellQty = selectedHolding.shares * pFrac
@@ -932,13 +984,15 @@ local function drawStockExchange()
 							statusTime = ui.getTime()
 						end
 					end
-					ui.sameLine(nil, 8)
+					if i < numPct then ui.sameLine(nil, pctSp) end
 				end
 				ui.newLine()
 
 				if selectedHolding.isMegacorp then
 					ui.spacing()
-					ui.nextItemWidth(200)
+					local sliderW = math.floor(panelW * 0.45)
+					local btnW = panelW - sliderW - 8
+					ui.nextItemWidth(sliderW)
 					local maxSellCred = curVal
 					local sellCreditAmt = math.min(investCreditAmount, maxSellCred)
 					local newAmt, amtChanged = ui.sliderFloat("##PortSellCreditsSlider", sellCreditAmt, 5.0, math.max(5.0, maxSellCred), "%.0f Cr")
@@ -947,7 +1001,7 @@ local function drawStockExchange()
 					ui.sameLine(nil, 8)
 					local sellShares = math.min(selectedHolding.shares, investCreditAmount / curPrice)
 					local sellShareStr = (sellShares < 0.001) and string.format("%.6f", sellShares) or string.format("%.3f", sellShares)
-					if ui.button(string.format("LIQUIDATE %s (%s SHARES)##PortSellCustom", formatMoney(investCreditAmount), sellShareStr), Vector2(300, 26)) then
+					if ui.button(string.format("LIQUIDATE %s (%s SHARES)##PortSellCustom", formatMoney(investCreditAmount), sellShareStr), Vector2(btnW, 26)) then
 						if stock then
 							local ok, msg = StockExchange.SellSharesByCredits(stock, investCreditAmount)
 							statusMessage = msg
@@ -957,19 +1011,27 @@ local function drawStockExchange()
 				else
 					ui.spacing()
 					local localSellBatches = { 1, 5, 10, 25, 50, 100 }
+					local activeBatches = {}
 					for _, sz in ipairs(localSellBatches) do
 						if sz <= math.floor(selectedHolding.shares) then
-							if ui.button(string.format("SELL %d##PortSellBatch", sz), Vector2(75, 24)) then
+							table.insert(activeBatches, sz)
+						end
+					end
+					if #activeBatches > 0 then
+						local bSp = 6
+						local bW = math.floor((panelW - (#activeBatches - 1) * bSp) / #activeBatches)
+						for i, sz in ipairs(activeBatches) do
+							if ui.button(string.format("SELL %d##PortSellBatch", sz), Vector2(bW, 26)) then
 								if stock then
 									local ok, msg = StockExchange.SellShares(stock, sz)
 									statusMessage = msg
 									statusTime = ui.getTime()
 								end
 							end
-							ui.sameLine(nil, 6)
+							if i < #activeBatches then ui.sameLine(nil, bSp) end
 						end
+						ui.newLine()
 					end
-					ui.newLine()
 				end
 
 				-- Purchasing Desk (Purchase More Shares)
@@ -979,27 +1041,52 @@ local function drawStockExchange()
 					if selectedHolding.isMegacorp then
 						ui.textColored(colors.fontDim, "Acquire additional fractional shares of this megaconglomerate:")
 						local creditPresets = { 20, 50, 100, 250, 500, 1000, 5000, 25000 }
-						for _, cp in ipairs(creditPresets) do
+						local numPresets = #creditPresets
+						local preSp = 6
+						local preW = math.floor((panelW - (numPresets - 1) * preSp) / numPresets)
+						for i, cp in ipairs(creditPresets) do
 							local isSel = (math.abs(investCreditAmount - cp) < 0.5)
 							local bStyle = isSel and { Button = colors.uiPrimaryLight, Text = colors.black } or {}
 							ui.withStyleColors(bStyle, function()
-								if ui.button(formatCr(cp) .. " Cr##PortBuyPre", Vector2(72, 26)) then
+								if ui.button(formatCr(cp) .. " Cr##PortBuyPre", Vector2(preW, 26)) then
 									investCreditAmount = cp
 								end
 							end)
-							ui.sameLine(nil, 6)
+							if i < numPresets then ui.sameLine(nil, preSp) end
 						end
 						ui.newLine()
 
-						ui.nextItemWidth(200)
+						-- Slider & Fine Adjustment Nudge Buttons (Decreases on Left, Slider in Middle, Increases on Right)
+						local nudgeSp = 6
+						local decBtnW = math.max(48, math.floor(panelW * 0.08))
+						local incBtnW1 = math.max(48, math.floor(panelW * 0.08))
+						local incBtnW2 = math.max(48, math.floor(panelW * 0.08))
+						local incBtnW3 = math.max(56, math.floor(panelW * 0.09))
+						local fixedBtnsW = decBtnW * 2 + incBtnW1 + incBtnW2 + incBtnW3 + 5 * nudgeSp
+						local sliderW = math.max(160, panelW - fixedBtnsW)
+
+						if ui.button("-50##PortN50", Vector2(decBtnW, 24)) then investCreditAmount = math.max(5.0, investCreditAmount - 50.0) end
+						ui.sameLine(nil, nudgeSp)
+						if ui.button("-10##PortN10", Vector2(decBtnW, 24)) then investCreditAmount = math.max(5.0, investCreditAmount - 10.0) end
+						ui.sameLine(nil, nudgeSp)
+
+						ui.nextItemWidth(sliderW)
 						local newAmt, amtChanged = ui.sliderFloat("##PortBuyCreditsSlider", investCreditAmount, 5.0, 50000.0, "%.0f Cr")
 						if amtChanged then investCreditAmount = math.floor(newAmt * 100) / 100 end
-						ui.sameLine(nil, 8)
+						ui.sameLine(nil, nudgeSp)
 
+						if ui.button("+10##PortN10P", Vector2(incBtnW1, 24)) then investCreditAmount = investCreditAmount + 10.0 end
+						ui.sameLine(nil, nudgeSp)
+						if ui.button("+50##PortN50P", Vector2(incBtnW2, 24)) then investCreditAmount = investCreditAmount + 50.0 end
+						ui.sameLine(nil, nudgeSp)
+						if ui.button("+500##PortN500P", Vector2(incBtnW3, 24)) then investCreditAmount = investCreditAmount + 500.0 end
+						ui.newLine()
+
+						ui.spacing()
 						local calcShares = investCreditAmount / curPrice
 						local shareCalcStr = (calcShares < 0.001) and string.format("%.6f", calcShares) or string.format("%.3f", calcShares)
 						local buyLabel = string.format("BUY %s (%s SHARES)##PortBuyCreditBtn", formatMoney(investCreditAmount), shareCalcStr)
-						if ui.button(buyLabel, Vector2(320, 28)) then
+						if ui.button(buyLabel, Vector2(panelW, 34)) then
 							if stock then
 								local ok, msg = StockExchange.BuySharesByCredits(stock, investCreditAmount)
 								statusMessage = msg
@@ -1010,13 +1097,16 @@ local function drawStockExchange()
 						-- Local Enterprise in current system
 						ui.textColored(colors.fontDim, "Acquire additional whole shares in local municipal enterprise:")
 						local localBuyBatches = { 1, 5, 10, 50, 100, 500 }
-						for _, sz in ipairs(localBuyBatches) do
+						local numLBuy = #localBuyBatches
+						local lBuySp = 6
+						local lBuyW = math.floor((panelW - (numLBuy - 1) * lBuySp) / numLBuy)
+						for i, sz in ipairs(localBuyBatches) do
 							local isSel = (math.floor(tradeCount) == sz)
 							local bStyle = isSel and { Button = colors.uiPrimaryLight, Text = colors.black } or {}
 							ui.withStyleColors(bStyle, function()
-								if ui.button(tostring(sz) .. "##PortLocalBatch", Vector2(50, 26)) then tradeCount = sz end
+								if ui.button(tostring(sz) .. "##PortLocalBatch", Vector2(lBuyW, 26)) then tradeCount = sz end
 							end)
-							ui.sameLine(nil, 6)
+							if i < numLBuy then ui.sameLine(nil, lBuySp) end
 						end
 						ui.newLine()
 
@@ -1025,7 +1115,7 @@ local function drawStockExchange()
 						ui.text(string.format("Order: %d whole shares @ %s = %s", intTradeCount, formatMoney(curPrice), formatMoney(totalOrderCost)))
 						ui.spacing()
 
-						if ui.button(string.format("BUY %d SHARES##PortBuyLocalBtn", intTradeCount), Vector2(220, 32)) then
+						if ui.button(string.format("BUY %d SHARES##PortBuyLocalBtn", intTradeCount), Vector2(panelW, 34)) then
 							if stock then
 								local ok, msg = StockExchange.BuyShares(stock, intTradeCount)
 								statusMessage = msg
@@ -1041,6 +1131,12 @@ local function drawStockExchange()
 						"This enterprise is registered and chartered within the %s star system. Under interstellar securities regulations, buying additional shares requires physical docking within %s. Remote liquidation orders are cleared across GalNet from any star system.",
 						originSys, originSys))
 				end
+
+				-- Order confirmation displayed under buttons so panels never shift
+				if statusMessage and (ui.getTime() - statusTime < 6.0) then
+					ui.spacing()
+					ui.textColored(colors.alertYellow, statusMessage)
+				end
 			end)
 		end
 	end
@@ -1050,6 +1146,7 @@ StationView:registerView({
 	id = "stockExchange",
 	name = "ISX Stock Exchange",
 	icon = icons.money or icons.bbs,
+	securityMode = "encryption",
 	showView = true,
 	draw = drawStockExchange,
 	refresh = function(self) end,

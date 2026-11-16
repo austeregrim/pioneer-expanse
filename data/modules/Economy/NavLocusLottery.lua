@@ -213,10 +213,13 @@ function NavLocusLottery.BuyBatchTickets(count)
 	PlayerState.AddMoney(-cost)
 	local seed = math.floor((Game.time or 54321) + #playerTickets * 31)
 
-	-- Pre-sample 60 points for instantaneous 3D star-cloud visualization
+	-- Pre-sample points for instantaneous 3D star-cloud visualization.
+	-- Batches of 100 or 1,000 render 100% of loci. Mega-batches (10k-100k) sample 1,500 points
+	-- to ensure butter-smooth 60+ FPS in Lua while displaying a dense, vibrant volumetric star cloud.
+	local sampleLimit = math.min(1500, count)
 	local samplePoints = {}
 	local sampleRand = Rand.New(seed)
-	for i = 1, math.min(60, count) do
+	for i = 1, sampleLimit do
 		table.insert(samplePoints, generateRandomLocus(sampleRand))
 	end
 
@@ -238,6 +241,7 @@ end
 -- Returns all active coordinates owned by player for 3D visualization
 function NavLocusLottery.GetAllActivePoints()
 	local points = {}
+	local maxDisplayPoints = 2500 -- Global visual limit across all tickets to maintain 60+ FPS
 	for _, t in ipairs(playerTickets) do
 		if t.type == "SINGLE" and t.locus then
 			table.insert(points, {
@@ -245,13 +249,25 @@ function NavLocusLottery.GetAllActivePoints()
 				type = "SINGLE",
 				locus = t.locus,
 			})
-		elseif t.type == "BATCH" and t.samplePoints then
-			for _, pt in ipairs(t.samplePoints) do
-				table.insert(points, {
-					id = t.id,
-					type = "BATCH",
-					locus = pt,
-				})
+		elseif t.type == "BATCH" then
+			-- If batch had legacy 60-point cap, expand up to min(1500, t.count) using its deterministic seed
+			local targetCount = math.min(1500, t.count or 100)
+			if (not t.samplePoints or #t.samplePoints < targetCount) and t.seed then
+				t.samplePoints = {}
+				local sampleRand = Rand.New(t.seed)
+				for i = 1, targetCount do
+					table.insert(t.samplePoints, generateRandomLocus(sampleRand))
+				end
+			end
+			if t.samplePoints then
+				for _, pt in ipairs(t.samplePoints) do
+					if #points >= maxDisplayPoints then break end
+					table.insert(points, {
+						id = t.id,
+						type = "BATCH",
+						locus = pt,
+					})
+				end
 			end
 		end
 	end

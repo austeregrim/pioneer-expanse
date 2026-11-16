@@ -31,8 +31,14 @@ if not stationView then
 	}, Vector2(1920, 1080))
 
 	function stationView:renderTab(tabFn)
-		ui.withStyleVars({WindowPadding = self.style.windowPadding}, function()
-			ui.child("Container", Vector2(0, -self.style.height), nil, useWindowPadding, tabFn)
+		local panelStyleColors = {
+			WindowBg = ui.theme.styleColors.panel_900 or colors.windowBackground,
+			Border = ui.theme.styleColors.primary_500 or colors.windowFrame,
+		}
+		ui.withStyleColors(panelStyleColors, function()
+			ui.withStyleVars({WindowPadding = self.style.windowPadding}, function()
+				ui.child("Container", Vector2(0, -self.style.height), nil, useWindowPadding, tabFn)
+			end)
 		end)
 		self:shipSummary()
 	end

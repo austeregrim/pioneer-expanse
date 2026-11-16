@@ -11,6 +11,7 @@ local PiGuiFace = require 'pigui.libs.face'
 local Format = require "Format"
 local Character = require "Character"
 local ModalWindow = require 'pigui.libs.modal-win'
+local EncryptedText = require 'pigui.libs.encrypted-text'
 local ModelSpinner = require 'PiGui.Modules.ModelSpinner'
 local ModelSkin = require 'SceneGraph.ModelSkin'
 local Commodities = require 'Commodities'
@@ -20,6 +21,8 @@ local PlayerState = require 'PlayerState'
 local l = Lang.GetResource("ui-core")
 
 local rescaleVector = ui.rescaleUI(Vector2(1, 1), Vector2(1920, 1080), true)
+
+local commsChildFlags = ui.ChildFlags { 'AlwaysUseWindowPadding', 'Borders' }
 
 local colors = ui.theme.colors
 local icons = ui.theme.icons
@@ -51,6 +54,7 @@ local textColorDefault = Color(255, 255, 255)
 local textColorWarning = Color(255, 255, 0)
 
 local activeTab = 0
+local repairsCommsText = EncryptedText.New("Starport engineering drydock uplink active. Diagnostic telemetry online. Structural hull reinforcement, pressure seal maintenance, and precision shipyard outfitting ready for deployment.", 0.50)
 
 local widgetSizes = ui.rescaleUI({
 	itemSpacing = Vector2(4, 7),
@@ -280,7 +284,7 @@ local function drawShipRepair()
 	ui.withStyleVars({ItemSpacing = widgetSizes.itemSpacing}, function ()
 		local infoColumnWidth = ui.getContentRegion().x - widgetSizes.faceSize.x - widgetSizes.itemSpacing.x
 
-		ui.child("ShipStatus", Vector2(infoColumnWidth, 0), function ()
+		ui.child("ShipStatus", Vector2(infoColumnWidth, 0), nil, commsChildFlags, function ()
 
 			-- SECTION 1: HULL STRUCTURAL REPAIR
 			ui.withFont(orbiteer.medlarge, function()
@@ -443,9 +447,22 @@ local function drawShipRepair()
 
 		ui.sameLine()
 
-		if(face ~= nil) then
-			face:render()
-		end
+		ui.child("RepairsContactPane", Vector2(0, 0), nil, commsChildFlags, function()
+			if(face ~= nil) then
+				face:render()
+			end
+
+			local now = ui.getTime()
+			ui.spacing()
+			ui.separator()
+			ui.spacing()
+			repairsCommsText:renderCommsHeader(now, "DRYDOCK-DIAG // ISO-9001")
+			ui.withFont(orbiteer.medlarge, function()
+				ui.textColored(colors.uiPrimaryLight, "YARDMASTER DIRECTIVE")
+			end)
+			ui.spacing()
+			repairsCommsText:renderTextWrapped(now, pionillium.body)
+		end)
 	end)
 end
 
@@ -475,18 +492,18 @@ local function drawPaintshop()
 		priceColor = textColorWarning
 	end
 
-	local columnWidth = ui.getContentRegion().x/2
 	local itemSpacing = Vector2(8, 6)
+	local columnWidth = math.floor((ui.getContentRegion().x - itemSpacing.x) / 2)
 	local verticalDummy = Vector2(0, 50)
 	ui.withStyleVars({ ItemSpacing = itemSpacing }, function ()
-		ui.child("PaintshopModelSpinner", Vector2(columnWidth, 0), function()
+		ui.child("PaintshopModelSpinner", Vector2(columnWidth, 0), nil, commsChildFlags, function()
 			modelSpinner:setSize(ui.getContentRegion())
 			modelSpinner:draw()
 		end)
 
 		ui.sameLine()
 
-		ui.child("PaintshopControls", Vector2(columnWidth, 0), function ()
+		ui.child("PaintshopControls", Vector2(0, 0), nil, commsChildFlags, function ()
 			ui.text(l["PAINTSHOP_WELCOME_" .. rand:Integer(NUM_WELCOME_MESSAGES - 1)])
 			ui.dummy(verticalDummy)
 			ui.text(l.PLEASE_DESIGN_NEW_PAINTJOB)
@@ -567,6 +584,7 @@ StationView:registerView({
 	id = "shipRepairs",
 	name = "Ship Maintenance",
 	icon = ui.theme.icons.repairs,
+	securityMode = "encryption",
 	showView = true,
 	draw = function()
 		ui.withFont(pionillium.body, function()
@@ -578,6 +596,7 @@ StationView:registerView({
 		end)
 	end,
 	refresh = function ()
+		repairsCommsText:reset()
 		if not determinePaintshopAvailability() then
 			activeTab = 0
 		end

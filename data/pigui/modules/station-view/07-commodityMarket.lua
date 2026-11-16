@@ -18,6 +18,7 @@ StationView:registerView({
 	id = "commodityMarket",
 	name = l.COMMODITY_MARKET,
 	icon = ui.theme.icons.market,
+	securityMode = "encryption",
 	showView = true,
 	draw = render,
 	refresh = function()

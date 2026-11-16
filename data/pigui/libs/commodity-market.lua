@@ -34,7 +34,7 @@ local baseWidgetSizes = {
 	windowGutter = 16
 }
 
-local commodityIconSize = Vector2(38.0, 32.0) -- png icons, native resolution
+local commodityIconSize = Vector2(24.0, 20.0)
 
 local vZero = Vector2(0, 0)
 local textColorDefault = Color(255, 255, 255)
@@ -113,8 +113,23 @@ function CommodityMarketWidget.New(id, title, config)
 	config.columnCount = config.columnCount or 6
 
 	config.initTable = config.initTable or function(self)
-		ui.setColumnWidth(0, commodityIconSize.x + ui.getItemSpacing().x)
-		ui.setColumnWidth(1, self.style.size.x / 2.4  - 50 * self.style.widgetSizes.rescaleVector.x)
+		local scrollbarPad = 16
+		local tableW = self.style.size.x - scrollbarPad
+		local col0W = math.floor(commodityIconSize.x + 8)
+		local col2W = 100
+		local col3W = 100
+		local col4W = 75
+		local col5W = 85
+		local col6W = 1
+		local col1W = math.max(120, tableW - (col0W + col2W + col3W + col4W + col5W + col6W))
+
+		ui.setColumnWidth(0, col0W)
+		ui.setColumnWidth(1, col1W)
+		ui.setColumnWidth(2, col2W)
+		ui.setColumnWidth(3, col3W)
+		ui.setColumnWidth(4, col4W)
+		ui.setColumnWidth(5, col5W)
+		ui.setColumnWidth(6, col6W)
 	end
 
 	-- Adds a text column to the UI table with the given alignment
@@ -160,7 +175,6 @@ function CommodityMarketWidget.New(id, title, config)
 			local market = self.station:GetCommodityMarket()
 			local pricemod = Economy.GetCommodityPriceMod(self.station.path, item.name, market)
 
-			ui.dummy(vZero)
 			ui.text(item:GetProperName())
 
 			local cls = EconView.ClassifyPrice(pricemod)
@@ -175,13 +189,9 @@ function CommodityMarketWidget.New(id, title, config)
 
 			ui.nextColumn()
 
-			ui.dummy(vZero)
 			config.columnText(Format.Money(config.getBuyPrice(self, item)), "RIGHT")
-			ui.dummy(vZero)
 			config.columnText(Format.Money(config.getSellPrice(self, item)), "RIGHT")
-			ui.dummy(vZero)
 			config.columnText(config.getStock(self, item), "RIGHT")
-			ui.dummy(vZero)
 			local n = self.cargoMgr:CountCommodity(item)
 			config.columnText(n > 0 and n or '', "RIGHT")
 		end)
@@ -190,6 +200,7 @@ function CommodityMarketWidget.New(id, title, config)
 	config.canDisplayItem = config.canDisplayItem or function (self, commodity)
 		return commodity.purchasable and Game.system:IsCommodityLegal(commodity.name)
 	end
+	config.borders = true
 
 	-- how much of this item do we have in stock?
     config.getStock = config.getStock or function (self, commodity)
@@ -359,200 +370,272 @@ function CommodityMarketWidget:ChangeTradeAmount(delta)
 	self.tradeTextColor = self.textColorDefault
 end
 
---player clicked confirm purchase button
-function CommodityMarketWidget:DoBuy()
+-- Player confirmed purchase order
+function CommodityMarketWidget:DoBuy(customQty)
+	local qty = customQty or self.tradeAmount
+	if qty <= 0 then return end
 	local price = self.funcs.getBuyPrice(self, self.selectedItem)
 	local stock = self.funcs.getStock(self, self.selectedItem)
 	local playerfreecargo = self.cargoMgr:GetFreeSpace()
-	local orderAmount = price * self.tradeAmount
+	local orderAmount = price * qty
 
-	--check cash (should never happen since trade amount buttons wont let it happen)
 	if orderAmount > PlayerState.GetMoney() then
 		self.popup.msg = l.YOU_NOT_ENOUGH_MONEY
 		self.popup:open()
 		return
 	end
 
-	--check stock
-	if self.tradeAmount > stock then
+	if qty > stock then
 		self.popup.msg = l.ITEM_IS_OUT_OF_STOCK
 		self.popup:open()
 		return
 	end
 
-	--check cargo limit
-	local tradecargo = (self.selectedItem.mass or 1) * self.tradeAmount
+	local tradecargo = (self.selectedItem.mass or 1) * qty
 	if playerfreecargo < tradecargo then
 		self.popup.msg = l.SHIP_IS_FULLY_LADEN
 		self.popup:open()
 		return
 	end
 
-	-- user validation code
 	if not self.funcs.onClickBuy(self, self.selectedItem) then
 		return
 	end
 
-	--all checks passed
-	assert(self.cargoMgr:AddCommodity(self.selectedItem, self.tradeAmount))
-	PlayerState.AddMoney(-orderAmount) --grab the money
+	assert(self.cargoMgr:AddCommodity(self.selectedItem, qty))
+	PlayerState.AddMoney(-orderAmount)
 
 	local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
 	if okTax and TaxAuthority and TaxAuthority.RecordCommodityPurchase then
 		local cName = self.selectedItem.name or tostring(self.selectedItem)
-		TaxAuthority.RecordCommodityPurchase(cName, self.tradeAmount, price)
+		TaxAuthority.RecordCommodityPurchase(cName, qty, price)
 	end
 
-	self.funcs.bought(self, self.selectedItem, self.tradeAmount)
-	self:ChangeTradeAmount(-self.tradeAmount) --reset the trade amount
-
-	--update market rows
-	self.tradeAmount = 0;
-	self:ChangeTradeAmount(0) --update trade amount text
-	self:Refresh() --rows needs to be recalculated since now the amounts in stock have changed
+	self.funcs.bought(self, self.selectedItem, qty)
+	self.tradeAmount = 0
+	self:Refresh()
 end
 
---player clicked the confirm sale button
-function CommodityMarketWidget:DoSell()
-	local price = self.funcs.getSellPrice(self, self.selectedItem)
-	--if commodity price is negative (radioactives, garbage), player needs to have enough cash
-	local orderamount = price * self.tradeAmount
+-- Player confirmed sale order
+function CommodityMarketWidget:DoSell(customQty)
+	local qty = customQty or self.tradeAmount
+	if qty <= 0 then return end
+	local owned = self.cargoMgr:CountCommodity(self.selectedItem)
+	qty = math.min(qty, owned)
+	if qty <= 0 then return end
 
-	-- user validation code
+	local price = self.funcs.getSellPrice(self, self.selectedItem)
+	local orderamount = price * qty
+
 	if not self.funcs.onClickSell(self, self.selectedItem) then
 		return
 	end
 
-	assert(self.cargoMgr:RemoveCommodity(self.selectedItem, self.tradeAmount) == self.tradeAmount)
-	PlayerState.AddMoney(orderamount) --grab the money
+	assert(self.cargoMgr:RemoveCommodity(self.selectedItem, qty) == qty)
+	PlayerState.AddMoney(orderamount)
 
 	local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
 	if okTax and TaxAuthority and TaxAuthority.RecordCommoditySale then
 		local cName = self.selectedItem.name or tostring(self.selectedItem)
-		TaxAuthority.RecordCommoditySale(cName, self.tradeAmount, price)
+		TaxAuthority.RecordCommoditySale(cName, qty, price)
 	end
 
-	self.funcs.sold(self, self.selectedItem, self.tradeAmount)
-	self:ChangeTradeAmount(-self.tradeAmount) --reset the trade amount
-
-	--if player sold all of this cargo, switch to buy panel
-	if self.cargoMgr:CountCommodity(self.selectedItem) == 0 then self.tradeModeBuy = true end
-
-	--update market rows
-	self.tradeAmount = 0;
-	self:ChangeTradeAmount(0) --update trade amount text
-	self:Refresh() --rows needs to be recalculated since now the amounts in stock have changed
+	self.funcs.sold(self, self.selectedItem, qty)
+	self.tradeAmount = 0
+	self:Refresh()
 end
 
 function CommodityMarketWidget:TradeMenu()
-	if(self.selectedItem) then
-		ui.child(self.id .. "TradeMenu", vZero, function()
-
-			ui.withFont(pionillium.heading, function()
-				-- center the buy/sell switch buttons
-				ui.addCursorPos(Vector2(ui.getContentRegion().x * 0.5 - self.style.widgetSizes.buySellSize.x - ui.getItemSpacing().x, 0))
-
-				if ui.button(l.BUY, self.style.widgetSizes.buySellSize, colorVariant[self.tradeModeBuy]) then
-					self.tradeModeBuy = true
-					self:ChangeTradeAmount(-self.tradeAmount)
-				end
-
-				ui.sameLine()
-
-				if ui.button(l.SELL, self.style.widgetSizes.buySellSize, colorVariant[not self.tradeModeBuy]) then
-					self.tradeModeBuy = false
-					self:ChangeTradeAmount(-self.tradeAmount)
-				end
+	local commsChildFlags = ui.ChildFlags { 'AlwaysUseWindowPadding', 'Borders' }
+	if not self.selectedItem then
+		ui.child(self.id .. "TradeMenu", vZero, nil, commsChildFlags, function()
+			ui.withFont(orbiteer.heading, function()
+				ui.textColored(ui.theme.colors.uiPrimaryLight, "COMMODITY TRANSACTION DESK")
 			end)
+			ui.separator()
+			ui.spacing()
+			ui.textColored(ui.theme.colors.fontDim, "Select a commodity from the market exchange list to inspect local demand, unit pricing, and execute trade orders.")
+		end)
+		return
+	end
 
+	ui.child(self.id .. "TradeMenu", vZero, nil, commsChildFlags, function()
+		local panelW = ui.getContentRegion().x
+		local item = self.selectedItem
+		local stock = self.funcs.getStock(self, item)
+		local owned = self.cargoMgr:CountCommodity(item)
+		local buyPrice = self.funcs.getBuyPrice(self, item)
+		local sellPrice = self.funcs.getSellPrice(self, item)
+		local playerMoney = PlayerState.GetMoney()
+		local freeCargo = self.cargoMgr:GetFreeSpace()
+
+		-- 1. Commodity Title Header Row
+		if self.icons[item.icon_name] == nil then
+			self.icons[item.icon_name] = PiImage.New("icons/goods/" .. item.icon_name .. ".png")
+		end
+
+		ui.columns(2, "tradeMenuItemTitle", false)
+		ui.setColumnWidth(0, commodityIconSize.x + 12)
+		self.icons[item.icon_name]:Draw(commodityIconSize)
+		ui.nextColumn()
+		ui.withFont(orbiteer.heading, function()
+			ui.textColored(ui.theme.colors.uiPrimaryLight, item:GetProperName())
+		end)
+		ui.columns(1, "", false)
+		ui.spacing()
+
+		-- Crisis / Price Trend alerts
+		local price = self.station:GetCommodityPrice(item)
+		local pricemod = get_pricemod(item, price)
+		local cls = EconView.ClassifyPrice(pricemod)
+		if cls and self.tradeComputer > 0 then
+			ui.textColored(ui.theme.colors.fontDim, l.INTERSTELLAR_TRADE_AVG .. ": ")
+			ui.sameLine()
+			ui.icon(cls[1], Vector2(ui.getTextLineHeight()), cls[2])
+			ui.sameLine()
+			ui.textColored(cls[2], string.format("%s (%+.1f%% avg)", cls[3], pricemod))
+		end
+
+		local mult, cNote = getCrisisCommodityMultiplier(item.name, true)
+		if cNote then
+			ui.textColored(ui.theme.colors.alertYellow, cNote)
+		end
+
+		ui.spacing()
+		ui.withFont(pionillium.body, function()
+			ui.textWrapped(item:GetDescription())
+		end)
+
+		ui.spacing()
+		ui.separator()
+		ui.spacing()
+
+		-- 2. Market Inventory & Cargo Summary
+		ui.textColored(ui.theme.colors.uiPrimaryLight, "MARKET INVENTORY & CARGO HOLD STATUS:")
+		ui.columns(2, "##commStatusCols", false)
+		ui.textColored(ui.theme.colors.fontDim, "Station Market Stock:")
+		ui.text(string.format("%d tons in stock @ %s / ton", stock, Format.Money(buyPrice)))
+		ui.nextColumn()
+
+		ui.textColored(ui.theme.colors.fontDim, "In Your Cargo Hold:")
+		if owned > 0 then
+			local totalVal = owned * sellPrice
+			ui.textColored(ui.theme.colors.econProfit, string.format("%d tons owned (@ %s = %s)", owned, Format.Money(sellPrice), Format.Money(totalVal)))
+		else
+			ui.textColored(ui.theme.colors.fontDim, string.format("0 tons (Hold Free: %d tons)", freeCargo))
+		end
+		ui.columns(1)
+
+		ui.spacing()
+		ui.separator()
+		ui.spacing()
+
+		-- 3. Dedicated Owned Cargo Liquidation (Quick Sell)
+		if owned > 0 then
+			ui.textColored(Color(255, 170, 50, 255), "OWNED CARGO LIQUIDATION:")
+			ui.textColored(ui.theme.colors.fontDim, "Instant liquidation of cargo currently loaded in your vessel's hold:")
+
+			local qSellBtns = {
+				{ frac = 0.25, label = "25%" },
+				{ frac = 0.50, label = "50%" },
+				{ frac = 1.00, label = string.format("SELL ALL (%d TONS)", owned) },
+			}
+			local qSp = 6
+			local qW = math.floor((panelW - (#qSellBtns - 1) * qSp) / #qSellBtns)
+			for i, sb in ipairs(qSellBtns) do
+				local sQty = math.max(1, math.floor(owned * sb.frac + 0.0001))
+				if sb.frac >= 0.99 then sQty = owned end
+				local sProceeds = sQty * sellPrice
+				local bLabel = string.format("%s (%s)##qSell%d", sb.label, Format.Money(sProceeds), i)
+				if ui.button(bLabel, Vector2(qW, 28)) then
+					self:DoSell(sQty)
+				end
+				if i < #qSellBtns then ui.sameLine(nil, qSp) end
+			end
 			ui.newLine()
+			ui.spacing()
+			ui.separator()
+			ui.spacing()
+		end
 
-			local bottomHalf = ui.getCursorPos()
-			bottomHalf.y = bottomHalf.y + ui.getContentRegion().y/1.65
-			if(self.icons[self.selectedItem.icon_name] == nil) then
-				self.icons[self.selectedItem.icon_name] = PiImage.New("icons/goods/".. self.selectedItem.icon_name ..".png")
+		-- 4. Order Quantity Counter
+		ui.textColored(ui.theme.colors.uiPrimaryLight, "CUSTOM TRANSACTION ORDER DESK:")
+		local maxBuy = math.max(0, math.min(stock, freeCargo, buyPrice > 0 and math.floor(playerMoney / buyPrice) or stock))
+		local maxLimit = math.max(maxBuy, owned)
+		if maxLimit <= 0 then maxLimit = 1 end
+
+		local qSp = 6
+		local qNudge = { -100, -10, -1, 0, 1, 10, 100 }
+		local qBtnW = math.floor((panelW - (#qNudge - 1) * qSp) / #qNudge)
+		for i, nVal in ipairs(qNudge) do
+			if nVal == 0 then
+				if ui.button(l.RESET .. "##CommReset", Vector2(qBtnW, 26)) then
+					self.tradeAmount = 0
+				end
+			else
+				local signStr = nVal > 0 and "+" or ""
+				if ui.button(signStr .. tostring(nVal) .. "##CommNudge", Vector2(qBtnW, 26)) then
+					self.tradeAmount = math.clamp(self.tradeAmount + nVal, 0, maxLimit)
+				end
+			end
+			if i < #qNudge then ui.sameLine(nil, qSp) end
+		end
+		ui.newLine()
+
+		ui.spacing()
+		local buyTotal = self.tradeAmount * buyPrice
+		local sellTotal = self.tradeAmount * sellPrice
+		ui.text(string.format("Order Quantity: %d tons  |  Purchase Cost: %s  |  Sale Proceeds: %s",
+			self.tradeAmount, Format.Money(buyTotal), Format.Money(sellTotal)))
+		ui.spacing()
+
+		-- 5. Direct Action Buttons
+		if owned > 0 then
+			local actW = math.floor((panelW - 12) / 2)
+			local canBuy = (self.tradeAmount > 0 and self.tradeAmount <= maxBuy and buyTotal <= playerMoney)
+			local buyText = string.format("BUY %d TONS (%s)##DoBuyBtn", self.tradeAmount, Format.Money(buyTotal))
+			if not canBuy and self.tradeAmount > 0 then
+				if buyTotal > playerMoney then buyText = "INSUFFICIENT FUNDS"
+				elseif self.tradeAmount > freeCargo then buyText = "HOLD FULL"
+				elseif self.tradeAmount > stock then buyText = "OUT OF STOCK" end
 			end
 
-			ui.columns(2, "tradeMenuItemTitle", false)
-			ui.setColumnWidth(0, commodityIconSize.x + ui.getItemSpacing().x)
-			self.icons[self.selectedItem.icon_name]:Draw(commodityIconSize)
-			ui.nextColumn()
-			ui.withStyleVars({ItemSpacing = self.style.itemSpacing/2}, function()
-				ui.withFont(orbiteer.heading, function()
-					-- align the height to the center relative to the icon
-					ui.alignTextToLineHeight(commodityIconSize.y)
-					ui.text(self.selectedItem:GetProperName())
-				end)
-			end)
-			ui.columns(1, "", false)
-			ui.newLine()
+			if ui.button(buyText, Vector2(actW, 36)) then
+				if canBuy then self:DoBuy(self.tradeAmount) end
+			end
+			ui.sameLine(nil, 12)
 
-			ui.withFont(pionillium.heading, function()
-				local price = self.station:GetCommodityPrice(self.selectedItem)
-				local pricemod = get_pricemod(self.selectedItem, price)
-				local cls = EconView.ClassifyPrice(pricemod)
+			local canSell = (self.tradeAmount > 0 and self.tradeAmount <= owned)
+			local sellText = string.format("SELL %d TONS (%s)##DoSellBtn", self.tradeAmount, Format.Money(sellTotal))
+			if not canSell and self.tradeAmount > 0 then
+				sellText = "EXCEEDS HOLD QUANTITY"
+			end
+			if ui.button(sellText, Vector2(actW, 36)) then
+				if canSell then self:DoSell(self.tradeAmount) end
+			end
+		else
+			local canBuy = (self.tradeAmount > 0 and self.tradeAmount <= maxBuy and buyTotal <= playerMoney)
+			local buyText = string.format("BUY %d TONS (%s)##DoBuyBtn", self.tradeAmount, Format.Money(buyTotal))
+			if self.tradeAmount == 0 then
+				buyText = "SELECT QUANTITY ABOVE TO PURCHASE"
+			elseif not canBuy then
+				if buyTotal > playerMoney then buyText = "INSUFFICIENT FUNDS"
+				elseif self.tradeAmount > freeCargo then buyText = "CARGO HOLD FULL"
+				elseif self.tradeAmount > stock then buyText = "STATION OUT OF STOCK" end
+			end
 
-				if cls and self.tradeComputer > 0 then
-					ui.text(l.INTERSTELLAR_TRADE_AVG)
-					ui.sameLine()
-
-					ui.icon(cls[1], Vector2(ui.getTextLineHeight()), cls[2])
-					ui.sameLine()
-					ui.text(cls[3])
-					ui.spacing()
-				end
-
-				local mult, cNote = getCrisisCommodityMultiplier(self.selectedItem.name, self.tradeModeBuy)
-				if cNote then
-					ui.textColored(ui.theme.colors.alertYellow, cNote)
-					ui.spacing()
-				end
-			end)
-
-			ui.withFont(pionillium.body, function()
-				ui.textWrapped(self.selectedItem:GetDescription())
-			end)
-
-			ui.setCursorPos(bottomHalf)
-			if ui.button("-100", self.style.widgetSizes.smallButton) then self:ChangeTradeAmount(-100) end
-			ui.sameLine()
-			if ui.button("-10", self.style.widgetSizes.smallButton) then self:ChangeTradeAmount(-10) end
-			ui.sameLine()
-			if ui.button("-1", self.style.widgetSizes.smallButton) then self:ChangeTradeAmount(-1) end
-			ui.sameLine()
-			if ui.button(l.RESET, self.style.widgetSizes.bigButton) then self:ChangeTradeAmount(-self.tradeAmount) end
-			ui.sameLine()
-			if ui.button("+1", self.style.widgetSizes.smallButton) then self:ChangeTradeAmount(1) end
-			ui.sameLine()
-			if ui.button("+10", self.style.widgetSizes.smallButton) then self:ChangeTradeAmount(10) end
-			ui.sameLine()
-			if ui.button("+100", self.style.widgetSizes.smallButton) then self:ChangeTradeAmount(100) end
-
-			ui.dummy(self.style.itemSpacing/2)
-			ui.withStyleColors({Text = self.tradeTextColor }, function()
-				ui.withFont(pionillium.heading, function()
-					ui.text(self.tradeText)
-				end)
-			end)
-
-			ui.addCursorPos(Vector2(0, ui.getContentRegion().y - self.style.widgetSizes.confirmButtonSize.y))
-			ui.withFont(orbiteer.heading, function()
-				if ui.button(self.tradeModeBuy and l.CONFIRM_PURCHASE or l.CONFIRM_SALE, self.style.widgetSizes.confirmButtonSize) then
-					if self.tradeModeBuy then self:DoBuy()
-					else self:DoSell() end
-				end
-			end)
-		end)
-	else
-		ui.newLine()
-	end
+			if ui.button(buyText, Vector2(panelW, 36)) then
+				if canBuy then self:DoBuy(self.tradeAmount) end
+			end
+		end
+	end)
 end
 
 function CommodityMarketWidget:SetSize(size)
 	size = Vector2(math.max(size.x, 100), math.max(size.y, 100))
 	if self.style.widgetSize ~= size then
 		self.style.widgetSize = size
-		self.style.size = Vector2(size.x * 0.6, size.y)
+		self.style.size = Vector2(math.floor(size.x * 0.45), size.y)
 
 		self.style.widgetSizes = ui.rescaleUI(
 			baseWidgetSizes,
@@ -627,7 +710,7 @@ function CommodityMarketWidget:Render(size)
 	self:SetSize(Vector2(fullSize.x, remainingHeight))
 
 	ui.withStyleVars({ItemSpacing = self.style.itemSpacing}, function()
-		ui.withFont(pionillium.heading, function()
+		ui.withFont(pionillium.body, function()
 			TableWidget.render(self)
 		end)
 		ui.sameLine(0, self.style.widgetSizes.windowGutter)

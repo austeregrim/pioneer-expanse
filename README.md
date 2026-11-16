@@ -59,9 +59,9 @@ This fork reimagines Pioneer with core flight mechanics, pacing, graphics, fleet
 * **Multi-Ship Ownership, Station Hangars & Fleet Autonomy**:
   * Persistent player fleet storage (`PlayerFleet.lua`); purchase new vessels directly into station hangars or store your current flagship.
   * Dedicated Station Hangar & Fleet Bay interface (`13-hangar.lua`) for vessel inspection, renaming, flagship swapping, maintenance, cargo transfers, selling, and remote ferry recalls across starports.
-  * Captain and crew recruitment (`05-crew.lua`) with combat, trading, and mining skill progression.
-  * Fleet Command interface (`07-fleet.lua`) supporting autonomous standing orders: Escort Flagship, Dock at Station, Autonomous Free Trade & Cargo Liquidation, Autonomous Ring Mining, and Sector Patrol.
-  * Fleet Mission Delegation (`04-missions.lua`) across passenger transport, cargo delivery, courier, and bounty hunting contracts.
+  * Captain and crew recruitment (`06-crew.lua`) with combat, trading, and mining skill progression.
+  * Fleet Command interface (`05-fleet.lua`) supporting autonomous standing orders: Escort Flagship, Dock at Station, Autonomous Free Trade & Cargo Liquidation, Autonomous Ring Mining, and Sector Patrol.
+  * Fleet Mission Delegation (`02-missions.lua`) across passenger transport, cargo delivery, courier, and bounty hunting contracts.
   * Dual-tier simulation: physical in-system flight transit and out-of-system (OOS) simulation with direct bank credit integration.
 
 * **1:1 Real-Time Flight Pacing & Offline Preservation**:

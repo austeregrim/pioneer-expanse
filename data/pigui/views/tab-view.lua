@@ -52,12 +52,11 @@ end
 function PiGuiTabView:getSig(tab)
 	if not self.sigs[tab.id] then
 		local isEnc = false
-		if tab.securityMode then
+		if self.name == "InfoView" then
+			-- Ship's internal computer terminal network: always signature verification, never encryption
+			isEnc = false
+		elseif tab.securityMode then
 			isEnc = (tab.securityMode == "encryption")
-		elseif self.name == "InfoView" then
-			isEnc = true
-		elseif tab.id == "police" or tab.id == "insuranceRebuy" or tab.id == "hangar" or tab.id == "universalCartographics" then
-			isEnc = true
 		end
 		local mode = isEnc and "encryption" or "signature"
 		local sig = StationSig.New(self.name .. "_" .. tab.id, mode)

@@ -14,6 +14,7 @@ StationView:registerView({
 	id = "equipmentMarketView",
 	name = l.EQUIPMENT_MARKET,
 	icon = ui.theme.icons.equipment,
+	securityMode = "encryption",
 	showView = true,
 	draw = function()
 		equipmentWidget:draw()

@@ -23,6 +23,7 @@ local Vector2 = _G.Vector2
 -- FIXME: need to manually set itemSpacing to be able to properly size columns
 -- Need a style-var query system for best effect
 local itemSpacing = ui.rescaleUI(Vector2(5, 8), Vector2(1920, 1080))
+local childFlags = ui.ChildFlags { 'AlwaysUseWindowPadding', 'Borders' }
 
 local jettison = function (item)
 	local enabled = Game.player.flightState == "FLYING"
@@ -441,35 +442,27 @@ end
 
 InfoView:registerView({
 	id = "econTrade",
-	name = l.ECONOMY_TRADE,
+	name = "Fuel and Weight",
 	icon = ui.theme.icons.cargo_manifest,
+	securityMode = "signature",
 	showView = true,
 
 	draw = function()
 		ui.withStyleVars({ItemSpacing = itemSpacing}, function()
 			ui.withFont(pionillium.body, function()
-				ui.horizontalGroup(function()
-					local spacing = itemSpacing.x + ui.getWindowPadding().x
-					local region = ui.getContentRegion()
-					local sizex = region.x / 2 - spacing
-					local sizey = region.y - StationView.style.height
+				local region = ui.getContentRegion()
+				local leftW = math.floor(region.x * 0.50)
 
-					ui.child("leftpanel", Vector2(sizex, sizey), function()
-						drawEconTrade()
-					end)
+				ui.child("leftpanel", Vector2(leftW, 0), nil, childFlags, function()
+					drawEconTrade()
+				end)
 
-					-- add innner padding
-					ui.sameLine(0, spacing)
+				ui.sameLine()
 
-					ui.separator()
-					-- add innner padding
-					ui.sameLine(0, spacing)
-
-					ui.child("rightpanel", Vector2(sizex, sizey), function()
-						ui.withFont(orbiteer.heading, function() ui.text(l.CARGO) end)
-						gauge_cargo()
-						cargolist()
-					end)
+				ui.child("rightpanel", Vector2(0, 0), nil, childFlags, function()
+					ui.withFont(orbiteer.heading, function() ui.text(l.CARGO) end)
+					gauge_cargo()
+					cargolist()
 				end)
 			end)
 		end)

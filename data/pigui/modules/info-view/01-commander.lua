@@ -18,6 +18,7 @@ local textTable = require 'pigui.libs.text-table'
 
 local l = Lang.GetResource("ui-core")
 
+local childFlags = ui.ChildFlags { 'AlwaysUseWindowPadding', 'Borders' }
 local itemSpacing = ui.rescaleUI(Vector2(6, 12), Vector2(1920, 1200))
 
 local face = nil
@@ -56,31 +57,27 @@ local function drawPlayerInfo()
 end
 
 InfoView:registerView({
-    id = "personalInfo",
-    name = l.PERSONAL_INFORMATION,
+    id = "commander",
+    name = l.COMMANDER or "Commander",
     icon = icons.personal_info,
     showView = true,
 	draw = function()
-		local spacing = InfoView.windowPadding.x * 2.0
-        local info_column_width = (ui.getColumnWidth() - spacing) / 2
+		local region = ui.getContentRegion()
+		local leftWidth = math.floor(region.x * 0.50)
 
-        ui.withStyleVars({ItemSpacing = itemSpacing}, function()
-            ui.withFont(pionillium.heading, function()
+		ui.withStyleVars({ItemSpacing = itemSpacing}, function()
+			ui.withFont(pionillium.heading, function()
+				ui.child("PlayerInfoDetails", Vector2(leftWidth, 0), nil, childFlags, drawPlayerInfo)
 
-                ui.child("PlayerInfoDetails", Vector2(info_column_width, 0), drawPlayerInfo)
+				ui.sameLine()
 
-				ui.sameLine(0, spacing)
-				ui.dummy(Vector2(info_column_width * 0.15), 0)
-				ui.sameLine(0, 0)
-
-				ui.child("PlayerView", Vector2(info_column_width * 0.7, 0), function()
+				ui.child("PlayerView", Vector2(0, 0), nil, childFlags, function()
 					face = face or PiGuiFace.New(Character.persistent.player, nil, false)
 					face:render()
 				end)
-
-            end)
-        end)
-    end,
+			end)
+		end)
+	end,
     refresh = function() end,
 	debugReload = function()
 		package.reimport('pigui.libs.face')

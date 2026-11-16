@@ -496,7 +496,7 @@ local function renderBulletinBoard()
 			leftWidth = math.max(widgetSizes.minListWidth, math.min(region.x * 0.38, region.x - widgetSizes.marketMinWidth))
 		end
 
-		ui.child("BulletinBoardLeft", Vector2(leftWidth, 0), function()
+		ui.child("BulletinBoardLeft", Vector2(leftWidth, 0), nil, commsChildFlags, function()
 			renderFilterBar()
 			bulletinBoard.style.size = Vector2(ui.getContentRegion().x, 0)
 			bulletinBoard:render()
@@ -525,6 +525,7 @@ StationView:registerView({
 	id = "bulletinBoard",
 	name = lui.BULLETIN_BOARD,
 	icon = ui.theme.icons.bbs,
+	securityMode = "encryption",
 	showView = true,
 	draw = renderBulletinBoard,
 	refresh = function ()

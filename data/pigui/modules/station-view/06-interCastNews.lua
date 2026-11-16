@@ -567,6 +567,7 @@ StationView:registerView({
 	id = "interCast",
 	name = "InterCast News",
 	icon = icons.comms or icons.bbs,
+	securityMode = "signature",
 	showView = true,
 	draw = drawInterCastNews,
 	refresh = function(self)

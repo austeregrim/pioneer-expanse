@@ -10,8 +10,14 @@ infoView.windowPadding = ui.rescaleUI(Vector2(12, 12), Vector2(1920, 1080))
 
 local useWindowPadding = ui.ChildFlags { 'AlwaysUseWindowPadding' }
 function infoView:renderTab(tabFn)
-	ui.withStyleVars({WindowPadding = self.windowPadding}, function()
-		ui.child("InfoContainer", Vector2(0, 0), nil, useWindowPadding, tabFn)
+	local panelStyleColors = {
+		WindowBg = ui.theme.styleColors.panel_900 or ui.theme.colors.windowBackground,
+		Border = ui.theme.styleColors.primary_500 or ui.theme.colors.windowFrame,
+	}
+	ui.withStyleColors(panelStyleColors, function()
+		ui.withStyleVars({WindowPadding = self.windowPadding}, function()
+			ui.child("InfoContainer", Vector2(0, 0), nil, useWindowPadding, tabFn)
+		end)
 	end)
 end
 

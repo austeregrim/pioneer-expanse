@@ -83,8 +83,8 @@ local function bindingTextButton(label, tooltip, enabled, callback)
 	end
 end
 
-local function optionTextButton(label, tooltip, enabled, callback)
-	local variant = not enabled and ui.theme.buttonColors.disabled
+local function optionTextButton(label, tooltip, enabled, callback, customVariant)
+	local variant = not enabled and ui.theme.buttonColors.disabled or (customVariant or ui.theme.buttonColors.default)
 
 	local button
 	ui.withFont(pionillium.medium, function()
@@ -889,10 +889,14 @@ ui.optionsWindow = ModalWindow.New("Options", function()
 			endGameConfirmWindow:open()
 		end)
 
-		ui.sameLine()
+		local quitWidth = optionButtonSize.x
+		ui.withFont(pionillium.medium, function()
+			quitWidth = math.max(optionButtonSize.x, ui.calcTextSize(lui.QUIT).x + ui.theme.styles.ButtonPadding.x * 2)
+		end)
+		ui.sameLine(-quitWidth)
 		optionTextButton(lui.QUIT, lui.QUIT_TOOLTIP, true, function()
 			quitConfirmWindow:open()
-		end)
+		end, ui.theme.buttonColors.danger)
 	end
 end, function (_, drawPopupFn)
 	ui.setNextWindowSize(optionsWinSize, 'Always')

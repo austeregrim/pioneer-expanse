@@ -21,6 +21,7 @@ local orbiteer = ui.fonts.orbiteer
 local colors = ui.theme.colors
 
 local itemSpacing = ui.rescaleUI(Vector2(5, 8), Vector2(1920, 1080))
+local childFlags = ui.ChildFlags { 'AlwaysUseWindowPadding', 'Borders' }
 
 -- Anti-abuse feature - this locks out the piloting commands based on a timer.
 -- It knows when the crew were last checked for a piloting skill, and prevents
@@ -212,16 +213,18 @@ local function makeCrewList()
 end
 
 local function drawCrewList(crewList)
-	textTable.drawTable(6, nil, crewList)
+	ui.child("CrewListPane", Vector2(0, 0), nil, childFlags, function()
+		textTable.drawTable(6, nil, crewList)
 
-	ui.newLine()
-	ui.withFont(orbiteer.heading, function() ui.text(l.GIVE_ORDERS_TO_CREW .. ":") end)
-	for label, task in pairs(crewTasks) do
-		if ui.button(l[label], Vector2(0, 0)) then lastTaskResult = task() end
-		ui.sameLine()
-	end
-	ui.newLine()
-	ui.text(lastTaskResult)
+		ui.newLine()
+		ui.withFont(orbiteer.heading, function() ui.text(l.GIVE_ORDERS_TO_CREW .. ":") end)
+		for label, task in pairs(crewTasks) do
+			if ui.button(l[label], Vector2(0, 0)) then lastTaskResult = task() end
+			ui.sameLine()
+		end
+		ui.newLine()
+		ui.text(lastTaskResult)
+	end)
 end
 
 local crewFace = nil
@@ -230,9 +233,9 @@ local function drawCrewInfo(crew)
 		crewFace = PiGuiFace.New(crew)
 	end
 
-	local spacing = InfoView.windowPadding.x * 2.0
-	local info_column_width = (ui.getColumnWidth() - spacing) / 2
-	ui.child("PlayerInfoDetails", Vector2(info_column_width, 0), function()
+	local region = ui.getContentRegion()
+	local leftWidth = math.floor(region.x * 0.50)
+	ui.child("PlayerInfoDetails", Vector2(leftWidth, 0), nil, childFlags, function()
 		ui.withFont(orbiteer.heading, function() ui.text(crew.name) end)
 		ui.newLine()
 
@@ -284,9 +287,9 @@ local function drawCrewInfo(crew)
 		if ui.button(lcrew.GO_BACK, Vector2(0, 0)) then inspectingCrewMember = nil end
 	end)
 
-	ui.sameLine(0, spacing)
+	ui.sameLine()
 
-	ui.child("PlayerView", Vector2(info_column_width, 0), function()
+	ui.child("PlayerView", Vector2(0, 0), nil, childFlags, function()
 		crewFace:render()
 	end)
 end

@@ -20,6 +20,7 @@ local columnPadding = ui.rescaleUI(Vector2(14, 14), Vector2(1920, 1080))
 local itemSpacing = ui.rescaleUI(Vector2(5, 8), Vector2(1920, 1080))
 local detailsSpacing = ui.rescaleUI(Vector2(5, 7), Vector2(1920, 1080))
 local framePadding = ui.rescaleUI(Vector2(6, 3), Vector2(1920, 1080))
+local childFlags = ui.ChildFlags { 'AlwaysUseWindowPadding', 'Borders' }
 local face = nil
 
 local activeMission = nil
@@ -52,8 +53,8 @@ end
 
 local function drawMissionDescription(missionDesc)
 	local contentRegion = ui.getContentRegion()
-	local leftColWidth = contentRegion.x / 1.618 - columnPadding.x / 2
-	ui.child("MissionDetailsColumn", Vector2(leftColWidth, 0), function()
+	local leftColWidth = math.floor(contentRegion.x * 0.55)
+	ui.child("MissionDetailsColumn", Vector2(leftColWidth, 0), nil, childFlags, function()
 		ui.withFont(orbiteer.heading, function() ui.text(l.MISSION_DETAILS) end)
 		ui.newLine()
 
@@ -138,9 +139,9 @@ local function drawMissionDescription(missionDesc)
 		end
 	end)
 
-	ui.sameLine(0, columnPadding.x)
+	ui.sameLine()
 
-	ui.child("MissionGiverFace", Vector2(0, 0), function()
+	ui.child("MissionGiverFace", Vector2(0, 0), nil, childFlags, function()
 		if not face or face.character ~= missionDesc.client then
 			face = PiGuiFace.New(missionDesc.client)
 		end
@@ -224,8 +225,10 @@ InfoView:registerView({
 				return
 			end
 
-			ui.withStyleVars({ItemSpacing = itemSpacing, FramePadding = framePadding}, function()
-				textTable.drawTable(6, nil, rowCache)
+			ui.child("MissionsListPane", Vector2(0, 0), nil, childFlags, function()
+				ui.withStyleVars({ItemSpacing = itemSpacing, FramePadding = framePadding}, function()
+					textTable.drawTable(6, nil, rowCache)
+				end)
 			end)
 		end)
 	end,

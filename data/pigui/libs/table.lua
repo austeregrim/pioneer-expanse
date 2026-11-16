@@ -61,6 +61,7 @@ function TableWidget.New(id, title, config)
             titleFont = config.titleFont or ui.fonts.orbiteer.xlarge,
             highlightColor = config.highlightColor or theme.colors.tableHighlight,
             selectionColor = config.selectionColor or theme.colors.tableSelection,
+            childFlags = config.childFlags or (config.borders and ui.ChildFlags { 'AlwaysUseWindowPadding', 'Borders' } or nil),
         },
         funcs = {
             initTable = config.initTable or defaultFuncs.initTable,
@@ -85,7 +86,7 @@ end
 
 function TableWidget:render()
     ui.withStyleVars({ItemSpacing = self.style.itemSpacing}, function()
-        ui.child("Table##" .. self.id, self.style.size, function()
+        ui.child("Table##" .. self.id, self.style.size, nil, self.style.childFlags, function()
             if self.scrollReset then
                 ui.setScrollHereY()
                 self.scrollReset = false

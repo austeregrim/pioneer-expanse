@@ -12,7 +12,7 @@ local icons = ui.theme.icons
 
 local l = Lang.GetResource("ui-core")
 
-local VERIFICATION_DURATION = 0.30
+local VERIFICATION_DURATION = 0.45
 
 local StationSig = {}
 StationSig.__index = StationSig
@@ -43,14 +43,20 @@ end
 function StationSig:reset(mode)
 	if mode then self.mode = mode end
 	self.startTime = ui.getTime()
-	local station = Game.player and Game.player:GetDockedWith()
+	local isShipTerminal = (self.id:find("^InfoView") ~= nil)
 	local seedStr
 	if self.mode == "encryption" then
 		local p = Game.player
 		local ship = p and p.shipName or "VESSEL"
 		local sys = Game.system and Game.system.name or "SECTOR"
+		local station = p and p:GetDockedWith()
 		seedStr = (station and station.label or "SYS") .. ":" .. ship .. ":" .. sys .. ":" .. tostring(self.id)
+	elseif isShipTerminal then
+		local p = Game.player
+		local ship = p and p.shipName or "SHIP"
+		seedStr = "SHIP_INTERNAL:" .. ship .. ":" .. tostring(self.id)
 	else
+		local station = Game.player and Game.player:GetDockedWith()
 		seedStr = (station and station.label or "STATION") .. ":" .. tostring(self.id)
 	end
 	self.keyFingerprint = computeKeyFingerprint(seedStr)
@@ -61,6 +67,7 @@ function StationSig:render(drawContentFn)
 	local frac = math.clamp((now - self.startTime) / VERIFICATION_DURATION, 0, 1)
 	local verified = (frac >= 1)
 
+	local isShipTerminal = (self.id:find("^InfoView") ~= nil)
 	local isEnc = (self.mode == "encryption")
 	local statusLabel, rightText, statusColor
 
@@ -69,6 +76,11 @@ function StationSig:render(drawContentFn)
 			or (l.COMM_ENCRYPTING or "ESTABLISHING QUANTUM-ENCRYPTED LINK...")
 		statusColor = verified and (colors.uiPrimaryLight or styleColors.success_300) or (colors.maneuver or colors.font)
 		rightText = "CIPHER " .. self.keyFingerprint .. "  ·  4096-bit AES-GCM / Post-Quantum Kyber-1024"
+	elseif isShipTerminal then
+		statusLabel = verified and "SHIP SYSTEM PUBKEY VERIFIED"
+			or "VERIFYING SHIP SYSTEM PUBKEY SIGNATURE..."
+		statusColor = verified and (styleColors.success_300 or colors.econMajorImport) or (colors.maneuver or colors.font)
+		rightText = "KEY " .. self.keyFingerprint .. "  ·  Post-quantum ECDSA-521 // LOCAL NODE"
 	else
 		statusLabel = verified and (l.SIG_VERIFIED or "STATION PUBKEY VERIFIED")
 			or (l.SIG_VERIFYING or "VERIFYING STATION PUBKEY SIGNATURE...")

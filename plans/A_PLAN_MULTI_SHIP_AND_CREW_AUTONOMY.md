@@ -46,7 +46,7 @@ Maintain a serialized `PlayerFleet` registry indexed by persistent `shipUid`:
 
 ### Phase A2: Hiring Captains, Crew Roles & Skill Progression
 
-#### Captain Assignment & Roles ([`05-crew.lua`](../data/pigui/modules/info-view/05-crew.lua), `data/libs/Character.lua`)
+#### Captain Assignment & Roles ([`06-crew.lua`](../data/pigui/modules/info-view/06-crew.lua), `data/libs/Character.lua`)
 * Allow any hired `Character` crew member to be designated **Captain** of a docked or active ship, enabling that ship to launch and operate autonomously without the player aboard.
 * Track 5 role-relevant skills (`1–5` stars or `0–100` XP) per `Character`:
   * **Piloting**: improves Supercruise acceleration/brake precision, interdiction evasion, and docking speed.
@@ -60,7 +60,7 @@ Maintain a serialized `PlayerFleet` registry indexed by persistent `shipUid`:
 
 ### Phase A3: Autonomous Fleet Orders (X4-Inspired Command Suite)
 
-#### Fleet Command View (`data/pigui/modules/info-view/07-fleet.lua`) + Map Context Actions
+#### Fleet Command View (`data/pigui/modules/info-view/05-fleet.lua`) + Map Context Actions
 Provide a unified **Fleet Command** tab in `InfoView` (plus right-click/target actions in `SystemView` and `SectorView`) to command any crewed ship in the fleet:
 
 1. **Follow / Wingman Escort (`FOLLOW`)**:
@@ -79,7 +79,7 @@ Provide a unified **Fleet Command** tab in `InfoView` (plus right-click/target a
 
 ### Phase A4: Autonomous Mission Delegation & Dual In-System / Out-of-System Simulation
 
-#### Mission Delegation (`MissionUtils` & [`04-missions.lua`](../data/pigui/modules/info-view/04-missions.lua))
+#### Mission Delegation (`MissionUtils` & [`02-missions.lua`](../data/pigui/modules/info-view/02-missions.lua))
 * Add **"Assign to Fleet Ship"** on eligible active contracts (`DeliverPackage`, `CargoRun`, `SearchRescue` supply/recovery, or `Combat` patrols) when a docked/idle crewed ship satisfies cargo capacity / jump range / weapon requirements.
 * Upon autonomous delivery/completion at the target station or waypoint, credit reward + reputation changes to the player and send a Comms report.
 
@@ -100,12 +100,12 @@ Provide a unified **Fleet Command** tab in `InfoView` (plus right-click/target a
 * **New Lua Modules & UI Views**:
   * `data/modules/PlayerFleet.lua` (fleet registry, serialization, IS/OOS sync, order state machine, mission delegation hooks)
   * `data/pigui/modules/station-view/13-hangar.lua` (Station Hangar / Ship Swap / Cargo & Module Transfer / Remote Ferry UI)
-  * `data/pigui/modules/info-view/07-fleet.lua` (Fleet Command roster, ship telemetry, autonomous orders, profit/event log)
+  * `data/pigui/modules/info-view/05-fleet.lua` (Fleet Command roster, ship telemetry, autonomous orders, profit/event log)
 * **Updates to Existing Files**:
   * `data/libs/Ship.lua` & `data/libs/Character.lua` (captain skill attributes, fleet crew transfer helpers)
   * `data/pigui/modules/station-view/04-shipMarket.lua` (Buy & Store vs Trade-In flow)
-  * `data/pigui/modules/info-view/05-crew.lua` (assign crew to specific fleet ships / Captain promotion)
-  * `data/pigui/modules/info-view/04-missions.lua` (delegate eligible contracts to a crewed fleet vessel)
+  * `data/pigui/modules/info-view/06-crew.lua` (assign crew to specific fleet ships / Captain promotion)
+  * `data/pigui/modules/info-view/02-missions.lua` (delegate eligible contracts to a crewed fleet vessel)
   * Optional small C++ helpers in `src/lua/LuaSpace.cpp` / `src/Space.cpp` for spawning/despawning persistent fleet vessels cleanly on dock/system entry without leaving orphan hulls.
 
 ---

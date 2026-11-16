@@ -600,9 +600,12 @@ function EquipmentWidget:drawShipSpinner()
 	end)
 end
 
+local commsChildFlags = ui.ChildFlags { 'AlwaysUseWindowPadding', 'Borders' }
+
 function EquipmentWidget:render()
 	ui.withFont(pionillium.body, function()
-		ui.child("ShipInfo", Vector2(ui.getContentRegion().x * 1 / 3, 0), noSavedSettings, function()
+		local leftWidth = math.floor(ui.getContentRegion().x * 0.45)
+		ui.child("ShipInfo", Vector2(leftWidth, 0), noSavedSettings, commsChildFlags, function()
 			if #self.tabs > 1 then
 				self.activeTab = ui.tabBarFont("##tabs", self.tabs, pionillium.heading, self)
 			else
@@ -612,7 +615,7 @@ function EquipmentWidget:render()
 
 		ui.sameLine(0, lineSpacing.x * 2)
 
-		ui.child("##container", function()
+		ui.child("##container", Vector2(0, 0), noSavedSettings, commsChildFlags, function()
 			if self.tabs[self.activeTab] == equipmentInfoTab and self.station and self.selectionActive then
 
 				if self.selectionActive then

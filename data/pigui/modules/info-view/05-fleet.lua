@@ -18,7 +18,7 @@ local pionillium = ui.fonts.pionillium
 local orbiteer = ui.fonts.orbiteer
 local Vector2 = _G.Vector2
 
-local childFlags = ui.ChildFlags { 'Borders' }
+local childFlags = ui.ChildFlags { 'AlwaysUseWindowPadding', 'Borders' }
 local spacing = ui.rescaleUI(Vector2(10, 8), Vector2(1920, 1080))
 local rosterWidth = ui.rescaleUI(460, Vector2(1920, 1080))
 
@@ -88,6 +88,12 @@ local function drawFleetHeaderBar(ships)
 	ui.child("##FleetCommandTopBar", Vector2(-1, ui.rescaleUI(66, Vector2(1920, 1080))), nil, childFlags, function()
 		ui.withFont(orbiteer.heading, function()
 			ui.textColored(colors.uiPrimaryLight, "FLEET COMMAND & AUTONOMOUS OPERATIONS")
+			if statusMsg then
+				ui.sameLine(0, ui.rescaleUI(24, Vector2(1920, 1080)))
+				ui.withFont(pionillium.body, function()
+					ui.textColored(colors.econProfit, "• " .. statusMsg)
+				end)
+			end
 		end)
 		ui.withFont(pionillium.body, function()
 			ui.text(string.format("Owned Fleet Ships: %d   |   Active Orders: %d   |   Cumulative Fleet Net Profit: ", #ships, activeCount))
@@ -99,8 +105,8 @@ local function drawFleetHeaderBar(ships)
 	end)
 end
 
-local function drawFleetRoster(ships)
-	ui.child("##FleetRosterPane", Vector2(rosterWidth, -1), nil, childFlags, function()
+local function drawFleetRoster(ships, customWidth)
+	ui.child("##FleetRosterPane", Vector2(customWidth or rosterWidth, -1), nil, childFlags, function()
 		ui.withFont(orbiteer.heading, function()
 			ui.textColored(colors.uiPrimaryLight, "Commissioned Vessels")
 		end)
@@ -419,12 +425,10 @@ InfoView:registerView({
 
 		ui.withFont(pionillium.body, function()
 			drawFleetHeaderBar(ships)
-			if statusMsg then
-				ui.textColored(colors.econProfit, statusMsg)
-			end
 			ui.spacing()
-
-			drawFleetRoster(ships)
+			local region = ui.getContentRegion()
+			local rWidth = math.floor(region.x * 0.45)
+			drawFleetRoster(ships, rWidth)
 			ui.sameLine(0, spacing.x)
 			local selectedEntry = selectedUid and PlayerFleet.GetShipByUid(selectedUid) or nil
 			drawCommandDeck(selectedEntry)
