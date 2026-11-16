@@ -73,8 +73,16 @@ void LuaObject<SectorView>::RegisterClass()
 		.AddFunction("AutoRoute", [](lua_State *l, SectorView *sv) {
 			SystemPath current_path = LuaPull<SystemPath>(l, 2, sv->GetCurrent());
 			SystemPath target_path = LuaPull<SystemPath>(l, 3, sv->GetSelected());
+			float maxJumpDist = 0.0f;
+			if (lua_gettop(l) >= 4 && !lua_isnil(l, 4)) {
+				maxJumpDist = static_cast<float>(lua_tonumber(l, 4));
+			}
+			bool findFuelStar = false;
+			if (lua_gettop(l) >= 5 && !lua_isnil(l, 5)) {
+				findFuelStar = lua_toboolean(l, 5);
+			}
 			std::vector<SystemPath> route;
-			const std::string result = sv->AutoRoute(current_path, target_path, route);
+			const std::string result = sv->AutoRoute(current_path, target_path, route, maxJumpDist, findFuelStar);
 			if (result == "OKAY") {
 				sv->ClearRoute();
 				for (auto it = route.begin(); it != route.end(); it++) {

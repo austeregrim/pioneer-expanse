@@ -5,6 +5,7 @@ local Game = require 'Game'
 local Event = require 'Event'
 local Format = require 'Format'
 local SystemPath = require 'SystemPath'
+local ShipDef = require 'ShipDef'
 local hyperJumpPlanner = require 'pigui.modules.hyperjump-planner'
 local systemEconView = require 'pigui.modules.system-econ-view'.New()
 local PlayerState    = require 'PlayerState'
@@ -696,7 +697,7 @@ local infoView = {
 				ui.sameLine(ui.getContentRegion().x - size, 0.0)
 
 				if ui.button(lui.AUTO_ROUTE, Vector2(0, 0), nil, nil, padding) then
-					hyperJumpPlanner.autoRoute(current, path)
+					hyperJumpPlanner.autoRoute(current, path, autoRouteMaxJumpDist, autoRouteFindFuelStar)
 				end
 
 			end
@@ -814,6 +815,9 @@ local econView = {
 	end
 }
 
+local autoRouteMaxJumpDist = nil
+local autoRouteFindFuelStar = false
+
 local function drawRouteList(route)
 	if ui.beginTable("##RouteList", 4) then
 		ui.tableSetupColumn("Index", "WidthFixed")
@@ -842,11 +846,31 @@ local function drawRouteList(route)
 			ui.text(i)
 			ui.tableNextColumn()
 
-			ui.withStyleColors({ Text = jump.color }, function()
-				ui.textAligned(ui.get_icon_glyph(jump.reachable and icons.map_checkmark or icons.fuel), 0.0)
-			end)
+			local driveMax = self.driveMaxFuel or 0.0
+			local tankMax = self.tankMaxFuel or 0.0
+			local totalMax = self.totalMaxCapacity or 0.0
 
-			ui.setItemTooltip(jump.reachable and lui.JUMP_REACHABLE or lui.INSUFFICIENT_FUEL)
+			if jump.status == "OK" then
+				ui.withStyleColors({ Text = colors.alertGreen or colors.font }, function()
+					ui.textAligned(ui.get_icon_glyph(icons.map_checkmark), 0.0)
+				end)
+				ui.setItemTooltip(string.format("Jump OK: %s t fuel\nDrive Cache remaining: %.1f / %.1f t\nMain Tank remaining: %.1f / %.1f t",
+					ui.Format.Number(jump.fuel, 1), jump.driveFuelRemaining or 0, driveMax, jump.tankFuelRemaining or 0, tankMax))
+			elseif jump.status == "ENGINE_REFUEL" then
+				-- Orange refuel icon: Hyperdrive reservoir requires internal transfer from main tank
+				ui.withStyleColors({ Text = Color(255, 160, 40, 255) }, function()
+					ui.textAligned(ui.get_icon_glyph(icons.fuel), 0.0)
+				end)
+				ui.setItemTooltip(string.format("ENGINE REFUEL NEEDED (%s t)\nHyperdrive cache depleted; transfers from main tank.\nMain Tank remaining: %.1f / %.1f t\n(Tank Max: %.1f t)",
+					ui.Format.Number(jump.fuel, 1), jump.tankFuelRemaining or 0, tankMax, tankMax))
+			else
+				-- Red refuel icon: Total onboard fuel tank capacity exhausted (needs scoopable star or station)
+				ui.withStyleColors({ Text = colors.alertRed }, function()
+					ui.textAligned(ui.get_icon_glyph(icons.fuel), 0.0)
+				end)
+				ui.setItemTooltip(string.format("OUT OF FUEL (Needs %.1f t)\nTotal onboard fuel (Tank Max: %.1f t) fully depleted!\nRefuel at star/station required.",
+					jump.fuel, totalMax))
+			end
 
 			ui.sameLine()
 
@@ -872,15 +896,22 @@ local routeView = {
 	title = lui.ROUTE_INFO,
 	active = true,
 
-	currentFuel = 0.0,
+	driveFuel = 0.0,
+	driveMaxFuel = 0.0,
+	tankFuel = 0.0,
+	tankMaxFuel = 0.0,
+	totalTankFuel = 0.0,
+	totalMaxCapacity = 0.0,
 	refresh = function(self)
 		local engine = Game.player:GetInstalledHyperdrive()
-		if not engine then
-			self.currentFuel = 0.0
-		else
-			self.currentFuel = engine.storedFuel +
-				Game.player:GetComponent('CargoManager'):CountCommodity(engine.fuel)
-		end
+		local shipDef = ShipDef and ShipDef[Game.player.shipId]
+		local fuelTankSize = shipDef and shipDef.fuelTankMass or (Game.player:GetShipType() and Game.player:GetShipType().fuelTankMass or 0)
+		self.driveFuel = engine and engine.storedFuel or 0.0
+		self.driveMaxFuel = engine and engine:GetMaxFuel() or 0.0
+		self.tankFuel = Game.player.fuelMassLeft or (fuelTankSize * (Game.player.fuel or 0) / 100)
+		self.tankMaxFuel = fuelTankSize or 0.0
+		self.totalTankFuel = self.driveFuel + self.tankFuel
+		self.totalMaxCapacity = self.driveMaxFuel + self.tankMaxFuel
 	end,
 
 	drawBody = function(self)
@@ -922,7 +953,10 @@ local routeView = {
 			ui.text("[")
 
 			textIcon(icons.hull, lui.CURRENT_FUEL)
-			ui.text(ui.Format.Mass(self.currentFuel * 1000, 1))
+			ui.text(string.format("%.1f / %.1f t (Drive %.1f/%.1ft | Tank %.1f/%.1ft)",
+				self.totalTankFuel, self.totalMaxCapacity,
+				self.driveFuel, self.driveMaxFuel,
+				self.tankFuel, self.tankMaxFuel))
 
 			ui.text("]")
 		end)
@@ -935,6 +969,36 @@ local routeView = {
 		textIcon(icons.route_dist, lui.TOTAL_DISTANCE)
 		ui.text(ui.Format.Number(distance, 2) .. " " .. lc.UNIT_LY)
 
+		end)
+
+		ui.spacing()
+
+		-- Auto-Route Settings Section
+		ui.separatorText("Auto-Route Settings")
+		local engine = Game.player:GetInstalledHyperdrive()
+		local maxRange = engine and engine:GetMaximumRange(Game.player) or 30.0
+		if not autoRouteMaxJumpDist or autoRouteMaxJumpDist > maxRange then
+			autoRouteMaxJumpDist = maxRange
+		end
+
+		ui.withFont(pionillium.details, function()
+			ui.text(string.format("Max Jump Distance: %.1f ly", autoRouteMaxJumpDist))
+			local newMaxJump, changedSlider = ui.sliderFloat("##maxJumpSlider", autoRouteMaxJumpDist, 1.0, maxRange, "%.1f ly")
+			if changedSlider then
+				autoRouteMaxJumpDist = newMaxJump
+			end
+
+			local changedFuelStar, newFuelStar = ui.checkbox("Find Fuel Star (Scoopable)##findFuelStarChk", autoRouteFindFuelStar)
+			if changedFuelStar then
+				autoRouteFindFuelStar = newFuelStar
+			end
+
+			if #route > 0 and current and route[#route] then
+				ui.spacing()
+				if ui.button("Recalculate Route##recalcRouteBtn", Vector2(ui.getContentRegion().x, 24)) then
+					hyperJumpPlanner.autoRoute(current, route[#route].path, autoRouteMaxJumpDist, autoRouteFindFuelStar)
+				end
+			end
 		end)
 
 		ui.spacing()

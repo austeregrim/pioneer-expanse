@@ -10,6 +10,7 @@ local Format      = require 'Format'
 local Rand        = require 'Rand'
 local Character   = require 'Character'
 local PiGuiFace   = require 'pigui.libs.face'
+local SystemPath  = require 'SystemPath'
 
 local colors = ui.theme.colors
 local icons = ui.theme.icons
@@ -54,6 +55,49 @@ local function getCategoryColor(cat)
 		return colors.white
 	end
 	return colors.fontDim
+end
+
+local function formatSystemWithDistance(art)
+	if not art then return "Unknown" end
+	local sysName = art.system or "Core Systems"
+	local dist = nil
+
+	if art.systemPath and Game.system then
+		local ok, d = pcall(function() return art.systemPath:DistanceTo(Game.system) end)
+		if ok and type(d) == "number" then dist = d end
+	end
+
+	if dist == nil and Game.system and sysName then
+		if sysName == Game.system.name then
+			dist = 0.0
+		else
+			local coreCoordinates = {
+				["Sol"] = {0, 0, 0, 0},
+				["Barnard's Star"] = {-1, 0, 0, 0},
+				["Tau Ceti"] = {0, -2, -1, 0},
+				["Wolf 359"] = {0, 0, 0, 0},
+				["Ross 128"] = {0, 1, 0, 0},
+				["Lalande 21185"] = {0, 0, 0, 0},
+				["Epsilon Eridani"] = {1, -1, -1, 0},
+				["Vega"] = {-3, -1, 1, 0},
+				["Sirius"] = {1, 0, -1, 0},
+			}
+			local coords = coreCoordinates[sysName]
+			if coords then
+				local ok, path = pcall(SystemPath.New, coords[1], coords[2], coords[3], coords[4])
+				if ok and path then
+					local ok2, d = pcall(function() return path:DistanceTo(Game.system) end)
+					if ok2 and type(d) == "number" then dist = d end
+				end
+			end
+		end
+	end
+
+	if dist ~= nil then
+		return string.format("%s (%.1fly)", sysName, dist)
+	else
+		return sysName
+	end
 end
 
 local function updateFace(art)
@@ -111,7 +155,7 @@ local newsTable = Table.New("NewsDispatchTable", false, {
 				ui.sameLine()
 				ui.icon(icons.distance, iconSize, textColor)
 				ui.sameLine()
-				ui.text(art.system)
+				ui.text(formatSystemWithDistance(art))
 
 				local catColor = getCategoryColor(art.category)
 				local catText = "[" .. art.category .. "]"
@@ -330,7 +374,7 @@ local function drawInterCastNews()
 			ui.child("NewsArticleText", Vector2(textWidth, 0), function()
 				-- Metadata line
 				ui.withFont(pionillium.details, function()
-					ui.textColored(colors.fontDim, string.format("TRANSMISSION DATE: %s   |   ORIGIN: %s", activeArticle.date, activeArticle.system))
+					ui.textColored(colors.fontDim, string.format("TRANSMISSION DATE: %s   |   ORIGIN: %s", activeArticle.date, formatSystemWithDistance(activeArticle)))
 					ui.textColored(colors.fontDim, string.format("REPORTING BUREAU: %s", activeArticle.bureau))
 				end)
 

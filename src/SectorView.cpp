@@ -12,6 +12,7 @@
 #include "MathUtil.h"
 #include "Pi.h"
 #include "Player.h"
+#include "ShipType.h"
 #include "RefCounted.h"
 #include "SectorMap.h"
 #include "SectorMapContext.h"
@@ -388,7 +389,7 @@ const std::vector<SystemPath> &SectorView::GetRoute() const
 	return m_route;
 }
 
-const std::string SectorView::AutoRoute(const SystemPath &start, const SystemPath &target, std::vector<SystemPath> &outRoute) const
+const std::string SectorView::AutoRoute(const SystemPath &start, const SystemPath &target, std::vector<SystemPath> &outRoute, float maxJumpDist, bool findFuelStar) const
 {
 	const RefCountedPtr<const Sector> start_sec = m_game.GetGalaxy()->GetSector(start);
 	const RefCountedPtr<const Sector> target_sec = m_game.GetGalaxy()->GetSector(target);
@@ -399,8 +400,17 @@ const std::string SectorView::AutoRoute(const SystemPath &start, const SystemPat
 	// Get the player's hyperdrive from Lua, later used to calculate the duration between systems
 	const ScopedTable hyperdrive = ScopedTable(try_hdrive);
 	// Cache max range so it doesn't get recalculated every time we call GetDuration
-	const float max_range = hyperdrive.CallMethod<float>("GetMaximumRange", Pi::player);
+	const float drive_max_range = hyperdrive.CallMethod<float>("GetMaximumRange", Pi::player);
+	const float max_range = (maxJumpDist > 0.0f && maxJumpDist < drive_max_range) ? maxJumpDist : drive_max_range;
 	const float max_range_sqr = max_range * max_range;
+
+	float drive_fuel = 0.0f;
+	hyperdrive.Get("storedFuel", drive_fuel);
+	const float drive_max_fuel = hyperdrive.CallMethod<float>("GetMaxFuel");
+	const float tank_fuel = (Pi::player && Pi::player->GetShipType()) ? float(Pi::player->GetShipType()->fuelTankMass * Pi::player->GetFuel()) : 0.0f;
+	const float tank_max_fuel = (Pi::player && Pi::player->GetShipType()) ? float(Pi::player->GetShipType()->fuelTankMass) : 0.0f;
+	const float initial_total_fuel = drive_fuel + tank_fuel;
+	const float max_total_fuel_capacity = drive_max_fuel + tank_max_fuel;
 
 	// use the square of the distance to avoid doing a sqrt for each sector
 	const float distSqr = Sector::DistanceBetweenSqr(start_sec, start.systemIndex, target_sec, target.systemIndex) * 1.10;
@@ -463,16 +473,19 @@ const std::string SectorView::AutoRoute(const SystemPath &start, const SystemPat
 	Output("SectorView::AutoRoute, nodes to search = %lu, earlied out sector distance from line: %lu times.\n", nodes.size(), secLineToFar);
 
 	// Optimize for fewest jumps first (so longer-range drives actually use long jumps),
-	// breaking ties by shortest total jump duration.
+	// breaking ties by shortest total jump duration, and favoring fuel reserves when tracking fuel stars.
 	struct RouteCost {
 		uint32_t jumps = UINT32_MAX;
 		float duration = INFINITY;
+		float fuel_remaining = 0.0f;
 
 		bool operator<(const RouteCost &other) const
 		{
 			if (jumps != other.jumps)
 				return jumps < other.jumps;
-			return duration < other.duration;
+			if (duration != other.duration)
+				return duration < other.duration;
+			return fuel_remaining > other.fuel_remaining;
 		}
 	};
 
@@ -491,8 +504,8 @@ const std::string SectorView::AutoRoute(const SystemPath &start, const SystemPat
 		unvisited.insert(i);
 	}
 
-	// cost to the start is 0 jumps, 0 duration
-	path_cost[0] = RouteCost{ 0, 0.f };
+	// cost to the start is 0 jumps, 0 duration, initial fuel
+	path_cost[0] = RouteCost{ 0, 0.f, initial_total_fuel };
 
 	size_t totalSkipped = 0u;
 	while (!unvisited.empty()) {
@@ -539,7 +552,31 @@ const std::string SectorView::AutoRoute(const SystemPath &start, const SystemPat
 			}
 
 			const float v_duration = hyperdrive.CallMethod<float>("GetDuration", Pi::player, v_dist_ly, max_range);
-			const RouteCost candidate{ path_cost[closest_i].jumps + 1, path_cost[closest_i].duration + v_duration };
+			const float v_fuel = hyperdrive.CallMethod<float>("GetFuelUse", Pi::player, v_dist_ly);
+
+			if (findFuelStar) {
+				if (path_cost[closest_i].fuel_remaining < v_fuel) {
+					++totalSkipped;
+					continue;
+				}
+			}
+
+			float next_fuel = path_cost[closest_i].fuel_remaining - v_fuel;
+			if (findFuelStar) {
+				bool isFuelStar = false;
+				for (unsigned sIdx = 0; sIdx < v_sec->m_systems[v.systemIndex].GetNumStars(); ++sIdx) {
+					auto st = v_sec->m_systems[v.systemIndex].GetStarType(sIdx);
+					if (st >= SystemBody::TYPE_STAR_M && st <= SystemBody::TYPE_STAR_O_HYPER_GIANT) {
+						isFuelStar = true;
+						break;
+					}
+				}
+				if (isFuelStar) {
+					next_fuel = max_total_fuel_capacity;
+				}
+			}
+
+			const RouteCost candidate{ path_cost[closest_i].jumps + 1, path_cost[closest_i].duration + v_duration, next_fuel };
 
 			if (candidate < path_cost[it]) {
 				path_cost[it] = candidate;
@@ -641,6 +678,14 @@ void SectorView::OnSwitchTo()
 	InputBindings.manager->AddInputFrame(&InputBindings);
 	InputBindings.manager->AddInputFrame(&m_map->InputBindings);
 	Update();
+
+	if (!m_route.empty()) {
+		SwitchToPath(m_route.back());
+	} else if (m_hyperspaceTarget.IsSystemPath() && !m_hyperspaceTarget.IsSameSystem(m_current)) {
+		SwitchToPath(m_hyperspaceTarget);
+	} else if (m_current.IsSystemPath()) {
+		SwitchToPath(m_current);
+	}
 }
 
 void SectorView::OnSwitchFrom()
@@ -677,7 +722,13 @@ void SectorView::Update()
 
 void SectorView::ResetView()
 {
-	SwitchToPath(m_current);
+	if (!m_route.empty()) {
+		SwitchToPath(m_route.back());
+	} else if (m_hyperspaceTarget.IsSystemPath() && !m_hyperspaceTarget.IsSameSystem(m_current)) {
+		SwitchToPath(m_hyperspaceTarget);
+	} else {
+		SwitchToPath(m_current);
+	}
 	m_map->ResetView();
 }
 

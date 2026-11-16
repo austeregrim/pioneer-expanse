@@ -117,6 +117,7 @@ function CommodityMarketWidget.New(id, title, config)
 				ui.addCursorPos(Vector2(ui.getContentRegion().x - ui.getTextLineHeightWithSpacing(), 0))
 
 				ui.icon(cls[1], Vector2(ui.getTextLineHeight()), cls[2])
+				ui.setItemTooltip(string.format("%s (%+.1f%% avg)", cls[3], pricemod))
 			end
 
 			ui.nextColumn()
@@ -511,8 +512,44 @@ function CommodityMarketWidget:Refresh()
 	self.tradeComputer = Game.player["trade_computer_cap"] or 0
 end
 
+function CommodityMarketWidget:DrawMarketKey()
+	ui.withFont(pionillium.details, function()
+		local iconSize = Vector2(ui.getTextLineHeight())
+		ui.textColored(ui.theme.colors.fontDim, "MARKET DEMAND KEY:")
+		ui.sameLine(0, 10)
+
+		ui.icon(ui.theme.icons.econ_major_import, iconSize, ui.theme.colors.econMajorImport)
+		ui.sameLine(0, 4)
+		ui.textColored(ui.theme.colors.econMajorImport, "Major Import (High Demand)")
+		ui.setItemTooltip("High Demand: Station critically needs this good; pays premium buy price (+10% or more)")
+		ui.sameLine(0, 14)
+
+		ui.icon(ui.theme.icons.econ_minor_import, iconSize, ui.theme.colors.econMinorImport)
+		ui.sameLine(0, 4)
+		ui.textColored(ui.theme.colors.econMinorImport, "Minor Import (In Demand)")
+		ui.setItemTooltip("In Demand: Station consumes this good; above-average buy price (+4% to +10%)")
+		ui.sameLine(0, 14)
+
+		ui.icon(ui.theme.icons.econ_minor_export, iconSize, ui.theme.colors.econMinorExport)
+		ui.sameLine(0, 4)
+		ui.textColored(ui.theme.colors.econMinorExport, "Minor Export (Surplus)")
+		ui.setItemTooltip("Surplus / Production: Station produces this good in volume; below-average sale price (-4% to -10%)")
+		ui.sameLine(0, 14)
+
+		ui.icon(ui.theme.icons.econ_major_export, iconSize, ui.theme.colors.econMajorExport)
+		ui.sameLine(0, 4)
+		ui.textColored(ui.theme.colors.econMajorExport, "Major Export (High Production)")
+		ui.setItemTooltip("High Production: Station primary export output; discount buy price for haulers (-10% or lower)")
+	end)
+end
+
 function CommodityMarketWidget:Render(size)
-	self:SetSize(size or ui.getContentRegion())
+	local fullSize = size or ui.getContentRegion()
+	self:DrawMarketKey()
+	ui.spacing()
+
+	local remainingHeight = ui.getContentRegion().y
+	self:SetSize(Vector2(fullSize.x, remainingHeight))
 
 	ui.withStyleVars({ItemSpacing = self.style.itemSpacing}, function()
 		ui.withFont(pionillium.heading, function()

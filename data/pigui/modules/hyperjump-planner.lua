@@ -3,6 +3,7 @@
 
 local Game = require 'Game'
 local Commodities = require 'Commodities'
+local ShipDef = require 'ShipDef'
 
 local Lang = require 'Lang'
 local lc = Lang.GetResource("core")
@@ -46,16 +47,33 @@ local function buildJumpRouteList()
 	local drive = player:GetInstalledHyperdrive()
 	if not drive then return end
 
-	local cur_fuel = drive.storedFuel
+	local shipDef = ShipDef[player.shipId]
+	local fuelTankSize = shipDef and shipDef.fuelTankMass or (player:GetShipType() and player:GetShipType().fuelTankMass or 0)
+	local cur_tank_fuel = player.fuelMassLeft or (fuelTankSize * (player.fuel or 0) / 100)
+	local cur_drive_fuel = drive.storedFuel
 
 	for jumpIndex, jump in pairs(sectorView:GetRoute()) do
 		local _, distance, fuel, duration = player:GetHyperspaceDetails(start, jump)
 		local color = colors.font
-		local remaining_fuel = cur_fuel - fuel
+		local status = "OK"
 
-		if remaining_fuel == 0 then
+		if cur_drive_fuel >= fuel then
+			-- Can be completed directly from hyperdrive fuel reservoir
+			cur_drive_fuel = cur_drive_fuel - fuel
+			status = "OK"
+			color = colors.font
+		elseif (cur_drive_fuel + cur_tank_fuel) >= fuel then
+			-- Hyperdrive cache insufficient, but main fuel tank has sufficient fuel to transfer
+			local needed_from_tank = fuel - cur_drive_fuel
+			cur_tank_fuel = cur_tank_fuel - needed_from_tank
+			cur_drive_fuel = 0.0
+			status = "ENGINE_REFUEL"
 			color = colors.alertYellow
-		elseif remaining_fuel < 0 then
+		else
+			-- Total onboard tank storage (drive + main tanks) is depleted! Needs star/station refuel
+			cur_drive_fuel = 0.0
+			cur_tank_fuel = 0.0
+			status = "EMPTY"
 			color = colors.alertRed
 		end
 
@@ -65,10 +83,15 @@ local function buildJumpRouteList()
 			distance = distance,
 			duration = duration,
 			fuel = fuel,
-			reachable = remaining_fuel >= 0
+			status = status,
+			reachable = (status ~= "EMPTY"),
+			needsEngineRefuel = (status == "ENGINE_REFUEL"),
+			totalDepleted = (status == "EMPTY"),
+			driveFuelRemaining = cur_drive_fuel,
+			tankFuelRemaining = cur_tank_fuel,
+			totalFuelRemaining = cur_drive_fuel + cur_tank_fuel,
 		}
 
-		cur_fuel = cur_fuel - fuel
 		start = jump
 	end -- for
 end
@@ -139,8 +162,8 @@ function hyperJumpPlanner.moveItemUp(index)
 	updateHyperspaceTarget()
 end
 
-function hyperJumpPlanner.autoRoute(from, to)
-	local result = sectorView:AutoRoute(from, to)
+function hyperJumpPlanner.autoRoute(from, to, maxJumpDist, findFuelStar)
+	local result = sectorView:AutoRoute(from, to, maxJumpDist or 0, findFuelStar or false)
 	if result == "NO_DRIVE" then
 		mb.OK(lui.NO_DRIVE)
 	elseif result == "NO_VALID_ROUTE" then

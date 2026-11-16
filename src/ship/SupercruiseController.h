@@ -129,6 +129,8 @@ public:
 	// FSD Interdiction
 	int GetInterdictorLevel() const;
 	bool HasFSDInterdictor() const { return GetInterdictorLevel() > 0; }
+	bool HasInterdictionNullifier() const;
+	float GetNullifierCooldown() const { return m_nullifierCooldown; }
 	bool CanInterdict(const Ship *target, std::string *outReason = nullptr) const;
 	bool StartInterdiction(Ship *target);
 	bool IsInterdicting() const { return m_interdictRole == INTERDICT_ATTACKER; }
@@ -201,6 +203,7 @@ private:
 
 	std::string m_statusMessage;
 	float m_statusMessageTimer = 0.0f;
+	float m_nullifierCooldown = 0.0f;
 
 	bool m_fuelScoopActive = false;
 	bool m_fuelScoopUnscoopable = false;

@@ -985,9 +985,12 @@ AICmdFlyTo::AICmdFlyTo(DynamicBody *dBody, Body *target) :
 	m_is_flyto = true;
 	m_suicideRecovery = false;
 
-	if (!target->IsType(ObjectType::TERRAINBODY))
+	if (!target->IsType(ObjectType::TERRAINBODY)) {
 		m_dist = VICINITY_MIN;
-	else
+		if (target->IsType(ObjectType::SPACESTATION) && !static_cast<const SpaceStation *>(target)->IsGroundStation()) {
+			m_dist = std::max(m_dist, target->GetClipRadius() * 1.5 + 600.0);
+		}
+	} else
 		m_dist = VICINITY_MUL * MaxEffectRad(target, m_prop);
 
 	const bool useSurfaceVicinity =
@@ -1239,6 +1242,36 @@ bool AICmdFlyTo::TimeStepUpdate()
 	ParentSafetyAdjust(m_dBody, targframeId, targpos, targvel);
 	vector3d relpos = targpos - m_dBody->GetPosition();
 	double targdist = relpos.Length();
+
+	// Check space station clearance if flying near an orbital space station
+	const SpaceStation *nearStation = nullptr;
+	if (m_target && m_target->IsType(ObjectType::SPACESTATION)) {
+		nearStation = static_cast<const SpaceStation *>(m_target);
+	} else {
+		Frame *curFrame = Frame::GetFrame(m_dBody->GetFrame());
+		if (curFrame && curFrame->GetBody() && curFrame->GetBody()->IsType(ObjectType::SPACESTATION)) {
+			nearStation = static_cast<const SpaceStation *>(curFrame->GetBody());
+		}
+	}
+	if (nearStation && !nearStation->IsGroundStation()) {
+		const vector3d stPos = nearStation->GetPositionRelTo(m_dBody->GetFrame());
+		const vector3d shipPos = m_dBody->GetPosition();
+		const vector3d toDest = targpos - shipPos;
+		const vector3d toStation = stPos - shipPos;
+		const double stRad = nearStation->GetClipRadius() * 1.45 + 350.0;
+		const double destDist = toDest.Length();
+		if (destDist > 1.0) {
+			const double t = Clamp(toStation.Dot(toDest) / (destDist * destDist), 0.0, 1.0);
+			const vector3d closestPtRel = (shipPos + t * toDest) - stPos;
+			if (closestPtRel.Length() < stRad) {
+				// Path intersects station clearance volume; deflect trajectory around station perimeter
+				vector3d avoidDir = (closestPtRel.LengthSqr() > 1.0) ? closestPtRel.NormalizedSafe() : (shipPos - stPos).NormalizedSafe();
+				targpos = stPos + avoidDir * (stRad + 400.0);
+				relpos = targpos - shipPos;
+				targdist = relpos.Length();
+			}
+		}
+	}
 
 	Frame *dFrame = Frame::GetFrame(m_dBody->GetFrame());
 	Body* planetNear = dFrame ? dFrame->GetBody() : nullptr;
@@ -1615,6 +1648,41 @@ bool AICmdDock::TimeStepUpdate()
 	}
 
 	if (m_state == eDockFlyToStart) { // fly to first docking waypoint
+		// Check if line between ship and m_dockpos intersects orbital station clearance volume
+		if (!m_target->IsGroundStation()) {
+			const vector3d stPos = m_target->GetPosition();
+			const vector3d shipPos = ship->GetPositionRelTo(m_target->GetFrame());
+			const vector3d shipRel = shipPos - stPos;
+			const vector3d dockRel = m_dockpos - stPos;
+			const double clearanceRad = m_target->GetClipRadius() * 1.45 + 350.0;
+			const vector3d segD = dockRel - shipRel;
+			const double segLen = segD.Length();
+
+			if (segLen > 10.0) {
+				const double t = Clamp(-shipRel.Dot(segD) / (segLen * segLen), 0.0, 1.0);
+				const vector3d closestPt = shipRel + t * segD;
+				if (closestPt.Length() < clearanceRad) {
+					// Direct line of sight is obstructed by the station hull;
+					// compute tangential perimeter transit waypoint to route around station
+					vector3d norm = shipRel.Cross(dockRel);
+					if (norm.LengthSqr() < 1e-4) {
+						norm = m_target->GetOrient().VectorY().Cross(shipRel);
+						if (norm.LengthSqr() < 1e-4)
+							norm = m_target->GetOrient().VectorZ().Cross(shipRel);
+					}
+					norm = norm.NormalizedSafe();
+					vector3d midDir = (shipRel.NormalizedSafe() + dockRel.NormalizedSafe()).NormalizedSafe();
+					if (midDir.LengthSqr() < 0.1)
+						midDir = norm.Cross(shipRel).NormalizedSafe();
+
+					const vector3d transitPos = stPos + midDir * (clearanceRad + 400.0);
+					m_child.reset(new AICmdFlyTo(m_dBody, m_target->GetFrame(), transitPos, 50.0, false));
+					ProcessChild();
+					return false;
+				}
+			}
+		}
+
 		m_child.reset(new AICmdFlyTo(m_dBody, m_target->GetFrame(), m_dockpos, 0.0, false));
 		ProcessChild();
 		return false;

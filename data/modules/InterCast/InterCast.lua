@@ -6,6 +6,8 @@ local Game       = require 'Game'
 local Format     = require 'Format'
 local Serializer = require 'Serializer'
 
+local SystemPath = require 'SystemPath'
+
 local InterCast = {}
 
 ---@class InterCastArticle
@@ -13,6 +15,7 @@ local InterCast = {}
 ---@field category "FRONTLINE"|"HUMANITARIAN"|"MARKET"|"POLITICS"
 ---@field headline string
 ---@field system string
+---@field systemPath any
 ---@field date string
 ---@field bureau string
 ---@field summary string
@@ -28,6 +31,8 @@ local STORY_TEMPLATES = {
 	FRONTLINE = {
 		{
 			headline = "SOL ALLIANCE NAVAL CONTINGENT MOBILIZES NEAR VEGA SECTOR",
+			system = "Vega",
+			systemPath = SystemPath.New(-3, -1, 1, 0),
 			bureau = "InterCast Sol Core Bureau",
 			summary = "Alliance naval commanders confirmed high-readiness deployment along the border following reported radar anomalies.",
 			body = "In an emergency communique issued from Alliance High Command at Earth, naval forces have mobilized battlegroups to secure perimeter transit lanes bordering Independent space. Civilians and commercial freighters traversing regional hyperlanes are advised to submit flight logs to military checkpoints upon arrival. Border patrols have reported sporadic skirmishes with unidentified strike wings.",
@@ -35,6 +40,8 @@ local STORY_TEMPLATES = {
 		},
 		{
 			headline = "FEDERATION FORCES IMPOSE NAVAL BLOCKADE ON TAU CETI TRANSIT CORRIDOR",
+			system = "Tau Ceti",
+			systemPath = SystemPath.New(0, -2, -1, 0),
 			bureau = "InterCast Federation Bureau",
 			summary = "Federal customs and defense gunships have restricted orbital starport access citing contraband weapon shipments.",
 			body = "Federal authorities have established an orbital exclusion zone around major starports in the Tau Ceti system. Commercial transports carrying military ordinance or unregistered commodities are subject to interdiction and impoundment. Independent merchant syndicates have condemned the blockade as an economic strangulation of free trade.",
@@ -42,6 +49,8 @@ local STORY_TEMPLATES = {
 		},
 		{
 			headline = "CEASEFIRE ACCORD BROKERED BETWEEN COLONIAL FACTIONS IN ROSS 128",
+			system = "Ross 128",
+			systemPath = SystemPath.New(0, 1, 0, 0),
 			bureau = "InterCast Frontier Desk",
 			summary = "Diplomatic envoys have signed an interim armistice following three weeks of intensive skirmishing over asteroid claim rights.",
 			body = "Following weeks of attrition over contested mining rights in the inner belt, colonial representatives have ratified an initial ceasefire. Demilitarized orbital corridors have been established under mutual supervision, though local commanders warn that underlying treaty disputes remain unresolved.",
@@ -49,6 +58,8 @@ local STORY_TEMPLATES = {
 		},
 		{
 			headline = "HIGH-INTENSITY COMBAT ZONES DETECTED NEAR EPSILON ERIDANI INNER BELT",
+			system = "Epsilon Eridani",
+			systemPath = SystemPath.New(1, -1, -1, 0),
 			bureau = "InterCast Tactical Recon",
 			summary = "Mercenary fleets and syndicate gunships have engaged heavy corporate defense patrols across prime extraction sectors.",
 			body = "Tactical telemetry confirms heavy exchanges of thermal beam fire across mining claims near Epsilon Eridani IV. Station traffic control has issued an active hazard notice, warning unarmed haulers to route around orbital insertion lanes until perimeter security is re-established.",
@@ -59,6 +70,8 @@ local STORY_TEMPLATES = {
 	HUMANITARIAN = {
 		{
 			headline = "OUTBREAK: EMERGENCY MEDICAL QUARANTINE IMPOSED IN BARNARD'S STAR",
+			system = "Barnard's Star",
+			systemPath = SystemPath.New(-1, 0, 0, 0),
 			bureau = "InterCast Medical Wire",
 			summary = "Starport health authorities have declared a planetary quarantine following widespread spread of an airborne respiratory strain.",
 			body = "Medical authorities have placed planetary surface outposts and orbital colonies under severe medical containment. Local pharmaceutical supplies are critically exhausted, and starport directors are offering premium bounties for urgent shipments of medicines and vaccines. Pilots arriving with medical aid are granted immediate priority docking clearance.",
@@ -66,6 +79,8 @@ local STORY_TEMPLATES = {
 		},
 		{
 			headline = "SEVERE FAMINE DECLARED IN LALANDE 21185 COLONIES; RELIEF HAULERS DESPERATELY NEEDED",
+			system = "Lalande 21185",
+			systemPath = SystemPath.New(0, 0, 0, 0),
 			bureau = "InterCast Colonial Relief Desk",
 			summary = "Hydroponic failure has triggered widespread food shortages, sparking urgent distress calls across neighboring sectors.",
 			body = "A cascade failure across atmospheric greenhouse domes has wiped out over 80% of local grain and vegetable harvests in the Lalande 21185 system. Starport governors have released emergency reserve funds to purchase grain, livestock, and synthesized food rations at multiple times standard market value.",
@@ -73,6 +88,8 @@ local STORY_TEMPLATES = {
 		},
 		{
 			headline = "REFUGEE CONVOYS EVACUATE BORDER MINING OUTPOSTS AMID ESCALATING CRISIS",
+			system = "Tau Ceti",
+			systemPath = SystemPath.New(0, -2, -1, 0),
 			bureau = "InterCast Humanitarian Watch",
 			summary = "Hundreds of civilian workers and dependents have boarded evacuation transports bound for central core systems.",
 			body = "With regional infrastructure failing and security guarantees collapsing along the outer rim, charter transports have begun evacuating non-combatant populations. Station berths are overwhelmed, and volunteer pilots are assisting in passenger ferrying operations.",
@@ -83,6 +100,8 @@ local STORY_TEMPLATES = {
 	MARKET = {
 		{
 			headline = "MINING STRIKE TRIGGERS MASSIVE PRECIOUS METALS DEFICIT IN WOLF 359",
+			system = "Wolf 359",
+			systemPath = SystemPath.New(0, 0, 0, 0),
 			bureau = "InterCast Commodities Exchange",
 			summary = "A labor dispute across orbital refineries has frozen shipments of titanium, platinum, and industrial alloys.",
 			body = "Industrial production lines across the sector face immediate shortages as refinery workers in Wolf 359 halt operations. Commodity brokers report metal prices surging over 300% on regional exchanges, creating unprecedented margins for independent haulers willing to run replacement shipments.",
@@ -90,6 +109,8 @@ local STORY_TEMPLATES = {
 		},
 		{
 			headline = "HYDROGEN FUEL EXPORT TARIFFS ENACTED ACROSS FEDERATION PORTS",
+			system = "Sol",
+			systemPath = SystemPath.New(0, 0, 0, 0),
 			bureau = "InterCast Economic Analysis",
 			summary = "New regional export taxes on liquid hydrogen and military fuel have disrupted long-distance trade routes.",
 			body = "Federal trade commissioners have ratified new tariff levies on interstellar fuel exports, citing strategic stockpile preservation. Long-haul freighters and expedition vessels are stockpiling hydrogen at unaligned stations before regional price increases take full effect.",
@@ -97,6 +118,8 @@ local STORY_TEMPLATES = {
 		},
 		{
 			headline = "BLACK MARKET WEAPONS BOOM EXPANDS IN UNGOVERNED ANARCHY BORDERS",
+			system = "Barnard's Star",
+			systemPath = SystemPath.New(-1, 0, 0, 0),
 			bureau = "InterCast Underworld Syndicate",
 			summary = "Lax customs enforcement in unaligned systems has drawn high-stakes weapons cartels and smugglers.",
 			body = "Independent investigators report record volumes of military-grade laser components and combat electronics passing through frontier relay stations. Local security forces lack the patrol tonnage to inspect deep-space transfers, leaving corridors wide open for illicit commerce.",
@@ -107,6 +130,8 @@ local STORY_TEMPLATES = {
 	POLITICS = {
 		{
 			headline = "INTERSTELLAR SUMMIT OPENS: SUPERPOWERS CONVENE OVER HYPERSPACE TRANSIT RIGHTS",
+			system = "Sol",
+			systemPath = SystemPath.New(0, 0, 0, 0),
 			bureau = "InterCast Political Bureau",
 			summary = "Diplomats from Earth, the Federation, and Independent leagues have gathered to debate hyperlane navigation treaties.",
 			body = "Representatives from major spacefaring civilizations have assembled for a high-stakes legislative session. Key agenda items include the standardization of beacon transponder frequencies, universal search-and-rescue covenants, and freedom-of-navigation guarantees for unarmed commercial shipping.",
@@ -114,6 +139,8 @@ local STORY_TEMPLATES = {
 		},
 		{
 			headline = "HIGH-VALUE SYNDICATE BOUNTY POSTED FOR CAPTURE OF NOTORIOUS CORSAIR LEADER",
+			system = "Tau Ceti",
+			systemPath = SystemPath.New(0, -2, -1, 0),
 			bureau = "InterCast Security Digest",
 			summary = "Regional starport authorities have authorized an unprecedented 250,000 CR bounty for the capture of pirate warlords.",
 			body = "Following coordinated raids on commercial fuel convoys, starport security commissioners have authorized lethal interdiction warrants. Licensed bounty hunters and combat-rated mercenaries are mobilizing across neighboring frontier starports.",
@@ -121,6 +148,8 @@ local STORY_TEMPLATES = {
 		},
 		{
 			headline = "COLONIAL LEAGUE ANNOUNCES SOVEREIGN EXPANSION CHARTER FOR OUTER STARS",
+			system = "Vega",
+			systemPath = SystemPath.New(-3, -1, 1, 0),
 			bureau = "InterCast Frontier Governance",
 			summary = "Pioneer exploratory fleets prepare to claim unchartered systems along the Orion-Cygnus arm.",
 			body = "Spurred by high mineral yields and new scientific discoveries, colonial authorities have granted land and mineral charters for newly surveyed star systems. Surveyors and explorer vessels are commanding record bounties for planetary cartography data.",
@@ -149,7 +178,8 @@ local function generateSeedArticles()
 				id = "art_" .. tostring(articleIdCounter),
 				category = categoryName,
 				headline = t.headline,
-				system = t.headline:match("IN ([%a%s%d']+)") or t.headline:match("ON ([%a%s%d']+)") or "Core Systems",
+				system = t.system or (t.headline:match("IN ([%a%s%d']+)") or t.headline:match("ON ([%a%s%d']+)") or "Sol"),
+				systemPath = t.systemPath,
 				date = formatCurrentDate(),
 				bureau = t.bureau,
 				summary = t.summary,
@@ -225,6 +255,7 @@ local function onEnterSystem()
 			category = "MARKET",
 			headline = string.format("LOCAL WIRE: COMMERCE AND TRADE DISPATCH FROM %s", string.upper(sysName)),
 			system = sysName,
+			systemPath = Game.system.path,
 			date = dateStr,
 			bureau = string.format("InterCast %s Bureau", sysName),
 			summary = string.format("Station authorities in %s report steady starport traffic and active bulletin board commercial contracts.", sysName),

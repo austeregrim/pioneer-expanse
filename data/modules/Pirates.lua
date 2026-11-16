@@ -21,6 +21,25 @@ local planets = {}
 local playerSCStartTime = nil
 local nextPlayerSCCheckTime = 0
 local nextPlayerInterdictTime = 0
+local systemBeyondInhabited = false
+
+local function checkBeyondInhabitedSpace()
+	if not Game.system then return false end
+	local pop = Game.system.population or 0
+	local stPaths = Game.system:GetStationPaths()
+	if pop > 0 or (stPaths and #stPaths > 0) then
+		return false
+	end
+	local ok, nearby = pcall(function()
+		return Game.system:GetNearbySystems(5.0, function(s)
+			return (s.population and s.population > 0) or (#s:GetStationPaths() > 0)
+		end)
+	end)
+	if ok and nearby then
+		return #nearby == 0
+	end
+	return false
+end
 
 local function equipInterdictor(ship, threat)
 	local equipSet = ship:GetComponent("EquipSet")
@@ -63,6 +82,7 @@ end
 
 local pirateIsInterested = function (player)
 	if not player or not player:exists() then return false end
+	if systemBeyondInhabited then return false end
 	local lawlessness = (Game.system and Game.system.lawlessness) or 0.0
 	local cargoTons = player.usedCargo or 0
 	-- In high-security systems (lawlessness < 0.15), pirates rarely ambush in normal space
@@ -77,6 +97,7 @@ end
 
 local shouldInterdictPlayerInSC = function (player)
 	if not player or not player:exists() then return false end
+	if systemBeyondInhabited then return false end
 	local lawlessness = (Game.system and Game.system.lawlessness) or 0.0
 	local cargoTons = player.usedCargo or 0
 	if lawlessness < 0.15 then
@@ -109,6 +130,10 @@ end
 
 local function spawnSystemPirates(player)
 	if not Game.system then return end
+	if systemBeyondInhabited then
+		-- >5ly beyond inhabited space: malicious NPCs are virtually non-existent (0.2% rare chance)
+		if Engine.rand:Number(1) > 0.002 then return end
+	end
 	local lawlessness = Game.system.lawlessness
 	local population = Game.system.population
 	local stationPaths = Game.system:GetStationPaths()
@@ -212,6 +237,7 @@ local onEnterSystem = function (player)
 	playerSCStartTime = nil
 	nextPlayerSCCheckTime = 0
 	nextPlayerInterdictTime = 0
+	systemBeyondInhabited = checkBeyondInhabitedSpace()
 	spawnSystemPirates(player)
 end
 
@@ -221,6 +247,7 @@ local onLeaveSystem = function ()
 	playerSCStartTime = nil
 	nextPlayerSCCheckTime = 0
 	nextPlayerInterdictTime = 0
+	systemBeyondInhabited = false
 end
 
 local onShipHit = function (ship, attacker)
@@ -238,7 +265,7 @@ local onShipDestroyed = function (ship)
 		pirates[ship] = nil
 
 		-- Spawn a new pirate
-		if #planets == 0 or not Game.system then return end
+		if #planets == 0 or not Game.system or systemBeyondInhabited then return end
 		local threat = calculateThreat(Game.system.lawlessness)
 		local planet = planets[Engine.rand:Integer(1, #planets)]:GetSystemBody()
 		local star = planet and planet.nearestJumpable
@@ -305,6 +332,7 @@ local onGameStart = function ()
 	loaded_data = nil
 
 	if not wasLoaded and Game.system then
+		systemBeyondInhabited = checkBeyondInhabitedSpace()
 		spawnSystemPirates(Game.player)
 	end
 
@@ -316,7 +344,7 @@ local onGameStart = function ()
 	}
 
 	Timer:CallEvery(8, function ()
-		if not Game.system or not Game.player or not Game.player:exists() then return end
+		if not Game.system or not Game.player or not Game.player:exists() or systemBeyondInhabited then return end
 		local policeId = Game.system.faction and Game.system.faction.policeShip
 		local allShips = Space.GetBodies("Ship")
 		local playerInSC = Game.player:GetFlightState() == "SUPERCRUISE"

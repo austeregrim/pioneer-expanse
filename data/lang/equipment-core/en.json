@@ -71,6 +71,14 @@
     "description": "",
     "message": "Military-grade frameshift tether module with +70% range, broad capture arc, and rapid tether lock."
   },
+  "INTERDICTION_NULLIFIER": {
+    "description": "",
+    "message": "FSD Interdiction Nullifier"
+  },
+  "INTERDICTION_NULLIFIER_DESCRIPTION": {
+    "description": "",
+    "message": "Automated defensive countermeasure. When targeted by an FSD interdiction tether, discharges a resonance pulse that shatters the tether, forcibly dropping the attacking vessel out of Supercruise with an emergency heat spike and extended 45-second FSD reboot cooldown."
+  },
   "AUXILIARY_CARGO_RACK": {
     "description": "Equipment name for a cargo-carrying rack installed as a cabin module",
     "message": "Auxiliary Cargo Rack"

@@ -36,6 +36,7 @@ void SupercruiseController::SaveToJson(Json &jsonObj, Space *space) const
 	scObj["speed"] = m_speed;
 	scObj["assist_active"] = m_assistActive;
 	scObj["dock_on_arrival"] = m_dockOnArrival;
+	scObj["nullifier_cooldown"] = m_nullifierCooldown;
 	scObj["heat_spike"] = m_heatSpike;
 	Space *sp = space ? space : (Pi::game ? Pi::game->GetSpace() : nullptr);
 	scObj["index_for_target"] = (sp && m_target) ? sp->GetIndexForBody(m_target) : 0;
@@ -66,6 +67,7 @@ void SupercruiseController::LoadFromJson(const Json &jsonObj)
 	m_speed = scObj.value("speed", 0.0);
 	m_assistActive = scObj.value("assist_active", false);
 	m_dockOnArrival = scObj.value("dock_on_arrival", false);
+	m_nullifierCooldown = scObj.value("nullifier_cooldown", 0.0f);
 	m_heatSpike = scObj.value("heat_spike", 0.0);
 	m_targetIndex = scObj.value("index_for_target", 0);
 	m_target = nullptr;
@@ -627,6 +629,35 @@ void SupercruiseController::SafeDisengage()
 		m_ship->SetPosition(target->GetPosition() + fromTarget * dropOff);
 		m_ship->SetVelocity(target->GetVelocity());
 		m_ship->SetAngVelocity(vector3d(0.0));
+	} else if (target && target->IsType(ObjectType::TERRAINBODY)) {
+		// Planetary Orbital Drop-In: switch to planet orbital non-rotating frame in a stable orbital insertion
+		Frame *pf = Frame::GetFrame(target->GetFrame());
+		FrameId orbFrameId = pf ? pf->GetNonRotFrame() : target->GetFrame();
+		if (orbFrameId.valid() && Frame::GetFrame(orbFrameId)) {
+			m_ship->SwitchToFrame(orbFrameId);
+			const vector3d planetPos = target->GetPositionRelTo(orbFrameId);
+			vector3d fromPlanet = (m_ship->GetPosition() - planetPos).NormalizedSafe();
+			if (fromPlanet.LengthSqr() < 0.1)
+				fromPlanet = vector3d(0.0, 0.0, 1.0);
+
+			const double exclR = GetExclusionZoneRadius(target);
+			const double dropDist = exclR + 250000.0; // 250 km above exclusion zone
+			m_ship->SetPosition(planetPos + fromPlanet * dropDist);
+
+			// Face orbital tangent and establish orbital velocity
+			const double M = target->GetMass();
+			const double orbSpeed = (M > 0.0 && dropDist > 0.0) ? std::sqrt(G * M / dropDist) : 0.0;
+			vector3d up = fromPlanet;
+			vector3d fwd = -m_ship->GetOrient().VectorZ();
+			vector3d tangent = (fwd - up * fwd.Dot(up)).NormalizedSafe();
+			if (tangent.LengthSqr() < 0.1)
+				tangent = MathUtil::OrthogonalDirection(up).Normalized();
+			vector3d right = tangent.Cross(up).Normalized();
+			m_ship->SetOrient(matrix3x3d::FromVectors(right, up, -tangent));
+
+			m_ship->SetVelocity(target->GetVelocityRelTo(orbFrameId) + tangent * orbSpeed);
+			m_ship->SetAngVelocity(vector3d(0.0));
+		}
 	} else if (ringPlanet) {
 		DropIntoRing(ringPlanet, "DROPPED INTO PLANETARY RING — " + ringPlanet->GetLabel());
 		return;
@@ -976,11 +1007,19 @@ void SupercruiseController::ComputeAISteering(const vector3d &targetPosRelToShip
 		return;
 	}
 
+	const double exclR = (targetBody && targetBody->IsType(ObjectType::TERRAINBODY))
+		? GetExclusionZoneRadius(targetBody)
+		: 0.0;
+	const double effectiveDist = std::max(0.0, dist - exclR);
 	const double speed = std::max(m_speed, MIN_SPEED);
-	const double eta = dist / speed;
-	if (m_slowDownWarning || (dist <= SAFE_DISENGAGE_DIST * 1.6 && speed > SAFE_DISENGAGE_SPEED * 0.90)) {
-		outThrottle = 0.20;
-	} else if (dist > 30.0 * LIGHT_SPEED && eta > 10.0) {
+	const double eta = (speed > 1.0) ? (effectiveDist / speed) : 0.0;
+	if (m_slowDownWarning) {
+		// When entering a heavy gravity well or approaching safe drop threshold, regulate throttle to 0.55
+		// to allow smooth, controlled braking without sudden throttle oscillation
+		outThrottle = 0.55;
+	} else if (effectiveDist <= SAFE_DISENGAGE_DIST * 1.6 && speed > SAFE_DISENGAGE_SPEED * 0.90) {
+		outThrottle = 0.50;
+	} else if (effectiveDist > 30.0 * LIGHT_SPEED && eta > 10.0) {
 		outThrottle = 1.0;
 	} else {
 		outThrottle = 0.75;
@@ -1002,6 +1041,7 @@ void SupercruiseController::UpdateEnvironmentAndTarget(float timeStep, Body **ou
 	double maxStrain = 0.0;
 	Planet *ringReadyPlanet = nullptr;
 	Planet *ringImmersionPlanet = nullptr;
+	Body *activeTarget = GetActiveTarget();
 	const vector3d forwardDir = -m_ship->GetOrient().VectorZ();
 	const FrameId shipFrameId = m_ship->GetFrame();
 	const Frame *shipFrame = Frame::GetFrame(shipFrameId);
@@ -1025,8 +1065,11 @@ void SupercruiseController::UpdateEnvironmentAndTarget(float timeStep, Body **ou
 
 		// Check exclusion zone impact when moving toward the body
 		if (exclR > 0.0 && dist <= exclR && toBodyDot > 0.0) {
-			if (outHitExclusionBody && !*outHitExclusionBody)
+			if (b == activeTarget && m_speed <= SAFE_DISENGAGE_SPEED) {
+				m_safeDisengageReady = true;
+			} else if (outHitExclusionBody && !*outHitExclusionBody) {
 				*outHitExclusionBody = b;
+			}
 		}
 
 		const double h = std::max(dist - exclR, 1000.0);
@@ -1154,21 +1197,24 @@ void SupercruiseController::UpdateEnvironmentAndTarget(float timeStep, Body **ou
 
 	// Target telemetry
 	vector3d relToTarget;
-	Body *activeTarget = GetActiveTarget();
 	const bool targetIsSCShip = activeTarget && activeTarget->IsType(ObjectType::SHIP) &&
 		static_cast<const Ship *>(activeTarget)->GetFlightState() == Ship::SUPERCRUISE;
 
 	if (GetActiveTargetPosRelToShip(relToTarget)) {
 		m_targetDistance = relToTarget.Length();
-		m_targetETA = (m_speed > 1.0) ? (m_targetDistance / m_speed) : 0.0;
+		const double targetExclR = (activeTarget && activeTarget->IsType(ObjectType::TERRAINBODY))
+			? GetExclusionZoneRadius(activeTarget)
+			: 0.0;
+		const double effectiveDist = std::max(0.0, m_targetDistance - targetExclR);
+		m_targetETA = (m_speed > 1.0) ? (effectiveDist / m_speed) : 0.0;
 
-		m_safeDisengageReady = !targetIsSCShip && (m_targetDistance <= SAFE_DISENGAGE_DIST) && (m_speed <= SAFE_DISENGAGE_SPEED);
+		m_safeDisengageReady = !targetIsSCShip && (effectiveDist <= SAFE_DISENGAGE_DIST) && (m_speed <= SAFE_DISENGAGE_SPEED);
 
 		// Overshoot ("Loop of Shame") warning when ETA drops below 5.2s outside safe drop range,
 		// or when entering a heavy gravity well at excessive speed (Elite Dangerous SLOW DOWN indicator)
 		const double closingDot = forwardDir.Dot(relToTarget.NormalizedSafe());
 		const bool targetOvershoot = !targetIsSCShip && (closingDot > 0.5) &&
-			(m_targetDistance > SAFE_DISENGAGE_DIST) &&
+			(effectiveDist > SAFE_DISENGAGE_DIST) &&
 			(m_speed > SAFE_DISENGAGE_SPEED) &&
 			(m_targetETA > 0.0 && m_targetETA < 5.3);
 		const bool gravityWellSlowDown = (m_gravityStrain > 0.25) && (m_speed > m_maxEnvSpeed * 1.08);
@@ -1197,6 +1243,10 @@ void SupercruiseController::StaticUpdate(float timeStep)
 
 	if (m_cooldown > 0.0f) {
 		m_cooldown = std::max(0.0f, m_cooldown - timeStep);
+	}
+
+	if (m_nullifierCooldown > 0.0f) {
+		m_nullifierCooldown = std::max(0.0f, m_nullifierCooldown - timeStep);
 	}
 
 	if (m_heatSpike > 0.0) {
@@ -1285,11 +1335,16 @@ void SupercruiseController::StaticUpdate(float timeStep)
 	// along v = d / 6.0 so ETA holds steady at 0:06 all the way down to Safe Disengage.
 	// Skip when chasing another Supercruise ship so pursuers don't artificially brake below target velocity.
 	if (hasTarget && !targetIsSCShip && m_targetDistance < 500.0 * LIGHT_SPEED) {
-		if (inBlueZone) {
-			const double sixSecondSpeed = std::max(100000.0, m_targetDistance / 6.0);
+		const double targetExclR = (activeTarget && activeTarget->IsType(ObjectType::TERRAINBODY))
+			? GetExclusionZoneRadius(activeTarget)
+			: 0.0;
+		const double effectiveDist = std::max(0.0, m_targetDistance - targetExclR);
+
+		if (inBlueZone || m_assistActive) {
+			const double sixSecondSpeed = std::max(MIN_SPEED, effectiveDist / 6.0);
 			targetCapSpeed = std::min(targetCapSpeed, sixSecondSpeed / 0.75);
 		} else if (m_throttle < 0.65 && m_throttle > 0.001) {
-			const double subBlueSpeed = std::max(MIN_SPEED, (m_targetDistance / 6.0) * (m_throttle / 0.75));
+			const double subBlueSpeed = std::max(MIN_SPEED, (effectiveDist / 6.0) * (m_throttle / 0.75));
 			targetCapSpeed = std::min(targetCapSpeed, subBlueSpeed / m_throttle);
 		}
 	}
@@ -1308,7 +1363,12 @@ void SupercruiseController::StaticUpdate(float timeStep)
 		const double accel = std::max(45000.0, m_speed * 0.38) * (0.35 + 0.65 * m_throttle);
 		m_speed = std::min(m_desiredSpeed, m_speed + accel * timeStep);
 	} else if (m_speed > m_desiredSpeed) {
-		const double decel = std::max(120000.0, m_speed * (0.35 + 0.65 * m_gravityStrain));
+		const double speedDelta = m_speed - m_desiredSpeed;
+		double decelFactor = 0.45 + 1.25 * m_gravityStrain;
+		if (inBlueZone || m_assistActive) {
+			decelFactor = 0.85 + 2.0 * m_gravityStrain;
+		}
+		const double decel = std::max(150000.0, m_speed * decelFactor + speedDelta * (1.5 + 2.5 * m_gravityStrain));
 		m_speed = std::max(m_desiredSpeed, m_speed - decel * timeStep);
 	}
 
@@ -1514,6 +1574,13 @@ bool SupercruiseController::CanInterdict(const Ship *target, std::string *outRea
 	return true;
 }
 
+bool SupercruiseController::HasInterdictionNullifier() const
+{
+	if (!m_ship) return false;
+	const int cap = m_ship->Properties().Get("interdiction_nullifier");
+	return cap > 0;
+}
+
 bool SupercruiseController::StartInterdiction(Ship *target)
 {
 	std::string reason;
@@ -1531,6 +1598,25 @@ bool SupercruiseController::StartInterdiction(Ship *target)
 
 	const bool attackerIsPlayer = m_ship->IsType(ObjectType::PLAYER);
 	const bool targetIsPlayer = target->IsType(ObjectType::PLAYER);
+
+	// Check if target has an active Interdiction Nullifier countermeasure
+	if (targetSc->HasInterdictionNullifier() && targetSc->m_nullifierCooldown <= 0.0f) {
+		targetSc->m_nullifierCooldown = 60.0f;
+		targetSc->ShowStatusMessage("INTERDICTION NULLIFIED — DEFENSIVE PULSE DISCHARGED", 6.0f);
+		if (targetIsPlayer) {
+			Sound::BodyMakeNoise(target, "ok", 1.0f);
+		}
+
+		// Attacking ship suffers emergency drop, heat spike, and extended 45-second FSD reboot cooldown
+		EmergencyDrop("INTERDICTION NULLIFIED — DEFENSIVE COUNTERMEASURE");
+		m_heatSpike = 1.0;
+		m_cooldown = 45.0f;
+		ShowStatusMessage("TARGET ENGAGED INTERDICTION NULLIFIER — FORCED DROPOUT & FSD REBOOT (45s)", 6.0f);
+		if (attackerIsPlayer) {
+			Sound::BodyMakeNoise(m_ship, "warning", 0.9f);
+		}
+		return false;
+	}
 
 	// Unlawful interdiction check when player interdicts a clean vessel
 	if (attackerIsPlayer && !target->IsWanted()) {

@@ -154,9 +154,10 @@ local function draw3DCelestialSphere(canvasOrigin, width, height, targetLocus, e
 		end
 	end
 
-	-- 3. Draw Longitude Meridian Lines (every 45 degrees)
+	-- 3. Draw Longitude Meridian Lines (every 45 degrees, with 0° RA marked in dim yellow)
 	for m = 0, 7 do
 		local lon = (m / 8) * (2 * math.pi)
+		local isZeroRA = (m == 0)
 		local numSegments = 24
 		local prevPt, prevZ = nil, 0
 
@@ -165,8 +166,16 @@ local function draw3DCelestialSphere(canvasOrigin, width, height, targetLocus, e
 			local pt, z = projectPoint(lon, lat, radius)
 			if prevPt then
 				local alphaMult = (prevZ + z) > 0 and 1.0 or 0.25
-				local segCol = Color(35, 140, 200, math.floor(75 * alphaMult))
-				ui.addLine(prevPt, pt, segCol, 0.9)
+				local segCol
+				local lineW = 0.9
+				if isZeroRA then
+					-- Dim yellow marking line for 0 degrees Right Ascension
+					segCol = Color(225, 205, 80, math.floor(190 * alphaMult))
+					lineW = 1.8
+				else
+					segCol = Color(35, 140, 200, math.floor(75 * alphaMult))
+				end
+				ui.addLine(prevPt, pt, segCol, lineW)
 			end
 			prevPt = pt
 			prevZ = z
@@ -316,7 +325,7 @@ local function drawNavLocusLottery()
 	-- Sub Tab 1: 3D Astrolabe Ticket Viewer & Single Buy
 	if currentSubTab == "TICKET" then
 		local availW = ui.getContentRegion().x
-		local canvasH = 390
+		local canvasH = math.max(540, ui.getContentRegion().y - 20)
 
 		-- Holographic Chit Frame
 		ui.child("##holographicChit", Vector2(availW, canvasH), nil, childFlags, function()
@@ -335,7 +344,7 @@ local function drawNavLocusLottery()
 			draw3DCelestialSphere(canvasPos, availW, canvasH, currentFocusLocus, allPoints, {
 				centerX = 0.28,
 				centerY = 0.50,
-				radiusScale = 0.36,
+				radiusScale = 0.44,
 			})
 
 			-- Right pane: The Astrolabe Dials & Readout
@@ -348,6 +357,19 @@ local function drawNavLocusLottery()
 				end)
 				ui.textColored(colors.fontDim, "Select 5 coordinate vectors to calibrate your sweepstakes chit:")
 				ui.separator()
+				ui.spacing()
+
+				-- Random vectors button located above the list of vectors
+				if ui.button("GENERATE RANDOM QUICK-PICK##RandomBtn", Vector2(260, 30)) then
+					local rand = require('Rand').New(math.floor(ui.getTime() * 1000))
+					customRing = rand:Integer(0, 99)
+					customClassIdx = rand:Integer(1, #stellarClasses)
+					customRA = math.floor(rand:Number(0.0, 359.9) * 10) / 10
+					customDec = math.floor(rand:Number(-90.0, 90.0) * 10) / 10
+					customEpoch = rand:Integer(0, 9999)
+					lastSpinTime = ui.getTime()
+					ui.playBoinkNoise()
+				end
 				ui.spacing()
 
 				-- Dial 1: Sector Ring (00-99)
@@ -368,8 +390,7 @@ local function drawNavLocusLottery()
 				ui.text("Vector 2: Stellar Class:")
 				ui.sameLine()
 				ui.textColored(curColor, string.format("[ %s ]", curClass))
-				ui.sameLine(nil, 8)
-				-- Render clickable chips for all stellar classes
+				-- Stellar class selector chips below the header line
 				for cIdx, sClass in ipairs(stellarClasses) do
 					local sCol = STELLAR_COLORS[sClass] or colors.white
 					local isSel = (cIdx == customClassIdx)
@@ -435,20 +456,8 @@ local function drawNavLocusLottery()
 					winLocus.ring, winLocus.class, winLocus.ra, winLocus.dec, winLocus.epoch))
 
 				ui.spacing()
-				if ui.button("GENERATE RANDOM QUICK-PICK##RandomBtn", Vector2(230, 32)) then
-					local rand = require('Rand').New(math.floor(ui.getTime() * 1000))
-					customRing = rand:Integer(0, 99)
-					customClassIdx = rand:Integer(1, #stellarClasses)
-					customRA = math.floor(rand:Number(0.0, 359.9) * 10) / 10
-					customDec = math.floor(rand:Number(-90.0, 90.0) * 10) / 10
-					customEpoch = rand:Integer(0, 9999)
-					lastSpinTime = ui.getTime()
-					ui.playBoinkNoise()
-				end
 
-				ui.sameLine(nil, 12)
-
-				if ui.button("PURCHASE TICKET (10 CR)##BuySingleBtn", Vector2(200, 32)) then
+				if ui.button("PURCHASE TICKET (10 CR)##BuySingleBtn", Vector2(240, 34)) then
 					local locus = {
 						ring = customRing,
 						class = stellarClasses[customClassIdx],
@@ -522,7 +531,7 @@ local function drawNavLocusLottery()
 			ui.separator()
 
 			local canvasPos = ui.getCursorScreenPos()
-			local canvasH = 340
+			local canvasH = math.max(480, ui.getContentRegion().y - 95)
 
 			-- Determine selected focus ticket
 			local focusTicketLocus = nil
@@ -534,15 +543,15 @@ local function drawNavLocusLottery()
 				end
 			end
 
-			-- Render 3D astrolabe containing all owned points
+			-- Render 3D astrolabe containing all owned points, taking up maximum vertical space
 			draw3DCelestialSphere(canvasPos, leftW, canvasH, focusTicketLocus, allPoints, {
 				centerX = 0.50,
-				centerY = 0.52,
-				radiusScale = 0.35,
+				centerY = 0.50,
+				radiusScale = 0.44,
 				rotSpeed = 0.30,
 			})
 
-			ui.setCursorPos(Vector2(12, canvasH + 20))
+			ui.setCursorPos(Vector2(12, canvasH + 10))
 			ui.textColored(colors.uiPrimaryLight, "Coverage Legend:")
 			ui.text("• Colored Pins: Single Registered Chits (Star Class Color)")
 			ui.text("• Star Cloud: Batch Saturation Dispersion Points")

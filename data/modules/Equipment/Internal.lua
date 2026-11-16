@@ -64,6 +64,14 @@ Equipment.Register("misc.fsd_interdictor_3", EquipType.New {
 	icon_name="equip_radar"
 })
 
+Equipment.Register("misc.interdiction_nullifier", EquipType.New {
+	l10n_key="INTERDICTION_NULLIFIER",
+	price=14500, purchasable=true, tech_level=3,
+	slot={ type="computer.countermeasure", size=1 },
+	mass=0.8, volume=1.0, capabilities={ interdiction_nullifier=1 },
+	icon_name="equip_shield_generator"
+})
+
 --===============================================
 -- Sensors
 --===============================================
