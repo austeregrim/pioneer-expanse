@@ -699,44 +699,348 @@ local function drawStockExchange()
 	-- Tab 3: Player Portfolio & Holdings
 	elseif currentTab == "PORTFOLIO" then
 		local portfolio = StockExchange.GetPlayerPortfolio()
-		local hasHoldings = false
-		for _, _ in pairs(portfolio) do hasHoldings = true; break end
+		local holdingsList = {}
+		for ticker, h in pairs(portfolio) do
+			if h.shares and h.shares > 0.000001 then
+				table.insert(holdingsList, h)
+			end
+		end
 
-		if not hasHoldings then
+		-- Sort holdings by total market value descending
+		table.sort(holdingsList, function(a, b)
+			local stockA = StockExchange.GetStock(a.ticker)
+			local valA = (stockA and stockA.price or a.avgBuyPrice) * a.shares
+			local stockB = StockExchange.GetStock(b.ticker)
+			local valB = (stockB and stockB.price or b.avgBuyPrice) * b.shares
+			return valA > valB
+		end)
+
+		if #holdingsList == 0 then
 			ui.child("##emptyPortfolio", Vector2(-1, -1), nil, childFlags, function()
+				ui.withFont(orbiteer.heading, function()
+					ui.textColored(colors.uiPrimaryLight, "NO ACTIVE HOLDINGS IN PORTFOLIO")
+				end)
+				ui.spacing()
 				ui.textColored(colors.fontDim, "You do not currently own any shares or equity holdings.")
-				ui.textWrapped("Browse Galactic Megacorporations or Local System Enterprises to invest your commercial profits.")
+				ui.textWrapped("Browse Galactic Megacorporations or Local System Enterprises on the exchange to invest your commercial profits and earn quarterly dividends.")
 			end)
 		else
-			ui.child("##fullPortfolio", Vector2(-1, -1), nil, childFlags, function()
-				ui.columns(7, "##portfolioCols", true)
-				ui.text("TICKER") ui.nextColumn()
-				ui.text("COMPANY") ui.nextColumn()
-				ui.text("SHARES OWNED") ui.nextColumn()
-				ui.text("AVG BUY") ui.nextColumn()
-				ui.text("CURRENT") ui.nextColumn()
-				ui.text("TOTAL VALUE") ui.nextColumn()
-				ui.text("PROFIT / LOSS") ui.nextColumn()
+			local availW = ui.getContentRegion().x
+			local leftW = math.floor(availW * 0.44)
+			local rightW = availW - leftW - 16
+
+			-- Ensure selectedTicker points to an owned holding
+			local selectedHolding = nil
+			for _, h in ipairs(holdingsList) do
+				if h.ticker == selectedTicker then
+					selectedHolding = h
+					break
+				end
+			end
+			if not selectedHolding then
+				selectedHolding = holdingsList[1]
+				selectedTicker = selectedHolding.ticker
+			end
+
+			-- Left holdings list with sparklines
+			ui.child("##portfolioList", Vector2(leftW, -1), nil, childFlags, function()
+				ui.textColored(colors.uiPrimaryLight, string.format("Securities & Holdings (%d Positions):", #holdingsList))
 				ui.separator()
 
-				for ticker, h in pairs(portfolio) do
-					local stock = StockExchange.GetStock(ticker)
+				ui.columns(6, "##portfolioCols", true)
+				ui.text("TICKER") ui.nextColumn()
+				ui.text("HOLDING") ui.nextColumn()
+				ui.text("TREND (30D)") ui.nextColumn()
+				ui.text("SHARES") ui.nextColumn()
+				ui.text("MKT VALUE") ui.nextColumn()
+				ui.text("PROFIT/LOSS") ui.nextColumn()
+				ui.separator()
+
+				for _, h in ipairs(holdingsList) do
+					local isSel = (selectedTicker == h.ticker)
+					if ui.selectable(h.ticker .. "##portRow", isSel, { "SpanAllColumns" }) then
+						selectedTicker = h.ticker
+					end
+					ui.nextColumn()
+
+					ui.text(h.name or h.ticker)
+					ui.nextColumn()
+
+					-- Mini Sparkline Trendline
+					local sparkPos = ui.getCursorScreenPos()
+					local sparkW, sparkH = 75, 18
+					ui.dummy(Vector2(sparkW, sparkH))
+					local hist = StockExchange.GetStockHistory(h.ticker)
+					drawMiniSparkline(sparkPos, sparkW, sparkH, hist)
+					ui.nextColumn()
+
+					local shareStr = h.isMegacorp and string.format("%.3f", h.shares) or string.format("%d", math.floor(h.shares))
+					ui.text(shareStr)
+					ui.nextColumn()
+
+					local stock = StockExchange.GetStock(h.ticker)
 					local curPrice = stock and stock.price or h.avgBuyPrice
 					local curVal = h.shares * curPrice
+					ui.text(formatMoney(curVal))
+					ui.nextColumn()
+
 					local pnl = curVal - h.totalInvested
 					local pnlCol = (pnl >= 0) and colors.econProfit or colors.econLoss
 					local pnlSign = (pnl >= 0) and "+" or ""
-					local shareStr = h.isMegacorp and string.format("%.3f", h.shares) or string.format("%d", math.floor(h.shares))
-
-					ui.text(ticker) ui.nextColumn()
-					ui.text(h.name or ticker) ui.nextColumn()
-					ui.text(shareStr) ui.nextColumn()
-					ui.text(formatMoney(h.avgBuyPrice)) ui.nextColumn()
-					ui.text(formatMoney(curPrice)) ui.nextColumn()
-					ui.text(formatMoney(curVal)) ui.nextColumn()
-					ui.textColored(pnlCol, string.format("%s%s", pnlSign, formatMoney(pnl))) ui.nextColumn()
+					local pnlPct = (h.totalInvested > 0) and ((pnl / h.totalInvested) * 100) or 0.0
+					ui.textColored(pnlCol, string.format("%s%.1f%%", pnlSign, pnlPct))
+					ui.nextColumn()
 				end
 				ui.columns(1)
+			end)
+
+			ui.sameLine(nil, 16)
+
+			-- Right Detail Panel for Selected Holding
+			local stock = StockExchange.GetStock(selectedHolding.ticker)
+			local curPrice = stock and stock.price or selectedHolding.avgBuyPrice
+			local curSys = Game.system and Game.system.name or "Sol"
+			local isRemote = (not selectedHolding.isMegacorp) and (stock and stock.system and stock.system ~= curSys)
+			local canBuy, buyReason = StockExchange.CanBuyStock(stock)
+
+			ui.child("##portfolioDetail", Vector2(rightW, -1), nil, childFlags, function()
+				local stats = StockExchange.Get24hStats(selectedHolding.ticker)
+				local chgCol = (stats.changeCr >= 0) and colors.econProfit or colors.econLoss
+				local chgSign = (stats.changeCr >= 0) and "+" or ""
+
+				ui.withFont(orbiteer.heading, function()
+					ui.textColored(colors.uiPrimaryLight, selectedHolding.name or selectedHolding.ticker)
+				end)
+
+				ui.sameLine(rightW - 220)
+				if selectedHolding.isMegacorp then
+					ui.textColored(Color(255, 215, 60, 255), "[ MEGACORP ]")
+				elseif isRemote then
+					ui.textColored(Color(255, 170, 50, 255), "[ REMOTE — SELL ONLY ]")
+				else
+					ui.textColored(Color(120, 240, 160, 255), "[ LOCAL ENTERPRISE ]")
+				end
+
+				local sectorStr = stock and stock.sector or "Commercial Enterprise"
+				local divYield = (stock and stock.dividendYield) and string.format("  |  Dividend Yield: %.1f%%", stock.dividendYield * 100) or ""
+				local systemStr = ""
+				if not selectedHolding.isMegacorp then
+					local originSys = (stock and stock.system) or selectedHolding.system or "Chartered System"
+					systemStr = string.format("  |  Origin: %s System", originSys)
+				end
+
+				ui.textColored(colors.fontDim, string.format("Ticker: %s  |  Sector: %s%s%s",
+					selectedHolding.ticker, sectorStr, divYield, systemStr))
+				ui.separator()
+
+				if stock and stock.crisisNote then
+					ui.textColored(colors.alertYellow, "CRISIS IMPACT ALERT: " .. stock.crisisNote)
+				end
+
+				-- Header Price & 24h Stats Row
+				ui.text(string.format("Current Price: %s", formatMoney(curPrice)))
+				ui.sameLine()
+				ui.textColored(chgCol, string.format("(%s%s / %s%.2f%%)", chgSign, formatMoney(stats.changeCr), chgSign, stats.changePct))
+				ui.sameLine(nil, 24)
+				ui.textColored(colors.fontDim, string.format("24h Vol: %s shares", formatVol(stats.volume24h)))
+				ui.sameLine(nil, 20)
+				ui.textColored(colors.fontDim, string.format("52W: %s - %s", formatMoney(stats.low52w), formatMoney(stats.high52w)))
+
+				ui.spacing()
+
+				-- Chart Controls (Timeframe & Mode)
+				local timeframes = { "7D", "14D", "30D", "ALL" }
+				for _, tf in ipairs(timeframes) do
+					local isSel = (selectedTimeframe == tf)
+					local bStyle = isSel and { Button = colors.uiPrimaryLight, Text = colors.black } or {}
+					ui.withStyleColors(bStyle, function()
+						if ui.button(tf .. "##PortTf", Vector2(48, 22)) then selectedTimeframe = tf end
+					end)
+					ui.sameLine(nil, 4)
+				end
+
+				ui.sameLine(rightW - 165)
+				local isArea = (chartMode == "AREA")
+				if ui.button((isArea and "MODE: AREA" or "MODE: CANDLES") .. "##PortModeBtn", Vector2(145, 22)) then
+					chartMode = isArea and "CANDLES" or "AREA"
+				end
+
+				ui.spacing()
+
+				-- Main Interactive Financial Chart Canvas
+				local chartPos = ui.getCursorScreenPos()
+				local chartW = rightW - 24
+				local chartH = 200
+				ui.dummy(Vector2(chartW, chartH))
+				local history = StockExchange.GetStockHistory(selectedHolding.ticker)
+				drawInteractiveStockChart(chartPos, chartW, chartH, history, selectedTimeframe, chartMode)
+
+				ui.spacing()
+
+				-- Detailed Position Summary Card
+				local curVal = selectedHolding.shares * curPrice
+				local pnl = curVal - selectedHolding.totalInvested
+				local pnlCol = (pnl >= 0) and colors.econProfit or colors.econLoss
+				local pnlSign = (pnl >= 0) and "+" or ""
+				local pnlPct = (selectedHolding.totalInvested > 0) and ((pnl / selectedHolding.totalInvested) * 100) or 0.0
+
+				local shareDisplay = selectedHolding.isMegacorp and string.format("%.3f", selectedHolding.shares) or string.format("%d", math.floor(selectedHolding.shares))
+
+				ui.separator()
+				ui.textColored(colors.uiPrimaryLight, "ACTIVE HOLDING DETAILS & RETURN ON INVESTMENT:")
+				ui.group(function()
+					ui.columns(4, "##holdingStatsCols", false)
+					ui.textColored(colors.fontDim, "Shares Owned:")
+					ui.text(shareDisplay)
+					ui.nextColumn()
+
+					ui.textColored(colors.fontDim, "Avg Cost Basis:")
+					ui.text(formatMoney(selectedHolding.avgBuyPrice))
+					ui.nextColumn()
+
+					ui.textColored(colors.fontDim, "Total Market Value:")
+					ui.text(formatMoney(curVal))
+					ui.nextColumn()
+
+					ui.textColored(colors.fontDim, "Unrealized P/L:")
+					ui.textColored(pnlCol, string.format("%s%s (%s%.1f%%)", pnlSign, formatMoney(pnl), pnlSign, pnlPct))
+					ui.nextColumn()
+					ui.columns(1)
+				end)
+				ui.separator()
+
+				-- Liquidation / Exit Desk (Always Available)
+				ui.textColored(Color(255, 95, 95, 255), "LIQUIDATION & EXIT DESK:")
+				ui.textColored(colors.fontDim, "Execute sell order via GalNet clearinghouse (accessible across all civilized space):")
+
+				-- Quick percentage liquidation bar
+				local pctButtons = { { 0.25, "25%" }, { 0.50, "50%" }, { 0.75, "75%" }, { 1.00, "100% (ALL)" } }
+				for _, pb in ipairs(pctButtons) do
+					local pFrac, pName = pb[1], pb[2]
+					local estProceeds = curVal * pFrac
+					if ui.button(string.format("SELL %s (%s)##PortSellPct", pName, formatMoney(estProceeds)), Vector2(170, 28)) then
+						local sellQty
+						if selectedHolding.isMegacorp then
+							sellQty = selectedHolding.shares * pFrac
+						else
+							sellQty = math.max(1, math.floor(selectedHolding.shares * pFrac + 0.0001))
+							if pFrac >= 0.99 then sellQty = math.floor(selectedHolding.shares) end
+						end
+						if stock then
+							local ok, msg = StockExchange.SellShares(stock, sellQty)
+							statusMessage = msg
+							statusTime = ui.getTime()
+						end
+					end
+					ui.sameLine(nil, 8)
+				end
+				ui.newLine()
+
+				if selectedHolding.isMegacorp then
+					ui.spacing()
+					ui.nextItemWidth(200)
+					local maxSellCred = curVal
+					local sellCreditAmt = math.min(investCreditAmount, maxSellCred)
+					local newAmt, amtChanged = ui.sliderFloat("##PortSellCreditsSlider", sellCreditAmt, 5.0, math.max(5.0, maxSellCred), "%.0f Cr")
+					if amtChanged then investCreditAmount = math.floor(newAmt * 100) / 100 end
+
+					ui.sameLine(nil, 8)
+					local sellShares = math.min(selectedHolding.shares, investCreditAmount / curPrice)
+					local sellShareStr = (sellShares < 0.001) and string.format("%.6f", sellShares) or string.format("%.3f", sellShares)
+					if ui.button(string.format("LIQUIDATE %s (%s SHARES)##PortSellCustom", formatMoney(investCreditAmount), sellShareStr), Vector2(300, 26)) then
+						if stock then
+							local ok, msg = StockExchange.SellSharesByCredits(stock, investCreditAmount)
+							statusMessage = msg
+							statusTime = ui.getTime()
+						end
+					end
+				else
+					ui.spacing()
+					local localSellBatches = { 1, 5, 10, 25, 50, 100 }
+					for _, sz in ipairs(localSellBatches) do
+						if sz <= math.floor(selectedHolding.shares) then
+							if ui.button(string.format("SELL %d##PortSellBatch", sz), Vector2(75, 24)) then
+								if stock then
+									local ok, msg = StockExchange.SellShares(stock, sz)
+									statusMessage = msg
+									statusTime = ui.getTime()
+								end
+							end
+							ui.sameLine(nil, 6)
+						end
+					end
+					ui.newLine()
+				end
+
+				-- Purchasing Desk (Purchase More Shares)
+				ui.separator()
+				if canBuy then
+					ui.textColored(Color(65, 235, 255, 255), "PURCHASE ADDITIONAL SHARES:")
+					if selectedHolding.isMegacorp then
+						ui.textColored(colors.fontDim, "Acquire additional fractional shares of this megaconglomerate:")
+						local creditPresets = { 20, 50, 100, 250, 500, 1000, 5000, 25000 }
+						for _, cp in ipairs(creditPresets) do
+							local isSel = (math.abs(investCreditAmount - cp) < 0.5)
+							local bStyle = isSel and { Button = colors.uiPrimaryLight, Text = colors.black } or {}
+							ui.withStyleColors(bStyle, function()
+								if ui.button(formatCr(cp) .. " Cr##PortBuyPre", Vector2(72, 26)) then
+									investCreditAmount = cp
+								end
+							end)
+							ui.sameLine(nil, 6)
+						end
+						ui.newLine()
+
+						ui.nextItemWidth(200)
+						local newAmt, amtChanged = ui.sliderFloat("##PortBuyCreditsSlider", investCreditAmount, 5.0, 50000.0, "%.0f Cr")
+						if amtChanged then investCreditAmount = math.floor(newAmt * 100) / 100 end
+						ui.sameLine(nil, 8)
+
+						local calcShares = investCreditAmount / curPrice
+						local shareCalcStr = (calcShares < 0.001) and string.format("%.6f", calcShares) or string.format("%.3f", calcShares)
+						local buyLabel = string.format("BUY %s (%s SHARES)##PortBuyCreditBtn", formatMoney(investCreditAmount), shareCalcStr)
+						if ui.button(buyLabel, Vector2(320, 28)) then
+							if stock then
+								local ok, msg = StockExchange.BuySharesByCredits(stock, investCreditAmount)
+								statusMessage = msg
+								statusTime = ui.getTime()
+							end
+						end
+					else
+						-- Local Enterprise in current system
+						ui.textColored(colors.fontDim, "Acquire additional whole shares in local municipal enterprise:")
+						local localBuyBatches = { 1, 5, 10, 50, 100, 500 }
+						for _, sz in ipairs(localBuyBatches) do
+							local isSel = (math.floor(tradeCount) == sz)
+							local bStyle = isSel and { Button = colors.uiPrimaryLight, Text = colors.black } or {}
+							ui.withStyleColors(bStyle, function()
+								if ui.button(tostring(sz) .. "##PortLocalBatch", Vector2(50, 26)) then tradeCount = sz end
+							end)
+							ui.sameLine(nil, 6)
+						end
+						ui.newLine()
+
+						local intTradeCount = math.max(1, math.floor(tradeCount))
+						local totalOrderCost = curPrice * intTradeCount
+						ui.text(string.format("Order: %d whole shares @ %s = %s", intTradeCount, formatMoney(curPrice), formatMoney(totalOrderCost)))
+						ui.spacing()
+
+						if ui.button(string.format("BUY %d SHARES##PortBuyLocalBtn", intTradeCount), Vector2(220, 32)) then
+							if stock then
+								local ok, msg = StockExchange.BuyShares(stock, intTradeCount)
+								statusMessage = msg
+								statusTime = ui.getTime()
+							end
+						end
+					end
+				else
+					-- Remote Local Enterprise: Sell Only!
+					local originSys = (stock and stock.system) or selectedHolding.system or "its home"
+					ui.textColored(Color(255, 170, 50, 255), "REMOTE ENTERPRISE — SELL / LIQUIDATION ONLY:")
+					ui.textWrapped(string.format(
+						"This enterprise is registered and chartered within the %s star system. Under interstellar securities regulations, buying additional shares requires physical docking within %s. Remote liquidation orders are cleared across GalNet from any star system.",
+						originSys, originSys))
+				end
 			end)
 		end
 	end

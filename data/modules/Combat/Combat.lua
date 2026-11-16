@@ -433,12 +433,19 @@ local finishMission = function (ref, mission)
 		Comms.ImportantMessage(l["SUCCESSMSG_" .. Engine.rand:Integer(1, MissionUtils.getNumberOfFlavours(l, "SUCCESSMSG"))], mission.client.name)
 		delta_reputation = 2.5
 		PlayerState.AddMoney(mission.reward)
+		local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
+		if okTax and TaxAuthority and TaxAuthority.RecordBBSIncome then
+			TaxAuthority.RecordBBSIncome(mission.reward, true) -- military/combat: tax-exempt!
+		end
 		FactionStanding.ApplyMissionOutcome(mission.factionName, standingDelta, nil, "Combat contract completed")
 		if mission.bonus > 0 then
 			local bonus = math.ceil(mission.reward/5 * mission.bonus)
 			local addition = string.interp(l["BONUS_" .. Engine.rand:Integer(1, MissionUtils.getNumberOfFlavours(l, "BONUS"))], { cash = Format.Money(bonus, false) })
 			Comms.ImportantMessage(addition, mission.client.name)
 			PlayerState.AddMoney(bonus)
+			if okTax and TaxAuthority and TaxAuthority.RecordBBSIncome then
+				TaxAuthority.RecordBBSIncome(bonus, true)
+			end
 		end
 	end
 	if delta_reputation ~= 0 then

@@ -23,12 +23,12 @@ local lc = Lang.GetResource 'core'
 
 -- don't produce missions for further than this many light years away
 local max_delivery_dist = 30
--- typical reward for delivery to a system max_delivery_dist away
-local typical_reward = 25 * max_delivery_dist
+-- typical reward for delivery to a system max_delivery_dist away (rebalanced for real-time economy & taxation)
+local typical_reward = 120 * max_delivery_dist
 -- typical reward for delivery to a local port
-local typical_reward_local = 25
+local typical_reward_local = 250
 -- Minimum amount paid for very close deliveries
-local min_local_dist_pay = 8
+local min_local_dist_pay = 75
 
 local num_pirate_taunts = 10
 local num_deny = 8
@@ -450,6 +450,10 @@ local onPlayerDocked = function (player, station)
 			else
 				Comms.ImportantMessage(flav.successmsg, mission.client.name)
 				PlayerState.AddMoney(mission.reward)
+				local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
+				if okTax and TaxAuthority and TaxAuthority.RecordBBSIncome then
+					TaxAuthority.RecordBBSIncome(mission.reward, false)
+				end
 				Character.persistent.player.reputation = Character.persistent.player.reputation + reward
 				if not isCovert then
 					FactionStanding.ApplyMissionOutcome(mission.factionName, isLocal and 1 or 2, mission.destFactionName, "Package delivery completed")

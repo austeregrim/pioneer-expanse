@@ -26,8 +26,8 @@ local lc = Lang.GetResource 'core'
 
 -- don't produce missions for further than this many light years away
 local max_taxi_dist = 40
--- typical reward for taxi service to a system max_taxi_dist away
-local typical_reward = 75 * max_taxi_dist
+-- typical reward for taxi service to a system max_taxi_dist away (rebalanced for real-time economy & taxation)
+local typical_reward = 200 * max_taxi_dist
 -- max number of passengers per trip
 local max_group = 10
 
@@ -446,6 +446,10 @@ local onPlayerDocked = function (player, station)
 			else
 				Comms.ImportantMessage(flavours[mission.flavour].successmsg, mission.client.name)
 				PlayerState.AddMoney(mission.reward)
+				local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
+				if okTax and TaxAuthority and TaxAuthority.RecordBBSIncome then
+					TaxAuthority.RecordBBSIncome(mission.reward, false)
+				end
 				Character.persistent.player.reputation = Character.persistent.player.reputation + 2
 				if not isCovert then
 					FactionStanding.ApplyMissionOutcome(mission.factionName, 2, mission.destFactionName, "Passenger transport completed")

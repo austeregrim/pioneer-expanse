@@ -492,6 +492,25 @@ local function drawMacroGalacticDossier()
 end
 
 -- System Information bar (Contextually adapts to Macro Galactic View when zoomed out)
+local autoRouteMaxJumpDist = nil
+local autoRouteFindFuelStar = false
+local autoRouteSafetyIdx = 0 -- 0: Any, 1: Very Dangerous, 2: Dangerous, 3: Mostly Harmless, 4: Safe Only
+local autoRouteFactionFilter = "ALL" -- "ALL" or faction name
+
+local safetyLevels = {
+	[0] = { name = "Any Security Level", maxLawlessness = 1.0 },
+	[1] = { name = "Very Dangerous or Safer (<= 0.8)", maxLawlessness = 0.8 },
+	[2] = { name = "Dangerous or Safer (<= 0.6)", maxLawlessness = 0.6 },
+	[3] = { name = "Mostly Harmless or Safer (<= 0.4)", maxLawlessness = 0.4 },
+	[4] = { name = "Safe Systems Only (<= 0.2)", maxLawlessness = 0.2 },
+}
+
+local function getAutoRouteParams()
+	local sLevel = safetyLevels[autoRouteSafetyIdx] or safetyLevels[0]
+	local fac = (autoRouteFactionFilter ~= "ALL") and autoRouteFactionFilter or ""
+	return autoRouteMaxJumpDist, autoRouteFindFuelStar, sLevel.maxLawlessness, fac
+end
+
 ---@type UI.Sidebar.Module
 local infoView = {
 	active = true,
@@ -697,7 +716,8 @@ local infoView = {
 				ui.sameLine(ui.getContentRegion().x - size, 0.0)
 
 				if ui.button(lui.AUTO_ROUTE, Vector2(0, 0), nil, nil, padding) then
-					hyperJumpPlanner.autoRoute(current, path, autoRouteMaxJumpDist, autoRouteFindFuelStar)
+					local maxJump, fuelStar, maxLawless, faction = getAutoRouteParams()
+					hyperJumpPlanner.autoRoute(current, path, maxJump, fuelStar, maxLawless, faction)
 				end
 
 			end
@@ -815,10 +835,18 @@ local econView = {
 	end
 }
 
-local autoRouteMaxJumpDist = nil
-local autoRouteFindFuelStar = false
+local function drawRouteList(route, rView)
+	local driveMax = (rView and rView.driveMaxFuel) or 0.0
+	local tankMax = (rView and rView.tankMaxFuel) or 0.0
+	local totalMax = (rView and rView.totalMaxCapacity) or (driveMax + tankMax)
+	if driveMax == 0.0 and Game.player then
+		local engine = Game.player:GetInstalledHyperdrive()
+		driveMax = engine and engine:GetMaxFuel() or 0.0
+		local shipDef = ShipDef and ShipDef[Game.player.shipId]
+		tankMax = shipDef and shipDef.fuelTankMass or (Game.player:GetShipType() and Game.player:GetShipType().fuelTankMass or 0.0)
+		totalMax = driveMax + tankMax
+	end
 
-local function drawRouteList(route)
 	if ui.beginTable("##RouteList", 4) then
 		ui.tableSetupColumn("Index", "WidthFixed")
 		ui.tableSetupColumn("Name", "WidthStretch")
@@ -845,10 +873,6 @@ local function drawRouteList(route)
 
 			ui.text(i)
 			ui.tableNextColumn()
-
-			local driveMax = self.driveMaxFuel or 0.0
-			local tankMax = self.tankMaxFuel or 0.0
-			local totalMax = self.totalMaxCapacity or 0.0
 
 			if jump.status == "OK" then
 				ui.withStyleColors({ Text = colors.alertGreen or colors.font }, function()
@@ -993,10 +1017,45 @@ local routeView = {
 				autoRouteFindFuelStar = newFuelStar
 			end
 
+			ui.spacing()
+			ui.text("System Safety Filter:")
+			local safetyNames = {}
+			for idx = 0, #safetyLevels do
+				table.insert(safetyNames, safetyLevels[idx].name)
+			end
+			local changedSafety, newSafetyIdx = ui.combo("##safetyFilterCombo", autoRouteSafetyIdx, safetyNames)
+			if changedSafety then
+				autoRouteSafetyIdx = newSafetyIdx
+			end
+
+			ui.spacing()
+			ui.text("Faction Filter:")
+			local map = sectorView:GetMap()
+			local rawFactions = map and map:GetFactions() or {}
+			local factionNames = { "Any Faction" }
+			local factionMap = { [0] = "ALL" }
+			local currentFactionIdx = 0
+			local fIdx = 1
+			for _, f in pairs(rawFactions) do
+				if f.faction and f.faction.name and f.faction.name ~= "" then
+					table.insert(factionNames, f.faction.name)
+					factionMap[fIdx] = f.faction.name
+					if f.faction.name == autoRouteFactionFilter then
+						currentFactionIdx = fIdx
+					end
+					fIdx = fIdx + 1
+				end
+			end
+			local changedFaction, newFactionIdx = ui.combo("##factionFilterCombo", currentFactionIdx, factionNames)
+			if changedFaction then
+				autoRouteFactionFilter = factionMap[newFactionIdx] or "ALL"
+			end
+
 			if #route > 0 and current and route[#route] then
 				ui.spacing()
 				if ui.button("Recalculate Route##recalcRouteBtn", Vector2(ui.getContentRegion().x, 24)) then
-					hyperJumpPlanner.autoRoute(current, route[#route].path, autoRouteMaxJumpDist, autoRouteFindFuelStar)
+					local maxJump, fuelStar, maxLawless, faction = getAutoRouteParams()
+					hyperJumpPlanner.autoRoute(current, route[#route].path, maxJump, fuelStar, maxLawless, faction)
 				end
 			end
 		end)
@@ -1042,7 +1101,7 @@ local routeView = {
 		ui.child("##routeJumps", Vector2(0, 0), nil, childFlags, function()
 
 			ui.withStyleVars({ ItemSpacing = Vector2(4, 4) }, function()
-				drawRouteList(route)
+				drawRouteList(route, self)
 			end)
 
 		end)

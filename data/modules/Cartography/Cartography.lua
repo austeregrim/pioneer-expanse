@@ -408,12 +408,29 @@ function Cartography.SellSystem(sysKey)
 		if b.surface then sb.surface = true end
 	end
 
-	state.unsoldSystems[sysKey] = nil
-	state.stats.totalEarned = state.stats.totalEarned + payout.totalPay
-	PlayerState.AddMoney(payout.totalPay)
+	local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
+	local isHomeStation = false
+	local currentStation = Game.player and Game.player:GetDockedWith()
+	if okTax and TaxAuthority and TaxAuthority.IsHomeStation then
+		isHomeStation = TaxAuthority.IsHomeStation(currentStation)
+	end
 
-	Event.Queue("onCartographyDataSold", payout.totalPay, { payout })
-	return payout.totalPay
+	local actualPayout = payout.totalPay
+	if isHomeStation then
+		-- Home University Grant: +10% academic research bonus!
+		actualPayout = math.floor(actualPayout * 1.10)
+	end
+
+	state.unsoldSystems[sysKey] = nil
+	state.stats.totalEarned = state.stats.totalEarned + actualPayout
+	PlayerState.AddMoney(actualPayout)
+
+	if okTax and TaxAuthority and TaxAuthority.RecordCartographyIncome then
+		TaxAuthority.RecordCartographyIncome(actualPayout, isHomeStation)
+	end
+
+	Event.Queue("onCartographyDataSold", actualPayout, { payout })
+	return actualPayout
 end
 
 function Cartography.SellAll()

@@ -83,7 +83,7 @@ function ScanData.New(id, bodyPath, minResolution, minCoverage, isOrbital)
 		id = id,
 		bodyPath = bodyPath,
 		minResolution = minResolution,
-		targetCoverage = minCoverage,
+		targetCoverage = (isOrbital and minCoverage) or 1.0,
 		orbital = isOrbital or false,
 		coverage = 0.0,
 		complete = false
@@ -274,21 +274,40 @@ function ScanManager:GetAvailableSensors()
 	return self.sensors
 end
 
-local NLAT = 12
-local NLON = 24
-local GRID_CELLS = NLAT * NLON
 local SURFACE_VISIBILITY_DOT = 0.35
 local SURFACE_COMPLETE_COVERAGE = 0.85
 
-local SPHERE_NORMALS = {}
-for i = 0, NLAT - 1 do
-	local lat = -0.5 * math.pi + math.pi * ((i + 0.5) / NLAT)
-	local clat = math.cos(lat)
-	local slat = math.sin(lat)
-	for j = 0, NLON - 1 do
-		local lon = 2.0 * math.pi * ((j + 0.5) / NLON)
-		SPHERE_NORMALS[i * NLON + j + 1] = Vector3(clat * math.cos(lon), slat, clat * math.sin(lon))
+local function getSurfaceGridDimensions(body)
+	local sbody = body and body:GetSystemBody()
+	local r = sbody and sbody.radius or 6371000
+	-- Scale grid resolution with body radius:
+	-- Small asteroids/moons: nlat = 10, nlon = 20 (chunky/large triangles)
+	-- Earth (~6371km): nlat = 18, nlon = 36 (fine/detailed triangles)
+	-- Giants (>=20,000km): nlat = 26, nlon = 52 (dense, high-detail triangles)
+	local nlat = math.clamp(math.floor(10 + math.sqrt(math.min(r, 50000000) / 50000000) * 16), 10, 28)
+	local nlon = nlat * 2
+	return nlat, nlon
+end
+
+local function generateSphereNormals(nlat, nlon)
+	local normals = {}
+	for i = 0, nlat - 1 do
+		local lat = -0.5 * math.pi + math.pi * ((i + 0.5) / nlat)
+		local clat = math.cos(lat)
+		local slat = math.sin(lat)
+		for j = 0, nlon - 1 do
+			local lon = 2.0 * math.pi * ((j + 0.5) / nlon)
+			normals[i * nlon + j + 1] = Vector3(clat * math.cos(lon), slat, clat * math.sin(lon))
+		end
 	end
+	return normals
+end
+
+local function getOrbitalScanDuration(body)
+	local sbody = body and body:GetSystemBody()
+	local r = sbody and sbody.radius or 6371000
+	-- Scaled duration based on radius: min 5s, max 45s
+	return math.min(45.0, 5.0 + 40.0 * math.sqrt(math.min(r, 70000000) / 70000000))
 end
 
 local function getScanMaxDistance(body, isOrbital)
@@ -446,7 +465,7 @@ function ScanManager:AddNewSurfaceScan(bodyPath, minResolution, requiredCoverage
 	local id = makeScanID(self.scanId, bodyPath, false)
 	self.scanId = self.scanId + 1
 
-	local scanData = ScanData.New(id, bodyPath, minResolution, requiredCoverage, false)
+	local scanData = ScanData.New(id, bodyPath, minResolution, 1.0, false)
 
 	self.scanMap[id] = scanData
 	table.insert(self.pendingScans, scanData)
@@ -559,7 +578,7 @@ function ScanManager:StartFreeScan(body, isOrbital)
 	local id = makeScanID(self.scanId, body.path, isOrbital)
 	self.scanId = self.scanId + 1
 
-	local targetCov = isOrbital and 1.0 or SURFACE_COMPLETE_COVERAGE
+	local targetCov = 1.0
 	local scanData = ScanData.New(id, body.path, 1e9, targetCov, isOrbital)
 	scanData.freeScan = true
 	self.scanMap[id] = scanData
@@ -577,6 +596,40 @@ function ScanManager:StartFreeScan(body, isOrbital)
 	end
 
 	return id
+end
+
+-- Move any scan for the given body to the top of the queue and activate it immediately
+---@param body Body
+---@return boolean success
+function ScanManager:PrioritizeBodyInQueue(body)
+	if not body or not body.path then return false end
+	if self.activeScan and isSameBodyPath(self.activeScan.bodyPath, body.path) then
+		return true -- Already actively scanning this body
+	end
+
+	-- Check pendingScans for any scan targeting this body
+	local bestIdx = nil
+	for idx, s in ipairs(self.pendingScans) do
+		if isSameBodyPath(s.bodyPath, body.path) then
+			-- Prefer orbital scan first if not complete, otherwise surface scan
+			if not bestIdx then
+				bestIdx = idx
+			elseif s.orbital and not self.pendingScans[bestIdx].orbital then
+				bestIdx = idx
+			end
+		end
+	end
+
+	if bestIdx then
+		local scan = table.remove(self.pendingScans, bestIdx)
+		table.insert(self.pendingScans, 1, scan)
+		if self:CanScanBeActivated(scan.id) then
+			self:SetActiveScan(scan.id)
+		end
+		return true
+	end
+
+	return false
 end
 
 -- Automatically activate the next scan in the queue if one is viable
@@ -731,21 +784,37 @@ function ScanManager:OnUpdateScan(scan)
 	if scan.orbital then
 		Game.SetSurfaceScanOverlay(nil)
 		if withinParams then
-			-- Orbital scan completes immediately once within scan range
-			scan.coverage = scan.targetCoverage
-			scan.complete = true
-			self.activeScan = nil
-			self.activeCallback = nil
-			self.withinParameters = false
-
-			if scan.freeScan then
-				Cartography.RecordBodyScan(body, true)
-			else
-				table.insert(self.completedScans, scan)
+			if not self.withinParameters then
+				Event.Queue("onScanRangeEnter", self.ship, scan.id)
 			end
-			Event.Queue("onScanComplete", self.ship, scan.id)
-			self:AdvanceQueue()
-			return true
+			self.withinParameters = true
+
+			if not scan.scanDuration then
+				scan.scanDuration = getOrbitalScanDuration(body)
+				scan.elapsedTime = 0.0
+			end
+
+			local dt = ORBITAL_SCAN_UPDATE_RATE
+			scan.elapsedTime = (scan.elapsedTime or 0.0) + dt
+			scan.coverage = math.min(scan.targetCoverage, scan.targetCoverage * (scan.elapsedTime / scan.scanDuration))
+
+			if scan.coverage >= scan.targetCoverage or scan.elapsedTime >= scan.scanDuration then
+				scan.coverage = scan.targetCoverage
+				scan.complete = true
+				self.activeScan = nil
+				self.activeCallback = nil
+				self.withinParameters = false
+
+				if scan.freeScan then
+					Cartography.RecordBodyScan(body, true)
+				else
+					table.insert(self.completedScans, scan)
+				end
+				Event.Queue("onScanComplete", self.ship, scan.id)
+				self:AdvanceQueue()
+				return true
+			end
+			return false
 		else
 			if self.withinParameters then
 				Event.Queue("onScanRangeExit", self.ship, scan.id)
@@ -756,11 +825,16 @@ function ScanManager:OnUpdateScan(scan)
 	end
 
 	-- Surface scan: 3D sphere coverage tracking (completes at 85% surface seen)
-	if not scan.surfaceGrid then
+	if not scan.surfaceGrid or not scan.normals then
+		local nlat, nlon = getSurfaceGridDimensions(body)
+		scan.nlat = nlat
+		scan.nlon = nlon
+		scan.totalCells = nlat * nlon
 		scan.surfaceGrid = {}
-		for k = 1, GRID_CELLS do
+		for k = 1, scan.totalCells do
 			scan.surfaceGrid[k] = "0"
 		end
+		scan.normals = generateSphereNormals(nlat, nlon)
 		scan.scannedCells = 0
 	end
 
@@ -772,24 +846,21 @@ function ScanManager:OnUpdateScan(scan)
 		local shipDir = relPos:normalized()
 		local grid = scan.surfaceGrid
 		local count = scan.scannedCells or 0
+		local totalCells = scan.totalCells or #grid
 
-		for k = 1, GRID_CELLS do
-			if grid[k] == "0" and SPHERE_NORMALS[k]:dot(shipDir) >= SURFACE_VISIBILITY_DOT then
+		for k = 1, totalCells do
+			if grid[k] == "0" and scan.normals[k]:dot(shipDir) >= SURFACE_VISIBILITY_DOT then
 				grid[k] = "1"
 				count = count + 1
 			end
 		end
 
 		scan.scannedCells = count
-		local coverageRatio = count / GRID_CELLS
-		if scan.freeScan or scan.targetCoverage <= 1.0 then
-			scan.coverage = coverageRatio
-		else
-			scan.coverage = math.min(scan.targetCoverage * 1.01, (coverageRatio / SURFACE_COMPLETE_COVERAGE) * scan.targetCoverage)
-		end
+		local rawCoverage = count / totalCells
+		scan.targetCoverage = 1.0
 
-		if coverageRatio >= SURFACE_COMPLETE_COVERAGE then
-			scan.coverage = scan.targetCoverage
+		if rawCoverage >= SURFACE_COMPLETE_COVERAGE then
+			scan.coverage = 1.0
 			scan.complete = true
 			self.activeScan = nil
 			self.activeCallback = nil
@@ -805,7 +876,8 @@ function ScanManager:OnUpdateScan(scan)
 			self:AdvanceQueue()
 			return true
 		else
-			Game.SetSurfaceScanOverlay(body, true, coverageRatio, table.concat(grid))
+			scan.coverage = rawCoverage
+			Game.SetSurfaceScanOverlay(body, true, rawCoverage, table.concat(grid))
 		end
 	else
 		if self.withinParameters then
@@ -829,8 +901,68 @@ function ScanManager:Unserialize()
 	-- these calls should be deferred into a PostLoad() method or event
 	self:SetupShipEquipListener()
 
+	-- Migrate and sanitize any existing surface scans from prior versions:
+	-- Shows true percentage scanned, completing at 85% raw coverage (marking 100% on complete).
+	local function migrateScan(scan)
+		if not scan then return end
+		if not scan.orbital or scan.freeScan then
+			scan.targetCoverage = 1.0
+		end
+		if not scan.orbital then
+			if scan.scannedCells and scan.totalCells and scan.totalCells > 0 then
+				local rawRatio = scan.scannedCells / scan.totalCells
+				if rawRatio >= SURFACE_COMPLETE_COVERAGE then
+					scan.coverage = 1.0
+					scan.complete = true
+				else
+					scan.coverage = rawRatio
+				end
+			elseif scan.coverage then
+				if scan.coverage >= SURFACE_COMPLETE_COVERAGE then
+					scan.coverage = 1.0
+					scan.complete = true
+				end
+			end
+		end
+	end
+
+	if self.scanMap then
+		for _, s in pairs(self.scanMap) do
+			migrateScan(s)
+		end
+	end
+	if self.pendingScans then
+		local pendingClean = {}
+		for _, s in ipairs(self.pendingScans) do
+			migrateScan(s)
+			if s.complete then
+				local b = self:GetScanBodyByType(s)
+				if b and s.freeScan then
+					Cartography.RecordBodyScan(b, false)
+				end
+			else
+				table.insert(pendingClean, s)
+			end
+		end
+		self.pendingScans = pendingClean
+	end
+	if self.activeScan then
+		migrateScan(self.activeScan)
+		if self.activeScan.complete then
+			local b = self:GetScanBodyByType(self.activeScan)
+			if b and self.activeScan.freeScan then
+				Cartography.RecordBodyScan(b, false)
+			end
+			self.activeScan = nil
+			self.activeCallback = nil
+			self.withinParameters = false
+			Game.SetSurfaceScanOverlay(nil)
+			self:AdvanceQueue()
+		end
+	end
+
 	-- Restore the scanning callback on loading a saved game
-	if self.activeCallback then
+	if self.activeCallback and self.activeScan then
 		self:StartScanCallback(true)
 	end
 

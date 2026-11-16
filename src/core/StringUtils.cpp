@@ -20,7 +20,7 @@ std::string format_money(double cents, bool showCents)
 
 	double money = showCents ? 0.01 * cents : round(0.01 * cents);
 
-	const char *format = (money < 0) ? "-$%.2f" : "$%.2f";
+	const char *format = (money < 0) ? "-%.2f" : "%.2f";
 	char buf[64];
 	snprintf(buf, sizeof(buf), format, fabs(money));
 	std::string result(buf);
@@ -41,12 +41,13 @@ std::string format_money(double cents, bool showCents)
 			"\u00a0" :
 			Lang::NUMBER_GROUP_SEP; // space should be fixed space
 
-		size_t skip = (money < 0) ? 2 : 1; // compensate for "$" or "-$"
+		size_t skip = (money < 0) ? 1 : 0; // compensate for leading "-"
 		while (pos - skip > groupDigits) { // insert thousand seperator
 			pos = pos - groupDigits;
 			result.insert(pos, groupSep);
 		}
 	}
+	result += " Cr";
 	return result;
 }
 

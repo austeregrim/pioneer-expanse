@@ -74,7 +74,15 @@ function Insurance.GetPolicyInfo()
 	end
 
 	local total = hullPrice + equipValue
-	local deductible = math.max(1000, math.floor(total * 0.05))
+	local deductibleRate = 5
+	local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
+	if okTax and TaxAuthority and TaxAuthority.GetInsuranceDiscount then
+		local discount = TaxAuthority.GetInsuranceDiscount()
+		if discount > 0 then
+			deductibleRate = 3 -- 40% subsidized discount for lawful registered residents
+		end
+	end
+	local deductible = math.max(1000, math.floor(total * (deductibleRate / 100)))
 
 	return {
 		underwriter = "Solar Marine & Astral Underwriters",
@@ -83,8 +91,8 @@ function Insurance.GetPolicyInfo()
 		hullValue = hullPrice,
 		equipValue = equipValue,
 		totalValue = total,
-		coverageRate = 95,
-		deductibleRate = 5,
+		coverageRate = 100 - deductibleRate,
+		deductibleRate = deductibleRate,
 		deductible = deductible,
 		beaconStatus = "ONLINE (121.5 MHz / 406.025 MHz COSPAS-SARSAT)",
 	}
@@ -223,7 +231,15 @@ local function onPlayerShipDestroyed(ship)
 	local shipDef = ShipDef[ship.shipId]
 	local hullPrice = (shipDef and shipDef.baseprice) or 100000
 	local totalVal = hullPrice + totalEquipValue
-	local deductibleVal = math.max(1000, math.floor(totalVal * 0.05))
+	local deductibleRate = 5
+	local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
+	if okTax and TaxAuthority and TaxAuthority.GetInsuranceDiscount then
+		local discount = TaxAuthority.GetInsuranceDiscount()
+		if discount > 0 then
+			deductibleRate = 3 -- 40% subsidized discount for lawful registered residents
+		end
+	end
+	local deductibleVal = math.max(1000, math.floor(totalVal * (deductibleRate / 100)))
 
 	-- Jettison cargo as salvageable flotsam canisters into deep space
 	local droppedCargoList = {}

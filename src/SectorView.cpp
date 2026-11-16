@@ -21,6 +21,7 @@
 #include "galaxy/Galaxy.h"
 #include "galaxy/Sector.h"
 #include "galaxy/StarSystem.h"
+#include "galaxy/Factions.h"
 #include "imgui/imgui.h"
 #include "lua/LuaObject.h"
 #include "lua/LuaRef.h"
@@ -389,7 +390,7 @@ const std::vector<SystemPath> &SectorView::GetRoute() const
 	return m_route;
 }
 
-const std::string SectorView::AutoRoute(const SystemPath &start, const SystemPath &target, std::vector<SystemPath> &outRoute, float maxJumpDist, bool findFuelStar) const
+const std::string SectorView::AutoRoute(const SystemPath &start, const SystemPath &target, std::vector<SystemPath> &outRoute, float maxJumpDist, bool findFuelStar, float maxLawlessness, const std::string &factionFilter) const
 {
 	const RefCountedPtr<const Sector> start_sec = m_game.GetGalaxy()->GetSector(start);
 	const RefCountedPtr<const Sector> target_sec = m_game.GetGalaxy()->GetSector(target);
@@ -549,6 +550,24 @@ const std::string SectorView::AutoRoute(const SystemPath &start, const SystemPat
 			if (v_dist_ly > max_range) {
 				++totalSkipped;
 				continue;
+			}
+
+			// Safety / Threat filter: skip systems with lawlessness higher than maxLawlessness
+			if (maxLawlessness > 0.0f && maxLawlessness < 1.0f && !v.IsSameSystem(target) && !v.IsSameSystem(start)) {
+				RefCountedPtr<StarSystem> sys = m_game.GetGalaxy()->GetStarSystem(v);
+				if (sys && sys->GetSysPolit().lawlessness.ToDouble() > maxLawlessness) {
+					++totalSkipped;
+					continue;
+				}
+			}
+
+			// Faction filter: skip systems not belonging to the chosen faction
+			if (!factionFilter.empty() && factionFilter != "ALL" && !v.IsSameSystem(target) && !v.IsSameSystem(start)) {
+				const Faction *sysFaction = v_sec->m_systems[v.systemIndex].GetFaction();
+				if (!sysFaction || sysFaction->name != factionFilter) {
+					++totalSkipped;
+					continue;
+				}
 			}
 
 			const float v_duration = hyperdrive.CallMethod<float>("GetDuration", Pi::player, v_dist_ly, max_range);

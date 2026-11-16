@@ -5,6 +5,7 @@
 
 #include "FileSystem.h"
 #include "Frame.h"
+#include "Game.h"
 #include "Pi.h"
 #include "Ship.h"
 #include "core/IniConfig.h"
@@ -49,6 +50,11 @@ SpeedLines::SpeedLines(Ship *s) :
 void SpeedLines::Update(float time)
 {
 	PROFILE_SCOPED();
+	if (Pi::game && Pi::game->IsPaused())
+		return;
+	if (time <= 0.0f)
+		return;
+
 	const vector3d velD = m_ship->GetVelocity();
 	const double absVelD = velD.Length();
 
@@ -69,11 +75,11 @@ void SpeedLines::Update(float time)
 	float d;
 	if (inJumpSurge) {
 		m_lineLength = 240.f;
-		d = MAX_VEL;
+		d = MAX_VEL * (time * 60.0f);
 	} else if (inSupercruise) {
 		const double logNorm = Clamp(std::log10(std::max(absVelD, 30000.0) / 30000.0) / 7.3, 0.0, 1.0);
 		m_lineLength = float(65.0 + 175.0 * logNorm);
-		d = float(35.0 + (MAX_VEL - 35.0) * logNorm);
+		d = float(35.0 + (MAX_VEL - 35.0) * logNorm) * (time * 60.0f);
 	} else {
 		const float absVel = float( std::min(absVelD, 1e7) );
 		float mult;

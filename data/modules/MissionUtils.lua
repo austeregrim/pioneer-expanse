@@ -38,8 +38,8 @@ Calculator.travelTimeAU = 1.0
 Calculator.typHyperTime = 7 * Days
 Calculator.typHyperDist = 15
 
-Calculator.inSystemReward = 50
-Calculator.hyperspaceReward = 500
+Calculator.inSystemReward = 200
+Calculator.hyperspaceReward = 1500
 
 -- Setup per-mission parameters in the mission calculator
 function Calculator:SetParams(args)

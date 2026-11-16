@@ -6,18 +6,17 @@ local StationView = require 'pigui.views.station-view'
 local AutoSave    = require 'modules.AutoSave.AutoSave'
 local PlayerState = require 'PlayerState'
 local Insurance   = require 'modules.Insurance.Insurance'
+local TaxAuthority = require 'modules.Economy.TaxAuthority'
 
 local Game = require 'Game'
 local Rand = require 'Rand'
 local Format = require 'Format'
 local ShipDef = require 'ShipDef'
 local Character = require 'Character'
-local Commodities = require 'Commodities'
 local Comms = require 'Comms'
 local Space = require 'Space'
 
 local PiGuiFace = require 'pigui.libs.face'
-local PiImage = require 'pigui.libs.image'
 local textTable = require 'pigui.libs.text-table'
 local ModalWindow = require 'pigui.libs.modal-win'
 
@@ -25,7 +24,6 @@ local pionillium = ui.fonts.pionillium
 local orbiteer = ui.fonts.orbiteer
 local colors = ui.theme.colors
 local icons = ui.theme.icons
-local gaugeSpacing = ui.getTextLineHeight() * 0.8
 
 local Lang = require 'Lang'
 local l = Lang.GetResource("ui-core")
@@ -39,18 +37,14 @@ local widgetSizes = ui.rescaleUI({
 }, Vector2(1920, 1080))
 
 widgetSizes.itemSpacing = Vector2(math.ceil(widgetSizes.itemSpacing.x), math.ceil(widgetSizes.itemSpacing.y))
-widgetSizes.buttonFullRefuelSize = Vector2(widgetSizes.buttonSizeBase.x*2 + widgetSizes.itemSpacing.x, widgetSizes.buttonSizeBase.y)
 widgetSizes.buttonLaunchSize = Vector2(widgetSizes.buttonSizeBase.x*5, widgetSizes.buttonSizeBase.y)
-widgetSizes.iconSize = Vector2(0, widgetSizes.buttonSizeBase.y)
 
 local face = nil
 local stationSeed = false
 local shipDef
 
-local hyperdrive ---@type Equipment.HyperdriveType?
-local hyperdrive_fuel
-local hydrogenIcon = PiImage.New("icons/goods/Hydrogen.png")
-local hyperdriveIcon = PiImage.New("icons/goods/Hydrogen.png")
+local taxStatusBanner = nil
+local taxBannerColor = colors.uiPrimaryLight
 
 local popupMsg = ''
 local popup = ModalWindow.New('lobbyPopup', function(self)
@@ -96,147 +90,196 @@ local requestLaunch = function (station)
 	end
 end
 
-local refuelInternalTank = function (delta)
-	local station = Game.player:GetDockedWith()
-	local stock = station:GetCommodityStock(Commodities.hydrogen)
-	local price = station:GetCommodityPrice(Commodities.hydrogen)
+local function drawCivilAdministrationSection(station)
+	local resInfo = TaxAuthority.GetResidencyInfo()
+	local assess = TaxAuthority.GetTaxAssessment()
+	local playerMoney = PlayerState.GetMoney()
 
-	if delta > 0 then
-		if stock == 0 then
-			popupMsg = l.ITEM_IS_OUT_OF_STOCK
-			popup:open()
-			return
+	ui.spacing()
+	ui.separator()
+	ui.spacing()
+
+	if taxStatusBanner then
+		ui.textColored(taxBannerColor, taxStatusBanner)
+		ui.spacing()
+	end
+
+	-- Header
+	ui.withFont(orbiteer.medlarge, function()
+		ui.textColored(colors.uiPrimaryLight, "INTERSTELLAR REVENUE SERVICE & CIVIL ADMINISTRATION")
+	end)
+	ui.spacing()
+
+	local availWidth = ui.getContentRegion().x
+	local col0Width = math.max(380 * rescaleVector.x, math.floor(availWidth * 0.50))
+	ui.columns(2, "LobbyCivilTaxCols", false)
+	ui.setColumnWidth(0, col0Width)
+
+	-- Left Column: Residency & Civic Allegiance
+	ui.group(function()
+		ui.withFont(orbiteer.medlarge, function()
+			ui.textColored(colors.uiPrimaryLight, "CIVIL RESIDENCY & JURISDICTION")
+		end)
+		ui.spacing()
+
+		local residencyStatusStr
+		if resInfo.isResident then
+			if resInfo.canChange then
+				residencyStatusStr = "Term Expired (Eligible to Transfer)"
+			else
+				residencyStatusStr = string.format("Active (Locked: %d days remaining)", resInfo.remainingDays)
+			end
+		else
+			residencyStatusStr = "Stateless / Transient Pilot"
 		end
 
-		delta = math.clamp(delta, 0, 100 - Game.player.fuel)
-	else
-		delta = math.clamp(delta, -Game.player.fuel, 0)
-	end
+		local rateStr = string.format("%.1f%% (Faction %.1f%% + System %+.1f%%)",
+			resInfo.effectiveRate * 100,
+			resInfo.baselineRate * 100,
+			resInfo.systemModifier * 100)
 
-	local fuel = Game.player.fuel + delta
-	local mass = shipDef.fuelTankMass/100 * delta
-	local total = price * mass
+		textTable.draw({
+			{ "Current Port of Call", (station and station.label) or "Unknown Station" },
+			{ "Registered Home Station", resInfo.homeStationName },
+			{ "Home System", resInfo.homeSystemName },
+			{ "Governing Faction", resInfo.homeFaction },
+			{ "Residency Status", residencyStatusStr },
+			{ "Effective Tax Rate", rateStr },
+		})
 
-	if total > PlayerState.GetMoney() then
-		total = PlayerState.GetMoney()
-		mass = total / price
-		fuel = Game.player.fuel + mass * 100 / shipDef.fuelTankMass
-	end
-
-	if stock < mass then
-		mass = stock
-		total = price * mass
-		fuel = Game.player.fuel + mass * 100 / shipDef.fuelTankMass
-	end
-
-	PlayerState.AddMoney(-total)
-	local commodityChangeAmount = mass < 0 and math.floor(mass) or math.ceil(mass)
-	station:AddCommodityStock(Commodities.hydrogen, -commodityChangeAmount)
-	Game.player:SetFuelPercent(fuel)
-end
-
-local refuelHyperdrive = function (mass)
-	assert(hyperdrive)
-	local station = assert(Game.player:GetDockedWith())
-	local stock = station:GetCommodityStock(hyperdrive_fuel)
-	local price = station:GetCommodityPrice(hyperdrive_fuel)
-
-	if mass > 0 then
-		if stock == 0 then
-			popupMsg = l.ITEM_IS_OUT_OF_STOCK
-			popup:open()
-			return
+		ui.spacing()
+		if resInfo.isResident and not resInfo.canChange then
+			ui.textColored(colors.fontDim, string.format("90-Day Residency Commitment: %d / %d Days", resInfo.termDaysTotal - resInfo.remainingDays, resInfo.termDaysTotal))
+			local gaugePos = ui.getCursorScreenPos()
+			local gaugeHeight = 16 * rescaleVector.y
+			local gaugeWidth = ui.getContentRegion().x
+			ui.gauge(gaugePos, resInfo.progress * 100, '', string.format("%.0f%% Term Elapsed", resInfo.progress * 100),
+				0, 100, icons.station or icons.info, false, colors.gaugeEquipmentMarket, '',
+				gaugeWidth, gaugeHeight, pionillium.details)
+			ui.dummy(Vector2(0, gaugeHeight + 8 * rescaleVector.y))
 		end
-	end
 
-	mass = math.clamp(mass, -hyperdrive.storedFuel, hyperdrive:GetMaxFuel() - hyperdrive.storedFuel)
+		ui.spacing()
+		ui.withFont(orbiteer.medlarge, function()
+			ui.textColored(colors.fontDim, "RESIDENCY PRIVILEGES & INCENTIVES")
+		end)
+		ui.bulletText("Subsidized Ship Insurance: 40% reduction on rebuy deductible (3% vs 5%).")
+		ui.bulletText("Academic Cartography Credit: +10% scan value & 25% tax rebate at Home Port.")
+		ui.bulletText("Faction Legal Standing: System defense patrol protection in core lanes.")
 
-	-- Can't buy any more than the station has in stock or we have money for
-	mass = math.min(mass, math.min(stock, PlayerState.GetMoney() / price))
-	PlayerState.AddMoney(-price * mass)
-
-	hyperdrive:SetFuel(Game.player, hyperdrive.storedFuel + mass)
-	station:AddCommodityStock(hyperdrive_fuel, -math.round(mass))
-end
-
-local function lobbyMenu()
-	local station = Game.player:GetDockedWith()
-	if not station then return end -- station can be false if we requested launch this frame
-
-	-- Setup columns: icon | costs | buttons | fuel gauge
-	ui.columns(4, 'thrusterFuel', false)
-	ui.setColumnWidth(0, widgetSizes.buttonSizeBase.x + widgetSizes.itemSpacing.x)
-	ui.setColumnWidth(1, widgetSizes.buttonSizeBase.x + widgetSizes.itemSpacing.x)
-	ui.setColumnWidth(2, (widgetSizes.buttonSizeBase.x + widgetSizes.itemSpacing.x)*4)
-
-	-- internal tank fuel
-	hydrogenIcon:Draw(widgetSizes.iconSize)
-	ui.nextColumn()
-
-	-- internal tank refill costs
-	ui.withFont(pionillium.body, function()
-		ui.text(Format.Money(station:GetCommodityPrice(Commodities.hydrogen)) .. "/t")
-		ui.text(Format.Money(station:GetCommodityPrice(Commodities.hydrogen) * shipDef.fuelTankMass/100 * Game.player.fuel))
+		ui.spacing()
+		if station then
+			local isCurrentHome = (resInfo.isResident and resInfo.homeStationName == station.label)
+			local actionBtnSize = Vector2(ui.getContentRegion().x, 36 * rescaleVector.y)
+			if isCurrentHome then
+				ui.withStyleColors({ Button = ui.theme.buttonColors.disabled.normal, Text = colors.fontDim }, function()
+					ui.button("CURRENT REGISTERED HOME STATION##lobbyRes", actionBtnSize)
+				end)
+			elseif not resInfo.canChange then
+				ui.withStyleColors({ Button = ui.theme.buttonColors.disabled.normal, Text = colors.fontDim }, function()
+					ui.button(string.format("RESIDENCY LOCKED (%d DAYS REMAINING)##lobbyRes", resInfo.remainingDays), actionBtnSize)
+				end)
+			else
+				local regLabel = string.format("REGISTER RESIDENCY AT %s (90-DAY TERM)##lobbyRes", string.upper(station.label))
+				if ui.button(regLabel, actionBtnSize) then
+					local ok, msg = TaxAuthority.RegisterResidency(station)
+					if ok then
+						taxStatusBanner = msg
+						taxBannerColor = colors.econProfit or colors.uiPrimaryLight
+						ui.playSfx("OK")
+					else
+						taxStatusBanner = msg
+						taxBannerColor = colors.alertRed
+					end
+				end
+			end
+		end
 	end)
+
 	ui.nextColumn()
 
-	-- internal tank refill buttons
-	if ui.button(l.REFUEL_FULL, widgetSizes.buttonFullRefuelSize) then refuelInternalTank(100) end
-	ui.sameLine()
-	if ui.button("-10%", widgetSizes.buttonSizeBase) then refuelInternalTank(-10) end
-	ui.sameLine()
-	if ui.button("+10%", widgetSizes.buttonSizeBase) then refuelInternalTank(10) end
-	ui.nextColumn()
+	-- Right Column: Full Tax Assessment Ledger & Single Payment Button
+	ui.group(function()
+		ui.withFont(orbiteer.medlarge, function()
+			ui.textColored(colors.uiPrimaryLight, "CONSOLIDATED TAX ASSESSMENT")
+		end)
+		ui.spacing()
 
-	-- internal tank fuel gauge
-	local gaugePos = ui.getCursorScreenPos()
-	local gaugeHeight = widgetSizes.buttonSizeBase.y
-	gaugePos.x = gaugePos.x + gaugeSpacing;
-	gaugePos.y = gaugePos.y + widgetSizes.buttonSizeBase.y/2
-	local gaugeWidth = ui.getContentRegion().x
-	ui.gauge(gaugePos, Game.player.fuel, '', string.format(l.FUEL .. ": %0.1f t \t" .. l.DELTA_V .. ": %d km/s",
-		shipDef.fuelTankMass/100 * Game.player.fuel, Game.player:GetRemainingDeltaV()/1000),
-		0, 100, icons.fuel, true,
-		colors.gaugeEquipmentMarket, '', gaugeWidth, gaugeHeight, pionillium.body)
+		local dueStatusStr
+		local dueColor = colors.fontDim
+		if assess.isDelinquent then
+			dueStatusStr = "DELINQUENT - 5% LATE PENALTY APPLIED"
+			dueColor = colors.alertRed
+		elseif assess.daysUntilDue > 0 then
+			dueStatusStr = string.format("Filing Due in %d In-Game Days", assess.daysUntilDue)
+			dueColor = colors.fontDim
+		else
+			dueStatusStr = "No Assessment Pending"
+		end
 
-	-- hyperspace fuel
-	ui.nextColumn()
+		textTable.draw({
+			{ "Your Liquid Capital", Format.Money(playerMoney) },
+			{ "Assessment Filing Status", dueStatusStr },
+			{ "Trade Net Capital Gains Tax", Format.Money(assess.breakdown.tradeProfitTax) },
+			{ "Civilian BBS Contracts Tax", Format.Money(assess.breakdown.bbsJobsTax) },
+			{ "Cartographic Survey Data Tax", Format.Money(assess.breakdown.cartographyTax) },
+			{ "Combat & Bounty Earnings", string.format("%s (0%% Tax-Exempt)", Format.Money(assess.breakdown.exemptIncome)) },
+			{ "Lottery Windfall Tax Withheld", string.format("%s (30%% Withheld)", Format.Money(assess.breakdown.windfallTaxWithheld)) },
+			{ "Total Taxes Paid to Date", Format.Money(assess.stats.totalTaxPaid) },
+		})
 
-	if not hyperdrive then return end
+		local curPos = ui.getCursorScreenPos()
+		local colW = ui.getContentRegion().x
+		ui.addLine(curPos, Vector2(curPos.x + colW, curPos.y), colors.border or colors.fontDim, 1.0)
+		ui.dummy(Vector2(0, 6 * rescaleVector.y))
 
-	hyperdriveIcon:Draw(widgetSizes.iconSize)
-	ui.nextColumn()
+		ui.withFont(orbiteer.large, function()
+			local balColor = (assess.accruedTax > 0 and (assess.isDelinquent and colors.alertRed or colors.alertYellow)) or (colors.econProfit or colors.uiPrimaryLight)
+			ui.textColored(balColor, string.format("OUTSTANDING TAX BALANCE: %s", Format.Money(assess.accruedTax)))
+		end)
 
-	local stored_hyperfuel = hyperdrive.storedFuel
+		ui.withFont(pionillium.body, function()
+			if assess.accruedTax > 0 then
+				local statusColor = assess.isDelinquent and colors.alertRed or colors.alertYellow
+				ui.textColored(statusColor, string.format("Status: %s", dueStatusStr))
+			else
+				ui.textColored(colors.econProfit or colors.uiPrimaryLight, "Status: Account in Good Standing")
+			end
+		end)
 
-	-- hyperspace fuel prices
-	ui.withFont(pionillium.body, function()
-		ui.text(Format.Money(station:GetCommodityPrice(hyperdrive_fuel)) .. "/t")
-		ui.text(Format.Money(station:GetCommodityPrice(hyperdrive_fuel) * stored_hyperfuel))
+		ui.spacing()
+		local payBtnSize = Vector2(ui.getContentRegion().x, 38 * rescaleVector.y)
+		if assess.accruedTax > 0 then
+			local canAfford = playerMoney >= assess.accruedTax
+			local payBtnLabel = string.format("PAY ALL TAXES (%s)##lobbyPayTax", Format.Money(assess.accruedTax))
+
+			if canAfford then
+				ui.withStyleColors({ Button = colors.uiPrimaryLight, Text = colors.background or colors.font }, function()
+					if ui.button(payBtnLabel, payBtnSize) then
+						local ok, msg = TaxAuthority.PayTaxes()
+						if ok then
+							taxStatusBanner = msg
+							taxBannerColor = colors.econProfit or colors.uiPrimaryLight
+							ui.playSfx("OK")
+						else
+							taxStatusBanner = msg
+							taxBannerColor = colors.alertRed
+						end
+					end
+				end)
+			else
+				ui.withStyleColors({ Button = ui.theme.buttonColors.disabled.normal, Text = colors.alertRed }, function()
+					ui.button("INSUFFICIENT FUNDS TO SETTLE TAX ASSESSMENT##lobbyPayTax", payBtnSize)
+				end)
+			end
+		else
+			ui.withStyleColors({ Button = ui.theme.buttonColors.disabled.normal, Text = colors.fontDim }, function()
+				ui.button("ALL ASSESSMENTS SETTLED##lobbyPayTax", payBtnSize)
+			end)
+		end
 	end)
-	ui.nextColumn()
 
-	-- hyperspace fuel refill buttons
-	if ui.button("-10t", widgetSizes.buttonSizeBase) then refuelHyperdrive(-10) end
-	ui.sameLine()
-	if ui.button("-1t", widgetSizes.buttonSizeBase) then refuelHyperdrive(-1) end
-	ui.sameLine()
-	if ui.button("+1t", widgetSizes.buttonSizeBase) then refuelHyperdrive(1) end
-	ui.sameLine()
-	if ui.button("+10t", widgetSizes.buttonSizeBase) then refuelHyperdrive(10) end
-	ui.nextColumn()
-
-	-- hyperspace fuel gauge
-	gaugePos = ui.getCursorScreenPos()
-	gaugePos.x = gaugePos.x + gaugeSpacing;
-	gaugePos.y = gaugePos.y + widgetSizes.buttonSizeBase.y/2
-	ui.gauge(gaugePos, stored_hyperfuel, '', string.format(l.FUEL .. ": %0.1f t \t" .. l.HYPERSPACE_RANGE .. ": %d " .. l.LY,
-		stored_hyperfuel, Game.player:GetHyperspaceRange()),
-		0, hyperdrive:GetMaxFuel(),
-		icons.hyperspace, true, colors.gaugeEquipmentMarket, '',
-		gaugeWidth, gaugeHeight, pionillium.body)
-
-	ui.columns(1, '', false)
+	ui.columns(1, "LobbyCivilTaxEnd", false)
 end
 
 local function drawPlayerInfo()
@@ -277,12 +320,11 @@ local function drawPlayerInfo()
 	ui.withFont(pionillium.heading, function()
 		ui.withStyleVars({ItemSpacing = widgetSizes.itemSpacing}, function()
 			local buttonSizeSpacing = widgetSizes.buttonLaunchSize.y + widgetSizes.itemSpacing.y
-			local lobbyMenuHeight = widgetSizes.buttonSizeBase.y*2 + widgetSizes.itemSpacing.y*3 -- use an extra itemSpacing to avoid scrollbar
 
-			ui.child("Wrapper", Vector2(0, -lobbyMenuHeight), function()
+			ui.child("Wrapper", Vector2(0, 0), function()
 				-- face display has 1:1 aspect ratio, and we need size for a launch button underneath
 				local infoColumnWidth = -math.min(ui.getContentRegion().y - buttonSizeSpacing, widgetSizes.faceSize.x) - widgetSizes.itemSpacing.x
-				ui.child("PlayerShipFuel", Vector2(infoColumnWidth, 0), function()
+				ui.child("StationCivilInfo", Vector2(infoColumnWidth, 0), function()
 					ui.spacing()  -- Extra padding for umlaut and other signs on top of the station label.
 					textTable.withHeading(station.label, orbiteer.title, {
 						{ tech_certified, "" },
@@ -290,6 +332,8 @@ local function drawPlayerInfo()
 						{ station_orbit_info, "" },
 						{ local_gravity_pressure, ""},
 					})
+
+					drawCivilAdministrationSection(station)
 				end)
 
 				ui.sameLine()
@@ -314,8 +358,6 @@ local function drawPlayerInfo()
 				end)
 			end)
 
-			ui.child("LobbyMenuPanel", Vector2(0,0), lobbyMenu)
-
 		end)
 	end)
 end
@@ -327,6 +369,7 @@ StationView:registerView({
 	showView = true,
 	draw = drawPlayerInfo,
 	refresh = function()
+		taxStatusBanner = nil
 		local station = Game.player:GetDockedWith()
 		shipDef = ShipDef[Game.player.shipId]
 
@@ -336,10 +379,6 @@ StationView:registerView({
 				local rand = Rand.New(station.seed)
 				face = PiGuiFace.New(Character.New({ title = l.STATION_MANAGER }, rand), {itemSpacing = widgetSizes.itemSpacing})
 			end
-
-			hyperdrive = Game.player:GetInstalledHyperdrive()
-			hyperdrive_fuel = hyperdrive and hyperdrive.fuel or Commodities.hydrogen
-			hyperdriveIcon = PiImage.New("icons/goods/" .. hyperdrive_fuel.icon_name .. ".png")
 		end
 
 		if Insurance.ShouldOpenModal() then

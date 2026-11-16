@@ -23,6 +23,8 @@ local InterCast = {}
 ---@field urgent boolean
 
 local articles = {}
+local readArticles = {}
+local flaggedArticles = {}
 local currentHeadlineIndex = 1
 local lastHeadlineSwitchTime = 0
 local TICKER_CYCLE_INTERVAL = 14.0 -- Cycle headline every 14 seconds
@@ -158,14 +160,37 @@ local STORY_TEMPLATES = {
 	},
 }
 
-local function formatCurrentDate()
-	if Game.time then
-		local second, minute, hour, day, month, year = Game.GetPartsFromDateTime(Game.time)
+function InterCast.FormatDate(t)
+	t = t or Game.time or 0
+	if Game.GetPartsFromDateTime then
+		local second, minute, hour, day, month, year = Game.GetPartsFromDateTime(t)
 		if year then
-			return string.format("%04d.%02d.%02d", year, month, day)
+			return string.format("%04d-%02d-%02d", year, month, day)
 		end
 	end
-	return "3200.01.01"
+	local totalDays = math.floor(t / 86400)
+	local year = 3200 + math.floor(totalDays / 365)
+	local dayOfYear = (totalDays % 365) + 1
+	local month = math.min(12, math.floor(dayOfYear / 30) + 1)
+	local day = (dayOfYear % 30) + 1
+	return string.format("%04d-%02d-%02d", year, month, day)
+end
+
+function InterCast.NormalizeDate(rawDate)
+	if not rawDate or rawDate == "" then
+		return InterCast.FormatDate()
+	end
+	-- Convert YYYY.MM.DD (dots) to YYYY-MM-DD (dashes)
+	local y, m, d = tostring(rawDate):match("^(%d%d%d%d)%.(%d%d)%.(%d%d)$")
+	if y and m and d then
+		return string.format("%s-%s-%s", y, m, d)
+	end
+	-- Already YYYY-MM-DD
+	if tostring(rawDate):match("^%d%d%d%d%-%d%d%-%d%d$") then
+		return tostring(rawDate)
+	end
+	-- If it's "CYCLE %d" or non-standard format, fallback to current calendar date
+	return InterCast.FormatDate()
 end
 
 local function generateSeedArticles()
@@ -180,7 +205,7 @@ local function generateSeedArticles()
 				headline = t.headline,
 				system = t.system or (t.headline:match("IN ([%a%s%d']+)") or t.headline:match("ON ([%a%s%d']+)") or "Sol"),
 				systemPath = t.systemPath,
-				date = formatCurrentDate(),
+				date = InterCast.FormatDate(),
 				bureau = t.bureau,
 				summary = t.summary,
 				body = t.body,
@@ -237,11 +262,58 @@ function InterCast.CycleNextHeadline()
 end
 
 function InterCast.AddArticle(art)
+	if not art then return end
+	art.date = InterCast.NormalizeDate(art.date)
 	table.insert(articles, 1, art)
-	-- Keep list bounded to last 50 stories
-	if #articles > 50 then
+	-- Keep list bounded to last 120 stories for historical day navigation
+	if #articles > 120 then
 		table.remove(articles)
 	end
+end
+
+function InterCast.IsRead(artId)
+	if not artId then return false end
+	return readArticles[artId] == true
+end
+
+function InterCast.MarkRead(artId)
+	if artId and not readArticles[artId] then
+		readArticles[artId] = true
+	end
+end
+
+function InterCast.IsFlagged(artId)
+	if not artId then return false end
+	return flaggedArticles[artId] == true
+end
+
+function InterCast.ToggleFlagged(artId)
+	if not artId then return false end
+	if flaggedArticles[artId] then
+		flaggedArticles[artId] = nil
+		return false
+	else
+		flaggedArticles[artId] = true
+		return true
+	end
+end
+
+function InterCast.GetFlaggedCount()
+	local count = 0
+	for _, _ in pairs(flaggedArticles) do count = count + 1 end
+	return count
+end
+
+function InterCast.GetUniqueDates()
+	local dates = {}
+	local seen = {}
+	for _, art in ipairs(articles) do
+		if art.date and not seen[art.date] then
+			seen[art.date] = true
+			table.insert(dates, art.date)
+		end
+	end
+	return dates
 end
 
 local function onEnterSystem()
@@ -249,7 +321,7 @@ local function onEnterSystem()
 	if Game.system and #articles > 0 then
 		local sysName = Game.system.name
 		-- Chance to add localized headline
-		local dateStr = formatCurrentDate()
+		local dateStr = InterCast.FormatDate()
 		local localArticle = {
 			id = "art_local_" .. tostring(Game.time or 0),
 			category = "MARKET",
@@ -278,13 +350,20 @@ local function serialize()
 	return {
 		articles = articles,
 		currentIndex = currentHeadlineIndex,
+		readArticles = readArticles,
+		flaggedArticles = flaggedArticles,
 	}
 end
 
 local function unserialize(data)
 	if data and data.articles and #data.articles > 0 then
 		articles = data.articles
+		for _, art in ipairs(articles) do
+			art.date = InterCast.NormalizeDate(art.date)
+		end
 		currentHeadlineIndex = data.currentIndex or 1
+		readArticles = data.readArticles or {}
+		flaggedArticles = data.flaggedArticles or {}
 	else
 		generateSeedArticles()
 	end

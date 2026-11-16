@@ -26,12 +26,12 @@ local EscortTemplate = MissionUtils.ShipTemplates.GenericPolice
 
 -- don't produce missions for further than this many light years away
 local max_delivery_dist = 15
--- typical reward for delivery to a system max_delivery_dist away
-local typical_reward = 35 * max_delivery_dist
+-- typical reward for delivery to a system max_delivery_dist away (rebalanced for real-time economy & taxation)
+local typical_reward = 160 * max_delivery_dist
 -- typical reward for local delivery
-local typical_reward_local = 35
+local typical_reward_local = 300
 -- Minimum amount paid for very close deliveries
-local min_local_dist_pay = 10
+local min_local_dist_pay = 80
 -- max cargo per trip
 local max_cargo = 10
 local max_cargo_wholesaler = 100
@@ -731,6 +731,10 @@ local onPlayerDocked = function (player, station)
 
 				Character.persistent.player.reputation = Character.persistent.player.reputation + reputation
 				PlayerState.AddMoney(mission.reward)
+				local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
+				if okTax and TaxAuthority and TaxAuthority.RecordBBSIncome then
+					TaxAuthority.RecordBBSIncome(mission.reward, false)
+				end
 				local standingDelta = mission.localdelivery and 2 or 3
 				FactionStanding.ApplyMissionOutcome(mission.factionName, standingDelta, mission.destFactionName, "Cargo delivery completed")
 			else

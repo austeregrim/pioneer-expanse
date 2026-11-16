@@ -56,7 +56,7 @@ public:
 	bool RemoveRouteItem(const std::vector<SystemPath>::size_type element);
 	void ClearRoute();
 	const std::vector<SystemPath>& GetRoute() const;
-	const std::string AutoRoute(const SystemPath &start, const SystemPath &target, std::vector<SystemPath> &outRoute, float maxJumpDist = 0.0f, bool findFuelStar = false) const;
+	const std::string AutoRoute(const SystemPath &start, const SystemPath &target, std::vector<SystemPath> &outRoute, float maxJumpDist = 0.0f, bool findFuelStar = false, float maxLawlessness = 1.0f, const std::string &factionFilter = "") const;
 	void SetDrawRouteLines(bool value);
 
 	sigc::signal<void> onHyperspaceTargetChanged;

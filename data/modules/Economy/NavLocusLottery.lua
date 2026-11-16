@@ -310,13 +310,19 @@ local function executeScheduledDraw(drawTimestamp)
 	end
 	playerTickets = remainingTickets
 
-	-- Credit player winnings
+	-- Credit player winnings (with 30% interstellar windfall tax withholding)
 	if playerTotalWon > 0 then
-		PlayerState.AddMoney(playerTotalWon)
-		totalWinningsCollected = totalWinningsCollected + playerTotalWon
+		local windfallTax = math.floor(playerTotalWon * 0.30)
+		local netWon = playerTotalWon - windfallTax
+		PlayerState.AddMoney(netWon)
+		totalWinningsCollected = totalWinningsCollected + netWon
+		local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
+		if okTax and TaxAuthority and TaxAuthority.RecordWindfall then
+			TaxAuthority.RecordWindfall(playerTotalWon, windfallTax)
+		end
 	end
 
-	local dateStr = string.format("CYCLE %d", drawNumber)
+	local dateStr = InterCast.FormatDate and InterCast.FormatDate() or "3200-01-01"
 
 	-- Handle Grand Jackpot resolution (Player vs NPC vs Rollover)
 	if playerWonGrandJackpot then

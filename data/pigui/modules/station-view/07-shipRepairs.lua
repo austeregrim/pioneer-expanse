@@ -13,6 +13,8 @@ local Character = require "Character"
 local ModalWindow = require 'pigui.libs.modal-win'
 local ModelSpinner = require 'PiGui.Modules.ModelSpinner'
 local ModelSkin = require 'SceneGraph.ModelSkin'
+local Commodities = require 'Commodities'
+local PiImage = require 'pigui.libs.image'
 local Lang = require 'Lang'
 local PlayerState = require 'PlayerState'
 local l = Lang.GetResource("ui-core")
@@ -23,11 +25,18 @@ local colors = ui.theme.colors
 local icons = ui.theme.icons
 
 local pionillium = ui.fonts.pionillium
+local orbiteer = ui.fonts.orbiteer
+local gaugeSpacing = ui.getTextLineHeight() * 0.8
 
 local face = nil
 local stationSeed = false
 local damageToRepair = nil
 local repair_cost = 0
+
+local hyperdrive ---@type Equipment.HyperdriveType?
+local hyperdrive_fuel
+local hydrogenIcon = PiImage.New("icons/goods/Hydrogen.png")
+local hyperdriveIcon = PiImage.New("icons/goods/Hydrogen.png")
 
 local Color = _G.Color
 local Vector2 = _G.Vector2
@@ -47,13 +56,18 @@ local widgetSizes = ui.rescaleUI({
 	itemSpacing = Vector2(4, 7),
 	faceSize = Vector2(460, 440),
 	buttonSize = Vector2(90, 0),
+	buttonSizeBase = Vector2(64, 40),
 	verticalDummy = Vector2(0, 36),
 	gaugeWidth = 520,
 }, Vector2(1920, 1080))
 
+widgetSizes.itemSpacing = Vector2(math.ceil(widgetSizes.itemSpacing.x), math.ceil(widgetSizes.itemSpacing.y))
+widgetSizes.buttonFullRefuelSize = Vector2(widgetSizes.buttonSizeBase.x * 2 + widgetSizes.itemSpacing.x, widgetSizes.buttonSizeBase.y)
+widgetSizes.iconSize = Vector2(0, widgetSizes.buttonSizeBase.y)
 
+local popupMsg = l.YOU_DONT_HAVE_ENOUGH_MONEY_FOR_THAT_OPTION
 local popup = ModalWindow.New('ChiefMechanicPopup', function(self)
-	ui.text(l.YOU_DONT_HAVE_ENOUGH_MONEY_FOR_THAT_OPTION)
+	ui.text(popupMsg)
 	ui.dummy(Vector2((ui.getContentRegion().x - 100*rescaleVector.x) / 2, 0))
 	ui.sameLine()
 	if ui.button(l.OK, Vector2(100*rescaleVector.x, 0)) then
@@ -67,8 +81,75 @@ local tryRepair = function (damage, price)
 		Game.player:SetHullPercent(Game.player:GetHullPercent() + damage)
 		ui.playSfx("Repairing_Ship")
 	else
+		popupMsg = l.YOU_DONT_HAVE_ENOUGH_MONEY_FOR_THAT_OPTION
 		popup:open()
 	end
+end
+
+local refuelInternalTank = function (delta)
+	local station = Game.player:GetDockedWith()
+	if not station then return end
+	local stock = station:GetCommodityStock(Commodities.hydrogen)
+	local price = station:GetCommodityPrice(Commodities.hydrogen)
+
+	if delta > 0 then
+		if stock == 0 then
+			popupMsg = l.ITEM_IS_OUT_OF_STOCK
+			popup:open()
+			return
+		end
+
+		delta = math.clamp(delta, 0, 100 - Game.player.fuel)
+	else
+		delta = math.clamp(delta, -Game.player.fuel, 0)
+	end
+
+	local shipDef = ShipDef[Game.player.shipId]
+	local fuel = Game.player.fuel + delta
+	local mass = shipDef.fuelTankMass / 100 * delta
+	local total = price * mass
+
+	if total > PlayerState.GetMoney() then
+		total = PlayerState.GetMoney()
+		mass = total / price
+		fuel = Game.player.fuel + mass * 100 / shipDef.fuelTankMass
+	end
+
+	if stock < mass then
+		mass = stock
+		total = price * mass
+		fuel = Game.player.fuel + mass * 100 / shipDef.fuelTankMass
+	end
+
+	PlayerState.AddMoney(-total)
+	local commodityChangeAmount = mass < 0 and math.floor(mass) or math.ceil(mass)
+	station:AddCommodityStock(Commodities.hydrogen, -commodityChangeAmount)
+	Game.player:SetFuelPercent(fuel)
+end
+
+local refuelHyperdrive = function (mass)
+	if not hyperdrive then return end
+	local station = Game.player:GetDockedWith()
+	if not station then return end
+	local stock = station:GetCommodityStock(hyperdrive_fuel)
+	local price = station:GetCommodityPrice(hyperdrive_fuel)
+
+	if mass > 0 then
+		if stock == 0 then
+			popupMsg = l.ITEM_IS_OUT_OF_STOCK
+			popup:open()
+			return
+		end
+	end
+
+	mass = math.clamp(mass, -hyperdrive.storedFuel, hyperdrive:GetMaxFuel() - hyperdrive.storedFuel)
+
+	-- Can't buy any more than the station has in stock or we have money for
+	mass = math.min(mass, math.min(stock, PlayerState.GetMoney() / price))
+	PlayerState.AddMoney(-price * mass)
+
+	hyperdrive:SetFuel(Game.player, hyperdrive.storedFuel + mass)
+	station:AddCommodityStock(hyperdrive_fuel, -math.round(mass))
 end
 
 
@@ -194,13 +275,25 @@ local function drawShipRepair()
 	local hullPercent = round(Game.player:GetHullPercent())
 	local damage = 100 - hullPercent
 	local shipDef = ShipDef[Game.player.shipId]
-
-	-- local intro = string.interp(l.YOUR_HULL_IS_AT_X_INTEGRITY, {value = string.format('%.1f', hullPercent)})
+	local station = Game.player:GetDockedWith()
 
 	ui.withStyleVars({ItemSpacing = widgetSizes.itemSpacing}, function ()
 		local infoColumnWidth = ui.getContentRegion().x - widgetSizes.faceSize.x - widgetSizes.itemSpacing.x
 
 		ui.child("ShipStatus", Vector2(infoColumnWidth, 0), function ()
+
+			-- SECTION 1: HULL STRUCTURAL REPAIR
+			ui.withFont(orbiteer.medlarge, function()
+				ui.textColored(colors.uiPrimaryLight, "HULL STRUCTURAL INTEGRITY & REPAIRS")
+			end)
+			ui.spacing()
+
+			local gaugePos = ui.getCursorScreenPos()
+			gaugePos.y = gaugePos.y + ui.getTextLineHeightWithSpacing() * 0.5
+			ui.dummy(Vector2(widgetSizes.gaugeWidth, ui.getTextLineHeightWithSpacing()))
+			ui.gauge(gaugePos, hullPercent, '', l.HULL_INTEGRITY, 0, 100, icons.hull, true, colors.gaugeEquipmentMarket, l.HUD_HULL_STRENGTH, widgetSizes.gaugeWidth, ui.getTextLineHeightWithSpacing())
+
+			ui.spacing()
 
 			ui.withFont(pionillium.body, function ()
 				if hullPercent > 99.9 then
@@ -211,31 +304,135 @@ local function drawShipRepair()
 					damageToRepair = ui.sliderInt("##damageToRepair", damageToRepair, 1, damage, "%d%%")
 					repair_cost = getRepairCost(damageToRepair, shipDef)
 
-					if  ui.button(l.PAY, widgetSizes.buttonSize) then
+					if ui.button(l.PAY, widgetSizes.buttonSize) then
 						tryRepair(damageToRepair, repair_cost)
 						-- If we repaired more than 50% of the damage, reset
-						if  damageToRepair > damage / 2 then
+						if damageToRepair > damage / 2 then
 							damageToRepair = damage - damageToRepair
 						end
+					end
+					ui.sameLine()
+					local fullRepairCost = getRepairCost(damage, shipDef)
+					if ui.button("REPAIR FULL (" .. Format.Money(fullRepairCost) .. ")", Vector2(widgetSizes.buttonSize.x * 2.2, widgetSizes.buttonSize.y)) then
+						tryRepair(damage, fullRepairCost)
+						damageToRepair = 0
 					end
 				end
 			end)
 
-			ui.dummy(widgetSizes.verticalDummy)
+			ui.spacing()
+			ui.separator()
+			ui.spacing()
 
-			local gaugePos = ui.getCursorScreenPos()
-			gaugePos.y = gaugePos.y + ui.getTextLineHeightWithSpacing() * 0.5
-			ui.dummy(Vector2(widgetSizes.gaugeWidth, ui.getTextLineHeightWithSpacing()))
+			-- SECTION 2: PROPELLANT & HYPERDRIVE FUEL SERVICING
+			ui.withFont(orbiteer.medlarge, function()
+				ui.textColored(colors.uiPrimaryLight, "PROPELLANT & HYPERDRIVE FUEL SERVICING")
+			end)
+			ui.spacing()
 
-			ui.gauge(gaugePos, hullPercent, '', l.HULL_INTEGRITY, 0, 100, icons.hull, true, colors.gaugeEquipmentMarket, l.HUD_HULL_STRENGTH, widgetSizes.gaugeWidth, ui.getTextLineHeightWithSpacing())
+			if station then
+				-- Setup columns: icon | costs | buttons | fuel gauge
+				ui.columns(4, 'maintenanceFuelCols', false)
+				ui.setColumnWidth(0, widgetSizes.buttonSizeBase.x + widgetSizes.itemSpacing.x)
+				ui.setColumnWidth(1, widgetSizes.buttonSizeBase.x * 2 + widgetSizes.itemSpacing.x)
+				ui.setColumnWidth(2, (widgetSizes.buttonSizeBase.x + widgetSizes.itemSpacing.x) * 6)
 
-			ui.newLine()
+				-- Internal tank fuel
+				hydrogenIcon:Draw(widgetSizes.iconSize)
+				ui.nextColumn()
+
+				-- Internal tank refill costs
+				local hPrice = station:GetCommodityPrice(Commodities.hydrogen)
+				local currentFuelMass = shipDef.fuelTankMass / 100 * Game.player.fuel
+				ui.withFont(pionillium.body, function()
+					ui.text(Format.Money(hPrice) .. "/t")
+					ui.text(Format.Money(hPrice * currentFuelMass))
+				end)
+				ui.nextColumn()
+
+				-- Internal tank refill buttons
+				if ui.button(l.REFUEL_FULL, widgetSizes.buttonFullRefuelSize) then refuelInternalTank(100) end
+				ui.sameLine()
+				if ui.button("-10%", widgetSizes.buttonSizeBase) then refuelInternalTank(-10) end
+				ui.sameLine()
+				if ui.button("+10%", widgetSizes.buttonSizeBase) then refuelInternalTank(10) end
+				ui.nextColumn()
+
+				-- Internal tank fuel gauge
+				local fuelGaugePos = ui.getCursorScreenPos()
+				local fuelGaugeHeight = widgetSizes.buttonSizeBase.y
+				fuelGaugePos.x = fuelGaugePos.x + gaugeSpacing
+				fuelGaugePos.y = fuelGaugePos.y + widgetSizes.buttonSizeBase.y / 2
+				local fuelGaugeWidth = ui.getContentRegion().x
+				ui.gauge(fuelGaugePos, Game.player.fuel, '', string.format(l.FUEL .. ": %0.1f t \t" .. l.DELTA_V .. ": %d km/s",
+					currentFuelMass, Game.player:GetRemainingDeltaV() / 1000),
+					0, 100, icons.fuel, true,
+					colors.gaugeEquipmentMarket, '', fuelGaugeWidth, fuelGaugeHeight, pionillium.body)
+
+				-- Hyperspace fuel row
+				ui.nextColumn()
+
+				if hyperdrive then
+					hyperdriveIcon:Draw(widgetSizes.iconSize)
+					ui.nextColumn()
+
+					local stored_hyperfuel = hyperdrive.storedFuel
+					local hfPrice = station:GetCommodityPrice(hyperdrive_fuel)
+
+					-- Hyperspace fuel prices
+					ui.withFont(pionillium.body, function()
+						ui.text(Format.Money(hfPrice) .. "/t")
+						ui.text(Format.Money(hfPrice * stored_hyperfuel))
+					end)
+					ui.nextColumn()
+
+					-- Hyperspace fuel refill buttons
+					if ui.button(l.REFUEL_FULL, widgetSizes.buttonFullRefuelSize) then refuelHyperdrive(hyperdrive:GetMaxFuel()) end
+					ui.sameLine()
+					if ui.button("-10t", widgetSizes.buttonSizeBase) then refuelHyperdrive(-10) end
+					ui.sameLine()
+					if ui.button("-1t", widgetSizes.buttonSizeBase) then refuelHyperdrive(-1) end
+					ui.sameLine()
+					if ui.button("+1t", widgetSizes.buttonSizeBase) then refuelHyperdrive(1) end
+					ui.sameLine()
+					if ui.button("+10t", widgetSizes.buttonSizeBase) then refuelHyperdrive(10) end
+					ui.nextColumn()
+
+					-- Hyperspace fuel gauge
+					fuelGaugePos = ui.getCursorScreenPos()
+					fuelGaugePos.x = fuelGaugePos.x + gaugeSpacing
+					fuelGaugePos.y = fuelGaugePos.y + widgetSizes.buttonSizeBase.y / 2
+					ui.gauge(fuelGaugePos, stored_hyperfuel, '', string.format(l.FUEL .. ": %0.1f t \t" .. l.HYPERSPACE_RANGE .. ": %d " .. l.LY,
+						stored_hyperfuel, Game.player:GetHyperspaceRange()),
+						0, hyperdrive:GetMaxFuel(),
+						icons.hyperspace, true, colors.gaugeEquipmentMarket, '',
+						fuelGaugeWidth, fuelGaugeHeight, pionillium.body)
+				else
+					ui.textColored(colors.uiSecondary, "—")
+					ui.nextColumn()
+					ui.textColored(colors.uiSecondary, "No Drive")
+					ui.nextColumn()
+					ui.textColored(colors.uiSecondary, "Hyperspace drive not installed on this vessel.")
+				end
+
+				ui.columns(1, '', false)
+			end
+
+			ui.spacing()
+			ui.separator()
+			ui.spacing()
+
+			-- SECTION 3: LIVERY & PAINTSHOP
+			ui.withFont(orbiteer.medlarge, function()
+				ui.textColored(colors.uiPrimaryLight, "CUSTOM LIVERY & PAINTSHOP")
+			end)
+			ui.spacing()
 
 			ui.withFont(pionillium.heading, function()
 				local paintshopAvailable = determinePaintshopAvailability()
 
 				if (paintshopAvailable) then
-					if ui.button(l.VISIT_PAINTSHOP, Vector2(250, 36)) then
+					if ui.button(l.VISIT_PAINTSHOP, Vector2(280 * rescaleVector.x, 36 * rescaleVector.y)) then
 						activeTab = 1
 					end
 				else
@@ -255,7 +452,7 @@ end
 local function drawPaintshop()
 
 	ui.withFont(pionillium.heading, function()
-		if ui.button(l.VISIT_REPAIR_SERVICES, Vector2(250, 36)) then
+		if ui.button("RETURN TO MAINTENANCE SERVICES", Vector2(320 * rescaleVector.x, 36 * rescaleVector.y)) then
 			activeTab = 0
 			return
 		end
@@ -368,7 +565,7 @@ end
 
 StationView:registerView({
 	id = "shipRepairs",
-	name = l.SHIP_REPAIRS,
+	name = "Ship Maintenance",
 	icon = ui.theme.icons.repairs,
 	showView = true,
 	draw = function()
@@ -397,6 +594,10 @@ StationView:registerView({
 				face = PiGuiFace.New(Character.New({ title = l.CHIEF_MECHANIC }, rand),
 							{itemSpacing = widgetSizes.itemSpacing})
 			end
+
+			hyperdrive = Game.player:GetInstalledHyperdrive()
+			hyperdrive_fuel = hyperdrive and hyperdrive.fuel or Commodities.hydrogen
+			hyperdriveIcon = PiImage.New("icons/goods/" .. hyperdrive_fuel.icon_name .. ".png")
 		end
 		resetPreview()
 	end,

@@ -1124,8 +1124,13 @@ void WorldView::DrawSurfaceScanOverlay()
 		verts.emplace_back(float(s1.x), float(s1.y), 0.0f);
 	};
 
-	constexpr int NLAT = 12;
-	constexpr int NLON = 24;
+	const size_t gridLen = m_surfaceScan.grid.size();
+	int NLAT = 14;
+	int NLON = 28;
+	if (gridLen > 0) {
+		NLAT = std::max(8, int(std::round(std::sqrt(double(gridLen) / 2.0))));
+		NLON = NLAT * 2;
+	}
 	const size_t expectedLen = size_t(NLAT * NLON);
 
 	auto spherePt = [&](int i, int j) -> vector3d {
@@ -1137,8 +1142,8 @@ void WorldView::DrawSurfaceScanOverlay()
 
 	std::vector<vector3f> unscannedVerts;
 	std::vector<vector3f> scannedVerts;
-	unscannedVerts.reserve(NLAT * NLON * 8);
-	scannedVerts.reserve(NLAT * NLON * 8);
+	unscannedVerts.reserve(NLAT * NLON * 10);
+	scannedVerts.reserve(NLAT * NLON * 10);
 
 	for (int i = 0; i < NLAT; ++i) {
 		const double latMid = -0.5 * M_PI + M_PI * ((double(i) + 0.5) / double(NLAT));
@@ -1162,14 +1167,12 @@ void WorldView::DrawSurfaceScanOverlay()
 			const vector3d p01 = spherePt(i, j + 1);
 			const vector3d p11 = spherePt(i + 1, j + 1);
 
+			// Triangulated wireframe mesh: quad edges + diagonal
 			appendClippedSegment(dest, p00, p01);
 			appendClippedSegment(dest, p00, p10);
-			if (isScanned) {
-				appendClippedSegment(dest, p10, p11);
-				appendClippedSegment(dest, p01, p11);
-				// Subtle diagonal cross-hatch on scanned cells
-				appendClippedSegment(dest, p00, p11);
-			}
+			appendClippedSegment(dest, p10, p11);
+			appendClippedSegment(dest, p01, p11);
+			appendClippedSegment(dest, p00, p11);
 		}
 	}
 

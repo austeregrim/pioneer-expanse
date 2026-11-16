@@ -50,6 +50,59 @@ local function get_pricemod(itemType, price)
 	return (price / itemType.price - 1) * 100
 end
 
+local function getCrisisCommodityMultiplier(commodityName, isBuy)
+	if not Game.system or not Game.system.name then return 1.0, nil end
+	local okMacro, MacroEngine = pcall(require, 'modules.MacroGalaxy.MacroGalaxyEngine')
+	if not okMacro or not MacroEngine then return 1.0, nil end
+	local crisis = MacroEngine.GetCrisisForSystem(Game.system.name)
+	if not crisis then return 1.0, nil end
+
+	local cType = crisis.type
+	local sev = crisis.severity or 1
+	local isRes = (sev >= 3)
+	local cName = string.upper(commodityName or "")
+
+	if cType == "TARIFF_WAR" then
+		if cName:find("MACHINERY") or cName:find("COMPUTER") or cName:find("ROBOT") or cName:find("CONSUMER") or cName:find("PLASTIC") then
+			local tariffMult = (sev >= 2) and 1.40 or 1.25
+			local note = string.format("CUSTOMS TARIFF: +%.0f%% Import Surcharge", (tariffMult - 1.0) * 100)
+			return isBuy and tariffMult or (1.0 / tariffMult), note
+		end
+	elseif cType == "BLOCKADE" then
+		if cName:find("WEAPON") or cName:find("MEDICINE") or cName:find("GRAIN") or cName:find("MEAT") or cName:find("AIR") or cName:find("FUEL") then
+			local mult = (sev >= 2) and 2.10 or 1.65
+			local note = string.format("BLOCKADE SHORTAGE: +%.0f%% Runner Relief Premium", (mult - 1.0) * 100)
+			return mult, note
+		end
+	elseif cType == "SUPPLY_GLUT" then
+		if cName:find("ORE") or cName:find("METAL") or cName:find("ALLOY") or cName:find("MINERAL") then
+			local mult = isRes and 0.85 or 0.45
+			local note = "SUPPLY OVERHANG: -55% Smelting Glut Spot Crash"
+			return mult, note
+		end
+	elseif cType == "OUTBREAK" then
+		if cName:find("MEDICINE") or cName:find("AIR") or cName:find("WATER") then
+			local mult = isRes and 0.80 or (1.80 + sev * 0.40)
+			local note = string.format("OUTBREAK EPIDEMIC: +%.0f%% Vaccine & Medical Premium", (mult - 1.0) * 100)
+			return mult, note
+		end
+	elseif cType == "FAMINE" then
+		if cName:find("GRAIN") or cName:find("MEAT") or cName:find("FRUIT") or cName:find("FERTILIZER") or cName:find("ANIMAL") then
+			local mult = isRes and 0.85 or (1.80 + sev * 0.40)
+			local note = string.format("FAMINE RELIEF: +%.0f%% Emergency Caloric Subsidy", (mult - 1.0) * 100)
+			return mult, note
+		end
+	elseif cType == "MINERAL_RUSH" then
+		if cName:find("MINING_MACHINERY") or cName:find("PRECIOUS_METALS") then
+			local mult = isRes and 0.70 or (1.50 + sev * 0.30)
+			local note = string.format("MINERAL RUSH: +%.0f%% Extraction Speculation Surge", (mult - 1.0) * 100)
+			return mult, note
+		end
+	end
+
+	return 1.0, nil
+end
+
 local CommodityMarketWidget = {}
 
 function CommodityMarketWidget.New(id, title, config)
@@ -146,13 +199,17 @@ function CommodityMarketWidget.New(id, title, config)
     -- what do we charge for this item if we are buying
     config.getBuyPrice = config.getBuyPrice or function (self, commodity)
 		local price = self.station:GetCommodityPrice(commodity)
-		return price * (1.0 + math.sign(price) * Economy.TradeFeeSplit * 0.01)
+		local baseCost = price * (1.0 + math.sign(price) * Economy.TradeFeeSplit * 0.01)
+		local mult = getCrisisCommodityMultiplier(commodity.name, true)
+		return math.floor(baseCost * mult * 100) / 100
     end
 
     -- what do we get for this item if we are selling
     config.getSellPrice = config.getSellPrice or function (self, commodity)
         local price = self.station:GetCommodityPrice(commodity)
-		return price * (1.0 - math.sign(price) * Economy.TradeFeeSplit * 0.01)
+		local baseCost = price * (1.0 - math.sign(price) * Economy.TradeFeeSplit * 0.01)
+		local mult = getCrisisCommodityMultiplier(commodity.name, false)
+		return math.floor(baseCost * mult * 100) / 100
     end
 
 	config.onClickBuy = config.onClickBuy or function(self, commodity) return true end
@@ -340,6 +397,12 @@ function CommodityMarketWidget:DoBuy()
 	assert(self.cargoMgr:AddCommodity(self.selectedItem, self.tradeAmount))
 	PlayerState.AddMoney(-orderAmount) --grab the money
 
+	local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
+	if okTax and TaxAuthority and TaxAuthority.RecordCommodityPurchase then
+		local cName = self.selectedItem.name or tostring(self.selectedItem)
+		TaxAuthority.RecordCommodityPurchase(cName, self.tradeAmount, price)
+	end
+
 	self.funcs.bought(self, self.selectedItem, self.tradeAmount)
 	self:ChangeTradeAmount(-self.tradeAmount) --reset the trade amount
 
@@ -362,6 +425,12 @@ function CommodityMarketWidget:DoSell()
 
 	assert(self.cargoMgr:RemoveCommodity(self.selectedItem, self.tradeAmount) == self.tradeAmount)
 	PlayerState.AddMoney(orderamount) --grab the money
+
+	local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
+	if okTax and TaxAuthority and TaxAuthority.RecordCommoditySale then
+		local cName = self.selectedItem.name or tostring(self.selectedItem)
+		TaxAuthority.RecordCommoditySale(cName, self.tradeAmount, price)
+	end
 
 	self.funcs.sold(self, self.selectedItem, self.tradeAmount)
 	self:ChangeTradeAmount(-self.tradeAmount) --reset the trade amount
@@ -430,6 +499,12 @@ function CommodityMarketWidget:TradeMenu()
 					ui.icon(cls[1], Vector2(ui.getTextLineHeight()), cls[2])
 					ui.sameLine()
 					ui.text(cls[3])
+					ui.spacing()
+				end
+
+				local mult, cNote = getCrisisCommodityMultiplier(self.selectedItem.name, self.tradeModeBuy)
+				if cNote then
+					ui.textColored(ui.theme.colors.alertYellow, cNote)
 					ui.spacing()
 				end
 			end)

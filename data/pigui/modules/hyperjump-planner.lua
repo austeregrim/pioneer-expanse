@@ -162,8 +162,8 @@ function hyperJumpPlanner.moveItemUp(index)
 	updateHyperspaceTarget()
 end
 
-function hyperJumpPlanner.autoRoute(from, to, maxJumpDist, findFuelStar)
-	local result = sectorView:AutoRoute(from, to, maxJumpDist or 0, findFuelStar or false)
+function hyperJumpPlanner.autoRoute(from, to, maxJumpDist, findFuelStar, maxLawlessness, factionFilter)
+	local result = sectorView:AutoRoute(from, to, maxJumpDist or 0, findFuelStar or false, maxLawlessness or 1.0, factionFilter or "")
 	if result == "NO_DRIVE" then
 		mb.OK(lui.NO_DRIVE)
 	elseif result == "NO_VALID_ROUTE" then

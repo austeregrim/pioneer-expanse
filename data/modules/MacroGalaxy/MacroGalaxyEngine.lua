@@ -202,6 +202,114 @@ local CRISIS_DEFINITIONS = {
 			},
 		}
 	},
+
+	SUPPLY_GLUT = {
+		category = "MARKET",
+		stages = {
+			[1] = {
+				name = "Commodity Overproduction",
+				headline = "MARKET SLUMP: RUNAWAY SMELTING SURPLUS FLOODS STORAGE DEPOTS IN %s",
+				summary = "Automated refining surges produce record commodity stockpiles; spot prices collapse under inventory gluts.",
+				body = "A severe supply overhang has struck the industrial commodity exchanges in %s. Automated dredging fleets have oversupplied raw metals and rare ores, leaving commercial warehouses at 120%% capacity. Refiners and mining conglomerates are idling operations as ore prices crater.",
+				urgent = false,
+			},
+			[2] = {
+				name = "Production Halts & Price Plunge",
+				headline = "COMMODITY CRASH: MINING CONGLOMERATES IDLE DRILL FLOTILLAS IN %s",
+				summary = "Industrial cartels enact emergency output quotas as mining and refining margins turn negative.",
+				body = "Ore refining facilities across %s have entered an emergency shutdown cycle. With global storage depots saturated, spot prices for titanium, platinum, and minerals have plunged 40%% below extraction costs. Corporate equities in the extraction sector face steep quarterly write-downs.",
+				urgent = true,
+			},
+			[3] = {
+				name = "Inventory Rebalance",
+				headline = "MARKET EQUILIBRIUM: WAREHOUSE DRAWDOWN STABILIZES COMMODITY FLOWS IN %s",
+				summary = "Interstellar freight absorbing excess mineral stock; market spot quotes return to baseline.",
+				body = "A sustained drawdown by interstellar manufacturing hubs has finally cleared the severe inventory glut in %s. Spot ore prices have leveled out, and extraction cartels are tentatively re-firing automated drill dredgers.",
+				urgent = false,
+			},
+		}
+	},
+
+	ANTITRUST_PROBE = {
+		category = "POLITICS",
+		stages = {
+			[1] = {
+				name = "Monopoly Investigation Launched",
+				headline = "REGULATORY PROBE: COMMERCE TRIBUNAL INVESTIGATES CARTEL PRICE-FIXING IN %s",
+				summary = "Interstellar regulatory authorities subpoena corporate communications following price-gouging complaints.",
+				body = "The Pan-Galactic Trade Oversight Bureau in %s has launched a formal antitrust inquiry into dominant aerospace and industrial cartels. Whistleblower dossiers allege collusive margin inflation and predatory hyperlane freight tariffs.",
+				urgent = false,
+			},
+			[2] = {
+				name = "Punitive Sanctions & Fines",
+				headline = "PUNITIVE BILLIONS: COMMERCE COURT LEVIES MASSIVE ANTITRUST FINES IN %s",
+				summary = "Judicial decree orders multi-billion credit restitution and structural breakups of regional subsidiaries.",
+				body = "Following an emergency evidentiary ruling, antitrust judges in %s have imposed unprecedented regulatory penalties on dominant market leaders. In addition to stiff monetary fines, court orders mandate open hyperlane access and license forfeiture, wiping out corporate operating margins.",
+				urgent = true,
+			},
+			[3] = {
+				name = "Regulatory Settlement",
+				headline = "REGULATORY SETTLEMENT: ACCUSED CONGLOMERATES RATIFY REFORM ACCORD IN %s",
+				summary = "Restructured compliance charters adopted; antitrust scrutiny shifts to monitor status.",
+				body = "Corporate defense counsels in %s have finalized settlement terms with federal trade commissioners. Fines have been placed in escrow and compliance officers installed, bringing an end to the judicial selloff across regional exchanges.",
+				urgent = false,
+			},
+		}
+	},
+
+	INDUSTRIAL_DISASTER = {
+		category = "FRONTLINE",
+		stages = {
+			[1] = {
+				name = "Catastrophic Facility Rupture",
+				headline = "DISASTER ALERT: REFINERY CORE BREACH TRIGGERS ORBITAL LOCKDOWN IN %s",
+				summary = "Severe explosion and toxic fuel venting cripple prime fuel and propulsion fabrication plants.",
+				body = "An industrial catastrophe has rocked the orbital manufacturing ring in %s. A high-energy reactor coolant explosion has damaged propulsion assembly lines and caused major orbital debris hazards. Station safety directors have declared a level-1 industrial hazard perimeter.",
+				urgent = true,
+			},
+			[2] = {
+				name = "Fleet Grounding & Massive Recall",
+				headline = "MASS RECALL: AVIONICS DEFECT GROUNDS COMMERCIAL STARSHIPS IN %s",
+				summary = "Safety inspectors order immediate inspections after propulsion failures linked to tainted fuel and avionics.",
+				body = "A galaxy-wide grounding bulletin has been issued for starship chassis manufactured with components from %s. Millions in warranty claims and forensic investigation costs have sparked emergency board meetings and plummeting stock valuations for aerospace and fuel suppliers.",
+				urgent = true,
+			},
+			[3] = {
+				name = "Restoration & Safety Certification",
+				headline = "FACILITIES CLEARED: RECONSTRUCTED RING RE-CERTIFIED FOR SERVICE IN %s",
+				summary = "Industrial scrubbers complete decontamination; flight authorities re-authorize commercial vessel operations.",
+				body = "Rigorous recertification protocols have concluded at the damaged manufacturing berths in %s. New fail-safe containment matrices have been brought online, and aerospace supply chains are slowly returning to scheduled throughput.",
+				urgent = false,
+			},
+		}
+	},
+
+	TARIFF_WAR = {
+		category = "POLITICS",
+		stages = {
+			[1] = {
+				name = "Trade Sanctions Imposed",
+				headline = "TRADE FRICTION: RETALIATORY TARIFFS SLAPPED ON INTERSTELLAR FREIGHT IN %s",
+				summary = "Escalating diplomatic disputes prompt customs borders to enact 25% import surcharges.",
+				body = "Protectionist factions in %s have instituted punitive customs levies targeting foreign starship hulls, heavy machinery, and luxury avionics. Commercial haulers report gridlocked customs checkpoints and surging border tariff bills.",
+				urgent = false,
+			},
+			[2] = {
+				name = "Full Trade Embargo",
+				headline = "EMBARGO CRACKDOWN: COMMERCIAL BORDERS CLOSED AS TARIFF WAR PEAKS IN %s",
+				summary = "Tit-for-tat sanctions result in total commercial embargo; cross-border freight contracts cancelled.",
+				body = "The escalating tariff dispute in %s has culminated in a complete commercial embargo. Billions of credits in pending export shipments have been voided, with freight carriers and luxury manufacturers taking severe balance sheet hits.",
+				urgent = true,
+			},
+			[3] = {
+				name = "Free-Trade Accords",
+				headline = "TARIFF TRUCE: INTER-SYSTEM SUMMIT RATIFIES FREE-TRADE TREATY IN %s",
+				summary = "Diplomats repeal punitive tariffs; customs duties normalized across interstellar lanes.",
+				body = "A landmark bilateral trade pact signed in %s has dismantled all emergency border tariffs and restored reciprocal most-favored-nation trading status. Commercial shipping schedules are rapidly realigning to clear border backlogs.",
+				urgent = false,
+			},
+		}
+	},
 }
 
 local function formatCurrentDate()
@@ -239,7 +347,10 @@ local function seedEmergentCrisis(preferredSystem)
 	local rand = Rand.New(seed)
 	local targetSys = preferredSystem or eligible[rand:Integer(1, #eligible)]
 
-	local typeKeys = { "OUTBREAK", "FAMINE", "BLOCKADE", "INSURGENCY", "MINERAL_RUSH", "LABOR_STRIKE" }
+	local typeKeys = {
+		"OUTBREAK", "FAMINE", "BLOCKADE", "INSURGENCY", "MINERAL_RUSH", "LABOR_STRIKE",
+		"SUPPLY_GLUT", "ANTITRUST_PROBE", "INDUSTRIAL_DISASTER", "TARIFF_WAR"
+	}
 	local chosenType = typeKeys[rand:Integer(1, #typeKeys)]
 	local def = CRISIS_DEFINITIONS[chosenType]
 	if not def then return nil end

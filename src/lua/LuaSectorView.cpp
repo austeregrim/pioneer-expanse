@@ -81,8 +81,16 @@ void LuaObject<SectorView>::RegisterClass()
 			if (lua_gettop(l) >= 5 && !lua_isnil(l, 5)) {
 				findFuelStar = lua_toboolean(l, 5);
 			}
+			float maxLawlessness = 1.0f;
+			if (lua_gettop(l) >= 6 && !lua_isnil(l, 6)) {
+				maxLawlessness = static_cast<float>(lua_tonumber(l, 6));
+			}
+			std::string factionFilter;
+			if (lua_gettop(l) >= 7 && !lua_isnil(l, 7)) {
+				factionFilter = lua_tostring(l, 7);
+			}
 			std::vector<SystemPath> route;
-			const std::string result = sv->AutoRoute(current_path, target_path, route, maxJumpDist, findFuelStar);
+			const std::string result = sv->AutoRoute(current_path, target_path, route, maxJumpDist, findFuelStar, maxLawlessness, factionFilter);
 			if (result == "OKAY") {
 				sv->ClearRoute();
 				for (auto it = route.begin(); it != route.end(); it++) {

@@ -44,7 +44,7 @@ local function splitUtf8Chars(str)
 	return chars
 end
 
-local INTRO_TEXT = "Universal Cartographics encrypted telemetry uplink established. All stellar discoveries, orbital surveys, and 85% surface mappings from uncharted systems are eligible for immediate credit payout."
+local INTRO_TEXT = "Universal Cartographics encrypted telemetry uplink established. All stellar discoveries, orbital surveys, and detailed surface surveys from uncharted systems are eligible for immediate credit payout."
 local INTRO_CHARS = splitUtf8Chars(INTRO_TEXT)
 
 local function getDecryptedText(now)
@@ -263,7 +263,7 @@ local function drawUniversalCartographics()
 								ui.tableNextColumn()
 								local tags = {}
 								if b.orbital then table.insert(tags, "Orbital") end
-								if b.surface then table.insert(tags, "Surface 85%") end
+								if b.surface then table.insert(tags, "Surface Survey") end
 								if b.isRescan then
 									table.insert(tags, "Rescan (10%)")
 								elseif b.isKnownSystem then

@@ -31,6 +31,7 @@ local widgetSizes = ui.rescaleUI({
 local commsChildFlags = ui.ChildFlags { 'AlwaysUseWindowPadding', 'Borders' }
 
 local selectedCategory = "ALL"
+local selectedDate = "ALL"
 local selectedArticleId = nil
 local searchText = ""
 local face = nil
@@ -38,6 +39,7 @@ local lastFaceArticleId = nil
 
 local CATEGORIES = {
 	{ id = "ALL", label = "All News" },
+	{ id = "FLAGGED", label = "! Important" },
 	{ id = "FRONTLINE", label = "Frontline" },
 	{ id = "HUMANITARIAN", label = "Humanitarian" },
 	{ id = "MARKET", label = "Market Watch" },
@@ -131,66 +133,105 @@ local newsTable = Table.New("NewsDispatchTable", false, {
 		end
 
 		local isSelected = (selectedArticleId == art.id)
-		local textColor = isSelected and colors.uiPrimaryLight or colors.font
+		local isRead = InterCast.IsRead(art.id)
+		local isFlagged = InterCast.IsFlagged(art.id)
 		local region = ui.getContentRegion()
 
-		ui.icon(icons.comms, Vector2(ui.getTextLineHeight()), textColor)
-		ui.sameLine(0, widgetSizes.itemInnerSpacing.x)
+		-- Colors reflecting read vs unread vs selected status
+		local headlineColor
+		if isSelected then
+			headlineColor = colors.uiPrimaryLight
+		elseif not isRead then
+			headlineColor = colors.white
+		else
+			headlineColor = Color(135, 150, 170, 190) -- Dimmed for read dispatches
+		end
 
-		ui.withStyleColorsAndVars({ Text = textColor }, { ItemSpacing = widgetSizes.rowVerticalSpacing }, function()
-			-- Line 1: Headline in pionillium.heading (tight single line, no wrap, matching BBS)
-			ui.withFont(pionillium.heading, function()
-				ui.text(art.headline)
+		local metaColor = isSelected and colors.uiPrimaryLight or (not isRead and Color(160, 185, 215, 230) or Color(100, 115, 135, 180))
+		local iconColor = isSelected and colors.uiPrimaryLight or (not isRead and colors.uiPrimary or Color(90, 105, 125, 150))
+
+		-- Line 1: Flag button + Status icon + Headline + Category Badge
+		ui.withStyleVars({ ItemSpacing = widgetSizes.rowVerticalSpacing }, function()
+			-- Exclamation Point Flag Toggle Button
+			local flagBtnText = isFlagged and "!" or "·"
+			local flagBtnStyle = isFlagged
+				and { Button = Color(255, 190, 30, 220), Text = colors.black }
+				or { Button = Color(25, 30, 42, 160), Text = not isRead and colors.uiPrimaryLight or Color(90, 105, 125, 160) }
+
+			ui.withStyleColors(flagBtnStyle, function()
+				if ui.button(flagBtnText .. "##flg" .. art.id, Vector2(22, 20)) then
+					InterCast.ToggleFlagged(art.id)
+				end
+			end)
+			if ui.isItemHovered() then
+				ui.setTooltip(isFlagged and "Flagged as Important (!) — Click to unflag" or "Click to mark as Important (!)")
+			end
+
+			ui.sameLine(0, widgetSizes.itemInnerSpacing.x)
+
+			-- Dispatch Comms Icon (Bright for unread, dark for read)
+			ui.icon(icons.comms, Vector2(ui.getTextLineHeight()), iconColor)
+			ui.sameLine(0, widgetSizes.itemInnerSpacing.x)
+
+			-- Headline Text (single line, crisp)
+			ui.withFont(pionillium.body, function()
+				ui.textColored(headlineColor, art.headline)
 			end)
 
-			-- Line 2: Details metadata (clock icon + date, location icon + system, category badge)
+			-- Category Badge (Right-aligned on Line 1)
+			local catColor = getCategoryColor(art.category)
+			local catText = "[" .. art.category .. "]"
+			if art.urgent then catText = "[FLASH] " .. catText end
+			local catW = ui.calcTextSize(catText).x
+			if region.x > catW + 40 then
+				ui.sameLine(region.x - catW)
+				ui.withFont(pionillium.details, function()
+					ui.textColored(catColor, catText)
+				end)
+			end
+
+			-- Line 2: Metadata (Clock + Date, Location + System, Bureau)
 			ui.withFont(pionillium.details, function()
 				local textHeight = ui.getTextLineHeight()
 				local iconSize = Vector2(textHeight)
 
-				ui.icon(icons.clock, iconSize, textColor)
-				ui.sameLine()
-				ui.text(art.date)
+				ui.dummy(Vector2(26, 0))
+				ui.sameLine(0, widgetSizes.itemInnerSpacing.x)
 
+				ui.icon(icons.clock, iconSize, metaColor)
 				ui.sameLine()
-				ui.icon(icons.distance, iconSize, textColor)
-				ui.sameLine()
-				ui.text(formatSystemWithDistance(art))
+				ui.textColored(metaColor, art.date)
 
-				local catColor = getCategoryColor(art.category)
-				local catText = "[" .. art.category .. "]"
-				if art.urgent then catText = "[FLASH] " .. catText end
-				local catW = ui.calcTextSize(catText).x
-				if region.x > catW then
-					ui.sameLine(region.x - catW)
-					ui.textColored(catColor, catText)
-				end
+				ui.sameLine(nil, 10)
+				ui.icon(icons.distance, iconSize, metaColor)
+				ui.sameLine()
+				ui.textColored(metaColor, formatSystemWithDistance(art))
+
+				ui.sameLine(nil, 10)
+				ui.textColored(metaColor, "·  " .. (art.bureau or "InterCast Wire"))
 			end)
 
-			-- Line 3: Summary lead in pionillium.body (tight single line, no wrap, matching BBS)
-			ui.withFont(pionillium.body, function()
-				ui.text(art.summary)
-				ui.dummy(widgetSizes.rowVerticalSpacing)
-			end)
 			ui.nextColumn()
 		end)
 
-		return isSelected and colors.tableSelection or colors.tableHighlight
+		return isSelected and colors.tableSelection or (isRead and Color(12, 15, 22, 160) or colors.tableHighlight)
 	end,
 	onClickItem = function(self, item, key)
 		selectedArticleId = item.id
+		InterCast.MarkRead(item.id)
 	end,
 })
 
 local function renderFilterBar()
 	ui.withStyleVars({ ItemSpacing = widgetSizes.controlSpacing }, function()
+		-- Row 1: Search bar + Category tabs
 		local iconSize = Vector2(ui.getTextLineHeight())
 		ui.icon(icons.search_lens, iconSize, colors.fontDim)
 		ui.sameLine()
 
 		local hasSearch = searchText and searchText ~= ""
-		local inputWidth = ui.getContentRegion().x - (hasSearch and (widgetSizes.clearButtonWidth + widgetSizes.controlSpacing.x) or 0)
-		ui.pushItemWidth(math.max(80, inputWidth))
+		local inputWidth = 180 * rescaleVector.x
+		ui.pushItemWidth(inputWidth)
 		local updatedText, changed = ui.inputText("##newsSearch", searchText, "Search bulletins...", {})
 		ui.popItemWidth()
 		if changed then
@@ -206,20 +247,53 @@ local function renderFilterBar()
 			end
 		end
 
-		for i, cat in ipairs(CATEGORIES) do
-			if i > 1 then
-				ui.sameLine()
+		ui.sameLine(nil, 8)
+
+		for _, cat in ipairs(CATEGORIES) do
+			local label = cat.label
+			if cat.id == "FLAGGED" then
+				local flgCount = InterCast.GetFlaggedCount()
+				label = string.format("! Important (%d)", flgCount)
 			end
+
 			local selected = (selectedCategory == cat.id)
 			local btnVariant = selected and ui.theme.buttonColors.selected or ui.theme.buttonColors.default
-			if ui.button(cat.label, Vector2(0, 0), btnVariant) then
+			if ui.button(label .. "##CatBtn", Vector2(0, 0), btnVariant) then
 				if selectedCategory ~= cat.id then
 					selectedCategory = cat.id
 					selectedArticleId = nil
 					newsTable.scrollReset = true
 				end
 			end
+			ui.sameLine()
 		end
+		ui.newLine()
+
+		-- Row 2: Transmission Date Navigator Bar
+		local uniqueDates = InterCast.GetUniqueDates()
+		ui.withFont(pionillium.details, function()
+			ui.textColored(colors.fontDim, "TRANSMISSION DATE:")
+			ui.sameLine(nil, 6)
+
+			local isAllDates = (selectedDate == "ALL")
+			local allVariant = isAllDates and ui.theme.buttonColors.selected or ui.theme.buttonColors.default
+			if ui.button("ALL DATES##DateAll", Vector2(0, 0), allVariant) then
+				selectedDate = "ALL"
+				newsTable.scrollReset = true
+			end
+
+			for idx, d in ipairs(uniqueDates) do
+				if idx <= 6 then -- Show up to 6 most recent unique dates as quick tabs
+					ui.sameLine(nil, 4)
+					local isSelDate = (selectedDate == d)
+					local dVariant = isSelDate and ui.theme.buttonColors.selected or ui.theme.buttonColors.default
+					if ui.button(d .. "##Date" .. d, Vector2(0, 0), dVariant) then
+						selectedDate = d
+						newsTable.scrollReset = true
+					end
+				end
+			end
+		end)
 	end)
 end
 
@@ -229,15 +303,27 @@ local function drawInterCastNews()
 		local leftWidth = region.x * 0.45 -- Exact BBS 45% / 55% panel ratio
 
 		-- Fetch and filter articles
-		local allArticles = InterCast.GetArticles(selectedCategory)
+		local allArticles = InterCast.GetArticles(selectedCategory == "FLAGGED" and "ALL" or selectedCategory)
 		local filteredArticles = {}
 		local query = searchText and string.lower(searchText) or ""
 		for _, art in ipairs(allArticles) do
-			if query == ""
+			local matchesCat = true
+			if selectedCategory == "FLAGGED" then
+				matchesCat = InterCast.IsFlagged(art.id)
+			end
+
+			local matchesDate = true
+			if selectedDate ~= "ALL" then
+				matchesDate = (art.date == selectedDate)
+			end
+
+			local matchesQuery = (query == "")
 				or string.find(string.lower(art.headline or ""), query, 1, true)
 				or string.find(string.lower(art.summary or ""), query, 1, true)
 				or string.find(string.lower(art.bureau or ""), query, 1, true)
-			then
+				or string.find(string.lower(art.system or ""), query, 1, true)
+
+			if matchesCat and matchesDate and matchesQuery then
 				table.insert(filteredArticles, art)
 			end
 		end
@@ -264,6 +350,10 @@ local function drawInterCastNews()
 				activeArticle = art
 				break
 			end
+		end
+
+		if activeArticle then
+			InterCast.MarkRead(activeArticle.id)
 		end
 
 		updateFace(activeArticle)
@@ -366,66 +456,109 @@ local function drawInterCastNews()
 				ui.separator()
 				ui.spacing()
 
-			-- Reader Body & Face layout
-			local availableRegion = ui.getContentRegion()
-			local faceWidth = math.min(widgetSizes.faceSize.x, availableRegion.x * 0.36)
-			local textWidth = availableRegion.x - faceWidth - widgetSizes.itemSpacing.x
+				-- Reader Body & Face layout
+				local availableRegion = ui.getContentRegion()
+				local faceWidth = math.min(widgetSizes.faceSize.x, availableRegion.x * 0.36)
+				local textWidth = availableRegion.x - faceWidth - widgetSizes.itemSpacing.x
 
-			ui.child("NewsArticleText", Vector2(textWidth, 0), function()
-				-- Metadata line
-				ui.withFont(pionillium.details, function()
-					ui.textColored(colors.fontDim, string.format("TRANSMISSION DATE: %s   |   ORIGIN: %s", activeArticle.date, formatSystemWithDistance(activeArticle)))
-					ui.textColored(colors.fontDim, string.format("REPORTING BUREAU: %s", activeArticle.bureau))
+				ui.child("NewsArticleText", Vector2(textWidth, 0), function()
+					-- Metadata line with Interactive Flag Toggle Button
+					ui.withFont(pionillium.details, function()
+						ui.textColored(colors.fontDim, string.format("TRANSMISSION DATE: %s   |   ORIGIN: %s", activeArticle.date, formatSystemWithDistance(activeArticle)))
+						ui.textColored(colors.fontDim, string.format("REPORTING BUREAU: %s", activeArticle.bureau))
+					end)
+
+					ui.spacing()
+					local isFlagged = InterCast.IsFlagged(activeArticle.id)
+					local flagBtnText = isFlagged and "[ ! FLAGGED AS IMPORTANT ]" or "[ ! MARK IMPORTANT ]"
+					local flagBtnStyle = isFlagged
+						and { Button = Color(255, 190, 30, 220), Text = colors.black }
+						or { Button = Color(35, 42, 58, 200), Text = colors.white }
+
+					ui.withStyleColors(flagBtnStyle, function()
+						if ui.button(flagBtnText .. "##detailFlagBtn", Vector2(210, 26)) then
+							InterCast.ToggleFlagged(activeArticle.id)
+						end
+					end)
+
+					ui.spacing()
+					ui.separator()
+					ui.spacing()
+
+					-- Headline (wrapped in details view)
+					ui.withFont(orbiteer.heading, function()
+						ui.textWrapped(activeArticle.headline)
+					end)
+
+					ui.spacing()
+					ui.separator()
+					ui.spacing()
+
+					-- Summary Lead
+					ui.withFont(pionillium.heading, function()
+						ui.textColored(colors.uiPrimaryLight, activeArticle.summary)
+					end)
+
+					ui.spacing()
+					ui.separator()
+					ui.spacing()
+
+					-- Full Body Text
+					ui.withFont(pionillium.body, function()
+						ui.textWrapped(activeArticle.body)
+					end)
+
+					-- Regional Commodity & Tax Impact Advisory Card if this system has an active crisis
+					local okMacro, MacroEngine = pcall(require, 'modules.MacroGalaxy.MacroGalaxyEngine')
+					local sysCrisis = okMacro and MacroEngine and MacroEngine.GetCrisisForSystem(activeArticle.system)
+					if sysCrisis then
+						ui.spacing()
+						ui.spacing()
+						ui.child("CrisisEconCard", Vector2(textWidth, 90), nil, commsChildFlags, function()
+							ui.textColored(colors.alertYellow, string.format("GALACTIC ECONOMIC INTELLIGENCE ADVISORY — %s SYSTEM:", string.upper(activeArticle.system)))
+							ui.separator()
+							if sysCrisis.type == "TARIFF_WAR" then
+								ui.textColored(colors.white, "· Retaliatory Customs Tariffs: +25% to +40% Import Surcharge on High-Tech & Machinery.")
+								ui.textColored(colors.white, "· System Tax Authority: Retaliatory import customs surcharge active (+10.0% system tax rate).")
+							elseif sysCrisis.type == "BLOCKADE" then
+								ui.textColored(colors.white, "· Naval Exclusion Zone: Starports offering +65% to +110% relief bounty to blockade runners.")
+								ui.textColored(colors.white, "· System Tax Authority: Emergency naval blockade defense levy active (+5.0% system tax rate).")
+							elseif sysCrisis.type == "OUTBREAK" then
+								ui.textColored(colors.white, "· Medical Emergency: Vaccines, medicines, and air scrubbers purchasing at 2.2x to 2.8x standard margin.")
+							elseif sysCrisis.type == "FAMINE" then
+								ui.textColored(colors.white, "· Caloric Shortage: Starports paying 2.2x to 2.8x emergency tenders for grain, meat, and fertilizers.")
+							elseif sysCrisis.type == "SUPPLY_GLUT" then
+								ui.textColored(colors.white, "· Inventory Overhang: Spot raw ore and metal prices crushed -55% below baseline.")
+								ui.textColored(colors.white, "· System Tax Authority: Emergency trade stimulus tax rebate (-2.0% tax relief).")
+							elseif sysCrisis.type == "MINERAL_RUSH" then
+								ui.textColored(colors.white, "· Mining Speculation: Mining machinery in surging demand; raw metal refiners actively buying.")
+							else
+								ui.textColored(colors.white, string.format("· Active Regional Crisis: %s (Severity Level %d)", sysCrisis.type, sysCrisis.severity or 1))
+							end
+						end)
+					end
+
+					ui.spacing()
+					ui.spacing()
+					ui.separator()
+					ui.spacing()
+
+					-- InterCast Broadcast Covenant Notice
+					ui.withFont(pionillium.details, function()
+						ui.textColored(colors.fontDim, "INTERCAST BROADCAST COVENANT:")
+						ui.textWrapped("InterCast wire transmissions are broadcast continuously across sub-space transponder relays. Commercial pilots may monitor regional dispatches in-flight via the cockpit telemetry ticker.")
+					end)
 				end)
 
-				ui.spacing()
-				ui.separator()
-				ui.spacing()
+				ui.sameLine(0, widgetSizes.itemSpacing.x)
 
-				-- Headline (wrapped in details view)
-				ui.withFont(orbiteer.heading, function()
-					ui.textWrapped(activeArticle.headline)
-				end)
-
-				ui.spacing()
-				ui.separator()
-				ui.spacing()
-
-				-- Summary Lead
-				ui.withFont(pionillium.heading, function()
-					ui.textColored(colors.uiPrimaryLight, activeArticle.summary)
-				end)
-
-				ui.spacing()
-				ui.separator()
-				ui.spacing()
-
-				-- Full Body Text
-				ui.withFont(pionillium.body, function()
-					ui.textWrapped(activeArticle.body)
-				end)
-
-				ui.spacing()
-				ui.spacing()
-				ui.separator()
-				ui.spacing()
-
-				-- InterCast Broadcast Covenant Notice
-				ui.withFont(pionillium.details, function()
-					ui.textColored(colors.fontDim, "INTERCAST BROADCAST COVENANT:")
-					ui.textWrapped("InterCast wire transmissions are broadcast continuously across sub-space transponder relays. Commercial pilots may monitor regional dispatches in-flight via the cockpit telemetry ticker.")
+				-- Correspondent Face / Organisation Badge
+				ui.child("NewsFaceCol", Vector2(faceWidth, 0), function()
+					if face then
+						face:render()
+					end
 				end)
 			end)
-
-			ui.sameLine(0, widgetSizes.itemSpacing.x)
-
-			-- Correspondent Face / Organisation Badge
-			ui.child("NewsFaceCol", Vector2(faceWidth, 0), function()
-				if face then
-					face:render()
-				end
-			end)
-		end)
 		end)
 	end)
 end
