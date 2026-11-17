@@ -1116,8 +1116,10 @@ bool AICmdFlyTo::TimeStepUpdate()
 						const double safeDist = std::max(SupercruiseController::SAFE_DISENGAGE_DIST,
 							SupercruiseController::GetExclusionZoneRadius(m_target) + SupercruiseController::SAFE_DISENGAGE_DIST);
 						if (rawDist <= safeDist && sc->GetSpeed() <= SupercruiseController::SAFE_DISENGAGE_SPEED) {
-							sc->NormalDrop();
-							return false;
+							if (!sc->GetTargetObscuredBy(rawRel, m_target)) {
+								sc->NormalDrop();
+								return false;
+							}
 						}
 					} else if (sc->IsSafeDisengageReady()) {
 						sc->SafeDisengage();

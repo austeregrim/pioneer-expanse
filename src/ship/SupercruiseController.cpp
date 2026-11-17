@@ -933,6 +933,68 @@ bool SupercruiseController::GetActiveTargetPosRelToShip(vector3d &outPosRelToShi
 	return false;
 }
 
+const Body *SupercruiseController::GetTargetObscuredBy(const vector3d &targetPosRelToShip, const Body *targetBody) const
+{
+	if (!m_ship || !Pi::game || !Pi::game->GetSpace())
+		return nullptr;
+
+	const double dist = targetPosRelToShip.Length();
+	if (dist < 1000.0)
+		return nullptr;
+
+	const vector3d dir = targetPosRelToShip / dist;
+	const Body *closestBlocker = nullptr;
+	double closestProj = std::numeric_limits<double>::max();
+
+	for (Body *b : Pi::game->GetSpace()->GetBodies()) {
+		if (!b || b == m_ship || b == targetBody || !b->IsType(ObjectType::TERRAINBODY))
+			continue;
+
+		const double exclR = GetExclusionZoneRadius(b);
+		if (exclR <= 0.0)
+			continue;
+
+		const vector3d toBody = b->GetPositionRelTo(m_ship);
+		const double proj = toBody.Dot(dir);
+
+		// Body center must be in front of the ship and before the destination
+		if (proj <= 0.0 || proj >= dist)
+			continue;
+
+		// Check if target is located on or in the immediate vicinity of body b
+		const bool targetIsOnBody = (targetPosRelToShip - toBody).LengthSqr() <= (exclR * 1.25) * (exclR * 1.25);
+		// If target is attached to body b (e.g. surface starport), the occlusion boundary is the physical/exclusion horizon.
+		// If b is an intervening body, keep a generous clearance buffer to avoid gravity well lock.
+		const double clearR = targetIsOnBody ? (exclR * 1.005) : std::max(exclR * 1.12, exclR + 50000.0);
+
+		const double perpDistSq = toBody.LengthSqr() - proj * proj;
+		if (perpDistSq < clearR * clearR && proj < closestProj) {
+			closestProj = proj;
+			closestBlocker = b;
+		}
+	}
+
+	return closestBlocker;
+}
+
+bool SupercruiseController::IsTargetOccluded(Body **outBlocker) const
+{
+	if (outBlocker)
+		*outBlocker = nullptr;
+
+	vector3d relToTarget;
+	if (!GetActiveTargetPosRelToShip(relToTarget))
+		return false;
+
+	const Body *blocker = GetTargetObscuredBy(relToTarget, GetActiveTarget());
+	if (blocker) {
+		if (outBlocker)
+			*outBlocker = const_cast<Body *>(blocker);
+		return true;
+	}
+	return false;
+}
+
 void SupercruiseController::ComputeAISteering(const vector3d &targetPosRelToShip, const Body *targetBody, vector3d &outAngInput, double &outThrottle) const
 {
 	outAngInput = vector3d(0.0);
@@ -945,8 +1007,52 @@ void SupercruiseController::ComputeAISteering(const vector3d &targetPosRelToShip
 	if (desiredDir.LengthSqr() < 0.1)
 		desiredDir = -m_ship->GetOrient().VectorZ();
 
-	// Obstacle avoidance: steer tangentially around planetary/stellar exclusion zones
-	if (Pi::game && Pi::game->GetSpace()) {
+	bool isOccluded = false;
+
+	// 1. Planetary occlusion avoidance: when destination is obscured behind a planetary or stellar body,
+	// orbit tangentially along the great circle until line-of-sight clears the horizon limb.
+	if (const Body *blocker = GetTargetObscuredBy(targetPosRelToShip, targetBody)) {
+		isOccluded = true;
+		const double exclR = GetExclusionZoneRadius(blocker);
+		const double clearR = std::max(exclR * 1.12, exclR + 50000.0);
+		const vector3d toBody = blocker->GetPositionRelTo(m_ship);
+		const double bodyDist = toBody.Length();
+
+		if (bodyDist > 1.0) {
+			// Radial unit vector from body center to ship
+			const vector3d uBS = -toBody / bodyDist;
+			// Vector from body center to target
+			const vector3d toTargetFromBlocker = targetPosRelToShip - toBody;
+			const vector3d uBT = toTargetFromBlocker.NormalizedSafe();
+
+			// Project target direction onto the plane perpendicular to ship radius (great circle tangent)
+			vector3d tangentRaw = uBT - uBS * uBT.Dot(uBS);
+			if (tangentRaw.LengthSqr() < 1e-4) {
+				const vector3d fwd = -m_ship->GetOrient().VectorZ();
+				tangentRaw = fwd - uBS * fwd.Dot(uBS);
+				if (tangentRaw.LengthSqr() < 1e-4)
+					tangentRaw = MathUtil::OrthogonalDirection(uBS);
+			}
+			const vector3d tangentDir = tangentRaw.NormalizedSafe();
+
+			if (bodyDist > clearR * 1.5) {
+				// Far from body: aim at the horizon limb tangent point on the side of the target
+				const vector3d limbPoint = toBody + tangentDir * clearR;
+				desiredDir = limbPoint.NormalizedSafe();
+			} else {
+				// In orbital cruise around the body: orbit tangentially at safe clearance altitude
+				const double altDeficit = clearR - bodyDist;
+				double radialBias = 0.0;
+				if (altDeficit > 0.0) {
+					radialBias = std::min(0.65, altDeficit / 20000.0);
+				} else {
+					radialBias = Clamp((clearR - bodyDist) / clearR, -0.15, 0.15);
+				}
+				desiredDir = (tangentDir * (1.0 - std::fabs(radialBias)) + uBS * radialBias).NormalizedSafe();
+			}
+		}
+	} else if (Pi::game && Pi::game->GetSpace()) {
+		// 2. Obstacle avoidance: steer tangentially around intervening planetary/stellar exclusion zones
 		double bestAvoidDist = dist;
 		for (Body *b : Pi::game->GetSpace()->GetBodies()) {
 			if (!b || !b->IsType(ObjectType::TERRAINBODY))
@@ -999,6 +1105,12 @@ void SupercruiseController::ComputeAISteering(const vector3d &targetPosRelToShip
 	// Roll into large lateral offsets so faster pitch axis handles most of the turn
 	const double rollCmd = (std::fabs(yawErr) > 0.18) ? Clamp(-toLocal.x * 1.6, -1.0, 1.0) : 0.0;
 	outAngInput = vector3d(pitchCmd, yawCmd, rollCmd);
+
+	if (isOccluded) {
+		// When orbiting an occluded body, hold 75% blue zone for maximum steering agility and controlled speed
+		outThrottle = 0.75;
+		return;
+	}
 
 	const bool aligned = (toLocal.z < -0.85);
 	if (!aligned) {
@@ -1208,7 +1320,8 @@ void SupercruiseController::UpdateEnvironmentAndTarget(float timeStep, Body **ou
 		const double effectiveDist = std::max(0.0, m_targetDistance - targetExclR);
 		m_targetETA = (m_speed > 1.0) ? (effectiveDist / m_speed) : 0.0;
 
-		m_safeDisengageReady = !targetIsSCShip && (effectiveDist <= SAFE_DISENGAGE_DIST) && (m_speed <= SAFE_DISENGAGE_SPEED);
+		const bool isOccluded = (GetTargetObscuredBy(relToTarget, activeTarget) != nullptr);
+		m_safeDisengageReady = !targetIsSCShip && !isOccluded && (effectiveDist <= SAFE_DISENGAGE_DIST) && (m_speed <= SAFE_DISENGAGE_SPEED);
 
 		// Overshoot ("Loop of Shame") warning when ETA drops below 5.2s outside safe drop range,
 		// or when entering a heavy gravity well at excessive speed (Elite Dangerous SLOW DOWN indicator)
@@ -1340,12 +1453,15 @@ void SupercruiseController::StaticUpdate(float timeStep)
 			: 0.0;
 		const double effectiveDist = std::max(0.0, m_targetDistance - targetExclR);
 
-		if (inBlueZone || m_assistActive) {
-			const double sixSecondSpeed = std::max(MIN_SPEED, effectiveDist / 6.0);
-			targetCapSpeed = std::min(targetCapSpeed, sixSecondSpeed / 0.75);
-		} else if (m_throttle < 0.65 && m_throttle > 0.001) {
-			const double subBlueSpeed = std::max(MIN_SPEED, (effectiveDist / 6.0) * (m_throttle / 0.75));
-			targetCapSpeed = std::min(targetCapSpeed, subBlueSpeed / m_throttle);
+		const bool isOccluded = (GetTargetObscuredBy(targetRel, activeTarget) != nullptr);
+		if (!isOccluded) {
+			if (inBlueZone || m_assistActive) {
+				const double sixSecondSpeed = std::max(MIN_SPEED, effectiveDist / 6.0);
+				targetCapSpeed = std::min(targetCapSpeed, sixSecondSpeed / 0.75);
+			} else if (m_throttle < 0.65 && m_throttle > 0.001) {
+				const double subBlueSpeed = std::max(MIN_SPEED, (effectiveDist / 6.0) * (m_throttle / 0.75));
+				targetCapSpeed = std::min(targetCapSpeed, subBlueSpeed / m_throttle);
+			}
 		}
 	}
 
@@ -1416,15 +1532,17 @@ void SupercruiseController::TimeStepUpdate(float timeStep, const vector3d &desir
 
 	// If Supercruise Assist is active and player is not overriding pitch/yaw, steer toward target
 	if (m_assistActive && std::fabs(desiredAngInput.x) < 0.05 && std::fabs(desiredAngInput.y) < 0.05) {
-		if (Body *target = GetActiveTarget()) {
-			const vector3d toTargetWorld = target->GetPositionRelTo(m_ship).NormalizedSafe();
-			// Convert to ship-local coordinates (where -Z is forward, +X is right, +Y is up)
-			const vector3d toTargetLocal = toTargetWorld * m_ship->GetOrient();
-			const double pitchErr = std::atan2(toTargetLocal.y, -toTargetLocal.z);
-			const double yawErr = std::atan2(-toTargetLocal.x, -toTargetLocal.z);
+		vector3d targetRel;
+		if (GetActiveTargetPosRelToShip(targetRel)) {
+			vector3d aiAng;
+			double aiThrottle;
+			ComputeAISteering(targetRel, GetActiveTarget(), aiAng, aiThrottle);
 
-			angCmd.x = Clamp(pitchErr * 2.0, -basePitchRate * blueZoneMult, basePitchRate * blueZoneMult);
-			angCmd.y = Clamp(yawErr * 2.0, -baseYawRate * blueZoneMult, baseYawRate * blueZoneMult);
+			angCmd.x = aiAng.x * basePitchRate * blueZoneMult;
+			angCmd.y = aiAng.y * baseYawRate * blueZoneMult;
+			if (std::fabs(aiAng.z) > 0.05 && std::fabs(desiredAngInput.z) < 0.05) {
+				angCmd.z = aiAng.z * baseRollRate * blueZoneMult;
+			}
 		}
 	}
 

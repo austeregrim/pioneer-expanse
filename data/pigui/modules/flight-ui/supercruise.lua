@@ -467,6 +467,8 @@ local function drawSupercruiseTargetPanel(player, center, reticuleRadius)
 	local btnDropTL = Vector2(panelX + 8, panelY + panelH - bottomOffset)
 	local btnDropBR = Vector2(panelX + panelW - 8, panelY + panelH - bottomOffset + 22)
 
+	local occluded, blocker = player.IsSupercruiseTargetOccluded and player:IsSupercruiseTargetOccluded()
+
 	if safeReady and not isShipTarget then
 		local hDrop = ui.isMouseHoveringRect(btnDropTL, btnDropBR)
 		ui.addRectFilled(btnDropTL, btnDropBR, hDrop and Color(30, 80, 50, 230) or Color(15, 45, 30, 210), 3, ui.RoundCornersAll)
@@ -479,6 +481,15 @@ local function drawSupercruiseTargetPanel(player, center, reticuleRadius)
 	elseif isShipTarget then
 		ui.addStyledText(Vector2(panelX + panelW * 0.5, (btnDropTL.y + btnDropBR.y) * 0.5),
 			ui.anchor.center, ui.anchor.center, "SUPERCRUISE INTERCEPT", colCyan, pionillium.tiny)
+	elseif occluded then
+		local blkName = blocker and blocker:GetLabel() or "PLANET"
+		if assist then
+			ui.addStyledText(Vector2(panelX + panelW * 0.5, (btnDropTL.y + btnDropBR.y) * 0.5),
+				ui.anchor.center, ui.anchor.center, "SC ASSIST: ORBITING " .. blkName, colAmber, pionillium.tiny)
+		else
+			ui.addStyledText(Vector2(panelX + panelW * 0.5, (btnDropTL.y + btnDropBR.y) * 0.5),
+				ui.anchor.center, ui.anchor.center, "TARGET OCCLUDED BY " .. blkName, colAmber, pionillium.tiny)
+		end
 	elseif assist then
 		ui.addStyledText(Vector2(panelX + panelW * 0.5, (btnDropTL.y + btnDropBR.y) * 0.5),
 			ui.anchor.center, ui.anchor.center, "SC ASSIST: AUTO-DROP", colGreen, pionillium.small)

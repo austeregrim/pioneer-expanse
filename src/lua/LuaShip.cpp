@@ -1587,6 +1587,23 @@ static int l_ship_is_slow_down_warning(lua_State *l)
 	return 1;
 }
 
+static int l_ship_is_supercruise_target_occluded(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	if (s->GetSupercruise()) {
+		Body *blocker = nullptr;
+		bool occluded = s->GetSupercruise()->IsTargetOccluded(&blocker);
+		lua_pushboolean(l, occluded);
+		if (occluded && blocker) {
+			LuaObject<Body>::PushToLua(blocker);
+			return 2;
+		}
+		return 1;
+	}
+	lua_pushboolean(l, false);
+	return 1;
+}
+
 static int l_ship_get_supercruise_target_distance(lua_State *l)
 {
 	Ship *s = LuaObject<Ship>::CheckFromLua(1);
@@ -2006,6 +2023,7 @@ void LuaObject<Ship>::RegisterClass()
 		{ "GetSupercruiseGravityStrain", l_ship_get_supercruise_gravity_strain },
 		{ "IsSafeDisengageReady", l_ship_is_safe_disengage_ready },
 		{ "IsSlowDownWarning", l_ship_is_slow_down_warning },
+		{ "IsSupercruiseTargetOccluded", l_ship_is_supercruise_target_occluded },
 		{ "GetSupercruiseTargetDistance", l_ship_get_supercruise_target_distance },
 		{ "GetSupercruiseTargetETA", l_ship_get_supercruise_target_eta },
 		{ "HasSupercruiseAssist", l_ship_has_supercruise_assist },

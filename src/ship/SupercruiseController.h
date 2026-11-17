@@ -150,6 +150,10 @@ public:
 	// Compute exclusion zone radius (in meters) from body center
 	static double GetExclusionZoneRadius(const Body *body);
 
+	// Planetary occlusion queries & great-circle bypass routing
+	const Body *GetTargetObscuredBy(const vector3d &targetPosRelToShip, const Body *targetBody) const;
+	bool IsTargetOccluded(Body **outBlocker = nullptr) const;
+
 private:
 	void UpdateEnvironmentAndTarget(float timeStep, Body **outHitExclusionBody);
 	void UpdateStellarFuelScoop(float timeStep);
