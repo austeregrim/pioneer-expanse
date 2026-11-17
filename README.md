@@ -15,6 +15,34 @@ This fork reimagines Pioneer with core flight mechanics, pacing, graphics, fleet
 
 ---
 
+## Community & Upstream Heritage
+
+Pioneer: Expanse builds with deep appreciation upon the foundation created by the upstream Pioneer contributors over more than a decade:
+* Upstream Pioneer Project: [https://pioneerspacesim.net/](https://pioneerspacesim.net/)
+* Upstream Repository: [https://github.com/pioneerspacesim/pioneer](https://github.com/pioneerspacesim/pioneer)
+* Original License: [GNU General Public License v3 (GPLv3)](http://www.gnu.org/licenses/gpl-3.0.html)
+
+## Compiling from Source
+
+Pioneer: Expanse builds using CMake and Ninja on modern Linux distributions:
+
+```bash
+# Install dependencies (Debian/Ubuntu)
+sudo apt-get install cmake ninja-build libsdl2-dev libglew-dev libassimp-dev \
+                     libvorbis-dev libsigc++-2.0-dev libfreetype-dev libopenal-dev
+
+# Configure and compile
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build --target pioneer unittest build-data -j $(nproc)
+
+# Run unit tests
+./build/unittest
+
+# Launch game
+./build/pioneer
+```
+
+
 ## Major Differences: Pioneer: Expanse vs. Original Pioneer
 
 | Gameplay System | Original Pioneer Baseline | Pioneer: Expanse |
@@ -160,33 +188,6 @@ To ensure unambiguous legal clarity and full downstream open-source compliance:
 3. **Freedom for All Downstream Users**: Anyone is free to fork, study, compile, modify, and redistribute Pioneer: Expanse under the terms of the GNU GPLv3.
 
 ---
-
-## Community & Upstream Heritage
-
-Pioneer: Expanse builds with deep appreciation upon the foundation created by the upstream Pioneer contributors over more than a decade:
-* Upstream Pioneer Project: [https://pioneerspacesim.net/](https://pioneerspacesim.net/)
-* Upstream Repository: [https://github.com/pioneerspacesim/pioneer](https://github.com/pioneerspacesim/pioneer)
-* Original License: [GNU General Public License v3 (GPLv3)](http://www.gnu.org/licenses/gpl-3.0.html)
-
-## Compiling from Source
-
-Pioneer: Expanse builds using CMake and Ninja on modern Linux distributions:
-
-```bash
-# Install dependencies (Debian/Ubuntu)
-sudo apt-get install cmake ninja-build libsdl2-dev libglew-dev libassimp-dev \
-                     libvorbis-dev libsigc++-2.0-dev libfreetype-dev libopenal-dev
-
-# Configure and compile
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build --target pioneer unittest build-data -j $(nproc)
-
-# Run unit tests
-./build/unittest
-
-# Launch game
-./build/pioneer
-```
 
 For detailed platform compilation notes, see [COMPILING.txt](COMPILING.txt).
 
