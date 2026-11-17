@@ -92,7 +92,9 @@ end
 local function onShipUndocked(ship, station)
 	if not station or not ship or ship == Game.player then return end
 	if Game.player:GetDockedWith() == station or (Game.player:exists() and station:exists() and Game.player:DistanceTo(station) < 25000) then
-		Comms.Message(string.format("Traffic Control: Outbound vessel %s cleared for departure. Airlock corridor active.", ship:GetLabel()), station.label)
+		local isSurface = (station.type == "STARPORT_SURFACE")
+		local corridorName = isSurface and "Air space" or "Airlock corridor"
+		Comms.Message(string.format("Traffic Control: Outbound vessel %s cleared for departure. %s active.", ship:GetLabel(), corridorName), station.label)
 	end
 end
 

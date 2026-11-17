@@ -200,6 +200,28 @@ function NavLocusLottery.BuySingleTicket(customLocus)
 	}
 
 	table.insert(playerTickets, ticket)
+
+	local okFlightLog, FlightLog = pcall(require, 'modules.FlightLog.FlightLog')
+	local okFormat, Format = pcall(require, 'Format')
+	if okFlightLog and FlightLog and FlightLog.RecordTransaction then
+		local formatMoney = (okFormat and Format and Format.Money) or function(v) return tostring(v) .. " Cr" end
+		local locusCoord = string.format("RING %02d | CLASS %s | RA %05.1f° | DEC %+05.1f° | EPOCH #%04d",
+			locus.ring, locus.class, locus.ra, locus.dec, locus.epoch)
+		FlightLog.RecordTransaction({
+			category = "LOTTERY",
+			title = string.format("Nav-Locus Lottery Ticket (%s)", formatMoney(-cost)),
+			amount = -cost,
+			details = {
+				{ "Sweepstakes", "Nav-Locus Astrogation Lottery" },
+				{ "Draw Target", string.format("Draw Cycle #%d", drawNumber) },
+				{ "Ticket Type", "Single Coordinate Entry" },
+				{ "Selected Coordinate", locusCoord },
+				{ "Wager Cost", formatMoney(cost) },
+			},
+			note = string.format("Registered lottery ticket coordinate [%s] for Draw #%d.", locusCoord, drawNumber)
+		})
+	end
+
 	return true, "Nav-Locus Ticket Registered: [" .. tostring(locus.ring) .. " | " .. locus.class .. " | " .. tostring(locus.ra) .. "° | " .. tostring(locus.dec) .. "° | #" .. tostring(locus.epoch) .. "]"
 end
 
@@ -235,6 +257,26 @@ function NavLocusLottery.BuyBatchTickets(count)
 	}
 
 	table.insert(playerTickets, batch)
+
+	local okFlightLog, FlightLog = pcall(require, 'modules.FlightLog.FlightLog')
+	local okFormat, Format = pcall(require, 'Format')
+	if okFlightLog and FlightLog and FlightLog.RecordTransaction then
+		local formatMoney = (okFormat and Format and Format.Money) or function(v) return tostring(v) .. " Cr" end
+		FlightLog.RecordTransaction({
+			category = "LOTTERY",
+			title = string.format("Nav-Locus Batch Purchase: %s Entries (%s)", string.format("%.0f", count), formatMoney(-cost)),
+			amount = -cost,
+			details = {
+				{ "Sweepstakes", "Nav-Locus Astrogation Lottery" },
+				{ "Draw Target", string.format("Draw Cycle #%d", drawNumber) },
+				{ "Ticket Type", "Batch Coordinate Array" },
+				{ "Total Array Entries", string.format("%.0f coordinates", count) },
+				{ "Total Wager Cost", formatMoney(cost) },
+			},
+			note = string.format("Registered batch array of %.0f astrogation coordinates for Draw #%d.", count, drawNumber)
+		})
+	end
+
 	return true, string.format("Registered Batch of %s Nav-Locus Coordinates (Total Cost: %s Cr)", string.format("%.0f", count), string.format("%.0f", cost))
 end
 
@@ -335,6 +377,26 @@ local function executeScheduledDraw(drawTimestamp)
 		local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
 		if okTax and TaxAuthority and TaxAuthority.RecordWindfall then
 			TaxAuthority.RecordWindfall(playerTotalWon, windfallTax)
+		end
+
+		local okFlightLog, FlightLog = pcall(require, 'modules.FlightLog.FlightLog')
+		local okFormat, Format = pcall(require, 'Format')
+		if okFlightLog and FlightLog and FlightLog.RecordTransaction then
+			local formatMoney = (okFormat and Format and Format.Money) or function(v) return tostring(v) .. " Cr" end
+			FlightLog.RecordTransaction({
+				category = "LOTTERY",
+				title = string.format("Nav-Locus Prize Payout (+%s)", formatMoney(netWon)),
+				amount = netWon,
+				details = {
+					{ "Sweepstakes", "Nav-Locus Astrogation Lottery" },
+					{ "Draw Cycle", string.format("Draw Cycle #%d", drawNumber) },
+					{ "Winning Coordinate Vector", locusStr },
+					{ "Gross Prize Won", formatMoney(playerTotalWon) },
+					{ "Windfall Tax Withheld (30%)", formatMoney(windfallTax) },
+					{ "Net Payout Disbursed", formatMoney(netWon) },
+				},
+				note = string.format("Claimed %s in lottery winnings for Draw #%d (Winning Vector: %s).", formatMoney(netWon), drawNumber, locusStr)
+			})
 		end
 	end
 

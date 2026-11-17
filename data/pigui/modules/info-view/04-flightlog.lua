@@ -5,6 +5,7 @@ local ui = require 'pigui'
 local Table = require 'pigui.libs.table'
 local InfoView = require 'pigui.views.info-view'
 local Lang = require 'Lang'
+local Format = require 'Format'
 local FlightLog = require 'modules.FlightLog.FlightLog'
 local FlightLogExporter = require 'modules.FlightLog.FlightLogExporter'
 local Color = _G.Color
@@ -60,17 +61,23 @@ local function getEntryTitle(entry)
 		else
 			return entry:GetLocalizedName()
 		end
+	elseif eType == "Transaction" then
+		return entry.title or entry:GetLocalizedName()
 	end
 	return entry:GetLocalizedName()
 end
 
-local function getEntryCategoryBadge(eType)
+local function getEntryCategoryBadge(eType, entry)
 	if eType == "System" then
 		return "[SYSTEM]", colors.uiPrimaryLight
 	elseif eType == "Station" then
 		return "[STATION]", colors.econProfit
 	elseif eType == "Custom" then
 		return "[CAPTAIN'S LOG]", colors.maneuver
+	elseif eType == "Transaction" then
+		local catBadge = (entry and entry.category) and ("[" .. entry.category .. "]") or "[FINANCIAL]"
+		local catColor = (entry and entry.amount and entry.amount >= 0) and (colors.econProfit or colors.uiPrimaryLight) or colors.alertYellow
+		return catBadge, catColor
 	end
 	return "[" .. string.upper(eType) .. "]", colors.fontDim
 end
@@ -82,6 +89,8 @@ local function getEntryIcon(eType)
 		return icons.comms or icons.bbs or icons.docking
 	elseif eType == "Custom" then
 		return icons.bookmark or icons.pencil
+	elseif eType == "Transaction" then
+		return icons.cash or icons.bbs or icons.info
 	end
 	return icons.bookmark
 end
@@ -90,6 +99,7 @@ local function renderFilterBar()
 	ui.horizontalGroup(function()
 		local pillLabels = {
 			{ id = "ALL", label = "All Logs" },
+			{ id = "Transaction", label = "Financial" },
 			{ id = "System", label = l.LOG_SYSTEM or "Systems" },
 			{ id = "Station", label = l.LOG_STATION or "Stations" },
 			{ id = "Custom", label = l.LOG_CUSTOM or "Captain's Entries" },
@@ -112,7 +122,7 @@ local function renderFilterBar()
 		ui.sameLine(0, widgetSizes.controlSpacing.x)
 
 		if ui.button((l.LOG_EXPORT or "Export") .. "##exportBtn", Vector2(0, 0)) then
-			local incSet = { System = true, Custom = true, Station = true }
+			local incSet = { System = true, Custom = true, Station = true, Transaction = true }
 			FlightLogExporter.Export(incSet, earliestFirst, true, exportHtml)
 		end
 	end)
@@ -191,7 +201,7 @@ local logTable = Table.New("FlightLogTable", false, {
 					ui.text(ui.Format.SystemPath(entry.systemp))
 				end
 
-				local catBadge, catColor = getEntryCategoryBadge(eType)
+				local catBadge, catColor = getEntryCategoryBadge(eType, entry)
 				local catW = ui.calcTextSize(catBadge).x
 				if region.x > catW then
 					ui.sameLine(region.x - catW)
@@ -204,6 +214,10 @@ local logTable = Table.New("FlightLogTable", false, {
 				local preview = entry.entry or ""
 				if preview == "" and eType == "Custom" and entry.location and entry.location[1] then
 					preview = entry.composeLocationString(entry.location)
+				elseif preview == "" and eType == "Transaction" then
+					local amtStr = (entry.amount and entry.amount >= 0 and "+" or "") .. Format.Money(entry.amount or 0)
+					local stStr = (entry.stationName and entry.stationName ~= "") and (" @ " .. entry.stationName) or ""
+					preview = string.format("Amount: %s%s | Balance: %s", amtStr, stStr, Format.Money(entry.balance or 0))
 				elseif preview == "" and eType == "Station" and entry.systemp then
 					preview = entry:GetLocalizedName() .. " - " .. ui.Format.SystemPath(entry.systemp)
 				elseif preview == "" and eType == "System" and entry.systemp then
@@ -238,7 +252,7 @@ local function renderDetailsPanel(activeItem)
 
 	local entry = activeItem.entry
 	local eType = entry:GetType()
-	local catBadge, catColor = getEntryCategoryBadge(eType)
+	local catBadge, catColor = getEntryCategoryBadge(eType, entry)
 
 	-- Header line
 	ui.withFont(pionillium.details, function()
@@ -325,7 +339,7 @@ end
 
 local function drawScreen()
 	local allEntries = {}
-	local incSet = { System = true, Custom = true, Station = true }
+	local incSet = { System = true, Custom = true, Station = true, Transaction = true }
 	local idx = 0
 	for entry in FlightLog:GetLogEntries(incSet, nil, earliestFirst) do
 		idx = idx + 1

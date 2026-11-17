@@ -47,6 +47,8 @@ local shipDef
 
 local taxStatusBanner = nil
 local taxBannerColor = colors.uiPrimaryLight
+local residencyStatusBanner = nil
+local residencyBannerColor = colors.uiPrimaryLight
 
 local popupMsg = ''
 local popup = ModalWindow.New('lobbyPopup', function(self)
@@ -78,7 +80,9 @@ local requestLaunch = function (station)
 
 	if not station:CanLaunch(Game.player) then
 		local wait = station:GetLaunchWaitTime()
-		Comms.ImportantMessage(string.format("Traffic Control: Launch clearance on hold. Airlock corridor active with traffic. Hold position on pad (est. %ds).", math.ceil(wait)), station.label)
+		local isSurface = (station.type == "STARPORT_SURFACE")
+		local holdArea = isSurface and "Air space" or "Airlock corridor"
+		Comms.ImportantMessage(string.format("Traffic Control: Launch clearance on hold. %s active with traffic. Hold position on pad (est. %ds).", holdArea, math.ceil(wait)), station.label)
 		return false
 	end
 
@@ -156,7 +160,7 @@ local function drawCivilAdministrationSection(station)
 			local gaugePos = ui.getCursorScreenPos()
 			local gaugeHeight = 16 * rescaleVector.y
 			local gaugeWidth = ui.getContentRegion().x
-			ui.gauge(gaugePos, resInfo.progress * 100, '', string.format("%.0f%% Term Elapsed", resInfo.progress * 100),
+			ui.gauge(gaugePos, resInfo.progress * 100, '', "%d%% Term Elapsed",
 				0, 100, icons.station or icons.info, false, colors.gaugeEquipmentMarket, '',
 				gaugeWidth, gaugeHeight, pionillium.details)
 			ui.dummy(Vector2(0, gaugeHeight + 8 * rescaleVector.y))
@@ -187,15 +191,20 @@ local function drawCivilAdministrationSection(station)
 				if ui.button(regLabel, actionBtnSize) then
 					local ok, msg = TaxAuthority.RegisterResidency(station)
 					if ok then
-						taxStatusBanner = msg
-						taxBannerColor = colors.econProfit or colors.uiPrimaryLight
+						residencyStatusBanner = msg
+						residencyBannerColor = colors.econProfit or colors.uiPrimaryLight
 						ui.playSfx("OK")
 					else
-						taxStatusBanner = msg
-						taxBannerColor = colors.alertRed
+						residencyStatusBanner = msg
+						residencyBannerColor = colors.alertRed
 					end
 				end
 			end
+		end
+
+		if residencyStatusBanner then
+			ui.spacing()
+			ui.textColored(residencyBannerColor, residencyStatusBanner)
 		end
 	end)
 
@@ -280,15 +289,14 @@ local function drawCivilAdministrationSection(station)
 				ui.button("ALL ASSESSMENTS SETTLED##lobbyPayTax", payBtnSize)
 			end)
 		end
+
+		if taxStatusBanner then
+			ui.spacing()
+			ui.textColored(taxBannerColor, taxStatusBanner)
+		end
 	end)
 
 	ui.columns(1, "LobbyCivilTaxEnd", false)
-
-	-- Status feedback displayed at bottom so administrative headers/columns never shift
-	if taxStatusBanner then
-		ui.spacing()
-		ui.textColored(taxBannerColor, taxStatusBanner)
-	end
 end
 
 local function drawPlayerInfo()
@@ -375,31 +383,37 @@ local function drawPlayerInfo()
 					end)
 					ui.spacing()
 
-					ui.withFont(orbiteer.title, function()
-						local size = Vector2(ui.getContentRegion().x, widgetSizes.buttonLaunchSize.y)
-						if Insurance.HasPendingClaim() then
+					local size = Vector2(ui.getContentRegion().x, widgetSizes.buttonLaunchSize.y)
+					if Insurance.HasPendingClaim() then
+						ui.withFont(orbiteer.large, function()
 							ui.withStyleColors({ Button = colors.alertRed }, function()
 								if ui.button("SETTLE INSURANCE CLAIM TO LAUNCH", size) then
 									StationView:SwitchTo("insurance")
 								end
 							end)
-						else
-							local canLaunch = station:CanLaunch(Game.player)
-							local wait = station:GetLaunchWaitTime()
-							if not canLaunch and wait > 0.0 then
-								local holdText = string.format("ATC HOLD: AIRLOCK CORRIDOR OCCUPIED — %ds", math.ceil(wait))
+						end)
+					else
+						local canLaunch = station:CanLaunch(Game.player)
+						local wait = station:GetLaunchWaitTime()
+						if not canLaunch and wait > 0.0 then
+							local isSurface = (station.type == "STARPORT_SURFACE")
+							local holdText = string.format("%s: %ds", isSurface and "AIR SPACE HOLD" or "AIRLOCK HOLD", math.ceil(wait))
+							local holdFont = orbiteer.medlarge
+							ui.withFont(holdFont, function()
 								ui.withStyleColors({ Button = colors.alertYellow, ButtonHovered = colors.alertYellow, ButtonActive = colors.alertYellow, Text = colors.black }, function()
 									if ui.button(holdText, size) then
 										requestLaunch(station)
 									end
 								end)
-							else
+							end)
+						else
+							ui.withFont(orbiteer.title, function()
 								if ui.button(l.REQUEST_LAUNCH, size) then
 									requestLaunch(station)
 								end
-							end
+							end)
 						end
-					end)
+					end
 				end)
 			end)
 

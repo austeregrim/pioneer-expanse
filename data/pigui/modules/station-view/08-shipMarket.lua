@@ -195,6 +195,22 @@ local function buyShip (mkt, sos)
 
 	PlayerState.AddMoney(-cost)
 
+	local okFlightLog, FlightLog = pcall(require, 'modules.FlightLog.FlightLog')
+	if okFlightLog and FlightLog and FlightLog.RecordTransaction then
+		FlightLog.RecordTransaction({
+			category = "SHIP",
+			title = string.format("Vessel Acquisition: %s (%s)", def.name, Format.Money(-cost)),
+			amount = -cost,
+			details = {
+				{ "Vessel Model", def.name },
+				{ "Vessel Registration", sos.label or "Unnamed" },
+				{ "Trade-in Deducted", Format.Money(tradeInValue or 0) },
+				{ "Net Cost Paid", Format.Money(cost) },
+			},
+			note = string.format("Acquired %s (%s) from shipyard.", def.name, sos.label or "Unnamed")
+		})
+	end
+
 	station:ReplaceShipOnSale(sos, {
 		def     = ShipDef[player.shipId],
 		skin    = player:GetSkin(),

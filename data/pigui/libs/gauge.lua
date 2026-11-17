@@ -67,9 +67,13 @@ ui.gauge = function(position, value, unit, format, minimum, maximum, icon, showP
 
 		formatFont = formatFont or ui.fonts.pionillium.medium
 		if value and format then
+			local ok, text = pcall(string.format, format, value)
+			if not ok then
+				text = tostring(format)
+			end
 			ui.addFancyText(Vector2(uiPos.x + gauge_height/2, uiPos.y + gauge_height / 14), ui.anchor.left, ui.anchor.center, {
-				{ text=string.format(format, value), color=ui.theme.colors.reticuleCircle,     font=formatFont, tooltip=tooltip },
-				{ text=unit,                         color=ui.theme.colors.reticuleCircleDark, font=formatFont, tooltip=tooltip }},
+				{ text=text, color=ui.theme.colors.reticuleCircle,     font=formatFont, tooltip=tooltip },
+				{ text=unit, color=ui.theme.colors.reticuleCircleDark, font=formatFont, tooltip=tooltip }},
 				ui.theme.colors.transparent)
 		end
 	end)

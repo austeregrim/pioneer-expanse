@@ -84,6 +84,21 @@ local tryRepair = function (damage, price)
 		PlayerState.AddMoney(-price)
 		Game.player:SetHullPercent(Game.player:GetHullPercent() + damage)
 		ui.playSfx("Repairing_Ship")
+
+		local okFlightLog, FlightLog = pcall(require, 'modules.FlightLog.FlightLog')
+		if okFlightLog and FlightLog and FlightLog.RecordTransaction then
+			FlightLog.RecordTransaction({
+				category = "MAINTENANCE",
+				title = string.format("Hull Restoration (%s)", Format.Money(-price)),
+				amount = -price,
+				details = {
+					{ "Service Type", "Structural Hull Repair" },
+					{ "Integrity Restored", string.format("+%.1f%%", damage) },
+					{ "Service Fee", Format.Money(price) },
+				},
+				note = string.format("Restored %.1f%% vessel hull integrity at starport repair yard.", damage)
+			})
+		end
 	else
 		popupMsg = l.YOU_DONT_HAVE_ENOUGH_MONEY_FOR_THAT_OPTION
 		popup:open()
@@ -129,6 +144,24 @@ local refuelInternalTank = function (delta)
 	local commodityChangeAmount = mass < 0 and math.floor(mass) or math.ceil(mass)
 	station:AddCommodityStock(Commodities.hydrogen, -commodityChangeAmount)
 	Game.player:SetFuelPercent(fuel)
+
+	if total > 0 then
+		local okFlightLog, FlightLog = pcall(require, 'modules.FlightLog.FlightLog')
+		if okFlightLog and FlightLog and FlightLog.RecordTransaction then
+			FlightLog.RecordTransaction({
+				category = "MAINTENANCE",
+				title = string.format("Thruster Refueling (%s)", Format.Money(-total)),
+				amount = -total,
+				details = {
+					{ "Propellant Fuel", "Liquid Hydrogen (H2)" },
+					{ "Quantity Refueled", string.format("%.2f tons", mass) },
+					{ "Unit Price", Format.Money(price) },
+					{ "Total Cost", Format.Money(total) },
+				},
+				note = string.format("Replenished %.2f tons liquid hydrogen thruster propellant.", mass)
+			})
+		end
+	end
 end
 
 local refuelHyperdrive = function (mass)
@@ -150,10 +183,29 @@ local refuelHyperdrive = function (mass)
 
 	-- Can't buy any more than the station has in stock or we have money for
 	mass = math.min(mass, math.min(stock, PlayerState.GetMoney() / price))
-	PlayerState.AddMoney(-price * mass)
+	local total = price * mass
+	PlayerState.AddMoney(-total)
 
 	hyperdrive:SetFuel(Game.player, hyperdrive.storedFuel + mass)
 	station:AddCommodityStock(hyperdrive_fuel, -math.round(mass))
+
+	if total > 0 then
+		local okFlightLog, FlightLog = pcall(require, 'modules.FlightLog.FlightLog')
+		if okFlightLog and FlightLog and FlightLog.RecordTransaction then
+			FlightLog.RecordTransaction({
+				category = "MAINTENANCE",
+				title = string.format("Hyperspace Refueling (%s)", Format.Money(-total)),
+				amount = -total,
+				details = {
+					{ "Hyperdrive Fuel", "Enriched Hyperfuel" },
+					{ "Quantity Refueled", string.format("%.2f tons", mass) },
+					{ "Unit Price", Format.Money(price) },
+					{ "Total Cost", Format.Money(total) },
+				},
+				note = string.format("Replenished %.2f tons hyperspace jump fuel.", mass)
+			})
+		end
+	end
 end
 
 

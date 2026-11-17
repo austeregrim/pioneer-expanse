@@ -542,6 +542,26 @@ function StockExchange.BuyShares(stock, count)
 		shareStr = string.format("%.3f", count)
 	end
 
+	local okFlightLog, FlightLog = pcall(require, 'modules.FlightLog.FlightLog')
+	local okFormat, Format = pcall(require, 'Format')
+	if okFlightLog and FlightLog and FlightLog.RecordTransaction then
+		local formatMoney = (okFormat and Format and Format.Money) or function(v) return tostring(v) .. " Cr" end
+		FlightLog.RecordTransaction({
+			category = "STOCK",
+			title = string.format("Equity Buy: %s %s (%s)", shareStr, stock.ticker, formatMoney(-cost)),
+			amount = -cost,
+			details = {
+				{ "Corporation", stock.name },
+				{ "Ticker Symbol", stock.ticker },
+				{ "Order Action", "BUY" },
+				{ "Shares Executed", shareStr },
+				{ "Execution Price", formatMoney(stock.price) },
+				{ "Total Consideration", formatMoney(cost) },
+			},
+			note = string.format("Acquired %s shares of %s (%s) at %s per share.", shareStr, stock.name, stock.ticker, formatMoney(stock.price))
+		})
+	end
+
 	return true, string.format("Purchased %s shares of %s for %.2f Cr", shareStr, stock.ticker, cost)
 end
 
@@ -632,6 +652,26 @@ function StockExchange.SellShares(stock, count)
 		shareStr = string.format("%.4f", count)
 	else
 		shareStr = string.format("%.3f", count)
+	end
+
+	local okFlightLog, FlightLog = pcall(require, 'modules.FlightLog.FlightLog')
+	local okFormat, Format = pcall(require, 'Format')
+	if okFlightLog and FlightLog and FlightLog.RecordTransaction then
+		local formatMoney = (okFormat and Format and Format.Money) or function(v) return tostring(v) .. " Cr" end
+		FlightLog.RecordTransaction({
+			category = "STOCK",
+			title = string.format("Equity Sell: %s %s (+%s)", shareStr, stock.ticker, formatMoney(proceeds)),
+			amount = proceeds,
+			details = {
+				{ "Corporation", stock.name },
+				{ "Ticker Symbol", stock.ticker },
+				{ "Order Action", "SELL" },
+				{ "Shares Liquidated", shareStr },
+				{ "Execution Price", formatMoney(stock.price) },
+				{ "Gross Sale Proceeds", formatMoney(proceeds) },
+			},
+			note = string.format("Liquidated %s shares of %s (%s) at %s per share.", shareStr, stock.name, stock.ticker, formatMoney(stock.price))
+		})
 	end
 
 	return true, string.format("Sold %s shares of %s for %.2f Cr", shareStr, stock.ticker, proceeds)
@@ -782,6 +822,22 @@ function StockExchange.OnMacroTick(deltaDays, activeCrises)
 		if dividendPayout > 0 then
 			PlayerState.AddMoney(dividendPayout)
 			totalDividendsCollected = totalDividendsCollected + dividendPayout
+
+			local okFlightLog, FlightLog = pcall(require, 'modules.FlightLog.FlightLog')
+			local okFormat, Format = pcall(require, 'Format')
+			if okFlightLog and FlightLog and FlightLog.RecordTransaction then
+				local formatMoney = (okFormat and Format and Format.Money) or function(v) return tostring(v) .. " Cr" end
+				FlightLog.RecordTransaction({
+					category = "STOCK",
+					title = string.format("Corporate Dividend Payout (+%s)", formatMoney(dividendPayout)),
+					amount = dividendPayout,
+					details = {
+						{ "Distribution Type", "Quarterly Portfolio Dividends" },
+						{ "Total Disbursed", formatMoney(dividendPayout) },
+					},
+					note = string.format("Received %s in quarterly dividend disbursements across portfolio holdings.", formatMoney(dividendPayout))
+				})
+			end
 		end
 	end
 end

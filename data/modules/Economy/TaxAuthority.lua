@@ -246,6 +246,11 @@ function TaxAuthority.PayTaxes()
 	end
 
 	local paid = state.accruedTax
+	local tradeTax = state.breakdown.tradeProfitTax
+	local bbsTax = state.breakdown.bbsJobsTax
+	local cartoTax = state.breakdown.cartographyTax
+	local penaltyTax = (state.isDelinquent and state.penaltyApplied) and math.floor(paid * DELINQUENCY_PENALTY_RATE) or 0
+
 	PlayerState.AddMoney(-paid)
 
 	state.stats.totalTaxPaid = state.stats.totalTaxPaid + paid
@@ -261,6 +266,32 @@ function TaxAuthority.PayTaxes()
 	state.breakdown.tradeProfitTax = 0
 	state.breakdown.bbsJobsTax = 0
 	state.breakdown.cartographyTax = 0
+
+	local okFlightLog, FlightLog = pcall(require, 'modules.FlightLog.FlightLog')
+	local okFormat, Format = pcall(require, 'Format')
+	if okFlightLog and FlightLog and FlightLog.RecordTransaction then
+		local formatMoney = (okFormat and Format and Format.Money) or function(v) return tostring(v) .. " Cr" end
+		local details = {
+			{ "Settlement Type", "Consolidated Tax Assessment" },
+			{ "Trade Net Capital Gains Tax", formatMoney(tradeTax) },
+			{ "Civilian BBS Contracts Tax", formatMoney(bbsTax) },
+			{ "Cartographic Survey Data Tax", formatMoney(cartoTax) },
+		}
+		if penaltyTax > 0 then
+			table.insert(details, { "Late Delinquency Penalty (5%)", formatMoney(penaltyTax) })
+		end
+		table.insert(details, { "Tax Jurisdiction Faction", state.homeFaction or "Independent Systems" })
+		table.insert(details, { "Registered Home Port", state.homeStationName or "Unregistered" })
+		table.insert(details, { "Total Assessment Settled", formatMoney(paid) })
+
+		FlightLog.RecordTransaction({
+			category = "TAX",
+			title = string.format("Tax Settlement (%s)", formatMoney(-paid)),
+			amount = -paid,
+			details = details,
+			note = string.format("Settled %s in outstanding tax liabilities with civil revenue authority.", formatMoney(paid))
+		})
+	end
 
 	Event.Queue("onTaxesPaid", paid)
 	return true, string.format("Settled %d Cr in outstanding taxes. Account in good standing.", paid)

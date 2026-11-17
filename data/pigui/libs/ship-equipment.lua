@@ -65,10 +65,29 @@ function EquipmentWidget:onBuyItem(equip)
 		equip = equip:Instance()
 	end
 
-	PlayerState.AddMoney(-self.market:getBuyPrice(equip))
+	local buyCost = self.market:getBuyPrice(equip)
+	PlayerState.AddMoney(-buyCost)
 	self.station:AddEquipmentStock(equip:GetPrototype(), -1)
 
 	assert(self.ship:GetComponent("EquipSet"):Install(equip, self.selectedSlot))
+
+	local okFlightLog, FlightLog = pcall(require, 'modules.FlightLog.FlightLog')
+	local okFormat, Format = pcall(require, 'Format')
+	if okFlightLog and FlightLog and FlightLog.RecordTransaction then
+		local formatMoney = (okFormat and Format and Format.Money) or function(v) return tostring(v) .. " Cr" end
+		local eqName = equip:GetPrototype().name or "Ship Module"
+		FlightLog.RecordTransaction({
+			category = "EQUIPMENT",
+			title = string.format("Outfitting: %s (%s)", eqName, formatMoney(-buyCost)),
+			amount = -buyCost,
+			details = {
+				{ "Equipment Module", eqName },
+				{ "Order Action", "INSTALL" },
+				{ "Module Price", formatMoney(buyCost) },
+			},
+			note = string.format("Purchased and installed %s on vessel.", eqName)
+		})
+	end
 
 	self.selectedEquip = self.selectedSlot and equip
 	self:buildSections()
@@ -80,11 +99,30 @@ function EquipmentWidget:onSellItem(equip)
 	assert(self.selectedEquip == equip)
 
 	local player = Game.player
+	local sellPrice = self.market:getSellPrice(equip)
 
-	PlayerState.AddMoney(self.market:getSellPrice(equip))
+	PlayerState.AddMoney(sellPrice)
 	self.station:AddEquipmentStock(equip:GetPrototype(), 1)
 
 	assert(self.ship:GetComponent("EquipSet"):Remove(equip))
+
+	local okFlightLog, FlightLog = pcall(require, 'modules.FlightLog.FlightLog')
+	local okFormat, Format = pcall(require, 'Format')
+	if okFlightLog and FlightLog and FlightLog.RecordTransaction then
+		local formatMoney = (okFormat and Format and Format.Money) or function(v) return tostring(v) .. " Cr" end
+		local eqName = equip:GetPrototype().name or "Ship Module"
+		FlightLog.RecordTransaction({
+			category = "EQUIPMENT",
+			title = string.format("Equipment Sold: %s (+%s)", eqName, formatMoney(sellPrice)),
+			amount = sellPrice,
+			details = {
+				{ "Equipment Module", eqName },
+				{ "Order Action", "SELL / REMOVE" },
+				{ "Refund Proceeds", formatMoney(sellPrice) },
+			},
+			note = string.format("Uninstalled and sold %s from vessel.", eqName)
+		})
+	end
 
 	self.selectedEquip = nil
 	self:buildSections()

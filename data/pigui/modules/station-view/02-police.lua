@@ -62,9 +62,35 @@ local function payfine(fine)
 		popup:open()
 		return
 	end
+
+	local record = PlayerState.GetCrimeRecord()
+	local crimeDetails = {}
+	if record and record.crimetype then
+		local crimes = make_crime_list(record.crimetype)
+		for _, c in ipairs(crimes) do
+			if c.count > 0 then
+				table.insert(crimeDetails, { "Infraction: " .. c.name, string.format("%d count(s)", c.count) })
+			end
+		end
+	end
+	table.insert(crimeDetails, { "Fine Settled", Format.Money(fine) })
+	local factionName = (Game.system and Game.system.faction and Game.system.faction.name) or "Local Authority"
+	table.insert(crimeDetails, { "Issuing Authority", factionName })
+
 	PlayerState.AddMoney(-fine)
 	PlayerState.ClearCrimeFine()
 	refreshStatusIcon()
+
+	local okFlightLog, FlightLog = pcall(require, 'modules.FlightLog.FlightLog')
+	if okFlightLog and FlightLog and FlightLog.RecordTransaction then
+		FlightLog.RecordTransaction({
+			category = "FINE",
+			title = string.format("Police Fine Paid (%s)", Format.Money(-fine)),
+			amount = -fine,
+			details = crimeDetails,
+			note = string.format("Settled %s in outstanding fines and citations with %s.", Format.Money(fine), factionName)
+		})
+	end
 end
 
 local function make_crime_list(record)

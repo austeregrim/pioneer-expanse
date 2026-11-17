@@ -425,6 +425,24 @@ function Cartography.SellSystem(sysKey)
 	state.stats.totalEarned = state.stats.totalEarned + actualPayout
 	PlayerState.AddMoney(actualPayout)
 
+	local okFlightLog, FlightLog = pcall(require, 'modules.FlightLog.FlightLog')
+	local okFormat, Format = pcall(require, 'Format')
+	if okFlightLog and FlightLog and FlightLog.RecordTransaction then
+		local formatMoney = (okFormat and Format and Format.Money) or function(v) return tostring(v) .. " Cr" end
+		FlightLog.RecordTransaction({
+			category = "CARTOGRAPHY",
+			title = string.format("Cartographic Survey Sale: %s (+%s)", payout.systemName, formatMoney(actualPayout)),
+			amount = actualPayout,
+			details = {
+				{ "Surveyed Star System", payout.systemName },
+				{ "Bodies Scanned", string.format("%d bodies", payout.bodyCount or 0) },
+				{ "Distance from Target", string.format("%.1f ly", payout.distanceLy or 0) },
+				{ "Gross Sale Proceeds", formatMoney(actualPayout) },
+			},
+			note = string.format("Transferred orbital scan data for %s to Universal Cartographics.", payout.systemName)
+		})
+	end
+
 	if okTax and TaxAuthority and TaxAuthority.RecordCartographyIncome then
 		TaxAuthority.RecordCartographyIncome(actualPayout, isHomeStation)
 	end

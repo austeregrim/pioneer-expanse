@@ -359,4 +359,95 @@ function FlightLogEntry.Station:GetDataPairs( earliest_first )
 	}
 end
 
+---@class FlightLogEntry.Transaction : FlightLogEntry.Base
+---@field time number The game time the transaction occurred
+---@field systemp SystemPath|nil The star system where transaction occurred
+---@field stationName string Starport or facility where transaction occurred
+---@field category string Category (TAX, FINE, TRADE, STOCK, LOTTERY, etc.)
+---@field title string Short headline for the transaction
+---@field amount number Signed credits amount
+---@field balance number Player account balance after transaction
+---@field details table<string, string>[] Array of key-value pairs with contextual metadata
+FlightLogEntry.Transaction = utils.class("FlightLogEntry.Transaction", FlightLogEntry.Base)
+
+function FlightLogEntry.Transaction:GetType()
+	return "Transaction"
+end
+
+function FlightLogEntry.Transaction:Constructor(time, systemp, stationName, category, title, amount, balance, details, entry)
+	FlightLogEntry.Base.Constructor(self, time, entry, true)
+	self.time = time
+	self.systemp = systemp
+	self.stationName = stationName or ""
+	self.category = category or "TRANSACTION"
+	self.title = title or "Financial Transaction"
+	self.amount = amount or 0
+	self.balance = balance or 0
+	self.details = details or {}
+end
+
+function FlightLogEntry.Transaction:Serialize()
+	return {
+		time = self.time,
+		systemp = self.systemp,
+		stationName = self.stationName,
+		category = self.category,
+		title = self.title,
+		amount = self.amount,
+		balance = self.balance,
+		details = self.details,
+		entry = self.entry,
+	}
+end
+
+function FlightLogEntry.Transaction.Unserialize(data)
+	return FlightLogEntry.Transaction.New(
+		data.time,
+		data.systemp,
+		data.stationName,
+		data.category,
+		data.title,
+		data.amount,
+		data.balance,
+		data.details,
+		data.entry
+	)
+end
+
+Serializer:RegisterClass("FlightLogEntry.Transaction", FlightLogEntry.Transaction)
+
+function FlightLogEntry.Transaction:GetLocalizedName()
+	return "Financial Transaction"
+end
+
+function FlightLogEntry.Transaction:CanBeRemoved()
+	return true
+end
+
+function FlightLogEntry.Transaction:GetDataPairs(earliest_first)
+	local o = {}
+	table.insert(o, { l.DATE or "Date", self.formatDate(self.time) })
+	if self.stationName and self.stationName ~= "" then
+		table.insert(o, { l.STATION or "Starport", self.stationName })
+	end
+	if self.systemp then
+		table.insert(o, { l.IN_SYSTEM or "System", ui.Format.SystemPath(self.systemp) })
+		table.insert(o, { l.ALLEGIANCE or "Allegiance", asFaction(self.systemp) })
+	end
+	table.insert(o, { "Transaction Type", self.category or "General" })
+	local amtStr = (self.amount >= 0 and "+" or "") .. Format.Money(self.amount)
+	table.insert(o, { "Transaction Amount", amtStr })
+	if self.balance then
+		table.insert(o, { "Account Balance", Format.Money(self.balance) })
+	end
+	if self.details and #self.details > 0 then
+		for _, d in ipairs(self.details) do
+			if d[1] and d[2] then
+				table.insert(o, { d[1], tostring(d[2]) })
+			end
+		end
+	end
+	return o
+end
+
 return FlightLogEntry

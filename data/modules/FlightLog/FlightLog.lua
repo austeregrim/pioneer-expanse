@@ -359,6 +359,39 @@ local AddStationToLog = function (ship, station)
 	FlightLog.AddEntry( FlightLogEntry.Station.New( station.path, Game.time, PlayerState.GetMoney(), nil ) )
 end
 
+-- Method: RecordTransaction
+--
+-- Records a financial transaction into the flight log with relative transaction details
+--
+-- > FlightLog.RecordTransaction(data)
+--
+---@param data { category: string, title: string, amount: number, details: table, note: string?, stationName: string?, systemp: SystemPath? }
+function FlightLog.RecordTransaction(data)
+	if not data then return end
+	local time = Game.time or 0
+	local systemp = data.systemp or (Game.system and Game.system.path) or nil
+	local stationName = data.stationName or ""
+	if stationName == "" and Game.player and Game.player:exists() and Game.player:GetFlightState() == "DOCKED" then
+		local st = Game.player:GetDockedWith()
+		if st and st:exists() then
+			stationName = st.label
+		end
+	end
+	local balance = PlayerState.GetMoney()
+	local entry = FlightLogEntry.Transaction.New(
+		time,
+		systemp,
+		stationName,
+		data.category or "TRANSACTION",
+		data.title or "Financial Transaction",
+		data.amount or 0,
+		balance,
+		data.details or {},
+		data.note or ""
+	)
+	FlightLog.AddEntry(entry)
+end
+
 function FlightLog.OrganizeEntries()
 
 	local function sortf( a, b )

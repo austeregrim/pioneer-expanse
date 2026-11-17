@@ -405,10 +405,27 @@ function CommodityMarketWidget:DoBuy(customQty)
 	assert(self.cargoMgr:AddCommodity(self.selectedItem, qty))
 	PlayerState.AddMoney(-orderAmount)
 
+	local cName = self.selectedItem.name or tostring(self.selectedItem)
 	local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
 	if okTax and TaxAuthority and TaxAuthority.RecordCommodityPurchase then
-		local cName = self.selectedItem.name or tostring(self.selectedItem)
 		TaxAuthority.RecordCommodityPurchase(cName, qty, price)
+	end
+
+	local okFlightLog, FlightLog = pcall(require, 'modules.FlightLog.FlightLog')
+	if okFlightLog and FlightLog and FlightLog.RecordTransaction then
+		FlightLog.RecordTransaction({
+			category = "TRADE",
+			title = string.format("Procured %dt %s (%s)", qty, cName, Format.Money(-orderAmount)),
+			amount = -orderAmount,
+			details = {
+				{ "Commodity Item", cName },
+				{ "Order Action", "BUY" },
+				{ "Quantity", string.format("%d tons", qty) },
+				{ "Unit Price", Format.Money(price) },
+				{ "Total Consideration", Format.Money(orderAmount) },
+			},
+			note = string.format("Purchased %dt %s at %s/ton from starport market.", qty, cName, Format.Money(price))
+		})
 	end
 
 	self.funcs.bought(self, self.selectedItem, qty)
@@ -434,10 +451,27 @@ function CommodityMarketWidget:DoSell(customQty)
 	assert(self.cargoMgr:RemoveCommodity(self.selectedItem, qty) == qty)
 	PlayerState.AddMoney(orderamount)
 
+	local cName = self.selectedItem.name or tostring(self.selectedItem)
 	local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
 	if okTax and TaxAuthority and TaxAuthority.RecordCommoditySale then
-		local cName = self.selectedItem.name or tostring(self.selectedItem)
 		TaxAuthority.RecordCommoditySale(cName, qty, price)
+	end
+
+	local okFlightLog, FlightLog = pcall(require, 'modules.FlightLog.FlightLog')
+	if okFlightLog and FlightLog and FlightLog.RecordTransaction then
+		FlightLog.RecordTransaction({
+			category = "TRADE",
+			title = string.format("Sold %dt %s (+%s)", qty, cName, Format.Money(orderamount)),
+			amount = orderamount,
+			details = {
+				{ "Commodity Item", cName },
+				{ "Order Action", "SELL" },
+				{ "Quantity", string.format("%d tons", qty) },
+				{ "Unit Price", Format.Money(price) },
+				{ "Gross Sale Proceeds", Format.Money(orderamount) },
+			},
+			note = string.format("Sold %dt %s at %s/ton to starport market.", qty, cName, Format.Money(price))
+		})
 	end
 
 	self.funcs.sold(self, self.selectedItem, qty)
