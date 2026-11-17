@@ -13,6 +13,9 @@ on:
     # stop aligning function parameters with the opening parenthesis
       '.clang-format'
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-format
   cancel-in-progress: ${{ github.ref == 'refs/heads/master' }}
