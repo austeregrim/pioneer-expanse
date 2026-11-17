@@ -42,6 +42,7 @@ function ModalWindow:open(...)
 		table.insert(modalStack, self)
 		self.stackIdx = #modalStack
 	end
+	self.isOpen = false
 
 	self:message("onOpen", ...)
 end
@@ -102,6 +103,13 @@ local function drawModals(idx)
 					ui.closeCurrentPopup()
 				end
 				ui.endPopup()
+			else
+				-- If beginPopupModal failed even though the window was marked open,
+				-- clean it up so it does not block the rest of the modal stack
+				if win.isOpen then
+					win:close()
+					drawModals(idx)
+				end
 			end
 		end)
 
@@ -129,6 +137,22 @@ end
 ui.registerModule('modal', function()
 	drawModals(1)
 end)
+
+local function closeAllModals()
+	for i = #modalStack, 1, -1 do
+		local win = modalStack[i]
+		if win then
+			win.stackIdx = -1
+			win.isOpen = false
+			table.remove(modalStack, i)
+			win:message("onClose")
+		end
+	end
+	modalStack = {}
+end
+
+Event.Register("onGameEnd", closeAllModals)
+Event.Register("onEnterMainMenu", closeAllModals)
 
 Event.Register("onPlayerUndocked", function()
 	for i = #modalStack, 1, -1 do

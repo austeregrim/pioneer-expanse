@@ -688,6 +688,11 @@ void MainMenu::Start()
 	perfInfoDisplay->ClearCounter(PiGui::PerfInfo::COUNTER_PHYS);
 	perfInfoDisplay->ClearCounter(PiGui::PerfInfo::COUNTER_PIGUI);
 
+	// Ensure any in-game Dear ImGui active ID, focus, and popup state are cleared
+	ImGui::ClosePopupToLevel(0, false);
+	ImGui::ClearActiveID();
+	ImGui::SetWindowFocus(nullptr);
+
 	LuaEvent::Queue("onEnterMainMenu");
 }
 
@@ -1144,6 +1149,11 @@ void GameLoop::End()
 
 	// When Pi::game goes, so too goes the death view.
 	Pi::SetView(0);
+
+	// Ensure any in-game Dear ImGui active ID, focus, and popup state are cleared
+	ImGui::ClosePopupToLevel(0, false);
+	ImGui::ClearActiveID();
+	ImGui::SetWindowFocus(nullptr);
 
 	// Clean up any left-over mouse state
 	Pi::input->SetCapturingMouse(false);
