@@ -288,6 +288,16 @@ end
 Event.Register("onPlayerShipDestroyed", onPlayerShipDestroyed)
 Event.Register("onPlayerRescued", onPlayerRescued)
 
+-- Module state lives for the whole process lifetime, so it must be cleared
+-- whenever a game ends. Otherwise a pending claim from a previous session
+-- leaks into the next loaded save / new game and blocks launching.
+local function resetState()
+	activeClaim = nil
+	openModalRequested = false
+end
+
+Event.Register("onGameEnd", resetState)
+
 local function serialize()
 	return {
 		activeClaim = activeClaim
@@ -295,6 +305,8 @@ local function serialize()
 end
 
 local function unserialize(data)
+	-- Always replace state: a save without a claim must not inherit a stale one.
+	resetState()
 	if data and data.activeClaim then
 		activeClaim = data.activeClaim
 	end

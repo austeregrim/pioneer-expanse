@@ -55,7 +55,10 @@ void View::DrawPiGui()
 		m_activated = false;
 	}
 
-	if (m_handlerName == "WorldView" && !ImGui::GetIO().WantTextInput && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopup)) {
+	// Map-style views are driven by keyboard bindings (WASD/RF pan, numpad rotate); don't let a
+	// stray active ImGui widget swallow those keys unless the user is actually typing or a popup is open.
+	const bool keyboardDrivenView = (m_handlerName == "WorldView" || m_handlerName == "SectorView" || m_handlerName == "SystemView");
+	if (keyboardDrivenView && !ImGui::GetIO().WantTextInput && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopup)) {
 		ImGui::SetNextFrameWantCaptureKeyboard(false);
 	}
 
