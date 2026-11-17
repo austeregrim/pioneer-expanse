@@ -1,6 +1,9 @@
 # Contributing
 
-Contributions are welcome!
+All Contributions even AI are welcome! 
+
+Please test your or AI generated code before you submit it, I don't have the time to test it for you nor fix your contributions. While we welcome all contributions it does need to meet the vision or roadmap for Pioneer: Expanse.
+
 Portions of this text was written with AI.
 
 ## Asset & Contribution Needs: 3D Models, Audio & Rigging Specifications
