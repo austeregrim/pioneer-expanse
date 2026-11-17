@@ -337,7 +337,7 @@ bool SpaceStation::CanLaunch(const Ship *ship) const
 			const_cast<SpaceStation*>(this)->m_corridorShip = nullptr;
 		} else {
 			const double dist = m_corridorShip->GetPositionRelTo(this).Length();
-			const double clearDist = GetClipRadius() * 1.4 + 500.0;
+			const double clearDist = IsGroundStation() ? std::min(GetClipRadius() * 0.8 + 200.0, 450.0) : (GetClipRadius() * 1.4 + 500.0);
 			if (dist > clearDist) {
 				const_cast<SpaceStation*>(this)->m_corridorShip = nullptr;
 			} else {
@@ -379,7 +379,7 @@ double SpaceStation::GetLaunchWaitTime() const
 	}
 	if (m_corridorShip && !m_corridorShip->IsDead()) {
 		const double dist = m_corridorShip->GetPositionRelTo(this).Length();
-		const double clearDist = GetClipRadius() * 1.4 + 500.0;
+		const double clearDist = IsGroundStation() ? std::min(GetClipRadius() * 0.8 + 200.0, 450.0) : (GetClipRadius() * 1.4 + 500.0);
 		if (dist < clearDist) {
 			const double corridorWait = std::max(4.0, (clearDist - dist) / 32.0);
 			wait = std::max(wait, corridorWait);
@@ -851,8 +851,9 @@ void SpaceStation::TimeStepUpdate(const float timeStep)
 	}
 
 	if (m_corridorShip) {
+		const double clearDist = IsGroundStation() ? std::min(GetClipRadius() * 0.8 + 200.0, 450.0) : (GetClipRadius() * 1.4 + 600.0);
 		if (m_corridorShip->IsDead() || m_corridorShip->GetFlightState() == Ship::HYPERSPACE ||
-			m_corridorShip->GetPositionRelTo(this).Length() > GetClipRadius() * 1.4 + 600.0) {
+			m_corridorShip->GetPositionRelTo(this).Length() > clearDist) {
 			m_corridorShip = nullptr;
 		}
 	}

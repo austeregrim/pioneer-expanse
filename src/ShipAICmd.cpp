@@ -1434,15 +1434,15 @@ bool AICmdFlyTo::TimeStepUpdate()
 	if (nearStation) {
 		const double distToStation = (m_dBody->GetPosition() - nearStation->GetPositionRelTo(m_dBody->GetFrame())).Length();
 		if (nearStation->IsGroundStation()) {
-			// Surface starport: enforce strict approach braking to prevent planetary surface impacts
-			if (distToStation < 600.0) {
-				ispeed = std::min(ispeed, 15.0);
-			} else if (distToStation < 1500.0) {
-				ispeed = std::min(ispeed, 30.0);
-			} else if (distToStation < 3500.0) {
-				ispeed = std::min(ispeed, 60.0);
-			} else if (distToStation < 7000.0) {
-				ispeed = std::min(ispeed, 110.0);
+			// Surface starport: approach limits preventing overshoot while allowing brisk transit
+			if (distToStation < 500.0) {
+				ispeed = std::min(ispeed, 35.0);
+			} else if (distToStation < 1200.0) {
+				ispeed = std::min(ispeed, 75.0);
+			} else if (distToStation < 3000.0) {
+				ispeed = std::min(ispeed, 140.0);
+			} else if (distToStation < 6000.0) {
+				ispeed = std::min(ispeed, 240.0);
 			}
 		} else {
 			// Orbital starport
@@ -1779,18 +1779,29 @@ bool AICmdDock::TimeStepUpdate()
 	}
 	const double maxdecel = std::max(0.5, availableDecel * 0.65);
 
-	// Station corridor speed limits: strictly prevent high-speed overshoots by heavy ships
+	// Station corridor speed limits: strictly prevent high-speed overshoots while preserving brisk descent
 	double speedCap = 55.0;
-	if (distToTarg < 400.0)
-		speedCap = 12.0;
-	else if (distToTarg < 1000.0)
-		speedCap = 22.0;
-	else if (distToTarg < 2500.0)
-		speedCap = 38.0;
+	if (m_target->IsGroundStation()) {
+		if (distToTarg < 35.0)
+			speedCap = 8.0;
+		else if (distToTarg < 120.0)
+			speedCap = 18.0;
+		else if (distToTarg < 300.0)
+			speedCap = 35.0;
+		else
+			speedCap = 65.0;
+	} else {
+		if (distToTarg < 400.0)
+			speedCap = 12.0;
+		else if (distToTarg < 1000.0)
+			speedCap = 22.0;
+		else if (distToTarg < 2500.0)
+			speedCap = 38.0;
 
-	// Inbound traffic holding: if slot corridor is occupied by a departing ship, hold outside at APPROACH1
-	if (m_target->GetStationType()->IsOrbitalStation() && !m_target->CanLaunch(ship) && distToTarg < 1600.0) {
-		speedCap = 0.0;
+		// Inbound traffic holding: if slot corridor is occupied by a departing ship, hold outside at APPROACH1
+		if (!m_target->CanLaunch(ship) && distToTarg < 1600.0) {
+			speedCap = 0.0;
+		}
 	}
 
 	double ispeed = (maxdecel < 1e-10) ? 0.0 : calc_ivel(distToTarg, 0.0, maxdecel);
@@ -2035,7 +2046,7 @@ bool AICmdDepart::TimeStepUpdate()
 		m_prop->SetLinThrusterState(vector3d(0.0, 1.0, -0.4));
 
 		const double distFromStation = ship->GetPositionRelTo(m_station).Length();
-		if (distFromStation > 650.0 || m_departTimer > 18.0) {
+		if (distFromStation > 450.0 || m_departTimer > 15.0) {
 			m_prop->SetLinThrusterState(vector3d(0.0));
 			m_station->NotifyCorridorCleared(ship);
 			return true;

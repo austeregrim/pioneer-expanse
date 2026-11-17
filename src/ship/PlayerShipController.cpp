@@ -382,6 +382,12 @@ void PlayerShipController::FlightAssist(const float timeStep, TotalDesiredAction
 			float itval = InputBindings.thrustForward->GetValue() * linearThrustPower;
 			power.z = fabs(itval);
 			double strafeZ = 0.0;
+			if (GetCruiseDirection() == CRUISE_UP && itval > 0.05f) {
+				// Player commanded forward throttle while in vertical liftoff mode:
+				// Seamlessly transition to forward cruise flight with full throttle authority!
+				SetCruiseDirection(CRUISE_FWD);
+				Util::SetCruiseSpeedFromActualVelocity(*this);
+			}
 			if (GetCruiseDirection() == CRUISE_FWD) {
 				if (!IsShipDrifting() && fabs(m_cruiseSpeed) > 1.0) {
 					Util::SetCruiseSpeedFromActualVelocity(*this); // also can cross 0 and stick to it
@@ -434,6 +440,11 @@ void PlayerShipController::FlightAssist(const float timeStep, TotalDesiredAction
 
 	// thrust-independent setting of cruise speed
 	if (!m_stickySpeedKey && InputBindings.speedControl->IsActive()) {
+		if (GetCruiseDirection() == CRUISE_UP && InputBindings.speedControl->GetValue() > 0.05f) {
+			// Throttle advanced forward while in vertical liftoff mode: transition to forward cruise
+			SetCruiseDirection(CRUISE_FWD);
+			Util::SetCruiseSpeedFromActualVelocity(*this);
+		}
 		Util::ChangeCruiseSpeedConstrained(*this, InputBindings.speedControl->GetValue() * std::max(std::abs(m_cruiseSpeed) * 0.05, 1.0));
 	}
 
@@ -488,14 +499,16 @@ void PlayerShipController::ApplyTotalAction(const TotalDesiredAction &params)
 {
 	// setting the desired speed has priority over the low-level thrust setting
 	if (params.desireLinVel) {
+		if (params.desiredLinear.LengthSqr() > 0.0)
+			m_ship->m_launchLockTimeout = 0.0f;
 		m_ship->AIMatchVel(params.desiredLinear, params.linPower);
-	} else if (m_ship->m_launchLockTimeout <= 0) {
-		m_ship->GetPropulsion()->SetLinThrusterState(params.desiredLinear);
-	} else if (params.desiredLinear.LengthSqr() > 0) {
-		// unlock launchlock in case of activation of linear thrust
-		m_ship->m_launchLockTimeout = 0;
-	} else if (!params.desireLinVel) {
-		m_ship->ClearLinThrusterState();
+	} else {
+		if (params.desiredLinear.LengthSqr() > 0.0)
+			m_ship->m_launchLockTimeout = 0.0f;
+		if (m_ship->m_launchLockTimeout <= 0.0f)
+			m_ship->GetPropulsion()->SetLinThrusterState(params.desiredLinear);
+		else if (!params.desireLinVel)
+			m_ship->ClearLinThrusterState();
 	}
 
 	m_ship->AIMatchAngVelObjSpace(params.desiredAngular, params.angPower, !params.desireAngVelFull);

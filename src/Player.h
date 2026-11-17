@@ -71,6 +71,7 @@ private:
 	Sound::Event m_creakSound;
 	vector3d m_atmosAccel;
 	vector3d m_atmosJerk;
+	float m_takeoffTimer;
 };
 
 #endif /* _PLAYER_H */

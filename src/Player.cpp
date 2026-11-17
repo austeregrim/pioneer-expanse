@@ -30,7 +30,8 @@ static Sound::Event s_soundUndercarriage;
 static Sound::Event s_soundHyperdrive;
 
 Player::Player(const ShipType::Id &shipId) :
-	Ship(shipId)
+	Ship(shipId),
+	m_takeoffTimer(0.0f)
 {
 	SetController(new PlayerShipController());
 	InitCockpit();
@@ -42,7 +43,8 @@ Player::Player(const ShipType::Id &shipId) :
 }
 
 Player::Player(const Json &jsonObj, Space *space) :
-	Ship(jsonObj, space)
+	Ship(jsonObj, space),
+	m_takeoffTimer(0.0f)
 {
 	InitCockpit();
 
@@ -382,6 +384,19 @@ void Player::StaticUpdate(const float timeStep)
 	// anyway so this will do for now
 	if (m_cockpit)
 		m_cockpit->Update(this, timeStep);
+
+	if (m_takeoffTimer > 0.0f) {
+		m_takeoffTimer -= timeStep;
+		if (m_takeoffTimer <= 0.0f) {
+			m_takeoffTimer = 0.0f;
+			auto con = GetPlayerController();
+			if (con && con->GetFlightControlState() == CONTROL_FIXSPEED && con->GetCruiseDirection() == PlayerShipController::CRUISE_UP) {
+				// Pad clearance achieved: transition smoothly from vertical liftoff to forward cruise flight
+				con->SetCruiseDirection(PlayerShipController::CRUISE_FWD);
+				con->ChangeCruiseSpeed(-con->GetCruiseSpeed());
+			}
+		}
+	}
 }
 
 int Player::GetManeuverTime() const
@@ -420,8 +435,10 @@ void Player::DoFixspeedTakeoff(SpaceStation *from)
 	SetFlightState(Ship::FLYING);
 	GetPlayerController()->SetFlightControlState(CONTROL_FIXSPEED);
 	double curSpeed = con->GetCruiseSpeed();
-	double wantSpeed = 2; // m/s
+	const bool isGround = from ? from->IsGroundStation() : false;
+	double wantSpeed = isGround ? 18.0 : 10.0; // m/s - brisk positive liftoff clear of pad
 	con->ChangeCruiseSpeed(wantSpeed - curSpeed);
+	m_takeoffTimer = 4.0f;
 
 	// special preparations for launch in a rotating orbital
 	if (from && !from->IsGroundStation()) {

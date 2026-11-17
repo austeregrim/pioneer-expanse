@@ -109,8 +109,8 @@ void SpaceStationType::OnSetupComplete()
 		if (SURFACE == dockMethod) {
 			const vector3f offDir = trans.Up().Normalized();
 			new_port.m_approach[DockStage::APPROACH1] = trans;
-			// Elevate and stagger approach waypoints above surface pads to avoid terrain scraping on entry
-			const float surfaceHeight = 900.0f + float(portId % 4) * 250.0f; // 900m, 1150m, 1400m, 1650m
+			// Elevate and stagger approach waypoints cleanly above surface pads to avoid terrain scraping without excessive altitude
+			const float surfaceHeight = 320.0f + float(portId % 4) * 35.0f; // 320m, 355m, 390m, 425m
 			new_port.m_approach[DockStage::APPROACH1].SetTranslate(trans.GetTranslate() + (offDir * surfaceHeight));
 		} else {
 			const vector3f offDir = -trans.Back().Normalized();

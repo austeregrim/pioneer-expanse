@@ -1138,8 +1138,8 @@ void Ship::SetFlightState(Ship::FlightState newState)
 		if (wasDockedOrUndocking) {
 			// lock thrusters on for amount of time needed to push us out of station
 			static const double MASS_LOCK_REFERENCE(40000.0); // based purely on experimentation
-			// limit the time to between 2.0 and 20.0 seconds of thrust, the player can override
-			m_launchLockTimeout = std::min(std::max(2.0, 2.0 * (GetMass() / MASS_LOCK_REFERENCE)), 20.0);
+			// limit the time to between 1.5 and 3.5 seconds of thrust, the player can override
+			m_launchLockTimeout = std::min(std::max(1.5, 1.5 * (GetMass() / MASS_LOCK_REFERENCE)), 3.5);
 		} else {
 			m_launchLockTimeout = 0.0;
 		}
