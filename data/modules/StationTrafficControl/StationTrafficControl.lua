@@ -100,6 +100,7 @@ end
 
 local function onShipExploded(ship, cause, speed)
 	if not ship then return end
+	if not Engine.GetBlackBoxEnabled or not Engine.GetBlackBoxEnabled() then return end
 	local label = ship:GetLabel()
 	local model = ship:GetShipType()
 	local msg = string.format("[BLACK BOX] Vessel \"%s\" (%s) EXPLODED! Cause: %s (%.1f m/s). Full flight path logged to blackbox_diagnostics.log",
