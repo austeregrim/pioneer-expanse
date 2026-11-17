@@ -223,6 +223,7 @@ public:
 	void AIKill(Ship *target);	   // Note: defined in Ship-AI.cpp
 	//void AIJourney(SystemBodyPath &dest);
 	void AIDock(SpaceStation *target);		// Note: defined in Ship-AI.cpp
+	void AIDepart(SpaceStation *target);	// Note: defined in Ship-AI.cpp
 	void AIFlyTo(Body *target);				// Note: defined in Ship-AI.cpp
 	void AIOrbit(Body *target, double alt); // Note: defined in Ship-AI.cpp
 	void AIHoldPosition();					// Note: defined in Ship-AI.cpp
@@ -279,6 +280,31 @@ public:
 	double GetLandingPosOffset() const { return m_landingMinOffset; }
 
 	Propulsion *GetPropulsion() { return m_propulsion; }
+
+	// Black Box Flight Recorder & Diagnostic Tracking
+	struct BlackBoxRecord {
+		double time;
+		vector3d pos;
+		vector3d vel;
+		double speed;
+		double distToStation;
+		std::string flightState;
+		std::string aiCmd;
+		std::string aiTarget;
+	};
+
+	struct LastCollisionInfo {
+		double time;
+		std::string otherLabel;
+		std::string surface;
+		double relVel;
+		vector3d pos;
+		bool valid;
+	};
+
+	void RecordCollision(const Body *other, const std::string &surface, double relVel);
+	static void ClearBlackBoxLog();
+	void DumpBlackBoxReport();
 
 protected:
 	vector3d CalcAtmosphericForce() const override;
@@ -401,6 +427,10 @@ private:
 	void SpawnThrusterExhaustParticles(float timeStep);
 
 	std::deque<CargoBody *> m_cargoSpawnQueue;
+
+	LastCollisionInfo m_lastCollision;
+	std::deque<BlackBoxRecord> m_blackBox;
+	double m_blackBoxRecordTimer;
 
 public:
 	// FIXME: these methods are deprecated; all calls should use the propulsion object directly.

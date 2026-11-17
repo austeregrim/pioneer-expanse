@@ -628,6 +628,22 @@ static int l_engine_set_headtracking_enabled(lua_State *l)
 	return 0;
 }
 
+static int l_engine_get_blackbox_enabled(lua_State *l)
+{
+	lua_pushboolean(l, Pi::config->Int("EnableBlackBox", 0) != 0);
+	return 1;
+}
+
+static int l_engine_set_blackbox_enabled(lua_State *l)
+{
+	if (lua_isnone(l, 1))
+		return luaL_error(l, "SetBlackBoxEnabled takes one boolean argument");
+	const bool enabled = lua_toboolean(l, 1);
+	Pi::config->SetInt("EnableBlackBox", (enabled ? 1 : 0));
+	Pi::config->Save();
+	return 0;
+}
+
 static int l_engine_get_display_hud_trails(lua_State *l)
 {
 	lua_pushboolean(l, Pi::config->Int("HudTrails") != 0);
@@ -1161,6 +1177,9 @@ void LuaEngine::Register()
 
 		{ "GetHeadtrackingEnabled", l_engine_get_headtracking_enabled },
 		{ "SetHeadtrackingEnabled", l_engine_set_headtracking_enabled },
+
+		{ "GetBlackBoxEnabled", l_engine_get_blackbox_enabled },
+		{ "SetBlackBoxEnabled", l_engine_set_blackbox_enabled },
 
 		{ "GetDisplayHudTrails", l_engine_get_display_hud_trails },
 		{ "SetDisplayHudTrails", l_engine_set_display_hud_trails },

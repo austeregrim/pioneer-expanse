@@ -7,6 +7,7 @@
 #include "EnumStrings.h"
 #include "Frame.h"
 #include "Game.h"
+#include "GameConfig.h"
 #include "GameSaveError.h"
 #include "HyperspaceCloud.h"
 #include "JsonUtils.h"
@@ -322,6 +323,9 @@ Ship::~Ship()
 void Ship::Init()
 {
 	m_invulnerable = false;
+	m_lastCollision = { 0.0, "", "", 0.0, vector3d(0.0), false };
+	m_blackBoxRecordTimer = 0.0;
+	m_blackBox.clear();
 
 	m_sensors.reset(new Sensors(this));
 
@@ -637,8 +641,114 @@ bool Ship::OnDamage(Body *attacker, float kgDamage, const CollisionContact &cont
 	return true;
 }
 
+void Ship::RecordCollision(const Body *other, const std::string &surface, double relVel)
+{
+	if (!Pi::config || Pi::config->Int("EnableBlackBox", 0) == 0)
+		return;
+
+	m_lastCollision.time = Pi::game ? Pi::game->GetTime() : 0.0;
+	m_lastCollision.otherLabel = other ? other->GetLabel() : "Unknown";
+	m_lastCollision.surface = surface;
+	m_lastCollision.relVel = relVel;
+	m_lastCollision.pos = GetPosition();
+	m_lastCollision.valid = true;
+}
+
+void Ship::ClearBlackBoxLog()
+{
+	if (!Pi::config || Pi::config->Int("EnableBlackBox", 0) == 0)
+		return;
+
+	FILE *f = fopen("blackbox_diagnostics.log", "w");
+	if (f) {
+		fprintf(f,
+			"================================================================================\n"
+			"[BLACK BOX FLIGHT RECORDER] LOG INITIALIZED - GAME SESSION STARTED\n"
+			"================================================================================\n\n");
+		fclose(f);
+	}
+}
+
+void Ship::DumpBlackBoxReport()
+{
+	if (!Pi::config || Pi::config->Int("EnableBlackBox", 0) == 0)
+		return;
+
+	char header[512];
+	const char *fstateHeader = EnumStrings::GetString("ShipFlightState", m_flightState);
+	snprintf(header, sizeof(header),
+		"\n================================================================================\n"
+		"[BLACK BOX FLIGHT RECORDER] SHIP EXPLOSION DIAGNOSTIC REPORT\n"
+		"Ship Label: \"%s\" | Model: %s | FlightState: %s\n",
+		GetLabel().c_str(), GetShipType() ? GetShipType()->name.c_str() : "Unknown",
+		fstateHeader ? fstateHeader : "Unknown");
+
+	char aiBuf[256] = "None";
+	std::string aiCmdName = "CMD_NONE";
+	if (m_curAICmd) {
+		const char *cName = EnumStrings::GetString("ShipAICmdName", m_curAICmd->GetType());
+		aiCmdName = cName ? cName : "Unknown";
+		m_curAICmd->GetStatusText(aiBuf);
+	}
+
+	double distToStation = -1.0;
+	std::string stationLabel = "None";
+	if (Pi::game && Pi::game->GetSpace()) {
+		for (Body *b : Pi::game->GetSpace()->GetBodies()) {
+			if (b->IsType(ObjectType::SPACESTATION)) {
+				double d = GetPositionRelTo(b).Length();
+				if (distToStation < 0 || d < distToStation) {
+					distToStation = d;
+					stationLabel = b->GetLabel();
+				}
+			}
+		}
+	}
+
+	char details[1024];
+	snprintf(details, sizeof(details),
+		"AI Command: %s | AI Status Text: %s\n"
+		"Nearest Station: \"%s\" (Distance: %.1f m)\n"
+		"Last Impact: Object: \"%s\" | Surface: %s | Impact Vel: %.1f m/s\n"
+		"Velocity at Death: (%.1f, %.1f, %.1f) [Speed: %.1f m/s]\n"
+		"--------------------------------------------------------------------------------\n"
+		"Flight Path Telemetry (Last %zu snapshots leading to explosion):\n",
+		aiCmdName.c_str(), aiBuf,
+		stationLabel.c_str(), distToStation,
+		m_lastCollision.valid ? m_lastCollision.otherLabel.c_str() : "Unknown",
+		m_lastCollision.valid ? m_lastCollision.surface.c_str() : "Unknown",
+		m_lastCollision.valid ? m_lastCollision.relVel : 0.0,
+		GetVelocity().x, GetVelocity().y, GetVelocity().z, GetVelocity().Length(),
+		m_blackBox.size());
+
+	std::string breadcrumbs;
+	int idx = 0;
+	for (const auto &rec : m_blackBox) {
+		char line[384];
+		snprintf(line, sizeof(line),
+			"  [%02d] T=%.1fs | Pos: (%.1f, %.1f, %.1f) | Vel: (%.1f, %.1f, %.1f) [%.1f m/s] | StDist: %.1fm | State: %s | Cmd: %s (%s)\n",
+			idx++, rec.time,
+			rec.pos.x, rec.pos.y, rec.pos.z,
+			rec.vel.x, rec.vel.y, rec.vel.z, rec.speed,
+			rec.distToStation, rec.flightState.c_str(), rec.aiCmd.c_str(), rec.aiTarget.c_str());
+		breadcrumbs += line;
+	}
+
+	Output("%s%s%s================================================================================\n\n",
+		header, details, breadcrumbs.c_str());
+
+	FILE *f = fopen("blackbox_diagnostics.log", "a");
+	if (f) {
+		fprintf(f, "%s%s%s================================================================================\n\n",
+			header, details, breadcrumbs.c_str());
+		fclose(f);
+	}
+}
+
 bool Ship::OnCollision(Body *b, Uint32 flags, double relVel)
 {
+	RecordCollision(b, b->GetLabel(), relVel);
+
 	// Collision with SpaceStation docking or entrance surface is
 	// completely handled by SpaceStations, you only
 	// need to return a "true" value in order to trigger
@@ -689,8 +799,15 @@ void Ship::Explode()
 {
 	if (m_invulnerable) return;
 
+	DumpBlackBoxReport();
+
 	if (IsType(ObjectType::PLAYER)) {
 		LuaEvent::Queue("onPlayerShipDestroyed", this);
+		LuaEvent::Emit();
+	} else {
+		std::string cause = m_lastCollision.valid ? m_lastCollision.surface : "Impact / Collision";
+		double speed = m_lastCollision.valid ? m_lastCollision.relVel : GetVelocity().Length();
+		LuaEvent::Queue("onShipExploded", this, cause, speed);
 		LuaEvent::Emit();
 	}
 
@@ -1223,6 +1340,46 @@ void Ship::TimeStepUpdate(const float timeStep)
 	m_navLights->SetEnabled(m_wheelState > 0.01f);
 	m_navLights->Update(timeStep);
 	if (m_sensors.get()) m_sensors->Update(timeStep);
+
+	// Black Box periodic flight path snapshot every 0.5s for ships in flight
+	if (Pi::config && Pi::config->Int("EnableBlackBox", 0) != 0) {
+		m_blackBoxRecordTimer += timeStep;
+		if (m_blackBoxRecordTimer >= 0.5) {
+			m_blackBoxRecordTimer = 0.0;
+			if (m_flightState == FLYING || m_flightState == DOCKING || m_flightState == UNDOCKING) {
+				BlackBoxRecord rec;
+				rec.time = Pi::game ? Pi::game->GetTime() : 0.0;
+				rec.pos = GetPosition();
+				rec.vel = GetVelocity();
+				rec.speed = rec.vel.Length();
+
+				rec.distToStation = -1.0;
+				if (Pi::game && Pi::game->GetSpace()) {
+					Frame *f = Frame::GetFrame(GetFrame());
+					if (f && f->GetBody() && f->GetBody()->IsType(ObjectType::SPACESTATION)) {
+						rec.distToStation = GetPositionRelTo(f->GetBody()).Length();
+					}
+				}
+
+				const char *fstateStr = EnumStrings::GetString("ShipFlightState", m_flightState);
+				rec.flightState = fstateStr ? fstateStr : "Unknown";
+
+				const char *cmdStr = m_curAICmd ? EnumStrings::GetString("ShipAICmdName", m_curAICmd->GetType()) : "None";
+				rec.aiCmd = cmdStr ? cmdStr : "None";
+
+				char aiTargetBuf[128] = "None";
+				if (m_curAICmd) {
+					m_curAICmd->GetStatusText(aiTargetBuf);
+				}
+				rec.aiTarget = aiTargetBuf;
+
+				m_blackBox.push_back(rec);
+				while (m_blackBox.size() > 30) {
+					m_blackBox.pop_front();
+				}
+			}
+		}
+	}
 }
 
 void Ship::DoThrusterSounds() const

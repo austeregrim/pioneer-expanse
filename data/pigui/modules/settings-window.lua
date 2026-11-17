@@ -754,6 +754,12 @@ local function showGameOptions()
 	if c then
 		Engine.SetHeadtrackingEnabled(enableHeadtracking)
 	end
+
+	local enableBlackBox = Engine.GetBlackBoxEnabled()
+	c,enableBlackBox = checkbox("Flight Black Box Diagnostics", enableBlackBox, "Record ship flight telemetry and crash impact diagnostics to blackbox_diagnostics.log when ships explode.")
+	if c then
+		Engine.SetBlackBoxEnabled(enableBlackBox)
+	end
 end
 
 local optionsTabs = {

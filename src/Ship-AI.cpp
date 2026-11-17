@@ -50,8 +50,14 @@ bool Ship::AITimeStep(float timeStep)
 			return false;
 		}
 
-		// just in case the AI left it on
-		ClearThrusterState();
+		// If NPC ship is in active flight with no active command, engage flight assist braking
+		// rather than dead-stick coasting into planetary surfaces or station hulls
+		if (m_flightState == FLYING && m_propulsion && GetVelocity().Length() > 2.0) {
+			m_propulsion->AIMatchVel(vector3d(0.0));
+			return false;
+		} else {
+			ClearThrusterState();
+		}
 		m_gunManager->SetAllGroupsFiring(false);
 		return true;
 	}
@@ -212,6 +218,17 @@ void Ship::AIDock(SpaceStation *target)
 	SetFuelReserve((GetFuel() < 0.5) ? GetFuel() / 2 : 0.25);
 
 	m_curAICmd = new AICmdDock(this, target);
+}
+
+void Ship::AIDepart(SpaceStation *target)
+{
+	if (!target) return;
+	if (m_curAICmd && m_curAICmd->GetType() == AICommand::CMD_DEPART) return;
+
+	AIClearInstructions();
+	SetFuelReserve((GetFuel() < 0.5) ? GetFuel() / 2 : 0.25);
+
+	m_curAICmd = new AICmdDepart(this, target);
 }
 
 void Ship::AIOrbit(Body *target, double alt)

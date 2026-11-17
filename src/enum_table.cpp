@@ -92,6 +92,7 @@ const struct EnumItem ENUM_ShipAICmdName[] = {
 	{ "CMD_KAMIKAZE", int(AICommand::CmdName::CMD_KAMIKAZE) },
 	{ "CMD_HOLDPOSITION", int(AICommand::CmdName::CMD_HOLDPOSITION) },
 	{ "CMD_FORMATION", int(AICommand::CmdName::CMD_FORMATION) },
+	{ "CMD_DEPART", int(AICommand::CmdName::CMD_DEPART) },
 	{ 0, 0 },
 };
 

@@ -1317,6 +1317,27 @@ static int l_ship_ai_dock_with(lua_State *l)
 }
 
 /*
+ * Method: AIDepart
+ *
+ * Depart from a given station via its airlock/corridor departure autopilot
+ *
+ * > ship:AIDepart(target)
+ *
+ * Parameters:
+ *
+ *   target - the <SpaceStation> to depart from
+ */
+static int l_ship_ai_depart(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	if (s->GetFlightState() == Ship::HYPERSPACE)
+		return luaL_error(l, "Ship:AIDepart() cannot be called on a ship in hyperspace");
+	SpaceStation *target = LuaObject<SpaceStation>::CheckFromLua(2);
+	s->AIDepart(target);
+	return 0;
+}
+
+/*
  * Method: AIEnterLowOrbit
  *
  * Fly to and enter a low orbit around a given planet or star
@@ -1917,6 +1938,7 @@ void LuaObject<Ship>::RegisterClass()
 		{ "AIKamikaze", l_ship_ai_kamikaze },
 		{ "AIFlyTo", l_ship_ai_fly_to },
 		{ "AIDockWith", l_ship_ai_dock_with },
+		{ "AIDepart", l_ship_ai_depart },
 		{ "AIEnterLowOrbit", l_ship_ai_enter_low_orbit },
 		{ "AIEnterMediumOrbit", l_ship_ai_enter_medium_orbit },
 		{ "AIEnterHighOrbit", l_ship_ai_enter_high_orbit },

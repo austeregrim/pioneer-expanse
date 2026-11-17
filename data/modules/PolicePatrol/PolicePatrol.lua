@@ -84,14 +84,21 @@ local function assignSupercruiseRoute(ship)
 		return
 	end
 	if stations and #stations > 0 then
-		local body = Space.GetBody(stations[Engine.rand:Integer(1, #stations)].bodyIndex)
-		if body then
-			ship:AIFlyTo(body)
+		for _ = 1, #stations do
+			local body = Space.GetBody(stations[Engine.rand:Integer(1, #stations)].bodyIndex)
+			if body and ship:DistanceTo(body) > 25000 then
+				ship:AIFlyTo(body)
+				return
+			end
 		end
-	elseif bodies and #bodies > 0 then
-		local body = Space.GetBody(bodies[Engine.rand:Integer(1, #bodies)].bodyIndex)
-		if body then
-			ship:AIFlyTo(body)
+	end
+	if bodies and #bodies > 0 then
+		for _ = 1, #bodies do
+			local body = Space.GetBody(bodies[Engine.rand:Integer(1, #bodies)].bodyIndex)
+			if body and ship:DistanceTo(body) > 25000 then
+				ship:AIFlyTo(body)
+				return
+			end
 		end
 	end
 end

@@ -480,7 +480,7 @@ Flow.spawnInitialShips = function()
 					Core.ships[ship] = { ts_error = "OK", status = 'docked', starport = portBody, ship_name = pick.id }
 					ship:SetLabel(Ship.MakeRandomLabel())
 					Trader.addEquip(ship)
-					local undockDelay = Engine.rand:Number(25, 240) + (i - 1) * 18
+					local undockDelay = 60 + (i - 1) * 75 + Engine.rand:Number(10, 35)
 					Trader.assignTask(ship, Game.time + undockDelay, 'doUndock')
 				end
 			end
@@ -524,6 +524,42 @@ Flow.spawnInitialShips = function()
 			end
 		end
 	end
+
+	-- 4. Initial Planetary Ring & Asteroid Mining Supply Lines
+	local miningSites = {}
+	if Game.system then
+		for _, path in ipairs(Game.system:GetBodyPaths()) do
+			local sb = path:GetSystemBody()
+			if sb and (sb.hasRings or sb.type == "PLANET_ASTEROID") and sb.body then
+				table.insert(miningSites, sb.body)
+			end
+		end
+	end
+	if #miningSites > 0 and #port_summary > 0 then
+		local numMiners = math.clamp(#miningSites * 2, 2, 6)
+		local minerHulls = { "dsminer", "kanara" }
+		for _ = 1, numMiners do
+			local hull = minerHulls[Engine.rand:Integer(1, #minerHulls)]
+			local site = miningSites[Engine.rand:Integer(1, #miningSites)]
+			local port = port_summary[Engine.rand:Integer(1, #port_summary)].port
+			local minerShip = Space.SpawnShip(hull, 5, 8)
+			if minerShip then
+				minerShip:SetLabel(Ship.MakeRandomLabel())
+				Core.ships[minerShip] = {
+					ts_error = "OK",
+					status = 'inbound',
+					starport = port,
+					ship_name = hull,
+					assignment = { type = 'mining', site = site, refinery = port }
+				}
+				Trader.addEquip(minerShip)
+				Space.PutShipOnRoute(minerShip, site, Engine.rand:Number(0.2, 0.8))
+				minerShip:AIFlyTo(site)
+				Trader.assignTask(minerShip, Game.time + Engine.rand:Number(70, 140), 'doReturnFromMining')
+			end
+		end
+	end
+
 	return ships_in_space
 end
 

@@ -59,7 +59,15 @@ local function getAtmoState(station)
 end
 
 local function onDockingClearanceGranted(station, ship)
-	if ship ~= Game.player then return end
+	if ship ~= Game.player then
+		if Game.player:GetDockedWith() == station or (Game.player:exists() and station:exists() and Game.player:DistanceTo(station) < 25000) then
+			local bayNum = station:GetAssignedBayNumber(ship)
+			if bayNum >= 0 then
+				Comms.Message(string.format("Traffic Control: Inbound vessel %s cleared for docking approach to Pad %d.", ship:GetLabel(), bayNum + 1), station.label)
+			end
+		end
+		return
+	end
 	local bayNum = station:GetAssignedBayNumber(ship)
 	local nearby = station:GetNearbyTraffic(50000) -- 50km
 	local gravity, hasAtmo, pressure = getAtmoState(station)
@@ -79,6 +87,23 @@ local function onDockingClearanceGranted(station, ship)
 
 	if nearby > 0 then conditionMessage = conditionMessage .. " " .. l.WATCH_FOR_TRAFFIC_ON_APPROACH end
 	if #conditionMessage > 0 then Comms.Message(conditionMessage, station.label) end
+end
+
+local function onShipUndocked(ship, station)
+	if not station or not ship or ship == Game.player then return end
+	if Game.player:GetDockedWith() == station or (Game.player:exists() and station:exists() and Game.player:DistanceTo(station) < 25000) then
+		Comms.Message(string.format("Traffic Control: Outbound vessel %s cleared for departure. Airlock corridor active.", ship:GetLabel()), station.label)
+	end
+end
+
+local function onShipExploded(ship, cause, speed)
+	if not ship then return end
+	local label = ship:GetLabel()
+	local model = ship:GetShipType()
+	local msg = string.format("[BLACK BOX] Vessel \"%s\" (%s) EXPLODED! Cause: %s (%.1f m/s). Full flight path logged to blackbox_diagnostics.log",
+		label, model, cause or "Collision", speed or 0.0)
+	print(msg)
+	Comms.ImportantMessage(msg, "Flight Safety ATC")
 end
 
 local function onDockingClearanceDenied(station, ship, reason)
@@ -129,5 +154,7 @@ Event.Register("onGameStart", onGameStart)
 Event.Register("onDockingClearanceGranted", onDockingClearanceGranted)
 Event.Register("onDockingClearanceDenied", onDockingClearanceDenied)
 Event.Register("onDockingClearanceExpired", onDockingClearanceExpired)
+Event.Register("onShipUndocked", onShipUndocked)
+Event.Register("onShipExploded", onShipExploded)
 
 Serializer:Register("StationTrafficControl", serialize, unserialize)

@@ -27,7 +27,8 @@ public:
 		CMD_KILL,
 		CMD_KAMIKAZE,
 		CMD_HOLDPOSITION,
-		CMD_FORMATION
+		CMD_FORMATION,
+		CMD_DEPART
 	};
 
 	AICommand(DynamicBody *dBody, CmdName name) :
@@ -113,6 +114,35 @@ private:
 		case eInvalidDockingStage: break;
 		}
 	}
+};
+
+class AICmdDepart : public AICommand {
+public:
+	virtual bool TimeStepUpdate();
+	AICmdDepart(DynamicBody *dBody, SpaceStation *station);
+
+	virtual void GetStatusText(char *str);
+	virtual void SaveToJson(Json &jsonObj);
+	AICmdDepart(const Json &jsonObj);
+	virtual void PostLoadFixup(Space *space);
+
+	virtual void OnDeleted(const Body *body);
+
+private:
+	enum EDepartingStates {
+		eDepartAlignCorridor = 0,
+		eDepartFlyToPort = 1,
+		eDepartFlyToClearance = 2,
+		eDepartComplete = 3
+	};
+
+	SpaceStation *m_station;
+	EDepartingStates m_state;
+	vector3d m_portPos;
+	vector3d m_clearPos;
+	vector3d m_corridorDir;
+	int m_stationIndex;
+	double m_departTimer;
 };
 
 class AICmdFlyTo : public AICommand {

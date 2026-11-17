@@ -343,11 +343,11 @@ end
 trader_task.doUndock = function(ship)
 	-- the player may have left the system or the ship may have already undocked
 	if ship:exists() and ship:GetDockedWith() then
-		-- we load goods before departure
-		Trader.addCargo(ship, 'export')
-		if not ship:Undock() then
-			-- unable to undock, try again later
-			Trader.assignTask(ship, Game.time + Core.WAIT_FOR_NEXT_UNDOCK, 'doUndock')
+		local port = ship:GetDockedWith()
+		-- Enforce Station Space Traffic Control (ATC) departure clearance
+		if not port:CanLaunch(ship) or not ship:Undock() then
+			-- Unable to launch due to active airlock corridor traffic or clearance hold: retry
+			Trader.assignTask(ship, Game.time + Engine.rand:Number(8, Core.WAIT_FOR_NEXT_UNDOCK + 4), 'doUndock')
 			return true
 		end
 	end
@@ -366,6 +366,36 @@ trader_task.doRedock = function(ship)
 				trader.ts_error = "dock_aft_6h"
 			end
 		end
+	end
+end
+
+trader_task.doReturnFromMining = function(ship)
+	local trader = Core.ships[ship]
+	if not trader or not ship:exists() or ship.flightState == 'HYPERSPACE' then return end
+
+	-- Add extracted ores/minerals to cargo hold
+	---@type CargoManager
+	local cargoMgr = ship:GetComponent('CargoManager')
+	if cargoMgr then
+		local Commodities = require 'Commodities'
+		local space = cargoMgr:GetFreeSpace()
+		if space > 0 then
+			local oreList = { Commodities.metal_ore, Commodities.precious_metals, Commodities.carbon_ore, Commodities.water }
+			local ore = oreList[Engine.rand:Integer(1, #oreList)]
+			cargoMgr:AddCommodity(ore, math.min(space, Engine.rand:Integer(10, 40)))
+		end
+	end
+
+	-- Return to refinery starport
+	local targetPort = trader.assignment and trader.assignment.refinery
+	if not targetPort or not targetPort:exists() then
+		targetPort = trader.starport
+	end
+
+	if targetPort and targetPort:exists() then
+		trader.status = 'inbound'
+		trader.starport = targetPort
+		ship:AIDockWith(targetPort)
 	end
 end
 

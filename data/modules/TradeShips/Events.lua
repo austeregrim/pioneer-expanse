@@ -152,7 +152,9 @@ onShipDocked = function (ship, starport)
 	ship:SetFuelPercent()
 
 	if trader.status == 'docked' then
-		Trader.assignTask(ship, Game.time + utils.deviation(Core.params.port_params[starport].time * 3600, 0.8), 'doUndock')
+		-- Real-time station turnaround: 45 to 80 seconds
+		local dwellTime = Engine.rand:Number(45, 80)
+		Trader.assignTask(ship, Game.time + dwellTime, 'doUndock')
 	end
 end
 Event.Register("onShipDocked", onShipDocked)
@@ -163,25 +165,30 @@ local onShipUndocked = function (ship, starport)
 	local Engine = require 'Engine'
 	local Space = require 'Space'
 
-	-- Gather acceptable alternative stations for in-system Supercruise trade hops
-	local ports = (Core.params and Core.params.ports) or Space.GetBodies("SpaceStation")
-	local altPorts = {}
-	for _, port in ipairs(ports) do
-		if port:exists() and port ~= starport and Trader.isStarportAcceptableForShip(port, ship) then
-			table.insert(altPorts, port)
+	-- Set departure status and engage station departure corridor autopilot
+	trader['status'] = 'departing'
+	ship:AIDepart(starport)
+
+	-- Find if system has mining sites (planetary rings or asteroids)
+	local miningSites = {}
+	if Game.system then
+		for _, path in ipairs(Game.system:GetBodyPaths()) do
+			local sb = path:GetSystemBody()
+			if sb and (sb.hasRings or sb.type == "PLANET_ASTEROID") and sb.body then
+				table.insert(miningSites, sb.body)
+			end
 		end
 	end
 
-	-- Roughly 55% of undocking ships in multi-station systems perform an in-system hop
-	if #altPorts > 0 and Engine.rand:Number(1) < 0.55 then
-		local nextPort = altPorts[Engine.rand:Integer(1, #altPorts)]
-		trader['starport'] = nextPort
-		trader['status'] = 'inbound'
-		ship:AIDockWith(nextPort)
+	-- 30% of eligible vessels run in-system ring/asteroid extraction, 70% interstellar exports
+	local isMinerHull = (trader.ship_name == 'dsminer' or trader.ship_name == 'kanara')
+	if #miningSites > 0 and (isMinerHull or Engine.rand:Number(1) < 0.30) then
+		local site = miningSites[Engine.rand:Integer(1, #miningSites)]
+		trader.assignment = { type = 'mining', site = site, refinery = starport }
 		return
 	end
 
-	-- Outbound ships enter Supercruise toward a distant body before hyperjumping clear of gravity
+	-- Outbound interstellar export
 	local farBodies = {}
 	if Game.system then
 		for _, path in ipairs(Game.system:GetBodyPaths()) do
@@ -194,9 +201,7 @@ local onShipUndocked = function (ship, starport)
 	local farBody = (#farBodies > 0 and farBodies[Engine.rand:Integer(1, #farBodies)])
 		or trader.starport:GetSystemBody().system:GetStars()[1].body
 
-	ship:AIFlyTo(farBody)
-	Trader.assignTask(ship, Game.time + Engine.rand:Number(25, 45), 'hyperjumpAtDistance')
-	trader['status'] = 'outbound'
+	trader.assignment = { type = 'export', farBody = farBody }
 end
 Event.Register("onShipUndocked", onShipUndocked)
 
@@ -206,7 +211,20 @@ local onAICompleted = function (ship, ai_error)
 	if ai_error ~= 'NONE' then
 		Core.log:add(ship, 'AICompleted: Error: '..ai_error..' Status: '..trader.status)
 	end
-	if trader.status == 'orbit' then
+	if trader.status == 'departing' then
+		-- Vessel has safely cleared the airlock/mail slot and APPROACH1 in open space!
+		if trader.assignment and trader.assignment.type == 'mining' then
+			trader.status = 'inbound'
+			ship:AIFlyTo(trader.assignment.site)
+			Trader.assignTask(ship, Game.time + Engine.rand:Number(90, 150), 'doReturnFromMining')
+		else
+			local farBody = (trader.assignment and trader.assignment.farBody)
+				or trader.starport:GetSystemBody().system:GetStars()[1].body
+			trader.status = 'outbound'
+			ship:AIFlyTo(farBody)
+			Trader.assignTask(ship, Game.time + Engine.rand:Number(25, 45), 'hyperjumpAtDistance')
+		end
+	elseif trader.status == 'orbit' then
 		if ai_error == 'NONE' then
 			trader.ts_error = "wait_6h"
 			Trader.assignTask(ship, Game.time + 21600, 'doRedock')
@@ -249,6 +267,21 @@ local onShipAlertChanged = function (ship, alert)
 	end
 end
 Event.Register("onShipAlertChanged", onShipAlertChanged)
+
+local onShipExploded = function (ship, cause, speed)
+	if Core.ships and Core.ships[ship] then
+		local trader = Core.ships[ship]
+		local info = string.format("[TRADER POST-MORTEM] Ship: %s (%s) | Status: %s | Target: %s | Assignment: %s | Cause: %s (%.1f m/s)",
+			ship:GetLabel(), trader.ship_name or "unknown",
+			trader.status or "unknown",
+			(trader.starport and trader.starport:exists() and trader.starport:GetLabel()) or "none",
+			(trader.assignment and trader.assignment.type) or "none",
+			cause or "collision", speed or 0.0)
+		Core.log:add(ship, info)
+		print(info)
+	end
+end
+Event.Register("onShipExploded", onShipExploded)
 
 local onShipHit = function (ship, attacker)
 	if attacker == nil then return end-- XX

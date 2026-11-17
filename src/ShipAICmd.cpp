@@ -38,6 +38,7 @@ AICommand *AICommand::LoadFromJson(const Json &jsonObj)
 		case CMD_KAMIKAZE: return new AICmdKamikaze(aiCommandObj);
 		case CMD_HOLDPOSITION: return new AICmdHoldPosition(aiCommandObj);
 		case CMD_FORMATION: return new AICmdFormation(aiCommandObj);
+		case CMD_DEPART: return new AICmdDepart(aiCommandObj);
 		}
 	} catch (Json::type_error &) {
 		throw SavedGameCorruptException();
@@ -1006,8 +1007,6 @@ AICmdFlyTo::AICmdFlyTo(DynamicBody *dBody, Body *target) :
 		m_target = target;
 		m_targframeId = FrameId::Invalid;
 	}
-
-	if (dBody->GetPositionRelTo(target).Length() <= VICINITY_MIN) m_targframeId = FrameId::Invalid;
 }
 
 // Specified pos, endvel should be > 0
@@ -1203,13 +1202,23 @@ bool AICmdFlyTo::TimeStepUpdate()
 
 				const SupercruiseController::Status st = sc->GetStatus();
 				if (st != SupercruiseController::SC_COOLDOWN && st != SupercruiseController::SC_NOT_FLYING && st != SupercruiseController::SC_FSD_OFFLINE) {
+					Frame *curFrame = Frame::GetFrame(ship->GetFrame());
+					Body *frameBody = curFrame ? curFrame->GetBody() : nullptr;
+
+					// Safety inhibitor: Do not charge FSD or blind-boost while inside or immediately next to a space station
+					if (frameBody && frameBody->IsType(ObjectType::SPACESTATION)) {
+						const double stationDist = ship->GetPosition().Length();
+						if (stationDist < frameBody->GetClipRadius() * 1.5 + 1200.0) {
+							// Inside station clearance zone: hold FSD charge, allow sublight departure autopilot to clear
+							return false;
+						}
+					}
+
 					if (st == SupercruiseController::SC_READY)
 						sc->StartCharge();
 
 					// Steer clear of nearby planet/station and accelerate past MIN_ENGAGE_SPEED
 					vector3d escapeDir = rawRel.NormalizedSafe();
-					Frame *curFrame = Frame::GetFrame(ship->GetFrame());
-					Body *frameBody = curFrame ? curFrame->GetBody() : nullptr;
 					if (frameBody && (frameBody->IsType(ObjectType::PLANET) || frameBody->IsType(ObjectType::SPACESTATION))) {
 						const vector3d away = ship->GetPosition().NormalizedSafe();
 						if (away.LengthSqr() > 0.1) {
@@ -1220,7 +1229,7 @@ bool AICmdFlyTo::TimeStepUpdate()
 					}
 
 					const double ang = m_prop->AIFaceDirection(escapeDir);
-					if (ang < 0.5 || st == SupercruiseController::SC_MASS_LOCKED)
+					if (ang < 0.35)
 						m_prop->SetLinThrusterState(vector3d(0.0, 0.0, -1.0));
 					else
 						m_prop->SetLinThrusterState(vector3d(0.0));
@@ -1251,6 +1260,17 @@ bool AICmdFlyTo::TimeStepUpdate()
 		Frame *curFrame = Frame::GetFrame(m_dBody->GetFrame());
 		if (curFrame && curFrame->GetBody() && curFrame->GetBody()->IsType(ObjectType::SPACESTATION)) {
 			nearStation = static_cast<const SpaceStation *>(curFrame->GetBody());
+		}
+	}
+	if (!nearStation && Pi::game && Pi::game->GetSpace()) {
+		for (Body *b : Pi::game->GetSpace()->GetBodies()) {
+			if (b->IsType(ObjectType::SPACESTATION)) {
+				const double d = (m_dBody->GetPosition() - b->GetPositionRelTo(m_dBody->GetFrame())).Length();
+				if (d < 15000.0) {
+					nearStation = static_cast<const SpaceStation *>(b);
+					break;
+				}
+			}
 		}
 	}
 	if (nearStation && !nearStation->IsGroundStation()) {
@@ -1409,6 +1429,63 @@ bool AICmdFlyTo::TimeStepUpdate()
 	if (m_target && m_target->IsType(ObjectType::SHIP)) fuelspeed -=
 		m_dBody->GetVelocityRelTo(Pi::game->GetSpace()->GetRootFrame()).Length();
 	if (ispeed > curspeed && curspeed > 0.9 * fuelspeed) ispeed = curspeed;
+
+	// In the vicinity of a space station (orbital or ground), enforce controlled traffic approach speed limits
+	if (nearStation) {
+		const double distToStation = (m_dBody->GetPosition() - nearStation->GetPositionRelTo(m_dBody->GetFrame())).Length();
+		if (nearStation->IsGroundStation()) {
+			// Surface starport: enforce strict approach braking to prevent planetary surface impacts
+			if (distToStation < 600.0) {
+				ispeed = std::min(ispeed, 15.0);
+			} else if (distToStation < 1500.0) {
+				ispeed = std::min(ispeed, 30.0);
+			} else if (distToStation < 3500.0) {
+				ispeed = std::min(ispeed, 60.0);
+			} else if (distToStation < 7000.0) {
+				ispeed = std::min(ispeed, 110.0);
+			}
+		} else {
+			// Orbital starport
+			if (distToStation < 1000.0) {
+				ispeed = std::min(ispeed, 22.0);
+			} else if (distToStation < 2500.0) {
+				ispeed = std::min(ispeed, 40.0);
+			} else if (distToStation < 4500.0) {
+				ispeed = std::min(ispeed, 75.0);
+			} else if (distToStation < 8000.0) {
+				ispeed = std::min(ispeed, 140.0);
+			}
+		}
+	}
+
+	// Prevent discrete time-step tunneling/overshoot during time acceleration
+	if (timestep > 0.05 && targdist > 0.0) {
+		const double maxStepSpeed = (targdist * 0.45) / timestep;
+		ispeed = std::min(ispeed, std::max(5.0, maxStepSpeed));
+	}
+
+	// Adaptive cruise control: avoid ramming into vessels ahead on the travel path
+	if (Pi::game && Pi::game->GetSpace() && curspeed > 5.0) {
+		const double checkDist = std::max(180.0, curspeed * 4.0); // 4-second lookahead
+		for (Body *other : Pi::game->GetSpace()->GetBodiesMaybeNear(m_dBody, checkDist)) {
+			if (other == m_dBody || !other->IsType(ObjectType::SHIP) || other->IsDead())
+				continue;
+			const vector3d toOther = other->GetPositionRelTo(m_dBody->GetFrame()) - m_dBody->GetPosition();
+			const double distToOther = toOther.Length();
+			if (distToOther < checkDist && distToOther > 1.0) {
+				const vector3d otherDir = toOther / distToOther;
+				// Is the other ship in our forward cone (< 35 deg of travel direction)?
+				if (otherDir.Dot(reldir) > 0.819) {
+					const vector3d otherVelRel = other->GetVelocityRelTo(m_dBody->GetFrame()) - m_dBody->GetVelocity();
+					const double closingSpeed = -otherVelRel.Dot(otherDir);
+					if (closingSpeed > -5.0) {
+						const double safeFollowSpeed = std::max(0.0, (distToOther - 75.0) / 3.0);
+						ispeed = std::min(ispeed, safeFollowSpeed);
+					}
+				}
+			}
+		}
+	}
 
 	// Don't exit a frame faster than some fraction of radius
 	//	double maxframespeed = 0.2 * m_frameId->GetRadius() / timestep;
@@ -1624,9 +1701,7 @@ bool AICmdDock::TimeStepUpdate()
 		const SpaceStationType *type = m_target->GetStationType();
 		SpaceStationType::positionOrient_t dockpos;
 		type->GetShipApproachWaypoints(port, (m_state == 0) ? DockStage::APPROACH1 : DockStage::APPROACH2, dockpos);
-		if (m_state != eDockGetDataEnd) {
-			m_dockpos = dockpos.pos;
-		}
+		m_dockpos = dockpos.pos;
 		// we are already near the station, what could go wrong?
 		// set the fuel reserve to 0, since the fuel could become lower than the
 		// current reserve during the flight, and the ship will not fly anywhere
@@ -1640,9 +1715,7 @@ bool AICmdDock::TimeStepUpdate()
 			m_dockpos -= m_dockupdir * (ship->GetLandingPosOffset() + 0.1);
 		}
 
-		if (m_state != eDockGetDataEnd) {
-			m_dockpos = m_target->GetOrient() * m_dockpos + m_target->GetPosition();
-		}
+		m_dockpos = m_target->GetOrient() * m_dockpos + m_target->GetPosition();
 		IncrementState();
 		// should have m_dockpos in target frame, dirs relative to target orient
 	}
@@ -1676,7 +1749,7 @@ bool AICmdDock::TimeStepUpdate()
 						midDir = norm.Cross(shipRel).NormalizedSafe();
 
 					const vector3d transitPos = stPos + midDir * (clearanceRad + 400.0);
-					m_child.reset(new AICmdFlyTo(m_dBody, m_target->GetFrame(), transitPos, 50.0, false));
+					m_child.reset(new AICmdFlyTo(m_dBody, m_target->GetFrame(), transitPos, 45.0, false));
 					ProcessChild();
 					return false;
 				}
@@ -1688,15 +1761,47 @@ bool AICmdDock::TimeStepUpdate()
 		return false;
 	}
 
-	// second docking waypoint
+	// second docking waypoint (approach through corridor)
 	ship->SetWheelState(true);
 	const vector3d targpos = GetPosInFrame(m_dBody->GetFrame(), m_target->GetFrame(), m_dockpos);
 	const vector3d relpos = targpos - m_dBody->GetPosition();
 	const vector3d reldir = relpos.NormalizedSafe();
 	const vector3d relvel = -m_target->GetVelocityRelTo(m_dBody);
+	const double distToTarg = relpos.Length();
 
-	const double maxdecel = m_prop->GetAccelUp() - GetGravityAtPos(m_target->GetFrame(), m_dockpos);
-	const double ispeed = calc_ivel(relpos.Length(), 0.0, maxdecel);
+	// Calculate realistic braking deceleration with safety margin
+	double availableDecel = m_prop->GetAccelMin();
+	if (m_target->GetStationType()->IsOrbitalStation()) {
+		// When approaching an orbital station, the ship faces forward along corridor and brakes with reverse thrusters
+		availableDecel = std::min(m_prop->GetAccelRev(), m_prop->GetAccelMin());
+	} else {
+		availableDecel = std::max(1.0, m_prop->GetAccelUp() - GetGravityAtPos(m_target->GetFrame(), m_dockpos));
+	}
+	const double maxdecel = std::max(0.5, availableDecel * 0.65);
+
+	// Station corridor speed limits: strictly prevent high-speed overshoots by heavy ships
+	double speedCap = 55.0;
+	if (distToTarg < 400.0)
+		speedCap = 12.0;
+	else if (distToTarg < 1000.0)
+		speedCap = 22.0;
+	else if (distToTarg < 2500.0)
+		speedCap = 38.0;
+
+	// Inbound traffic holding: if slot corridor is occupied by a departing ship, hold outside at APPROACH1
+	if (m_target->GetStationType()->IsOrbitalStation() && !m_target->CanLaunch(ship) && distToTarg < 1600.0) {
+		speedCap = 0.0;
+	}
+
+	double ispeed = (maxdecel < 1e-10) ? 0.0 : calc_ivel(distToTarg, 0.0, maxdecel);
+	ispeed = std::min(ispeed, speedCap);
+
+	// Prevent discrete time-step tunneling/overshoot during time acceleration in docking maneuver
+	const double dockTimestep = Pi::game->GetTimeStep();
+	if (dockTimestep > 0.05 && distToTarg > 0.0) {
+		const double maxStepSpeed = (distToTarg * 0.45) / dockTimestep;
+		ispeed = std::min(ispeed, std::max(2.0, maxStepSpeed));
+	}
 	const vector3d vdiff = ispeed * reldir - relvel;
 
 	// get rotation of station for next frame
@@ -1721,7 +1826,9 @@ bool AICmdDock::TimeStepUpdate()
 	if (vdiff.Dot(reldir) < 0) {
 		m_dBody->SetDecelerating(true);
 	}
-	if (m_state < eInvalidDockingStage && af < 0.01 && ship->GetWheelState() >= 1.0f) {
+	// Require ship to be physically close to the waypoint before incrementing state
+	const bool nearWaypoint = (distToTarg < (m_target->IsGroundStation() ? 8.0 : 25.0));
+	if (m_state < eInvalidDockingStage && af < 0.05 && ship->GetWheelState() >= 1.0f && nearWaypoint) {
 		IncrementState();
 	}
 
@@ -1729,6 +1836,211 @@ bool AICmdDock::TimeStepUpdate()
 	Output("AICmdDock dist = %.1f, speed = %.1f, ythrust = %.2f, state = %i\n",
 		sqrt(targdist), relvel.Length(), m_ship->GetLinThrusterState().y, m_state);
 #endif
+
+	return false;
+}
+
+AICmdDepart::AICmdDepart(DynamicBody *dBody, SpaceStation *station) :
+	AICommand(dBody, CMD_DEPART),
+	m_station(station),
+	m_state(eDepartAlignCorridor),
+	m_portPos(0.0),
+	m_clearPos(0.0),
+	m_corridorDir(0.0, 0.0, -1.0),
+	m_stationIndex(0),
+	m_departTimer(0.0)
+{
+	m_prop = m_dBody->GetComponent<Propulsion>();
+	assert(m_prop != nullptr);
+	if (m_station) {
+		const SpaceStationType *stType = m_station->GetStationType();
+		if (stType && stType->IsOrbitalStation()) {
+			SpaceStationType::positionOrient_t portPosOrient;
+			SpaceStationType::positionOrient_t clearPosOrient;
+			stType->GetShipApproachWaypoints(0, DockStage::APPROACH2, portPosOrient);
+			stType->GetShipApproachWaypoints(0, DockStage::APPROACH1, clearPosOrient);
+			m_portPos = portPosOrient.pos;
+			m_clearPos = clearPosOrient.pos;
+			vector3d d = m_clearPos - m_portPos;
+			if (d.LengthSqr() > 1.0)
+				m_corridorDir = d.NormalizedSafe();
+			else
+				m_corridorDir = vector3d(0.0, 0.0, -1.0);
+		}
+	}
+}
+
+AICmdDepart::AICmdDepart(const Json &jsonObj) :
+	AICommand(jsonObj, CMD_DEPART),
+	m_station(nullptr),
+	m_state(eDepartAlignCorridor),
+	m_portPos(0.0),
+	m_clearPos(0.0),
+	m_corridorDir(0.0, 0.0, -1.0),
+	m_stationIndex(0),
+	m_departTimer(0.0)
+{
+	try {
+		m_stationIndex = jsonObj["index_for_station"];
+		m_state = EDepartingStates(jsonObj["state"]);
+		m_portPos = jsonObj["port_pos"];
+		m_clearPos = jsonObj["clear_pos"];
+		m_corridorDir = jsonObj["corridor_dir"];
+		m_departTimer = jsonObj.value("depart_timer", 0.0);
+	} catch (Json::type_error &) {
+		throw SavedGameCorruptException();
+	}
+}
+
+void AICmdDepart::SaveToJson(Json &jsonObj)
+{
+	Space *space = Pi::game->GetSpace();
+	Json aiCommandObj({});
+	AICommand::SaveToJson(aiCommandObj);
+	aiCommandObj["index_for_station"] = space->GetIndexForBody(m_station);
+	aiCommandObj["state"] = m_state;
+	aiCommandObj["port_pos"] = m_portPos;
+	aiCommandObj["clear_pos"] = m_clearPos;
+	aiCommandObj["corridor_dir"] = m_corridorDir;
+	aiCommandObj["depart_timer"] = m_departTimer;
+	jsonObj["ai_command"] = aiCommandObj;
+}
+
+void AICmdDepart::PostLoadFixup(Space *space)
+{
+	AICommand::PostLoadFixup(space);
+	m_station = static_cast<SpaceStation *>(space->GetBodyByIndex(m_stationIndex));
+	m_prop = m_dBody->GetComponent<Propulsion>();
+	assert(m_prop != nullptr);
+}
+
+void AICmdDepart::OnDeleted(const Body *body)
+{
+	AICommand::OnDeleted(body);
+	if (static_cast<Body *>(m_station) == body) m_station = nullptr;
+}
+
+void AICmdDepart::GetStatusText(char *str)
+{
+	snprintf(str, 255, "Departing: state %d", int(m_state));
+}
+
+bool AICmdDepart::TimeStepUpdate()
+{
+	Ship *ship = nullptr;
+	if (m_dBody->IsType(ObjectType::SHIP)) {
+		ship = static_cast<Ship *>(m_dBody);
+	}
+	if (!ship || !m_station || ship->IsDead()) {
+		if (m_station && ship) m_station->NotifyCorridorCleared(ship);
+		return true;
+	}
+
+	ship->SetWheelState(false);
+
+	const double timestep = Pi::game->GetTimeStep();
+	m_departTimer += timestep;
+	if (m_departTimer > 50.0) {
+		m_station->NotifyCorridorCleared(ship);
+		return true;
+	}
+
+	const SpaceStationType *stType = m_station->GetStationType();
+
+	if (stType && stType->IsOrbitalStation()) {
+		const vector3d shipPosInSt = ship->GetPositionRelTo(m_station->GetFrame());
+		const vector3d relToPort = m_portPos - shipPosInSt;
+		const double distToPort = relToPort.Length();
+		const vector3d exitDir = m_corridorDir;
+
+		switch (m_state) {
+		case eDepartAlignCorridor: {
+			matrix3x3d trot = m_station->GetOrientRelTo(m_dBody->GetFrame());
+			const vector3d wantDir = trot * exitDir;
+			double ang = m_prop->AIFaceDirection(wantDir);
+
+			const double curFwdSpeed = ship->GetVelocityRelTo(m_station->GetFrame()).Dot(exitDir);
+			if (curFwdSpeed < 18.0) {
+				m_prop->SetLinThrusterState(vector3d(0.0, 0.0, -0.6));
+			} else {
+				m_prop->SetLinThrusterState(vector3d(0.0));
+			}
+
+			if (ang < 0.20 || m_departTimer > 4.0) {
+				m_state = eDepartFlyToPort;
+			}
+			break;
+		}
+
+		case eDepartFlyToPort: {
+			matrix3x3d trot = m_station->GetOrientRelTo(m_dBody->GetFrame());
+			const vector3d wantDir = trot * exitDir;
+			m_prop->AIFaceDirection(wantDir);
+
+			const double targetSpeed = 32.0;
+			const vector3d curVel = ship->GetVelocityRelTo(m_station->GetFrame());
+			const double curSpeed = curVel.Dot(exitDir);
+
+			if (curSpeed < targetSpeed) {
+				m_prop->SetLinThrusterState(vector3d(0.0, 0.0, -0.8));
+			} else if (curSpeed > targetSpeed + 5.0) {
+				m_prop->SetLinThrusterState(vector3d(0.0, 0.0, 0.6));
+			} else {
+				m_prop->SetLinThrusterState(vector3d(0.0));
+			}
+
+			const double proj = (shipPosInSt - m_portPos).Dot(exitDir);
+			if (proj >= -5.0 || distToPort < 35.0) {
+				m_state = eDepartFlyToClearance;
+			}
+			break;
+		}
+
+		case eDepartFlyToClearance: {
+			matrix3x3d trot = m_station->GetOrientRelTo(m_dBody->GetFrame());
+			const vector3d wantDir = trot * exitDir;
+			m_prop->AIFaceDirection(wantDir);
+
+			const double targetSpeed = 65.0;
+			const vector3d curVel = ship->GetVelocityRelTo(m_station->GetFrame());
+			const double curSpeed = curVel.Dot(exitDir);
+
+			if (curSpeed < targetSpeed) {
+				m_prop->SetLinThrusterState(vector3d(0.0, 0.0, -1.0));
+			} else {
+				m_prop->SetLinThrusterState(vector3d(0.0));
+			}
+
+			const double distFromStation = ship->GetPositionRelTo(m_station).Length();
+			const double clearanceRad = m_station->GetClipRadius() * 1.4 + 500.0;
+
+			if (distFromStation >= clearanceRad || (shipPosInSt - m_clearPos).Dot(exitDir) >= 0.0) {
+				m_state = eDepartComplete;
+				m_station->NotifyCorridorCleared(ship);
+				return true;
+			}
+			break;
+		}
+
+		case eDepartComplete:
+			m_station->NotifyCorridorCleared(ship);
+			return true;
+		}
+	} else {
+		const vector3d stUp = m_station->GetOrient().VectorY().NormalizedSafe();
+		matrix3x3d trot = m_station->GetOrientRelTo(m_dBody->GetFrame());
+		const vector3d wantUp = trot * stUp;
+
+		m_prop->AIFaceDirection(wantUp);
+		m_prop->SetLinThrusterState(vector3d(0.0, 1.0, -0.4));
+
+		const double distFromStation = ship->GetPositionRelTo(m_station).Length();
+		if (distFromStation > 650.0 || m_departTimer > 18.0) {
+			m_prop->SetLinThrusterState(vector3d(0.0));
+			m_station->NotifyCorridorCleared(ship);
+			return true;
+		}
+	}
 
 	return false;
 }

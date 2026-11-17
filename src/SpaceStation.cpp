@@ -35,7 +35,9 @@
 
 SpaceStation::SpaceStation(const SystemBody *sbody) :
 	ModelBody(),
-	m_type(nullptr)
+	m_type(nullptr),
+	m_corridorShip(nullptr),
+	m_lastLaunchTime(0.0)
 {
 	m_sbody = sbody;
 
@@ -48,7 +50,9 @@ SpaceStation::SpaceStation(const SystemBody *sbody) :
 
 SpaceStation::SpaceStation(const Json &jsonObj, Space *space) :
 	ModelBody(jsonObj, space),
-	m_type(nullptr)
+	m_type(nullptr),
+	m_corridorShip(nullptr),
+	m_lastLaunchTime(0.0)
 {
 	try {
 		Json spaceStationObj = jsonObj["space_station"];
@@ -246,6 +250,8 @@ SpaceStation::~SpaceStation()
 
 void SpaceStation::NotifyRemoved(const Body *const removedBody)
 {
+	if (m_corridorShip == removedBody)
+		m_corridorShip = nullptr;
 	for (Uint32 i = 0; i < m_shipDocking.size(); i++) {
 		if (m_shipDocking[i].ship == removedBody) {
 			m_shipDocking[i].ship = 0;
@@ -318,9 +324,83 @@ void SpaceStation::SwapDockedShipsPort(const int oldBay, const int newBay)
 	SwitchToStage(oldBay, DockStage::NONE);
 }
 
+bool SpaceStation::CanLaunch(const Ship *ship) const
+{
+	if (!ship) return false;
+
+	int bay = GetMyDockingPort(ship);
+	if (bay == -1 || IsPortLocked(bay)) return false;
+
+	// Check if the departure corridor is currently occupied by another vessel
+	if (m_corridorShip && m_corridorShip != ship) {
+		if (m_corridorShip->IsDead() || m_corridorShip->GetFlightState() == Ship::HYPERSPACE) {
+			const_cast<SpaceStation*>(this)->m_corridorShip = nullptr;
+		} else {
+			const double dist = m_corridorShip->GetPositionRelTo(this).Length();
+			const double clearDist = GetClipRadius() * 1.4 + 500.0;
+			if (dist > clearDist) {
+				const_cast<SpaceStation*>(this)->m_corridorShip = nullptr;
+			} else {
+				return false; // Corridor occupied by active departure
+			}
+		}
+	}
+
+	// Safety separation between consecutive launches
+	if (Pi::game) {
+		const double now = Pi::game->GetTime();
+		if (now > 0.0 && (now - m_lastLaunchTime) < MIN_LAUNCH_SEPARATION) {
+			return false; // Mandatory safety interval not yet elapsed
+		}
+	}
+
+	// Orbital station check: don't launch if an inbound ship is currently traversing the mail slot
+	if (m_type && m_type->IsOrbitalStation()) {
+		for (Uint32 i = 0; i < m_shipDocking.size(); i++) {
+			const shipDocking_t &dt = m_shipDocking[i];
+			if (dt.ship && dt.ship != ship && SpaceStationType::IsDockStage(dt.stage)) {
+				return false;
+			}
+		}
+	}
+
+	return true;
+}
+
+double SpaceStation::GetLaunchWaitTime() const
+{
+	double wait = 0.0;
+	if (Pi::game) {
+		const double now = Pi::game->GetTime();
+		const double elapsed = now - m_lastLaunchTime;
+		if (elapsed < MIN_LAUNCH_SEPARATION) {
+			wait = MIN_LAUNCH_SEPARATION - elapsed;
+		}
+	}
+	if (m_corridorShip && !m_corridorShip->IsDead()) {
+		const double dist = m_corridorShip->GetPositionRelTo(this).Length();
+		const double clearDist = GetClipRadius() * 1.4 + 500.0;
+		if (dist < clearDist) {
+			const double corridorWait = std::max(4.0, (clearDist - dist) / 32.0);
+			wait = std::max(wait, corridorWait);
+		}
+	}
+	return std::max(0.0, wait);
+}
+
+void SpaceStation::NotifyCorridorCleared(const Ship *ship)
+{
+	if (m_corridorShip == ship) {
+		m_corridorShip = nullptr;
+	}
+}
+
 bool SpaceStation::LaunchShip(Ship *ship, const int bay)
 {
-	if (IsPortLocked(bay)) return false; // another ship docking
+	if (!CanLaunch(ship)) return false;
+
+	m_corridorShip = ship;
+	if (Pi::game) m_lastLaunchTime = Pi::game->GetTime();
 
 	if (ship->ManualDocking()) {
 		// no one except the player can launch without the autopilot
@@ -328,7 +408,7 @@ bool SpaceStation::LaunchShip(Ship *ship, const int bay)
 		auto p = static_cast<Player*>(ship);
 		p->DoFixspeedTakeoff(this);
 		SwitchToStage(bay, DockStage::LEAVE);
-		return true;;
+		return true;
 	}
 
 	shipDocking_t &sd = m_shipDocking[bay];
@@ -411,9 +491,17 @@ bool SpaceStation::GetDockingClearance(Ship *s)
 bool SpaceStation::OnCollision(Body *b, Uint32 flags, double relVel)
 {
 	if (!b->IsType(ObjectType::SHIP)) return true;
-	if (!(flags & (SceneGraph::CollisionGeometry::DOCKING | SceneGraph::CollisionGeometry::ENTRANCE))) return true;
-
 	Ship *s = static_cast<Ship *>(b);
+
+	std::string surface = "Station Superstructure Hull";
+	if (flags & SceneGraph::CollisionGeometry::DOCKING)
+		surface = "Station Docking Bay Pad Surface";
+	else if (flags & SceneGraph::CollisionGeometry::ENTRANCE)
+		surface = "Station Airlock Mail Slot";
+
+	s->RecordCollision(this, surface, relVel);
+
+	if (!(flags & (SceneGraph::CollisionGeometry::DOCKING | SceneGraph::CollisionGeometry::ENTRANCE))) return true;
 	if(s->ManualDocking() && (flags & SceneGraph::CollisionGeometry::ENTRANCE)) return false;
 
 	bool touchOrbitalPad = (flags & SceneGraph::CollisionGeometry::DOCKING) && !IsGroundStation();
@@ -538,6 +626,9 @@ void SpaceStation::SwitchToStage(Uint32 bay, DockStage stage)
 
 	case DockStage::LEAVE:
 		dt.ship->OnUndocked(this, bay);
+		if (!dt.ship->IsType(ObjectType::PLAYER)) {
+			dt.ship->AIDepart(this);
+		}
 		dt.ship = nullptr;
 		dt.stagePos = 0;
 		dt.maxOffset = 0;
@@ -756,6 +847,13 @@ void SpaceStation::TimeStepUpdate(const float timeStep)
 			PositionDockedShip(dt.ship, i);
 		} else if (dt.ship->GetFlightState() == Ship::DOCKING || dt.ship->GetFlightState() == Ship::UNDOCKING) {
 			PositionDockingShip(dt.ship, i);
+		}
+	}
+
+	if (m_corridorShip) {
+		if (m_corridorShip->IsDead() || m_corridorShip->GetFlightState() == Ship::HYPERSPACE ||
+			m_corridorShip->GetPositionRelTo(this).Length() > GetClipRadius() * 1.4 + 600.0) {
+			m_corridorShip = nullptr;
 		}
 	}
 

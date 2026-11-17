@@ -109,11 +109,21 @@ void SpaceStationType::OnSetupComplete()
 		if (SURFACE == dockMethod) {
 			const vector3f offDir = trans.Up().Normalized();
 			new_port.m_approach[DockStage::APPROACH1] = trans;
-			new_port.m_approach[DockStage::APPROACH1].SetTranslate(trans.GetTranslate() + (offDir * 500.0f));
+			// Elevate and stagger approach waypoints above surface pads to avoid terrain scraping on entry
+			const float surfaceHeight = 900.0f + float(portId % 4) * 250.0f; // 900m, 1150m, 1400m, 1650m
+			new_port.m_approach[DockStage::APPROACH1].SetTranslate(trans.GetTranslate() + (offDir * surfaceHeight));
 		} else {
 			const vector3f offDir = -trans.Back().Normalized();
 			new_port.m_approach[DockStage::APPROACH1] = trans;
-			new_port.m_approach[DockStage::APPROACH1].SetTranslate(trans.GetTranslate() + (offDir * 1500.0f));
+
+			// Stagger approach holding slots across bays to eliminate 3D waypoint crowding
+			const float depthStagger = 1500.0f + float(portId % 4) * 450.0f; // 1500m, 1950m, 2400m, 2850m
+			const float angle = float(portId) * (2.0f * float(M_PI) / 8.0f);
+			const vector3f right = trans.Right().Normalized();
+			const vector3f up = trans.Up().Normalized();
+			const vector3f radialOffset = (right * cosf(angle) + up * sinf(angle)) * 260.0f;
+
+			new_port.m_approach[DockStage::APPROACH1].SetTranslate(trans.GetTranslate() + (offDir * depthStagger) + radialOffset);
 		}
 		new_port.m_approach[DockStage::APPROACH2] = trans;
 		new_port.m_approach[DockStage::APPROACH1].Renormalize();

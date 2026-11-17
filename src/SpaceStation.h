@@ -61,6 +61,9 @@ public:
 	// should call Ship::Undock and Ship::SetDockedWith instead
 	// Returns true on success, false if permission denied
 	bool LaunchShip(Ship *ship, const int port);
+	bool CanLaunch(const Ship *ship) const;
+	double GetLaunchWaitTime() const;
+	void NotifyCorridorCleared(const Ship *ship);
 	void SetDocked(Ship *ship, const int port);
 	void SwapDockedShipsPort(const int oldPort, const int newPort);
 
@@ -144,6 +147,11 @@ private:
 	double m_doorAnimationState;
 
 	std::unique_ptr<NavLights> m_navLights;
+
+	// Station Air Traffic Control (ATC) clearance tracker
+	Ship *m_corridorShip;
+	double m_lastLaunchTime;
+	static constexpr double MIN_LAUNCH_SEPARATION = 16.0;
 };
 
 #endif /* _SPACESTATION_H */

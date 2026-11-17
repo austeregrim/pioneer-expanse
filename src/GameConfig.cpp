@@ -61,6 +61,7 @@ GameConfig::GameConfig(const map_string &override_)
 	map["ProfilerZoneOutput"] = "0";
 	map["CameraSmoothing"] = "0";
 	map["AimingSensitivity"] = "1.0";
+	map["EnableBlackBox"] = "0"; // Black box flight recorder diagnostics (0 = disabled, 1 = enabled)
 
 	Read(FileSystem::userFiles, "config.ini");
 

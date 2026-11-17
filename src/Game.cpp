@@ -28,6 +28,7 @@
 #include "SectorView.h"
 #include "Sensors.h"
 #include "Sfx.h"
+#include "Ship.h"
 #include "Space.h"
 #include "SpaceStation.h"
 #include "SystemView.h"
@@ -51,6 +52,7 @@ Game::Game(const SystemPath &path, const double startDateTime, const char *shipT
 	m_forceTimeAccel(false)
 {
 	PROFILE_SCOPED()
+	Ship::ClearBlackBoxLog();
 	// Now that we have a Galaxy, check the starting location
 	if (!path.IsBodyPath())
 		throw InvalidGameStartLocation("SystemPath is not a body path");
@@ -151,6 +153,7 @@ Game::Game(const Json &jsonObj) :
 	m_forceTimeAccel(false)
 {
 	PROFILE_SCOPED()
+	Ship::ClearBlackBoxLog();
 	try {
 		int version = jsonObj["version"];
 		Output("savefile version: %d\n", version);

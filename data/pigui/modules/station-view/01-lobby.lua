@@ -76,6 +76,12 @@ local requestLaunch = function (station)
 
 	AutoSave.Save()
 
+	if not station:CanLaunch(Game.player) then
+		local wait = station:GetLaunchWaitTime()
+		Comms.ImportantMessage(string.format("Traffic Control: Launch clearance on hold. Airlock corridor active with traffic. Hold position on pad (est. %ds).", math.ceil(wait)), station.label)
+		return false
+	end
+
 	if not Game.player:Undock() then
 		Comms.ImportantMessage(l.LAUNCH_PERMISSION_DENIED_BUSY, station.label)
 		popupMsg = l.LAUNCH_PERMISSION_DENIED_BUSY
@@ -378,8 +384,19 @@ local function drawPlayerInfo()
 								end
 							end)
 						else
-							if ui.button(l.REQUEST_LAUNCH, size) then
-								requestLaunch(station)
+							local canLaunch = station:CanLaunch(Game.player)
+							local wait = station:GetLaunchWaitTime()
+							if not canLaunch and wait > 0.0 then
+								local holdText = string.format("ATC HOLD: AIRLOCK CORRIDOR OCCUPIED — %ds", math.ceil(wait))
+								ui.withStyleColors({ Button = colors.alertYellow, ButtonHovered = colors.alertYellow, ButtonActive = colors.alertYellow, Text = colors.black }, function()
+									if ui.button(holdText, size) then
+										requestLaunch(station)
+									end
+								end)
+							else
+								if ui.button(l.REQUEST_LAUNCH, size) then
+									requestLaunch(station)
+								end
 							end
 						end
 					end)

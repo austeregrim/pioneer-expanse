@@ -159,6 +159,35 @@ static int l_spacestation_get_nearby_traffic(lua_State *l)
 }
 
 /*
+ * Method: CanLaunch
+ *
+ * Check whether a ship can safely launch according to station ATC clearance rules.
+ *
+ * > canLaunch = station:CanLaunch(ship)
+ */
+static int l_spacestation_can_launch(lua_State *l)
+{
+	SpaceStation *s = LuaObject<SpaceStation>::CheckFromLua(1);
+	Ship *ship = LuaObject<Ship>::CheckFromLua(2);
+	lua_pushboolean(l, s->CanLaunch(ship));
+	return 1;
+}
+
+/*
+ * Method: GetLaunchWaitTime
+ *
+ * Returns estimated seconds remaining until launch clearance is available.
+ *
+ * > seconds = station:GetLaunchWaitTime()
+ */
+static int l_spacestation_get_launch_wait_time(lua_State *l)
+{
+	SpaceStation *s = LuaObject<SpaceStation>::CheckFromLua(1);
+	lua_pushnumber(l, s->GetLaunchWaitTime());
+	return 1;
+}
+
+/*
  * Attribute: numDocks
  *
  * The number of docking ports a spacestation has.
@@ -208,6 +237,8 @@ void LuaObject<SpaceStation>::RegisterClass()
 		{ "GetAssignedBayNumber", l_spacestation_get_assigned_bay_number },
 		{ "GetAssignedBayNavError", l_spacestation_get_assigned_bay_nav_error },
 		{ "GetNearbyTraffic", l_spacestation_get_nearby_traffic },
+		{ "CanLaunch", l_spacestation_can_launch },
+		{ "GetLaunchWaitTime", l_spacestation_get_launch_wait_time },
 
 		{ 0, 0 }
 	};
