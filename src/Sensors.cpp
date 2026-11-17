@@ -165,7 +165,7 @@ void Sensors::Update(float time)
 	//update contacts and delete stale ones
 	auto it = m_radarContacts.begin();
 	while (it != m_radarContacts.end()) {
-		if (!it->fresh) {
+		if (!it->fresh || !it->body || it->body->IsDead()) {
 			m_radarContacts.erase(it++);
 		} else {
 			const Ship *ship = it->body->IsType(ObjectType::SHIP) ? static_cast<Ship *>(it->body) : nullptr;
@@ -191,12 +191,19 @@ void Sensors::Update(float time)
 void Sensors::UpdateIFF(Body *b)
 {
 	PROFILE_SCOPED();
+	if (!b) return;
 	for (auto it = m_radarContacts.begin(); it != m_radarContacts.end(); ++it) {
 		if (it->body == b) {
 			it->iff = CheckIFF(b);
 			it->trail->SetColor(IFFColor(it->iff));
 		}
 	}
+}
+
+void Sensors::OnDeleted(const Body *body)
+{
+	m_radarContacts.remove_if([body](const RadarContact &rc) { return rc.body == body; });
+	m_staticContacts.remove_if([body](const RadarContact &rc) { return rc.body == body; });
 }
 
 void Sensors::ResetTrails()

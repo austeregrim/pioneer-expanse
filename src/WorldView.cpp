@@ -207,11 +207,12 @@ void WorldView::Draw3D()
 	// Contact trails (sublight contacts only; Supercruise ships draw short white/Doppler FTL wakes)
 	if (Pi::AreHudTrailsDisplayed()) {
 		for (auto it = Pi::player->GetSensors()->GetContacts().begin(); it != Pi::player->GetSensors()->GetContacts().end(); ++it) {
-			if (it->body && it->body->IsType(ObjectType::SHIP) &&
+			if (it->body && !it->body->IsDead() && it->body->IsType(ObjectType::SHIP) &&
 				static_cast<const Ship *>(it->body)->GetFlightState() == Ship::SUPERCRUISE) {
 				continue;
 			}
-			it->trail->Render(m_renderer);
+			if (it->trail)
+				it->trail->Render(m_renderer);
 		}
 	}
 
@@ -316,11 +317,15 @@ void WorldView::Update()
 		FrameId nonRotFrameId = Frame::GetFrame(playerFrameId)->GetNonRotFrame();
 		Frame::GetFrameTransform(nonRotFrameId, camFrameId, trans);
 
-		for (auto it = Pi::player->GetSensors()->GetContacts().begin(); it != Pi::player->GetSensors()->GetContacts().end(); ++it)
-			it->trail->SetTransform(trans);
+		for (auto it = Pi::player->GetSensors()->GetContacts().begin(); it != Pi::player->GetSensors()->GetContacts().end(); ++it) {
+			if (it->body && !it->body->IsDead() && it->trail)
+				it->trail->SetTransform(trans);
+		}
 	} else {
-		for (auto it = Pi::player->GetSensors()->GetContacts().begin(); it != Pi::player->GetSensors()->GetContacts().end(); ++it)
-			it->trail->Reset(playerFrameId);
+		for (auto it = Pi::player->GetSensors()->GetContacts().begin(); it != Pi::player->GetSensors()->GetContacts().end(); ++it) {
+			if (it->body && !it->body->IsDead() && it->trail)
+				it->trail->Reset(playerFrameId);
+		}
 	}
 }
 

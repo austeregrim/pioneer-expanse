@@ -1235,10 +1235,12 @@ bool AICmdFlyTo::TimeStepUpdate()
 							}
 							if (away.LengthSqr() < 0.1) away = -ship->GetOrient().VectorZ();
 							const double ang = m_prop->AIFaceDirection(away);
-							if (ang < 0.4)
-								m_prop->SetLinThrusterState(vector3d(0.0, 0.0, -0.8));
-							else
+							if (ang < 0.8) {
+								const double fwd = -Clamp(1.0 - (ang / 0.8), 0.25, 0.85);
+								m_prop->SetLinThrusterState(vector3d(0.0, 0.0, fwd));
+							} else {
 								m_prop->SetLinThrusterState(vector3d(0.0));
+							}
 							return false;
 						}
 					}

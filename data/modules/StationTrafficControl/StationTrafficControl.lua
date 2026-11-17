@@ -89,8 +89,11 @@ local function onDockingClearanceGranted(station, ship)
 	if #conditionMessage > 0 then Comms.Message(conditionMessage, station.label) end
 end
 
+local departureClearance = {}
+
 local function onShipUndocked(ship, station)
 	if not station or not ship or ship == Game.player then return end
+	departureClearance[ship] = Game.time + 300.0 -- 5 minutes of clearance to depart station area
 	if Game.player:GetDockedWith() == station or (Game.player:exists() and station:exists() and Game.player:DistanceTo(station) < 25000) then
 		local isSurface = (station.type == "STARPORT_SURFACE")
 		local corridorName = isSurface and "Air space" or "Airlock corridor"
@@ -103,7 +106,7 @@ local function onShipExploded(ship, cause, speed)
 	if not Engine.GetBlackBoxEnabled or not Engine.GetBlackBoxEnabled() then return end
 	local label = ship:GetLabel()
 	local model = ship:GetShipType()
-	local msg = string.format("[BLACK BOX] Vessel \"%s\" (%s) EXPLODED! Cause: %s (%.1f m/s). Full flight path logged to blackbox_diagnostics.log",
+	local msg = string.format("[BLACK BOX] Vessel \"%s\" (%s) EXPLODED! Cause: %s (%.1f m/s). Full flight path logged to blackbox_diagnostics.log in the user data folder",
 		label, model, cause or "Collision", speed or 0.0)
 	print(msg)
 	Comms.ImportantMessage(msg, "Flight Safety ATC")
@@ -164,36 +167,49 @@ local function enforceStationSafetyZone()
 
 				local isInside = (dist <= exclusionRadius)
 				local hasClearance = (station:GetAssignedBayNumber(ship) >= 0)
+				local hasDepartureClearance = (departureClearance[ship] and Game.time < departureClearance[ship])
 				local aiCmd = (ship.GetCurrentAICommand and ship:GetCurrentAICommand()) or ""
-				local isDeparting = (aiCmd == "CMD_DEPART")
+				local isDeparting = (aiCmd == "CMD_DEPART") or hasDepartureClearance
+
+				if dist > exclusionRadius and departureClearance[ship] then
+					departureClearance[ship] = nil
+				end
+
+				local rec = loiterTrack[ship]
+				local lastDist = rec and rec.lastDist or dist
+				local isMovingAway = (dist > lastDist + 1.0)
 
 				-- An unauthorized obstruction is a vessel inside the active exclusion zone that:
 				-- 1. Does not have bay clearance (hasClearance == false)
-				-- 2. Is not actively departing (aiCmd ~= "CMD_DEPART")
-				-- 3. Is essentially motionless / stalled / derelict (speed < 2.5 m/s)
-				-- Active ships departing or flying normally (speed >= 2.5 m/s) are NOT obstructions!
-				local isObstructing = isInside and not isDeparting and not hasClearance and (speed < 2.5)
+				-- 2. Does not have departure clearance (isDeparting == false)
+				-- 3. Is not moving away from the station (isMovingAway == false)
+				-- 4. Is essentially motionless / stalled / derelict (speed < 1.0 m/s)
+				-- Active ships departing, transiting, or flying normally are NOT obstructions!
+				local isObstructing = isInside and not isDeparting and not hasClearance and not isMovingAway and (speed < 1.0)
 
 				if isObstructing then
 					activeShips[ship] = true
-					local rec = loiterTrack[ship] or { time = 0, warned1 = false, warned2 = false }
+					rec = rec or { time = 0, warned1 = false, warned2 = false, lastDist = dist }
 					rec.time = rec.time + 2.0
+					rec.lastDist = dist
 					loiterTrack[ship] = rec
 
 					local label = ship:GetLabel()
 					local zoneName = isSurface and "airspace" or "airlock corridor"
 
-					if rec.time >= 15.0 and not rec.warned1 then
+					if rec.time >= 30.0 and not rec.warned1 then
 						rec.warned1 = true
 						Comms.Message(string.format("Traffic Control: Vessel \"%s\", you are loitering in an active %s without authorization. Clear the area immediately.", label, zoneName), station.label)
-					elseif rec.time >= 28.0 and not rec.warned2 then
+					elseif rec.time >= 60.0 and not rec.warned2 then
 						rec.warned2 = true
 						Comms.ImportantMessage(string.format("Traffic Control: Vessel \"%s\", final warning! Unauthorized loitering infraction confirmed. Clear the %s or lethal force will be authorized.", label, zoneName), station.label)
-					elseif rec.time >= 40.0 then
+					elseif rec.time >= 90.0 then
 						Comms.ImportantMessage(string.format("Traffic Control: Lethal force authorized against unauthorized obstruction \"%s\". Starport defense grid engaging.", label), station.label)
 						loiterTrack[ship] = nil
 						table.insert(toExplode, ship)
 					end
+				elseif rec then
+					rec.lastDist = dist
 				end
 			end
 		end

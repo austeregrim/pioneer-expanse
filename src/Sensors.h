@@ -58,6 +58,7 @@ public:
 	void UpdateIFF(Body *);
 	void ResetTrails();
 	void ClearContacts();
+	void OnDeleted(const Body *body);
 
 private:
 	Ship *m_owner;

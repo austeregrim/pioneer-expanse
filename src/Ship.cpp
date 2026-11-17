@@ -13,6 +13,7 @@
 #include "JsonUtils.h"
 #include "Missile.h"
 #include "NavLights.h"
+#include "FileSystem.h"
 #include "Pi.h"
 #include "Planet.h"
 #include "galaxy/SystemBody.h"
@@ -659,7 +660,7 @@ void Ship::ClearBlackBoxLog()
 	if (!Pi::config || Pi::config->Int("EnableBlackBox", 0) == 0)
 		return;
 
-	FILE *f = fopen("blackbox_diagnostics.log", "w");
+	FILE *f = fopen(FileSystem::JoinPath(FileSystem::GetUserDir(), "blackbox_diagnostics.log").c_str(), "w");
 	if (f) {
 		fprintf(f,
 			"================================================================================\n"
@@ -737,7 +738,7 @@ void Ship::DumpBlackBoxReport()
 	Output("%s%s%s================================================================================\n\n",
 		header, details, breadcrumbs.c_str());
 
-	FILE *f = fopen("blackbox_diagnostics.log", "a");
+	FILE *f = fopen(FileSystem::JoinPath(FileSystem::GetUserDir(), "blackbox_diagnostics.log").c_str(), "a");
 	if (f) {
 		fprintf(f, "%s%s%s================================================================================\n\n",
 			header, details, breadcrumbs.c_str());
@@ -1924,6 +1925,8 @@ void Ship::NotifyRemoved(const Body *const removedBody)
 {
 	if (m_supercruise) m_supercruise->OnDeleted(removedBody);
 	if (m_curAICmd) m_curAICmd->OnDeleted(removedBody);
+	if (m_sensors) m_sensors->OnDeleted(removedBody);
+	m_relationsMap.erase(const_cast<Body *>(removedBody));
 }
 
 void Ship::OnDocked(SpaceStation *s, int port)
