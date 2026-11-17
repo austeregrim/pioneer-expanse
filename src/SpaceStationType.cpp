@@ -116,14 +116,9 @@ void SpaceStationType::OnSetupComplete()
 			const vector3f offDir = -trans.Back().Normalized();
 			new_port.m_approach[DockStage::APPROACH1] = trans;
 
-			// Stagger approach holding slots across bays to eliminate 3D waypoint crowding
-			const float depthStagger = 1500.0f + float(portId % 4) * 450.0f; // 1500m, 1950m, 2400m, 2850m
-			const float angle = float(portId) * (2.0f * float(M_PI) / 8.0f);
-			const vector3f right = trans.Right().Normalized();
-			const vector3f up = trans.Up().Normalized();
-			const vector3f radialOffset = (right * cosf(angle) + up * sinf(angle)) * 260.0f;
-
-			new_port.m_approach[DockStage::APPROACH1].SetTranslate(trans.GetTranslate() + (offDir * depthStagger) + radialOffset);
+			// Stagger approach holding slots linearly along the entrance corridor to eliminate 3D waypoint crowding
+			const float depthStagger = 1500.0f + float(portId % 4) * 350.0f; // 1500m, 1850m, 2200m, 2550m
+			new_port.m_approach[DockStage::APPROACH1].SetTranslate(trans.GetTranslate() + (offDir * depthStagger));
 		}
 		new_port.m_approach[DockStage::APPROACH2] = trans;
 		new_port.m_approach[DockStage::APPROACH1].Renormalize();

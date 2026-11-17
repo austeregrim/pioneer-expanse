@@ -1280,17 +1280,21 @@ bool AICmdFlyTo::TimeStepUpdate()
 		const vector3d shipPos = m_dBody->GetPosition();
 		const vector3d toDest = targpos - shipPos;
 		const vector3d toStation = stPos - shipPos;
-		const double stRad = nearStation->GetClipRadius() * 1.45 + 350.0;
+		const double hullRad = nearStation->GetClipRadius() * 1.08 + 40.0;
 		const double destDist = toDest.Length();
-		if (destDist > 1.0) {
-			const double t = Clamp(toStation.Dot(toDest) / (destDist * destDist), 0.0, 1.0);
-			const vector3d closestPtRel = (shipPos + t * toDest) - stPos;
-			if (closestPtRel.Length() < stRad) {
-				// Path intersects station clearance volume; deflect trajectory around station perimeter
-				vector3d avoidDir = (closestPtRel.LengthSqr() > 1.0) ? closestPtRel.NormalizedSafe() : (shipPos - stPos).NormalizedSafe();
-				targpos = stPos + avoidDir * (stRad + 400.0);
-				relpos = targpos - shipPos;
-				targdist = relpos.Length();
+		if (destDist > 10.0) {
+			const double t = toStation.Dot(toDest) / (destDist * destDist);
+			// Station hull only obstructs if it lies strictly between ship and destination
+			if (t > 0.05 && t < 0.95) {
+				const vector3d closestPtRel = (shipPos + t * toDest) - stPos;
+				if (closestPtRel.Length() < hullRad) {
+					// Path intersects station clearance volume; deflect trajectory around station perimeter
+					vector3d avoidDir = (closestPtRel.LengthSqr() > 1.0) ? closestPtRel.NormalizedSafe() : (shipPos - stPos).NormalizedSafe();
+					const double avoidRad = nearStation->GetClipRadius() * 1.35 + 250.0;
+					targpos = stPos + avoidDir * avoidRad;
+					relpos = targpos - shipPos;
+					targdist = relpos.Length();
+				}
 			}
 		}
 	}
@@ -1657,7 +1661,13 @@ bool AICmdDock::TimeStepUpdate()
 	assert(ship != nullptr);
 
 	// finished moving into dock start pos (done by child FlyTo command)
-	if (m_state == eDockFlyToStart) IncrementState();
+	if (m_state == eDockFlyToStart) {
+		const vector3d shipPosInSt = ship->GetPositionRelTo(m_target->GetFrame());
+		const double distToDockStart = (shipPosInSt - m_dockpos).Length();
+		if (distToDockStart <= 120.0) {
+			IncrementState();
+		}
+	}
 
 	// If we're docked with the target, then we're finished!
 	if (ship->GetDockedWith() == m_target) {
@@ -1729,31 +1739,34 @@ bool AICmdDock::TimeStepUpdate()
 			const vector3d shipPos = ship->GetPositionRelTo(m_target->GetFrame());
 			const vector3d shipRel = shipPos - stPos;
 			const vector3d dockRel = m_dockpos - stPos;
-			const double clearanceRad = m_target->GetClipRadius() * 1.45 + 350.0;
+			const double hullRad = m_target->GetClipRadius() * 1.05 + 50.0;
 			const vector3d segD = dockRel - shipRel;
 			const double segLen = segD.Length();
 
 			if (segLen > 10.0) {
-				const double t = Clamp(-shipRel.Dot(segD) / (segLen * segLen), 0.0, 1.0);
-				const vector3d closestPt = shipRel + t * segD;
-				if (closestPt.Length() < clearanceRad) {
-					// Direct line of sight is obstructed by the station hull;
-					// compute tangential perimeter transit waypoint to route around station
-					vector3d norm = shipRel.Cross(dockRel);
-					if (norm.LengthSqr() < 1e-4) {
-						norm = m_target->GetOrient().VectorY().Cross(shipRel);
-						if (norm.LengthSqr() < 1e-4)
-							norm = m_target->GetOrient().VectorZ().Cross(shipRel);
-					}
-					norm = norm.NormalizedSafe();
-					vector3d midDir = (shipRel.NormalizedSafe() + dockRel.NormalizedSafe()).NormalizedSafe();
-					if (midDir.LengthSqr() < 0.1)
-						midDir = norm.Cross(shipRel).NormalizedSafe();
+				const double t = -shipRel.Dot(segD) / (segLen * segLen);
+				if (t > 0.05 && t < 0.95) {
+					const vector3d closestPt = shipRel + t * segD;
+					if (closestPt.Length() < hullRad) {
+						// Direct line of sight is obstructed by the station hull;
+						// compute tangential perimeter transit waypoint to route around station
+						vector3d norm = shipRel.Cross(dockRel);
+						if (norm.LengthSqr() < 1e-4) {
+							norm = m_target->GetOrient().VectorY().Cross(shipRel);
+							if (norm.LengthSqr() < 1e-4)
+								norm = m_target->GetOrient().VectorZ().Cross(shipRel);
+						}
+						norm = norm.NormalizedSafe();
+						vector3d midDir = (shipRel.NormalizedSafe() + dockRel.NormalizedSafe()).NormalizedSafe();
+						if (midDir.LengthSqr() < 0.1)
+							midDir = norm.Cross(shipRel).NormalizedSafe();
 
-					const vector3d transitPos = stPos + midDir * (clearanceRad + 400.0);
-					m_child.reset(new AICmdFlyTo(m_dBody, m_target->GetFrame(), transitPos, 45.0, false));
-					ProcessChild();
-					return false;
+						const double transitRad = m_target->GetClipRadius() * 1.35 + 250.0;
+						const vector3d transitPos = stPos + midDir * transitRad;
+						m_child.reset(new AICmdFlyTo(m_dBody, m_target->GetFrame(), transitPos, 35.0, false));
+						ProcessChild();
+						return false;
+					}
 				}
 			}
 		}
@@ -1800,8 +1813,8 @@ bool AICmdDock::TimeStepUpdate()
 		else if (distToTarg < 2500.0)
 			speedCap = 38.0;
 
-		// Inbound traffic holding: if slot corridor is occupied by a departing ship, hold outside at APPROACH1
-		if (!m_target->CanLaunch(ship) && distToTarg < 1600.0) {
+		// Inbound traffic holding: if slot corridor is actively occupied by a departing ship, hold outside at APPROACH1
+		if (m_target->IsCorridorOccupied(ship) && distToTarg < 1600.0) {
 			speedCap = 0.0;
 		}
 	}

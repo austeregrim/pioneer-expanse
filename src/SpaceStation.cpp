@@ -324,6 +324,26 @@ void SpaceStation::SwapDockedShipsPort(const int oldBay, const int newBay)
 	SwitchToStage(oldBay, DockStage::NONE);
 }
 
+bool SpaceStation::IsCorridorOccupied(const Ship *excludeShip) const
+{
+	if (!m_corridorShip || m_corridorShip == excludeShip)
+		return false;
+
+	if (m_corridorShip->IsDead() || m_corridorShip->GetFlightState() == Ship::HYPERSPACE) {
+		const_cast<SpaceStation*>(this)->m_corridorShip = nullptr;
+		return false;
+	}
+
+	const double dist = m_corridorShip->GetPositionRelTo(this).Length();
+	const double clearDist = IsGroundStation() ? std::min(GetClipRadius() * 0.8 + 200.0, 450.0) : (GetClipRadius() * 1.4 + 500.0);
+	if (dist > clearDist) {
+		const_cast<SpaceStation*>(this)->m_corridorShip = nullptr;
+		return false;
+	}
+
+	return true;
+}
+
 bool SpaceStation::CanLaunch(const Ship *ship) const
 {
 	if (!ship) return false;
@@ -332,18 +352,8 @@ bool SpaceStation::CanLaunch(const Ship *ship) const
 	if (bay == -1 || IsPortLocked(bay)) return false;
 
 	// Check if the departure corridor is currently occupied by another vessel
-	if (m_corridorShip && m_corridorShip != ship) {
-		if (m_corridorShip->IsDead() || m_corridorShip->GetFlightState() == Ship::HYPERSPACE) {
-			const_cast<SpaceStation*>(this)->m_corridorShip = nullptr;
-		} else {
-			const double dist = m_corridorShip->GetPositionRelTo(this).Length();
-			const double clearDist = IsGroundStation() ? std::min(GetClipRadius() * 0.8 + 200.0, 450.0) : (GetClipRadius() * 1.4 + 500.0);
-			if (dist > clearDist) {
-				const_cast<SpaceStation*>(this)->m_corridorShip = nullptr;
-			} else {
-				return false; // Corridor occupied by active departure
-			}
-		}
+	if (IsCorridorOccupied(ship)) {
+		return false; // Corridor occupied by active departure
 	}
 
 	// Safety separation between consecutive launches

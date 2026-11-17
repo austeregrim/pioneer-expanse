@@ -62,6 +62,7 @@ public:
 	// Returns true on success, false if permission denied
 	bool LaunchShip(Ship *ship, const int port);
 	bool CanLaunch(const Ship *ship) const;
+	bool IsCorridorOccupied(const Ship *excludeShip = nullptr) const;
 	double GetLaunchWaitTime() const;
 	void NotifyCorridorCleared(const Ship *ship);
 	void SetDocked(Ship *ship, const int port);
