@@ -24,6 +24,14 @@ Pioneer: Expanse builds with deep appreciation upon the foundation created by th
 
 ---
 
+## Releases
+
+Releases are published as soon as significant or major changes have been made, or if there is emergency bug fixes which is as soon as we see and can fix the bug.
+
+Windows and Linux executable packages are built around 20 minutes after publishing the release on github.
+
+We try to commit changes as soon as possible especially when working on bug fixes, if a release hasn't fixed a bug you're seeing try compiling from source, if you still experience issues please submit a bug.
+
 ## Compiling from Source
 
 Pioneer: Expanse builds using CMake and Ninja on modern Linux distributions:
