@@ -218,10 +218,16 @@ void LuaVector::Register(lua_State *L)
 		.AddCallCtor(&l_vector_call)
 		.AddFunction("normalized", &vector3d::NormalizedSafe)
 		.AddFunction("normalised", &vector3d::NormalizedSafe)
+		.AddFunction("Normalized", &vector3d::NormalizedSafe)
+		.AddFunction("Normalised", &vector3d::NormalizedSafe)
 		.AddFunction("lengthSqr", &vector3d::LengthSqr)
+		.AddFunction("LengthSqr", &vector3d::LengthSqr)
 		.AddFunction("length", &vector3d::Length)
+		.AddFunction("Length", &vector3d::Length)
 		.AddFunction("cross", &vector3d::Cross)
+		.AddFunction("Cross", &vector3d::Cross)
 		.AddFunction("dot", &vector3d::Dot)
+		.AddFunction("Dot", &vector3d::Dot)
 		.StopRecording();
 
 	// set the meta functions

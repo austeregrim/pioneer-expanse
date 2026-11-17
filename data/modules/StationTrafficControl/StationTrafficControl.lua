@@ -159,7 +159,7 @@ local function enforceStationSafetyZone()
 			if flightState == "FLYING" then
 				local dist = ship:DistanceTo(station)
 				local vel = ship:GetVelocityRelTo(station)
-				local speed = vel and vel:Length() or 0.0
+				local speed = (vel and vel.length) and vel:length() or 0.0
 
 				local isInside = (dist <= exclusionRadius)
 				local hasClearance = (station:GetAssignedBayNumber(ship) >= 0)
