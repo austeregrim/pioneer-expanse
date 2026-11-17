@@ -1207,11 +1207,38 @@ bool AICmdFlyTo::TimeStepUpdate()
 					Frame *curFrame = Frame::GetFrame(ship->GetFrame());
 					Body *frameBody = curFrame ? curFrame->GetBody() : nullptr;
 
-					// Safety inhibitor: Do not charge FSD or blind-boost while inside or immediately next to a space station
+					// Safety inhibitor: Do not charge FSD while inside or immediately next to a space station
+					const SpaceStation *nearStation = nullptr;
 					if (frameBody && frameBody->IsType(ObjectType::SPACESTATION)) {
-						const double stationDist = ship->GetPosition().Length();
-						if (stationDist < frameBody->GetClipRadius() * 1.5 + 1200.0) {
-							// Inside station clearance zone: hold FSD charge, allow sublight departure autopilot to clear
+						nearStation = static_cast<const SpaceStation *>(frameBody);
+					} else if (Pi::game && Pi::game->GetSpace()) {
+						for (Body *b : Pi::game->GetSpace()->GetBodies()) {
+							if (b->IsType(ObjectType::SPACESTATION)) {
+								const double d = (ship->GetPosition() - b->GetPositionRelTo(ship->GetFrame())).Length();
+								if (d < b->GetClipRadius() * 1.5 + 800.0) {
+									nearStation = static_cast<const SpaceStation *>(b);
+									break;
+								}
+							}
+						}
+					}
+					if (nearStation) {
+						const vector3d relToSt = ship->GetPosition() - nearStation->GetPositionRelTo(ship->GetFrame());
+						const double stDist = relToSt.Length();
+						const double clearRadius = nearStation->GetClipRadius() * 1.5 + 600.0;
+						if (stDist < clearRadius) {
+							// Inside station clearance zone: actively steer sublight away until clear
+							vector3d away = relToSt.NormalizedSafe();
+							if (nearStation->IsGroundStation()) {
+								const vector3d stUp = nearStation->GetOrientRelTo(ship->GetFrame()).VectorY().NormalizedSafe();
+								away = (away + stUp * 1.5).NormalizedSafe();
+							}
+							if (away.LengthSqr() < 0.1) away = -ship->GetOrient().VectorZ();
+							const double ang = m_prop->AIFaceDirection(away);
+							if (ang < 0.4)
+								m_prop->SetLinThrusterState(vector3d(0.0, 0.0, -0.8));
+							else
+								m_prop->SetLinThrusterState(vector3d(0.0));
 							return false;
 						}
 					}
@@ -1813,8 +1840,8 @@ bool AICmdDock::TimeStepUpdate()
 		else if (distToTarg < 2500.0)
 			speedCap = 38.0;
 
-		// Inbound traffic holding: if slot corridor is actively occupied by a departing ship, hold outside at APPROACH1
-		if (m_target->IsCorridorOccupied(ship) && distToTarg < 1600.0) {
+		// Inbound traffic holding: if slot corridor is actively occupied by a departing ship, hold outside at APPROACH1 (player gets priority)
+		if (!ship->IsType(ObjectType::PLAYER) && m_target->IsCorridorOccupied(ship) && distToTarg < 1600.0) {
 			speedCap = 0.0;
 		}
 	}
@@ -2062,7 +2089,7 @@ bool AICmdDepart::TimeStepUpdate()
 
 		const double distFromStation = ship->GetPositionRelTo(m_station).Length();
 		if (distFromStation > 450.0 || m_departTimer > 15.0) {
-			m_prop->SetLinThrusterState(vector3d(0.0));
+			m_prop->SetLinThrusterState(vector3d(0.0, 0.4, -0.6));
 			m_station->NotifyCorridorCleared(ship);
 			return true;
 		}
