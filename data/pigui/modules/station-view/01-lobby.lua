@@ -78,14 +78,6 @@ local requestLaunch = function (station)
 
 	AutoSave.Save()
 
-	if not station:CanLaunch(Game.player) then
-		local wait = station:GetLaunchWaitTime()
-		local isSurface = (station.type == "STARPORT_SURFACE")
-		local holdArea = isSurface and "Air space" or "Airlock corridor"
-		Comms.ImportantMessage(string.format("Traffic Control: Launch clearance on hold. %s active with traffic. Hold position on pad (est. %ds).", holdArea, math.ceil(wait)), station.label)
-		return false
-	end
-
 	if not Game.player:Undock() then
 		Comms.ImportantMessage(l.LAUNCH_PERMISSION_DENIED_BUSY, station.label)
 		popupMsg = l.LAUNCH_PERMISSION_DENIED_BUSY
@@ -393,26 +385,12 @@ local function drawPlayerInfo()
 							end)
 						end)
 					else
-						local canLaunch = station:CanLaunch(Game.player)
-						local wait = station:GetLaunchWaitTime()
-						if not canLaunch and wait > 0.0 then
-							local isSurface = (station.type == "STARPORT_SURFACE")
-							local holdText = string.format("%s: %ds", isSurface and "AIR SPACE HOLD" or "AIRLOCK HOLD", math.ceil(wait))
-							local holdFont = orbiteer.medlarge
-							ui.withFont(holdFont, function()
-								ui.withStyleColors({ Button = colors.alertYellow, ButtonHovered = colors.alertYellow, ButtonActive = colors.alertYellow, Text = colors.black }, function()
-									if ui.button(holdText, size) then
-										requestLaunch(station)
-									end
-								end)
-							end)
-						else
-							ui.withFont(orbiteer.title, function()
-								if ui.button(l.REQUEST_LAUNCH, size) then
-									requestLaunch(station)
-								end
-							end)
-						end
+						ui.withFont(orbiteer.title, function()
+							if ui.button(l.REQUEST_LAUNCH, size) then
+								requestLaunch(station)
+							end
+						end)
+					end
 					end
 				end)
 			end)

@@ -254,7 +254,9 @@ void SpaceStation::NotifyRemoved(const Body *const removedBody)
 		m_corridorShip = nullptr;
 	for (Uint32 i = 0; i < m_shipDocking.size(); i++) {
 		if (m_shipDocking[i].ship == removedBody) {
-			m_shipDocking[i].ship = 0;
+			m_shipDocking[i].ship = nullptr;
+			m_shipDocking[i].stage = DockStage::NONE;
+			LockPort(i, false);
 		}
 	}
 }
@@ -329,13 +331,24 @@ bool SpaceStation::IsCorridorOccupied(const Ship *excludeShip) const
 	if (!m_corridorShip || m_corridorShip == excludeShip)
 		return false;
 
-	if (m_corridorShip->IsDead() || m_corridorShip->GetFlightState() == Ship::HYPERSPACE) {
+	if (m_corridorShip->IsDead() || m_corridorShip->GetFlightState() == Ship::HYPERSPACE ||
+		m_corridorShip->GetFlightState() == Ship::DOCKED) {
 		const_cast<SpaceStation*>(this)->m_corridorShip = nullptr;
 		return false;
 	}
 
+	// Safety timeout: corridor departure hold cannot exceed 40 seconds under any circumstance
+	if (Pi::game) {
+		const double now = Pi::game->GetTime();
+		if (now > 0.0 && (now - m_lastLaunchTime) > 40.0) {
+			const_cast<SpaceStation*>(this)->m_corridorShip = nullptr;
+			return false;
+		}
+	}
+
 	const double dist = m_corridorShip->GetPositionRelTo(this).Length();
-	const double clearDist = IsGroundStation() ? std::min(GetClipRadius() * 0.8 + 200.0, 450.0) : (GetClipRadius() * 1.4 + 500.0);
+	// Orbital stations clear when past 1,400m from center (safely out of the axial mail slot corridor)
+	const double clearDist = IsGroundStation() ? std::min(GetClipRadius() * 0.8 + 200.0, 450.0) : std::min(GetClipRadius() * 0.8 + 400.0, 1400.0);
 	if (dist > clearDist) {
 		const_cast<SpaceStation*>(this)->m_corridorShip = nullptr;
 		return false;
@@ -349,7 +362,14 @@ bool SpaceStation::CanLaunch(const Ship *ship) const
 	if (!ship) return false;
 
 	int bay = GetMyDockingPort(ship);
-	if (bay == -1 || IsPortLocked(bay)) return false;
+	if (bay == -1) return false;
+
+	// The player always has priority and is never prevented from launching
+	if (ship->IsType(ObjectType::PLAYER)) {
+		return true;
+	}
+
+	if (IsPortLocked(bay)) return false;
 
 	// Check if the departure corridor is currently occupied by another vessel
 	if (IsCorridorOccupied(ship)) {
@@ -364,11 +384,11 @@ bool SpaceStation::CanLaunch(const Ship *ship) const
 		}
 	}
 
-	// Orbital station check: don't launch if an inbound ship is currently traversing the mail slot
+	// Orbital station check: don't launch if an inbound ship is currently actively traversing the mail slot entrance
 	if (m_type && m_type->IsOrbitalStation()) {
 		for (Uint32 i = 0; i < m_shipDocking.size(); i++) {
 			const shipDocking_t &dt = m_shipDocking[i];
-			if (dt.ship && dt.ship != ship && SpaceStationType::IsDockStage(dt.stage)) {
+			if (dt.ship && !dt.ship->IsDead() && dt.ship != ship && dt.stage == DockStage::DOCK_ANIMATION_1) {
 				return false;
 			}
 		}
@@ -387,12 +407,27 @@ double SpaceStation::GetLaunchWaitTime() const
 			wait = MIN_LAUNCH_SEPARATION - elapsed;
 		}
 	}
-	if (m_corridorShip && !m_corridorShip->IsDead()) {
+	if (m_corridorShip && !m_corridorShip->IsDead() && m_corridorShip->GetFlightState() != Ship::DOCKED) {
 		const double dist = m_corridorShip->GetPositionRelTo(this).Length();
-		const double clearDist = IsGroundStation() ? std::min(GetClipRadius() * 0.8 + 200.0, 450.0) : (GetClipRadius() * 1.4 + 500.0);
+		const double clearDist = IsGroundStation() ? std::min(GetClipRadius() * 0.8 + 200.0, 450.0) : std::min(GetClipRadius() * 0.8 + 400.0, 1400.0);
 		if (dist < clearDist) {
-			const double corridorWait = std::max(4.0, (clearDist - dist) / 32.0);
+			const double corridorWait = std::max(3.0, (clearDist - dist) / 35.0);
 			wait = std::max(wait, corridorWait);
+		}
+	}
+	if (m_type && m_type->IsOrbitalStation()) {
+		for (Uint32 i = 0; i < m_shipDocking.size(); i++) {
+			const shipDocking_t &dt = m_shipDocking[i];
+			if (dt.ship && !dt.ship->IsDead() && dt.stage == DockStage::DOCK_ANIMATION_1) {
+				wait = std::max(wait, 8.0);
+				break;
+			}
+		}
+	}
+	for (auto &bayIter : m_ports) {
+		if (bayIter.inUse) {
+			wait = std::max(wait, 6.0);
+			break;
 		}
 	}
 	return std::max(0.0, wait);
@@ -861,8 +896,10 @@ void SpaceStation::TimeStepUpdate(const float timeStep)
 	}
 
 	if (m_corridorShip) {
-		const double clearDist = IsGroundStation() ? std::min(GetClipRadius() * 0.8 + 200.0, 450.0) : (GetClipRadius() * 1.4 + 600.0);
+		const double clearDist = IsGroundStation() ? std::min(GetClipRadius() * 0.8 + 200.0, 450.0) : std::min(GetClipRadius() * 0.8 + 400.0, 1400.0);
+		const double elapsed = Pi::game ? (Pi::game->GetTime() - m_lastLaunchTime) : 0.0;
 		if (m_corridorShip->IsDead() || m_corridorShip->GetFlightState() == Ship::HYPERSPACE ||
+			m_corridorShip->GetFlightState() == Ship::DOCKED || elapsed > 40.0 ||
 			m_corridorShip->GetPositionRelTo(this).Length() > clearDist) {
 			m_corridorShip = nullptr;
 		}
@@ -968,12 +1005,29 @@ bool SpaceStation::IsPortLocked(const int bay) const
 	for (auto &bayIter : m_ports) {
 		for (auto &idIter : bayIter.bayIDs) {
 			if (idIter.first == bay) {
-				return bayIter.inUse;
+				if (!bayIter.inUse) return false;
+				// Validate: Is any bay on this port ACTUALLY in an active undocking stage?
+				bool activeUndock = false;
+				for (auto &checkIter : bayIter.bayIDs) {
+					int b = checkIter.first;
+					if (b >= 0 && Uint32(b) < m_shipDocking.size()) {
+						if (m_shipDocking[b].ship && !m_shipDocking[b].ship->IsDead() &&
+							SpaceStationType::IsUndockStage(m_shipDocking[b].stage)) {
+							activeUndock = true;
+							break;
+						}
+					}
+				}
+				if (!activeUndock) {
+					// Stale lock from crashed, deleted, or finished vessel; self-heal!
+					const_cast<SpaceStation*>(this)->LockPort(bay, false);
+					return false;
+				}
+				return true;
 			}
 		}
 	}
-	// is it safer to return that the is loacked?
-	return true;
+	return false;
 }
 
 void SpaceStation::LockPort(const int bay, const bool lockIt)

@@ -3,6 +3,7 @@
 
 local Game = require 'Game'
 local Event = require 'Event'
+local Comms = require 'Comms'
 local bindManager = require 'bind-manager'
 local AutoSave    = require 'modules.AutoSave.AutoSave'
 
