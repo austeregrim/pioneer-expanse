@@ -126,6 +126,78 @@ local function onDockingClearanceExpired(station, ship)
 	Comms.ImportantMessage(l.DOCKING_CLEARANCE_EXPIRED, station.label)
 end
 
+local loiterTrack = {}
+
+local function enforceStationSafetyZone()
+	if not Game.player or not Game.player:exists() then return end
+	if Game.player.flightState == "HYPERSPACE" then
+		loiterTrack = {}
+		return
+	end
+
+	local station = Game.player:FindNearestTo("SPACESTATION")
+	if not station or not station:exists() then
+		loiterTrack = {}
+		return
+	end
+
+	-- Only monitor when player is within traffic area (40 km)
+	if station:DistanceTo(Game.player) > 40000 and Game.player:GetDockedWith() ~= station then
+		loiterTrack = {}
+		return
+	end
+
+	local isSurface = (station.type == "STARPORT_SURFACE")
+	local exclusionRadius = isSurface and 650.0 or (station:GetPhysicalRadius() * 1.25 + 300.0)
+
+	local nearShips = Space.GetBodiesNear(station, exclusionRadius + 400.0, "Ship")
+	local activeShips = {}
+
+	for _, ship in ipairs(nearShips) do
+		if ship and ship:exists() and ship ~= Game.player then
+			local flightState = ship.flightState
+			if flightState == "FLYING" then
+				local dist = ship:DistanceTo(station)
+				local vel = ship:GetVelocityRelTo(station)
+				local speed = vel and vel:Length() or 0.0
+
+				local isInside = (dist <= exclusionRadius)
+				local hasClearance = (station:GetAssignedBayNumber(ship) >= 0)
+				-- Stalled/derelict (< 3.0 m/s) or unauthorized obstruction inside the flight corridor:
+				local isObstructing = isInside and (speed < 3.0 or (not hasClearance and dist < exclusionRadius * 0.85))
+
+				if isObstructing then
+					activeShips[ship] = true
+					local rec = loiterTrack[ship] or { time = 0, warned1 = false, warned2 = false }
+					rec.time = rec.time + 2.0
+					loiterTrack[ship] = rec
+
+					local label = ship:GetLabel()
+					local zoneName = isSurface and "airspace" or "airlock corridor"
+
+					if rec.time >= 10.0 and not rec.warned1 then
+						rec.warned1 = true
+						Comms.Message(string.format("Traffic Control: Vessel \"%s\", you are loitering in an active %s without authorization. Clear the area immediately.", label, zoneName), station.label)
+					elseif rec.time >= 20.0 and not rec.warned2 then
+						rec.warned2 = true
+						Comms.ImportantMessage(string.format("Traffic Control: Vessel \"%s\", final warning! Unauthorized loitering infraction confirmed. Clear the %s or lethal force will be authorized.", label, zoneName), station.label)
+					elseif rec.time >= 28.0 then
+						Comms.ImportantMessage(string.format("Traffic Control: Lethal force authorized against unauthorized obstruction \"%s\". Starport defense grid engaging.", label), station.label)
+						loiterTrack[ship] = nil
+						ship:Explode("Starport Defense Grid (Unauthorized Loitering)")
+					end
+				end
+			end
+		end
+	end
+
+	for s, _ in pairs(loiterTrack) do
+		if not activeShips[s] then
+			loiterTrack[s] = nil
+		end
+	end
+end
+
 local loaded_data
 
 local onGameStart = function ()
@@ -138,6 +210,7 @@ local onGameStart = function ()
 	end
 	loaded_data = nil
 	Timer:CallEvery(5, notifyControlledSpace)
+	Timer:CallEvery(2, enforceStationSafetyZone)
 end
 
 

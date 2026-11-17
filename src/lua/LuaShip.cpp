@@ -217,6 +217,11 @@ static int l_ship_explode(lua_State *l)
 	Ship *s = LuaObject<Ship>::CheckFromLua(1);
 	if (s->GetFlightState() == Ship::HYPERSPACE)
 		return luaL_error(l, "Ship:Explode() cannot be called on a ship in hyperspace");
+
+	if (lua_gettop(l) >= 2 && lua_isstring(l, 2)) {
+		std::string cause = lua_tostring(l, 2);
+		s->RecordCollision(nullptr, cause, 0.0);
+	}
 	s->Explode();
 
 	LUA_DEBUG_END(l, 0);

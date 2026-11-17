@@ -111,3 +111,4 @@ compile
 
 !data/modules/Debug
 *.lnk
+blackbox_diagnostics.log

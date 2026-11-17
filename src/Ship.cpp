@@ -812,7 +812,8 @@ void Ship::Explode()
 	}
 
 	Pi::game->GetSpace()->KillBody(this);
-	if (this->GetFrame() == Pi::player->GetFrame()) {
+	const double distToPlayer = (Pi::player && !Pi::player->IsDead()) ? GetPositionRelTo(Pi::player).Length() : 1e9;
+	if (distToPlayer < 50000.0 || (Pi::player && this->GetFrame() == Pi::player->GetFrame())) {
 		SfxManager::AddExplosion(this);
 		Sound::BodyMakeNoise(this, "Explosion_1", 1.0f);
 	}
