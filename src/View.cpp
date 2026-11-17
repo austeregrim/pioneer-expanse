@@ -55,5 +55,9 @@ void View::DrawPiGui()
 		m_activated = false;
 	}
 
+	if (m_handlerName == "WorldView" && !ImGui::GetIO().WantTextInput && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopup)) {
+		ImGui::SetNextFrameWantCaptureKeyboard(false);
+	}
+
 	ImGui::End();
 }

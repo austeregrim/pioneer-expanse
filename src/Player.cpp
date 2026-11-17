@@ -391,9 +391,10 @@ void Player::StaticUpdate(const float timeStep)
 			m_takeoffTimer = 0.0f;
 			auto con = GetPlayerController();
 			if (con && con->GetFlightControlState() == CONTROL_FIXSPEED && con->GetCruiseDirection() == PlayerShipController::CRUISE_UP) {
-				// Pad clearance achieved: transition smoothly from vertical liftoff to forward cruise flight
+				// Pad clearance achieved: transition cleanly to forward manual flight mode with full thruster authority
 				con->SetCruiseDirection(PlayerShipController::CRUISE_FWD);
-				con->ChangeCruiseSpeed(-con->GetCruiseSpeed());
+				con->SetFlightControlState(CONTROL_MANUAL);
+				con->SetFollowTarget(nullptr);
 			}
 		}
 	}

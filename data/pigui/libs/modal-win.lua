@@ -3,6 +3,7 @@
 
 local ui = require 'pigui'
 
+local Event = require 'Event'
 local Module = require 'pigui.libs.module'
 local utils = require 'utils'
 
@@ -127,6 +128,26 @@ end
 
 ui.registerModule('modal', function()
 	drawModals(1)
+end)
+
+Event.Register("onPlayerUndocked", function()
+	for i = #modalStack, 1, -1 do
+		local win = modalStack[i]
+		if win and win.name and win.name ~= "Options" and win.name ~= "SaveGameWindow" then
+			win:close()
+		end
+	end
+end)
+
+Event.Register("onViewChanged", function(currView)
+	if currView == "WorldView" then
+		for i = #modalStack, 1, -1 do
+			local win = modalStack[i]
+			if win and win.name and win.name ~= "Options" and win.name ~= "SaveGameWindow" and win.name ~= "About" then
+				win:close()
+			end
+		end
+	end
 end)
 
 return ModalWindow

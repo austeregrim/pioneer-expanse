@@ -58,6 +58,8 @@
 #include "graphics/opengl/RendererGL.h"
 
 #include "core/GuiApplication.h"
+#include "imgui/imgui.h"
+#include "imgui/imgui_internal.h"
 #include "core/Log.h"
 #include "core/OS.h"
 
@@ -1249,6 +1251,11 @@ void Pi::SetView(View *v)
 	if (currentView) currentView->Detach();
 	currentView = v;
 	if (currentView) currentView->Attach();
+
+	// Clear active ImGui ID and keyboard focus on view transition so previous view's widgets don't capture inputs
+	ImGui::ClearActiveID();
+	ImGui::SetWindowFocus(nullptr);
+
 	LuaEvent::Queue("onViewChanged",
 	                currentView? currentView->GetViewName().c_str() : "",
 	                previousView? previousView->GetViewName().c_str() : "");

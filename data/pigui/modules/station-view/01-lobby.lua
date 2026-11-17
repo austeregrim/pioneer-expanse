@@ -82,14 +82,17 @@ local requestLaunch = function (station)
 		Comms.ImportantMessage(l.LAUNCH_PERMISSION_DENIED_BUSY, station.label)
 		popupMsg = l.LAUNCH_PERMISSION_DENIED_BUSY
 		popup:open()
-	elseif nearbyTraffic - (station.numShipsDocked) > 0 then -- station radar picking up stuff nearby
-		Comms.Message(l.LAUNCH_PERMISSION_GRANTED_WATCH_TRAFFIC, station.label)
-		Game.SwitchView()
-	elseif station.numDocks - (station.numShipsDocked + 1) < station.numShipsDocked * 0.2 then -- busy station, pads almost full
-		Comms.Message(l.LAUNCH_PERMISSION_GRANTED_DEPART_QUICK, station.label)
-		Game.SwitchView()
 	else
-		Comms.Message(l.LAUNCH_PERMISSION_GRANTED, station.label)
+		if popup.isOpen or popup.stackIdx ~= -1 then
+			popup:close()
+		end
+		if nearbyTraffic - (station.numShipsDocked) > 0 then -- station radar picking up stuff nearby
+			Comms.Message(l.LAUNCH_PERMISSION_GRANTED_WATCH_TRAFFIC, station.label)
+		elseif station.numDocks - (station.numShipsDocked + 1) < station.numShipsDocked * 0.2 then -- busy station, pads almost full
+			Comms.Message(l.LAUNCH_PERMISSION_GRANTED_DEPART_QUICK, station.label)
+		else
+			Comms.Message(l.LAUNCH_PERMISSION_GRANTED, station.label)
+		end
 		Game.SwitchView()
 	end
 end
