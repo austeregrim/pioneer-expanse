@@ -22,6 +22,8 @@ Pioneer: Expanse builds with deep appreciation upon the foundation created by th
 * Upstream Repository: [https://github.com/pioneerspacesim/pioneer](https://github.com/pioneerspacesim/pioneer)
 * Original License: [GNU General Public License v3 (GPLv3)](http://www.gnu.org/licenses/gpl-3.0.html)
 
+---
+
 ## Compiling from Source
 
 Pioneer: Expanse builds using CMake and Ninja on modern Linux distributions:
@@ -41,7 +43,6 @@ cmake --build build --target pioneer unittest build-data -j $(nproc)
 # Launch game
 ./build/pioneer
 ```
-
 
 ## Major Differences: Pioneer: Expanse vs. Original Pioneer
 
