@@ -3,6 +3,8 @@
 
 #include "EnumStrings.h"
 #include "Frame.h"
+#include "Game.h"
+#include "Pi.h"
 #include "Player.h"
 #include "Ship.h"
 #include "ShipAICmd.h"
@@ -24,6 +26,28 @@ bool Ship::AITimeStep(float timeStep)
 	if (m_launchLockTimeout > 0.0) return false;
 
 	m_decelerating = false;
+
+	// Any NPC ship that finds itself inside an orbital space station without docking orders
+	// should immediately exit by recentering on the station axis and exiting through the airlock.
+	if (!IsType(ObjectType::PLAYER) && m_flightState == FLYING && Pi::game && Pi::game->GetSpace()) {
+		const Space::BodyNearList nearby = Pi::game->GetSpace()->GetBodiesMaybeNear(this, 1200.0);
+		for (Body *b : nearby) {
+			if (!b || !b->IsType(ObjectType::SPACESTATION)) continue;
+			SpaceStation *st = static_cast<SpaceStation *>(b);
+			if (st->IsInsideStation(this)) {
+				int bay = st->GetMyDockingPort(this);
+				bool hasDockingClearance = (bay != -1 && m_curAICmd && m_curAICmd->GetType() == AICommand::CMD_DOCK);
+				bool isDeparting = (m_curAICmd && m_curAICmd->GetType() == AICommand::CMD_DEPART);
+
+				if (!hasDockingClearance && !isDeparting) {
+					AIDepart(st);
+					return false;
+				}
+				break;
+			}
+		}
+	}
+
 	if (!m_curAICmd) {
 		if (this->IsType(ObjectType::PLAYER)) return true;
 
@@ -175,6 +199,19 @@ void Ship::AIFlyTo(Body *target)
 	}
 
 	SetFuelReserve((GetFuel() < 0.5) ? GetFuel() / 2 : 0.25);
+
+	// An NPC inside an orbital station cannot fly directly to outside targets; it must depart through the airlock first
+	if (!IsType(ObjectType::PLAYER) && Pi::game && Pi::game->GetSpace()) {
+		const Space::BodyNearList nearby = Pi::game->GetSpace()->GetBodiesMaybeNear(this, 1200.0);
+		for (Body *b : nearby) {
+			if (!b || !b->IsType(ObjectType::SPACESTATION)) continue;
+			SpaceStation *st = static_cast<SpaceStation *>(b);
+			if (st->IsInsideStation(this)) {
+				AIDepart(st);
+				return;
+			}
+		}
+	}
 
 	if (target->IsType(ObjectType::SHIP)) {
 		Ship *targetShip = static_cast<Ship *>(target);

@@ -78,6 +78,7 @@ class AICmdDock : public AICommand {
 public:
 	virtual bool TimeStepUpdate();
 	AICmdDock(DynamicBody *dBody, SpaceStation *target);
+	virtual ~AICmdDock();
 
 	virtual void GetStatusText(char *str);
 	virtual void SaveToJson(Json &jsonObj);
@@ -133,7 +134,10 @@ private:
 		eDepartAlignCorridor = 0,
 		eDepartFlyToPort = 1,
 		eDepartFlyToClearance = 2,
-		eDepartComplete = 3
+		eDepartComplete = 3,
+		eDepartRecenter = 4,
+		eDepartGroundLiftoff = 5,
+		eDepartGroundClimb = 6
 	};
 
 	SpaceStation *m_station;

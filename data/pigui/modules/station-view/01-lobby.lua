@@ -218,7 +218,7 @@ local function drawCivilAdministrationSection(station)
 			dueStatusStr = "DELINQUENT - 5% LATE PENALTY APPLIED"
 			dueColor = colors.alertRed
 		elseif assess.daysUntilDue > 0 then
-			dueStatusStr = string.format("Filing Due in %d In-Game Days", assess.daysUntilDue)
+			dueStatusStr = string.format("Filing Due in %d Days", assess.daysUntilDue)
 			dueColor = colors.fontDim
 		else
 			dueStatusStr = "No Assessment Pending"

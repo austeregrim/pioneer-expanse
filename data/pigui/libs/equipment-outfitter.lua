@@ -337,9 +337,8 @@ function Outfitter:buildEquipmentList()
 		data.available = data.canInstall and data.canReplace and not data.outOfStock
 		    and money >= self:getInstallPrice(equip)
 
-		-- Replace condition widget with price instead
-		-- trim leading '$' character since we're drawing it with an icon instead
-		data[#data] = { icons.money, ui.Format.Money(data.price):sub(2, -1) }
+		-- Replace condition widget with price instead (clean Format.Money already includes 'Cr' suffix)
+		data[#data] = { nil, ui.Format.Money(data.price) }
 
 		if equip:GetPrototype() == currentProto then
 			data.type = l.INSTALLED

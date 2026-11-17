@@ -296,9 +296,13 @@ local function drawNavLocusLottery()
 		-- Recent winner / rollover status line
 		if drawState.lastWinner then
 			local lw = drawState.lastWinner
-			local winTag = lw.isPlayer and "Commander Claimed" or "NPC Claimed"
-			ui.textColored(Color(120, 245, 140, 255), string.format("Cycle #%d Grand Winner (%s): %s (%s) in %s [%s]",
-				lw.drawNumber, winTag, lw.name, lw.faction, lw.system, formatCr(lw.amount)))
+			if lw.isPlayer then
+				ui.textColored(Color(120, 245, 140, 255), string.format("Cycle #%d Grand Winner (Commander Claimed): %s (%s) in %s [%s]",
+					lw.drawNumber, lw.name, lw.faction, lw.system, formatCr(lw.amount)))
+			else
+				ui.textColored(Color(120, 245, 140, 255), string.format("Cycle #%d Grand Winner: %s (%s) in %s [%s]",
+					lw.drawNumber, lw.name, lw.faction, lw.system, formatCr(lw.amount)))
+			end
 		else
 			ui.textColored(colors.fontDim, "Cycle Status: Progressive Pool Rollover Active (+75M–150M Cr / week)")
 		end
@@ -707,7 +711,7 @@ local function drawNavLocusLottery()
 
 			ui.textColored(colors.uiPrimaryLight, "Drawing Synchronisation Directives:")
 			ui.textWrapped("1. DRAW SCHEDULE: Synchronized pan-galactic draws occur weekly every Tuesday at 18:00:00 GST across all relay transponders. Draws advance seamlessly whether flying in real-time, waiting docked, or executing hyperspace jumps.")
-			ui.textWrapped("2. NPC & CONSORTIUM PARTICIPATION: Billions of interstellar pilots, mining syndicates, and corporate trusts participate in each cycle. When an NPC or consortium verifies a Tier 1 match, the grand pool is claimed and resets to 500M Cr.")
+			ui.textWrapped("2. CITIZEN & CONSORTIUM PARTICIPATION: Billions of interstellar pilots, mining syndicates, and corporate trusts participate in each cycle. When a participating citizen or consortium verifies a Tier 1 match, the grand pool is claimed and resets to 500M Cr.")
 			ui.textWrapped("3. PROGRESSIVE ROLLOVER: If no grand vector alignment is verified across pan-galactic transponders, the jackpot pool compounds by +75,000,000 to +150,000,000 Credits for the following Tuesday's draw.")
 		end)
 	end

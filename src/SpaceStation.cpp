@@ -20,6 +20,7 @@
 #include "Player.h"
 #include "Quaternion.h"
 #include "Ship.h"
+#include "ShipAICmd.h"
 #include "Space.h"
 #include "SpaceStationType.h"
 #include "StringF.h"
@@ -337,23 +338,44 @@ bool SpaceStation::IsCorridorOccupied(const Ship *excludeShip) const
 		return false;
 	}
 
-	// Safety timeout: corridor departure hold cannot exceed 40 seconds under any circumstance
+	// Safety timeout: corridor departure/arrival lock cannot exceed 45 seconds under any circumstance
 	if (Pi::game) {
 		const double now = Pi::game->GetTime();
-		if (now > 0.0 && (now - m_lastLaunchTime) > 40.0) {
+		if (now > 0.0 && (now - m_lastLaunchTime) > 45.0) {
 			const_cast<SpaceStation*>(this)->m_corridorShip = nullptr;
 			return false;
 		}
 	}
 
 	const double dist = m_corridorShip->GetPositionRelTo(this).Length();
-	// Orbital stations clear when past 1,400m from center (safely out of the axial mail slot corridor)
-	const double clearDist = IsGroundStation() ? std::min(GetClipRadius() * 0.8 + 200.0, 450.0) : std::min(GetClipRadius() * 0.8 + 400.0, 1400.0);
+	// Orbital stations clear when past full departure clearance radius (at least 2500m into open space)
+	const double clearDist = IsGroundStation() ? std::min(GetClipRadius() * 0.8 + 200.0, 450.0) : std::max(GetClipRadius() * 1.5 + 500.0, 2500.0);
 	if (dist > clearDist) {
 		const_cast<SpaceStation*>(this)->m_corridorShip = nullptr;
 		return false;
 	}
 
+	// For orbital stations, if the corridor ship was inbound and is now safely inside the interior cylinder,
+	// it has successfully traversed the mail slot entrance and cleared the corridor for subsequent traffic:
+	if (m_type && m_type->IsOrbitalStation() && IsInsideStation(m_corridorShip)) {
+		bool isDeparting = (m_corridorShip->GetAICommand() && m_corridorShip->GetAICommand()->GetType() == AICommand::CMD_DEPART);
+		if (!isDeparting) {
+			const_cast<SpaceStation*>(this)->m_corridorShip = nullptr;
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool SpaceStation::ClaimCorridor(Ship *ship)
+{
+	if (!ship) return false;
+	if (m_corridorShip == ship) return true;
+	if (IsCorridorOccupied(ship)) return false;
+
+	m_corridorShip = ship;
+	if (Pi::game) m_lastLaunchTime = Pi::game->GetTime();
 	return true;
 }
 
@@ -373,7 +395,7 @@ bool SpaceStation::CanLaunch(const Ship *ship) const
 
 	// Check if the departure corridor is currently occupied by another vessel
 	if (IsCorridorOccupied(ship)) {
-		return false; // Corridor occupied by active departure
+		return false; // Corridor occupied by active departure or arriving vessel
 	}
 
 	// Safety separation between consecutive launches
@@ -384,12 +406,26 @@ bool SpaceStation::CanLaunch(const Ship *ship) const
 		}
 	}
 
-	// Orbital station check: don't launch if an inbound ship is currently actively traversing the mail slot entrance
+	// Orbital station check: don't launch if an inbound ship is actively traversing or committed to final approach
 	if (m_type && m_type->IsOrbitalStation()) {
 		for (Uint32 i = 0; i < m_shipDocking.size(); i++) {
 			const shipDocking_t &dt = m_shipDocking[i];
-			if (dt.ship && !dt.ship->IsDead() && dt.ship != ship && dt.stage == DockStage::DOCK_ANIMATION_1) {
+			if (!dt.ship || dt.ship->IsDead() || dt.ship == ship) continue;
+
+			if (dt.stage == DockStage::DOCK_ANIMATION_1) {
 				return false;
+			}
+
+			if (dt.stage == DockStage::CLEARANCE_GRANTED) {
+				const vector3d relPos = dt.ship->GetPositionRelTo(this);
+				const double dist = relPos.Length();
+				// If inbound vessel has commenced final corridor ingress (< 2200m) and closing toward station
+				if (dist < 2200.0) {
+					const vector3d relVel = dt.ship->GetVelocityRelTo(this);
+					if (relPos.Dot(relVel) < 0.0) {
+						return false; // Inbound traffic on final approach has corridor right-of-way
+					}
+				}
 			}
 		}
 	}
@@ -409,7 +445,7 @@ double SpaceStation::GetLaunchWaitTime() const
 	}
 	if (m_corridorShip && !m_corridorShip->IsDead() && m_corridorShip->GetFlightState() != Ship::DOCKED) {
 		const double dist = m_corridorShip->GetPositionRelTo(this).Length();
-		const double clearDist = IsGroundStation() ? std::min(GetClipRadius() * 0.8 + 200.0, 450.0) : std::min(GetClipRadius() * 0.8 + 400.0, 1400.0);
+		const double clearDist = IsGroundStation() ? std::min(GetClipRadius() * 0.8 + 200.0, 450.0) : std::max(GetClipRadius() * 1.5 + 500.0, 2500.0);
 		if (dist < clearDist) {
 			const double corridorWait = std::max(3.0, (clearDist - dist) / 35.0);
 			wait = std::max(wait, corridorWait);
@@ -546,8 +582,11 @@ bool SpaceStation::OnCollision(Body *b, Uint32 flags, double relVel)
 
 	s->RecordCollision(this, surface, relVel);
 
-	if (!(flags & (SceneGraph::CollisionGeometry::DOCKING | SceneGraph::CollisionGeometry::ENTRANCE))) return true;
-	if(s->ManualDocking() && (flags & SceneGraph::CollisionGeometry::ENTRANCE)) return false;
+	// Entrance / mail slot airlock is an open doorway with NO physical barrier.
+	// It must never block, bounce, damage, or seize any ships exiting, entering, or maneuvering.
+	if (flags & SceneGraph::CollisionGeometry::ENTRANCE) {
+		return false;
+	}
 
 	bool touchOrbitalPad = (flags & SceneGraph::CollisionGeometry::DOCKING) && !IsGroundStation();
 
@@ -896,12 +935,40 @@ void SpaceStation::TimeStepUpdate(const float timeStep)
 	}
 
 	if (m_corridorShip) {
-		const double clearDist = IsGroundStation() ? std::min(GetClipRadius() * 0.8 + 200.0, 450.0) : std::min(GetClipRadius() * 0.8 + 400.0, 1400.0);
+		const double clearDist = IsGroundStation() ? std::min(GetClipRadius() * 0.8 + 200.0, 450.0) : std::max(GetClipRadius() * 1.5 + 500.0, 2500.0);
 		const double elapsed = Pi::game ? (Pi::game->GetTime() - m_lastLaunchTime) : 0.0;
+		bool insideAndInbound = false;
+		if (m_type && m_type->IsOrbitalStation() && IsInsideStation(m_corridorShip)) {
+			bool isDeparting = (m_corridorShip->GetAICommand() && m_corridorShip->GetAICommand()->GetType() == AICommand::CMD_DEPART);
+			if (!isDeparting) insideAndInbound = true;
+		}
+
 		if (m_corridorShip->IsDead() || m_corridorShip->GetFlightState() == Ship::HYPERSPACE ||
-			m_corridorShip->GetFlightState() == Ship::DOCKED || elapsed > 40.0 ||
-			m_corridorShip->GetPositionRelTo(this).Length() > clearDist) {
+			m_corridorShip->GetFlightState() == Ship::DOCKED || elapsed > 45.0 ||
+			insideAndInbound || m_corridorShip->GetPositionRelTo(this).Length() > clearDist) {
 			m_corridorShip = nullptr;
+		}
+	}
+
+	// Any NPC ship that finds itself inside an orbital space station without docking orders
+	// should immediately exit by recentering on the axis and exiting through the airlock.
+	if (m_type && m_type->IsOrbitalStation() && Pi::game && Pi::game->GetSpace()) {
+		Space::BodyNearList nearby = Pi::game->GetSpace()->GetBodiesMaybeNear(this, GetClipRadius() * 1.5);
+		for (Body *b : nearby) {
+			if (!b || !b->IsType(ObjectType::SHIP)) continue;
+			Ship *s = static_cast<Ship *>(b);
+			if (s->IsDead() || s->IsType(ObjectType::PLAYER)) continue;
+			if (s->GetFlightState() != Ship::FLYING) continue;
+
+			if (IsInsideStation(s)) {
+				int bay = GetMyDockingPort(s);
+				bool hasDockingClearance = (bay != -1 && !IsPortLocked(bay) && m_shipDocking[bay].stage != DockStage::NONE);
+				bool isDeparting = (s->GetAICommand() && s->GetAICommand()->GetType() == AICommand::CMD_DEPART);
+
+				if (!hasDockingClearance && !isDeparting) {
+					s->AIDepart(this);
+				}
+			}
 		}
 	}
 
@@ -922,6 +989,44 @@ void SpaceStation::UpdateInterpTransform(double alpha)
 bool SpaceStation::IsGroundStation() const
 {
 	return m_type->IsSurfaceStation();
+}
+
+bool SpaceStation::IsInsideStation(const Body *b) const
+{
+	if (!b || !m_type || !m_type->IsOrbitalStation()) return false;
+
+	// Position relative to station in station local coordinates:
+	const vector3d relPos = b->GetPositionRelTo(this);
+	const vector3d posInStation = relPos * GetOrient();
+
+	SpaceStationType::positionOrient_t portPosOrient;
+	SpaceStationType::positionOrient_t clearPosOrient;
+	if (!m_type->GetShipApproachWaypoints(0, DockStage::APPROACH2, portPosOrient) ||
+		!m_type->GetShipApproachWaypoints(0, DockStage::APPROACH1, clearPosOrient)) {
+		return false;
+	}
+
+	const vector3d portPos = portPosOrient.pos;
+	const vector3d corridorDir = (clearPosOrient.pos - portPosOrient.pos).NormalizedSafe();
+
+	// Axial distance along the corridor from the entrance mail slot:
+	// Negative = inside the station interior cylinder
+	// Positive = outside the station in open space
+	const double axialDist = (posInStation - portPos).Dot(corridorDir);
+
+	// Perpendicular distance from the station central cylinder axis:
+	const vector3d axisPoint = portPos + axialDist * corridorDir;
+	const double offAxisDist = (posInStation - axisPoint).Length();
+
+	// Inside station condition:
+	// Ship is on the interior side of the mail slot (axialDist <= 10.0m margin),
+	// within the longitudinal depth of the docking cylinder (axialDist >= -1200.0m),
+	// and within the cylinder diameter (offAxisDist <= 200.0m).
+	if (axialDist <= 10.0 && axialDist >= -1200.0 && offAxisDist <= 200.0) {
+		return true;
+	}
+
+	return false;
 }
 
 // Renders space station and adjacent city if applicable

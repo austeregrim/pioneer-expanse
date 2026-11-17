@@ -146,7 +146,8 @@ function ItemCard:draw(data, isSelected)
 
 			-- do all of the text first to generate as few draw commands as possible
 			for i, v in ipairs(data) do
-				local offset = fieldSize * (i - 1) + smIconSize.x + 2
+				local hasIcon = v[1] and true or false
+				local offset = fieldSize * (i - 1) + (hasIcon and (smIconSize.x + 2) or 0)
 				ui.setCursorScreenPos(pos + Vector2(offset, 1)) -- HACK: force 1-pixel offset here to align baselines
 				ui.text(v[2])
 				if v[3] and ui.isItemHovered("ForTooltip") then
@@ -156,9 +157,11 @@ function ItemCard:draw(data, isSelected)
 
 			-- Then draw the icons
 			for i, v in ipairs(data) do
-				local offset = fieldSize * (i - 1)
-				ui.setCursorScreenPos(pos + Vector2(offset, 0))
-				ui.icon(v[1], smIconSize, colors.white)
+				if v[1] then
+					local offset = fieldSize * (i - 1)
+					ui.setCursorScreenPos(pos + Vector2(offset, 0))
+					ui.icon(v[1], smIconSize, colors.white)
+				end
 			end
 		end)
 

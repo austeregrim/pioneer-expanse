@@ -63,6 +63,7 @@ public:
 	bool LaunchShip(Ship *ship, const int port);
 	bool CanLaunch(const Ship *ship) const;
 	bool IsCorridorOccupied(const Ship *excludeShip = nullptr) const;
+	bool ClaimCorridor(Ship *ship);
 	double GetLaunchWaitTime() const;
 	void NotifyCorridorCleared(const Ship *ship);
 	void SetDocked(Ship *ship, const int port);
@@ -78,6 +79,7 @@ public:
 
 	const SpaceStationType *GetStationType() const { return m_type; }
 	bool IsGroundStation() const;
+	bool IsInsideStation(const Body *b) const;
 
 	bool AllocateStaticSlot(int &slot);
 

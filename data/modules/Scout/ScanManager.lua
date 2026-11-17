@@ -313,7 +313,7 @@ end
 local function getScanMaxDistance(body, isOrbital)
 	local radius = body:GetSystemBody().radius
 	if isOrbital then
-		return math.max(radius * 6.0, 12000000)
+		return math.max(radius * 12.0, 24000000)
 	else
 		return math.max(radius * 4.0, 8000000)
 	end
