@@ -391,7 +391,6 @@ local function drawPlayerInfo()
 							end
 						end)
 					end
-					end
 				end)
 			end)
 
