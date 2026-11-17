@@ -137,7 +137,8 @@ private:
 		eDepartComplete = 3,
 		eDepartRecenter = 4,
 		eDepartGroundLiftoff = 5,
-		eDepartGroundClimb = 6
+		eDepartGroundClimb = 6,
+		eDepartBreakout = 7
 	};
 
 	SpaceStation *m_station;

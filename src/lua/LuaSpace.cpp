@@ -301,15 +301,33 @@ static int l_space_put_ship_on_route(lua_State *l)
 			// target below the effective radius of obstructor. Position the ship direct above the target
 			ship->SetPosition(targpos + targpos / targAlt * targdist);
 		}
-		// update velocity direction
-		ship->SetVelocity((targpos - ship->GetPosition()).Normalized() * pp.getVel() + targetbody->GetVelocityRelTo(ship->GetFrame()));
+		// update velocity direction, clamping radial descent into terrain to safe sublight speed
+		double cruiseVel = pp.getVel();
+		if (targAlt <= erad && body && body->IsType(ObjectType::TERRAINBODY)) {
+			cruiseVel = std::min(cruiseVel, 150.0);
+		}
+		ship->SetVelocity((targpos - ship->GetPosition()).Normalized() * cruiseVel + targetbody->GetVelocityRelTo(ship->GetFrame()));
 	}
 
-	// If placed well outside both start and destination gravity/station envelopes, engage Supercruise immediately facing destination
+	// Safety clamp: in sublight flight, never allow hypersonic downward velocity into a planet
+	if (body && body->IsType(ObjectType::TERRAINBODY) && ship->GetFlightState() == Ship::FLYING) {
+		const vector3d posFromPlanet = ship->GetPositionRelTo(body->GetFrame());
+		const double altAboveCenter = posFromPlanet.Length();
+		const vector3d upFromPlanet = posFromPlanet / std::max(1.0, altAboveCenter);
+		const vector3d velRelPlanet = ship->GetVelocityRelTo(body->GetFrame());
+		const double radialSpeed = velRelPlanet.Dot(upFromPlanet);
+		if (radialSpeed < -150.0) {
+			const double maxDescent = 150.0;
+			vector3d tangVel = velRelPlanet - upFromPlanet * radialSpeed;
+			ship->SetVelocity(tangVel - upFromPlanet * maxDescent + body->GetVelocityRelTo(ship->GetFrame()));
+		}
+	}
+
+	// If placed outside start station envelope and destination is far, engage Supercruise immediately facing destination
 	const vector3d finalToDest = targetbody->GetPositionRelTo(ship->GetFrame()) - ship->GetPosition();
 	const double finalDistToDest = finalToDest.Length();
 	const double distFromStart = (ship->GetPositionRelTo(Pi::game->GetSpace()->GetRootFrame()) - startPosRoot).Length();
-	if (finalDistToDest > 150000.0 && distFromStart > 150000.0 && ship->GetSupercruise() && !ship->IsType(ObjectType::PLAYER)) {
+	if (finalDistToDest > 150000.0 && distFromStart > 15000.0 && ship->GetSupercruise() && !ship->IsType(ObjectType::PLAYER)) {
 		if (finalDistToDest > 5000000.0) {
 			const vector3d dir = finalToDest / finalDistToDest;
 			vector3d ortho = MathUtil::OrthogonalDirection(dir).NormalizedSafe();

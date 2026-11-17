@@ -1266,11 +1266,51 @@ bool AICmdFlyTo::TimeStepUpdate()
 						}
 					}
 
+					// Forward obstacle and collision scanning during FSD charge/acceleration:
+					const vector3d myVel = ship->GetVelocityRelTo(ship->GetFrame());
+					const double mySpeed = myVel.Length();
+					const double scanDist = std::max(600.0, mySpeed * 5.0);
+					bool obstacleAhead = false;
+					vector3d evasiveStrafe(0.0);
+
+					if (Pi::game && Pi::game->GetSpace()) {
+						Space::BodyNearList nearBodies = Pi::game->GetSpace()->GetBodiesMaybeNear(ship, scanDist);
+						for (Body *ob : nearBodies) {
+							if (!ob || ob == ship || ob->IsDead()) continue;
+							if (!ob->IsType(ObjectType::SHIP) && !ob->IsType(ObjectType::SPACESTATION)) continue;
+
+							const vector3d toOb = ob->GetPositionRelTo(ship->GetFrame()) - ship->GetPosition();
+							const double obDist = toOb.Length();
+							if (obDist < 5.0 || obDist > scanDist) continue;
+
+							const vector3d obDir = toOb / obDist;
+							const vector3d thrustDir = -ship->GetOrient().VectorZ();
+							// In forward cone (< 35 degrees)
+							if (obDir.Dot(thrustDir) > 0.819 || (mySpeed > 10.0 && obDir.Dot(myVel / mySpeed) > 0.819)) {
+								obstacleAhead = true;
+								vector3d latDir = obDir.Cross(ship->GetOrient().VectorY()).NormalizedSafe();
+								if (latDir.LengthSqr() < 0.1)
+									latDir = MathUtil::OrthogonalDirection(obDir).NormalizedSafe();
+								evasiveStrafe += latDir * (scanDist - obDist) / scanDist;
+							}
+						}
+					}
+
 					const double ang = m_prop->AIFaceDirection(escapeDir);
-					if (ang < 0.35)
+					if (obstacleAhead) {
+						// Apply lateral evasion and reduce or reverse forward thrust
+						vector3d evasionRel = evasiveStrafe.NormalizedSafe() * 45.0;
+						if (mySpeed > 40.0) {
+							// Apply braking to avoid high-speed ramming
+							m_prop->SetLinThrusterState(vector3d(evasionRel.x, evasionRel.y, 1.0));
+						} else {
+							m_prop->SetLinThrusterState(vector3d(evasionRel.x, evasionRel.y, 0.0));
+						}
+					} else if (ang < 0.35) {
 						m_prop->SetLinThrusterState(vector3d(0.0, 0.0, -1.0));
-					else
+					} else {
 						m_prop->SetLinThrusterState(vector3d(0.0));
+					}
 					return false;
 				}
 			}
@@ -1347,31 +1387,23 @@ bool AICmdFlyTo::TimeStepUpdate()
 
 		if ((m_suicideRecovery = CheckSuicide(m_dBody, obspos, M, safeAlt, targetAlt, m_suicideRecovery))) {
 
-			//find best orientationg to get to horizon
-			vector3d sidedir = obspos.Cross(m_dBody->GetVelocity()).NormalizedSafe();
-			vector3d updir = sidedir.Cross(m_dBody->GetVelocity()).NormalizedSafe();
+			// Radial up direction away from planet center:
+			const vector3d radialUp = (-obspos).NormalizedSafe();
+			const vector3d myVel = m_dBody->GetVelocity();
+			vector3d retroDir = -myVel.NormalizedSafe();
+			if (retroDir.LengthSqr() < 0.1) retroDir = radialUp;
 
-			//clamped tangent of Yaw mismatch to target - for driving side trust
-			constexpr double cSideDriveRange = 0.02;
-			double targetSideTan = Clamp(targdist > 1 ? relpos.Dot(sidedir)/targdist : 0, -cSideDriveRange, cSideDriveRange);
+			// Blend retrograde braking with radial up to arrest downward descent
+			const vector3d recoveryFaceDir = (retroDir * 1.5 + radialUp).NormalizedSafe();
+			double ang = m_prop->AIFaceDirection(recoveryFaceDir);
+			m_prop->AIFaceUpdir(radialUp);
 
-			//Bellow safe alt (gravity too big for thrusters) breaking will kill the ship eventually
-			//so in this case ship accelerates along speed vector otherwise it is safe to break
-			float sign = G*M/obspos.LengthSqr() > 0.9 * m_prop->GetAccelUp() ? 1.0 : -1.0;
-
-			double ang = m_prop->AIFaceDirection(m_dBody->GetVelocity() * sign);
-			m_prop->AIFaceUpdir(updir);
-#ifdef DEBUG_CHECK_SUICIDE
-			if (m_dBody->IsType(ObjectType::PLAYER)) {
-				std::cout << "SUICIDE recovery! ang=" << ang << " targetSideTan=" << targetSideTan << std::endl;
-				std::cout << "safeAlt=" << safeAlt << " obsdist=" << obspos.Length() << " targetpos.Length()=" << targpos.Length() << std::endl;
+			// Always apply maximum upward lift thruster + main retrograde braking
+			double fwdThrust = 0.0;
+			if (ang < 0.5) {
+				fwdThrust = -1.0; // Main engines fire into recovery direction (retrograde + up)
 			}
-#endif
-
-			//Full Up and Forward thruster.
-			//Side thrust depends on relative pos of the target - not relevant for recovery but it is nice
-			//to be aligned with the target after surviving.
-			m_prop->SetLinThrusterState(ang < 0.05 ? vector3d(sign * targetSideTan * (1/cSideDriveRange), 1, -1) : vector3d(0.0));
+			m_prop->SetLinThrusterState(vector3d(0.0, 1.0, fwdThrust));
 
 			return false;
 		}
@@ -1449,7 +1481,7 @@ bool AICmdFlyTo::TimeStepUpdate()
 	const double tt = (bZeroDecel) ? timestep : std::max(sqrt(2.0 * targdist / maxdecel), timestep);
 	const vector3d perpvel = relvel + reldir * curspeed;
 	double perpspeed = perpvel.Length();
-	const vector3d perpdir = (perpspeed > 1e-30) ? perpvel / perpspeed : vector3d(0, 0, 1);
+	vector3d perpdir = (perpspeed > 1e-30) ? perpvel / perpspeed : vector3d(0, 0, 1);
 
 	double sidefactor = perpspeed / (tt * 0.5);
 	if (curspeed - m_endvel  > (tt + timestep) * maxdecel || maxdecel < sidefactor) {
@@ -1506,11 +1538,14 @@ bool AICmdFlyTo::TimeStepUpdate()
 		ispeed = std::min(ispeed, std::max(5.0, maxStepSpeed));
 	}
 
-	// Adaptive cruise control: avoid ramming into vessels ahead on the travel path
+	// Adaptive cruise control & obstacle avoidance: avoid ramming into vessels ahead on the travel path
 	if (Pi::game && Pi::game->GetSpace() && curspeed > 5.0) {
-		const double checkDist = std::max(180.0, curspeed * 4.0); // 4-second lookahead
+		const double stoppingDist = (curspeed * curspeed) / (2.0 * std::max(1.0, maxdecel));
+		const double checkDist = std::max(400.0, std::max(curspeed * 6.0, stoppingDist * 1.35));
 		for (Body *other : Pi::game->GetSpace()->GetBodiesMaybeNear(m_dBody, checkDist)) {
-			if (other == m_dBody || !other->IsType(ObjectType::SHIP) || other->IsDead())
+			if (other == m_dBody || other->IsDead())
+				continue;
+			if (!other->IsType(ObjectType::SHIP) && !other->IsType(ObjectType::SPACESTATION))
 				continue;
 			const vector3d toOther = other->GetPositionRelTo(m_dBody->GetFrame()) - m_dBody->GetPosition();
 			const double distToOther = toOther.Length();
@@ -1521,8 +1556,15 @@ bool AICmdFlyTo::TimeStepUpdate()
 					const vector3d otherVelRel = other->GetVelocityRelTo(m_dBody->GetFrame()) - m_dBody->GetVelocity();
 					const double closingSpeed = -otherVelRel.Dot(otherDir);
 					if (closingSpeed > -5.0) {
-						const double safeFollowSpeed = std::max(0.0, (distToOther - 75.0) / 3.0);
+						const double safeFollowSpeed = std::max(0.0, (distToOther - 100.0) / 4.0);
 						ispeed = std::min(ispeed, safeFollowSpeed);
+
+						// Apply evasive lateral steering bias around the obstacle
+						vector3d latDodge = otherDir.Cross(m_dBody->GetOrient().VectorY()).NormalizedSafe();
+						if (latDodge.LengthSqr() < 0.1)
+							latDodge = MathUtil::OrthogonalDirection(otherDir).NormalizedSafe();
+						perpdir = (perpdir + latDodge * 1.5).NormalizedSafe();
+						perpspeed = std::max(perpspeed, 25.0);
 					}
 				}
 			}
@@ -1712,13 +1754,16 @@ bool AICmdDock::TimeStepUpdate()
 	if (m_state == eDockFlyToStart) {
 		const vector3d shipPosInSt = ship->GetPositionRelTo(m_target->GetFrame());
 		const double distToDockStart = (shipPosInSt - m_dockpos).Length();
-		if (distToDockStart <= 120.0) {
+		if (distToDockStart <= 180.0) {
 			if (m_target->GetStationType()->IsOrbitalStation()) {
-				// Require corridor clearance before proceeding to final ingress
+				// Require corridor queue clearance before proceeding to final ingress
 				if (!m_target->ClaimCorridor(ship)) {
-					// Corridor occupied by departing or entering traffic; hold at holding point
+					// Corridor occupied by leaving or higher-priority traffic; actively hold position at holding waypoint in queue
 					m_prop->AIFaceDirection(m_target->GetOrientRelTo(m_dBody->GetFrame()) * m_dockdir);
-					m_prop->AIChangeVelDir(-ship->GetVelocityRelTo(m_target) * m_dBody->GetOrient());
+					const vector3d holdOffset = m_dockpos - shipPosInSt;
+					const vector3d holdVel = holdOffset.NormalizedSafe() * std::min(22.0, holdOffset.Length() * 1.2);
+					const vector3d vdiffHold = holdVel - ship->GetVelocityRelTo(m_target);
+					m_prop->AIChangeVelDir(vdiffHold * m_dBody->GetOrient());
 					return false;
 				}
 			}
@@ -1793,11 +1838,11 @@ bool AICmdDock::TimeStepUpdate()
 		}
 
 		// When calculating APPROACH1 holding waypoint for orbital stations, apply radial holding ring and depth stagger
-		// so inbound holding traffic is safely offset from the central departure corridor axis
+		// so inbound holding traffic queues cleanly outside the central departure corridor axis
 		if (type->IsOrbitalStation() && m_state == eDockGetDataStart) {
 			const double angle = double((port + 1) % 8) * (2.0 * M_PI / 8.0);
-			const double radius = 180.0;
-			const double depthStagger = double(port % 4) * 250.0;
+			const double radius = 220.0;
+			const double depthStagger = double(port % 6) * 260.0;
 			m_dockpos += dockpos.xaxis * (cos(angle) * radius) +
 			             dockpos.yaxis * (sin(angle) * radius) -
 			             dockpos.zaxis * depthStagger;
@@ -1890,12 +1935,6 @@ bool AICmdDock::TimeStepUpdate()
 			speedCap = 60.0;
 		else
 			speedCap = 80.0;
-
-		// Inbound traffic holding: if slot corridor is actively occupied by another ship, hold outside at APPROACH1 (player gets priority)
-		const double distFromStation = ship->GetPositionRelTo(m_target).Length();
-		if (!ship->IsType(ObjectType::PLAYER) && m_target->IsCorridorOccupied(ship) && distFromStation > (m_target->GetClipRadius() * 0.85)) {
-			speedCap = 0.0;
-		}
 	}
 
 	double ispeed = (maxdecel < 1e-10) ? 0.0 : calc_ivel(distToTarg, 0.0, maxdecel);
@@ -1909,40 +1948,51 @@ bool AICmdDock::TimeStepUpdate()
 	}
 	vector3d vdiff = ispeed * reldir - relvel;
 
-	// For orbital station corridor approach, enforce centerline alignment and recentering
+	// For orbital station corridor approach, enforce designated lane alignment, strafe avoidance, and docking initiation
 	if (m_target->GetStationType()->IsOrbitalStation() && m_state == eDockFlyToEnd) {
 		const vector3d shipRelStation = ship->GetPositionRelTo(m_target);
 		const vector3d shipPosInStation = shipRelStation * m_target->GetOrient();
 
-		SpaceStationType::positionOrient_t portPosOrient;
-		SpaceStationType::positionOrient_t clearPosOrient;
-		m_target->GetStationType()->GetShipApproachWaypoints(port, DockStage::APPROACH2, portPosOrient);
-		m_target->GetStationType()->GetShipApproachWaypoints(port, DockStage::APPROACH1, clearPosOrient);
-		const vector3d portPos = portPosOrient.pos;
-		const vector3d corridorDir = (clearPosOrient.pos - portPosOrient.pos).NormalizedSafe();
+		vector3d portPos(0.0), corridorDir(0.0, 0.0, 1.0), laneDir(1.0, 0.0, 0.0);
+		if (m_target->GetCorridorGeometry(portPos, corridorDir, laneDir)) {
+			const double axialDist = (shipPosInStation - portPos).Dot(corridorDir);
 
-		const double axialDist = (shipPosInStation - portPos).Dot(corridorDir);
-		const vector3d targetAxisPos = portPos + axialDist * corridorDir;
-		const vector3d offAxisVec = shipPosInStation - targetAxisPos;
-		const double offAxisDist = offAxisVec.Length();
+			// Dynamic collision detection, giving way to leaving and larger vessels, and lateral strafing
+			vector3d desiredLateralOffset(0.0);
+			const double trafficSpeedMult = m_target->EvaluateCorridorTrafficAvoidance(
+				ship, true, corridorDir, laneDir, axialDist, desiredLateralOffset);
 
-		if (axialDist > 0.0) {
-			double fwdSpeed = ispeed;
-			// If approaching entrance (< 250m) and significantly off-axis (> 12m), moderate forward flight to recenter
-			if (axialDist < 250.0 && offAxisDist > 12.0) {
-				fwdSpeed = std::min(fwdSpeed, std::max(18.0, axialDist * 0.18));
+			const vector3d targetLanePos = portPos + std::max(0.0, axialDist) * corridorDir + desiredLateralOffset;
+			vector3d offAxisVec = shipPosInStation - targetLanePos;
+			offAxisVec -= corridorDir * offAxisVec.Dot(corridorDir);
+			const double offAxisDist = offAxisVec.Length();
+			const double centerOffAxisDist = (shipPosInStation - (portPos + axialDist * corridorDir)).Length();
+
+			// If ship has reached the airlock doorway entrance and is aligned with the opening,
+			// transition smoothly into the station interior docking sequence:
+			if (axialDist <= 18.0 && centerOffAxisDist < 32.0 && !ship->ManualDocking()) {
+				if (m_target->BeginOrbitalDockingSequence(ship)) {
+					return false;
+				}
 			}
 
-			vector3d lateralVel = -offAxisVec * 2.5;
-			if (lateralVel.Length() > 20.0) lateralVel = lateralVel.NormalizedSafe() * 20.0;
+			double fwdSpeed = ispeed * trafficSpeedMult;
+			// Ensure steady final approach speed into the doorway when clear (don't stall to 0 before triggering docking)
+			if (trafficSpeedMult > 0.0 && axialDist < 120.0 && centerOffAxisDist < 20.0) {
+				fwdSpeed = std::max(fwdSpeed, 18.0 * trafficSpeedMult);
+			}
 
+			// If approaching entrance (< 250m) and off-path (> 10m), moderate forward flight while strafing onto path
+			if (axialDist < 250.0 && offAxisDist > 10.0) {
+				const double alignScale = Clamp(1.0 - (offAxisDist - 10.0) / 16.0, 0.0, 1.0);
+				fwdSpeed *= alignScale;
+			}
+
+			vector3d lateralVel = -offAxisVec.NormalizedSafe() * std::min(22.0, offAxisDist * 2.2);
 			vector3d desiredVelInStation = -corridorDir * fwdSpeed + lateralVel;
 			vector3d desiredVelFrame = m_target->GetOrient() * desiredVelInStation;
 			vector3d relVelStationFrame = ship->GetVelocityRelTo(m_target);
 			vdiff = desiredVelFrame - relVelStationFrame;
-		} else {
-			// Once safely inside the interior docking cylinder (axialDist <= 0.0), release corridor lock for next waiting vessel
-			m_target->NotifyCorridorCleared(ship);
 		}
 	}
 
@@ -1971,7 +2021,11 @@ bool AICmdDock::TimeStepUpdate()
 	// Require ship to be physically close to the waypoint before incrementing state
 	const bool nearWaypoint = (distToTarg < (m_target->IsGroundStation() ? 8.0 : 25.0));
 	if (m_state < eInvalidDockingStage && af < 0.05 && ship->GetWheelState() >= 1.0f && nearWaypoint) {
-		IncrementState();
+		if (m_target->GetStationType()->IsOrbitalStation() && m_state == eDockFlyToEnd) {
+			m_target->BeginOrbitalDockingSequence(ship);
+		} else {
+			IncrementState();
+		}
 	}
 
 #ifdef DEBUG_AUTOPILOT
@@ -2002,24 +2056,15 @@ AICmdDepart::AICmdDepart(DynamicBody *dBody, SpaceStation *station) :
 			stType->GetShipApproachWaypoints(0, DockStage::APPROACH2, portPosOrient);
 			stType->GetShipApproachWaypoints(0, DockStage::APPROACH1, clearPosOrient);
 			m_portPos = portPosOrient.pos;
-			m_clearPos = clearPosOrient.pos;
-			vector3d d = m_clearPos - m_portPos;
+			vector3d d = clearPosOrient.pos - m_portPos;
 			if (d.LengthSqr() > 1.0)
 				m_corridorDir = d.NormalizedSafe();
 			else
 				m_corridorDir = vector3d(0.0, 0.0, 1.0);
 
-			if (m_dBody->IsType(ObjectType::SHIP)) {
-				Ship *ship = static_cast<Ship *>(m_dBody);
-				const vector3d relPosFrame = ship->GetPositionRelTo(m_station);
-				const vector3d shipPosInStation = relPosFrame * m_station->GetOrient();
-				const double axialDist = (shipPosInStation - m_portPos).Dot(m_corridorDir);
-				const vector3d targetAxisPos = m_portPos + axialDist * m_corridorDir;
-				const double offAxisDist = (shipPosInStation - targetAxisPos).Length();
-				if (axialDist >= -60.0 && axialDist < 20.0 && offAxisDist > 8.0) {
-					m_state = eDepartRecenter;
-				}
-			}
+			// Dedicated outside departure waypoint on the line from the station center through the entrance port:
+			const double clearDist = std::max(1800.0, d.Length());
+			m_clearPos = m_portPos + m_corridorDir * clearDist;
 		} else {
 			m_state = eDepartGroundLiftoff;
 		}
@@ -2080,7 +2125,7 @@ void AICmdDepart::GetStatusText(char *str)
 {
 	switch (m_state) {
 	case eDepartRecenter:
-		snprintf(str, 255, "Departing: Recentering on axis");
+		snprintf(str, 255, "Departing: Returning to exit path");
 		break;
 	case eDepartAlignCorridor:
 		snprintf(str, 255, "Departing: Aligning exit");
@@ -2089,13 +2134,16 @@ void AICmdDepart::GetStatusText(char *str)
 		snprintf(str, 255, "Departing: Exiting airlock");
 		break;
 	case eDepartFlyToClearance:
-		snprintf(str, 255, "Departing: Clearing station");
+		snprintf(str, 255, "Departing: Navigating to exit waypoint");
 		break;
 	case eDepartGroundLiftoff:
 		snprintf(str, 255, "Departing: Vertical liftoff");
 		break;
 	case eDepartGroundClimb:
 		snprintf(str, 255, "Departing: Clearing starport");
+		break;
+	case eDepartBreakout:
+		snprintf(str, 255, "Departing: Clearing departure corridor");
 		break;
 	case eDepartComplete:
 		snprintf(str, 255, "Departing: Complete");
@@ -2128,105 +2176,135 @@ bool AICmdDepart::TimeStepUpdate()
 		// Calculate position and velocity in station local coordinates:
 		const vector3d relPosFrame = ship->GetPositionRelTo(m_station);
 		const vector3d shipPosInStation = relPosFrame * m_station->GetOrient();
-
 		const vector3d relVelFrame = ship->GetVelocityRelTo(m_station);
-		const vector3d shipVelInStation = relVelFrame * m_station->GetOrient();
 
-		// Longitudinal axis through exit mail slot:
+		const double clearCorridorDist = std::max(1800.0, (m_clearPos - m_portPos).Length());
+		m_clearPos = m_portPos + m_corridorDir * clearCorridorDist;
+
+		// Longitudinal projection onto the path from the station center/axis to the outside waypoint m_clearPos:
 		const double axialDist = (shipPosInStation - m_portPos).Dot(m_corridorDir);
-		const vector3d targetAxisPos = m_portPos + axialDist * m_corridorDir;
-		const vector3d offAxisVec = shipPosInStation - targetAxisPos;
-		const double offAxisDist = offAxisVec.Length();
+		const double clampedAxial = Clamp(axialDist, -1200.0, clearCorridorDist);
+		const vector3d axisPathPoint = m_portPos + clampedAxial * m_corridorDir;
+
+		vector3d pPos, cDir, laneDir;
+		if (!m_station->GetCorridorGeometry(pPos, cDir, laneDir)) {
+			laneDir = vector3d(1.0, 0.0, 0.0);
+		}
+
+		// Evaluate corridor traffic right-of-way and strafe offset (smaller ships strafe out of way of larger ships;
+		// once clear, desiredStrafeOffset returns to 0 so the ship returns to the axis-to-waypoint path):
+		vector3d desiredStrafeOffset(0.0);
+		const double trafficSpeedMult = m_station->EvaluateCorridorTrafficAvoidance(
+			ship, false, m_corridorDir, laneDir, axialDist, desiredStrafeOffset);
+
+		const vector3d targetPathPos = axisPathPoint + desiredStrafeOffset;
+		vector3d offPathVec = shipPosInStation - targetPathPos;
+		offPathVec -= m_corridorDir * offPathVec.Dot(m_corridorDir);
+		const double offPathDist = offPathVec.Length();
 
 		// Exit corridor direction in reference frame:
 		const vector3d wantDir = m_station->GetOrient() * m_corridorDir;
 
-		// Ships leaving the station should be able to identify when they are off of center of station exit,
-		// then stop, recenter, realign, and navigate to the exit:
-		if (axialDist >= -60.0 && axialDist < 25.0 && offAxisDist > 10.0 && m_state != eDepartRecenter) {
-			m_state = eDepartRecenter;
+		if (m_state == eDepartRecenter) {
+			m_state = eDepartFlyToPort;
 		}
 
 		switch (m_state) {
-		case eDepartRecenter: {
-			// 1. Realign facing towards the exit corridor
-			double ang = m_prop->AIFaceDirection(wantDir);
-
-			// 2. Stop forward motion and kill any outward drift
-			double wantFwdVel = 0.0;
-
-			// 3. Recenter onto central station axis:
-			// Proportional centering speed clamped to safe envelope
-			vector3d centeringVel = -offAxisVec.NormalizedSafe() * std::min(12.0, std::max(1.5, offAxisDist * 1.2));
-			if (offAxisDist < 2.0) {
-				centeringVel = -offAxisVec * 0.8;
-			}
-
-			vector3d desiredVelInStation = m_corridorDir * wantFwdVel + centeringVel;
-			vector3d desiredVelFrame = m_station->GetOrient() * desiredVelInStation;
-			vector3d vdiff = desiredVelFrame - relVelFrame;
-
-			m_prop->AIChangeVelDir(vdiff * ship->GetOrient());
-
-			// Check if stopped, recentered, and realigned:
-			const vector3d lateralVelInStation = shipVelInStation - m_corridorDir * (shipVelInStation.Dot(m_corridorDir));
-			if (offAxisDist < 3.0 && ang < 0.10 && lateralVelInStation.Length() < 1.5) {
-				m_state = eDepartFlyToPort;
-			}
-			break;
-		}
-
 		case eDepartAlignCorridor: {
-			double ang = m_prop->AIFaceDirection(wantDir);
+			// Rotate in place on the station axis to face the exit waypoint before accelerating forward
+			const double ang = m_prop->AIFaceDirection(wantDir);
 
-			// Gentle centering while aligning
-			vector3d desiredVelInStation = m_corridorDir * 12.0 - offAxisVec * 1.5;
+			vector3d returnVel = -offPathVec.NormalizedSafe() * std::min(16.0, offPathDist * 2.0);
+			double fwdSpeed = 0.0;
+			if (ang < 0.25 && offPathDist < 8.0) {
+				fwdSpeed = 10.0 * trafficSpeedMult;
+			}
+
+			vector3d desiredVelInStation = m_corridorDir * fwdSpeed + returnVel;
 			vector3d desiredVelFrame = m_station->GetOrient() * desiredVelInStation;
 			vector3d vdiff = desiredVelFrame - relVelFrame;
 			m_prop->AIChangeVelDir(vdiff * ship->GetOrient());
 
-			if (ang < 0.15 || m_departTimer > 5.0) {
+			if ((ang < 0.18 && offPathDist < 6.0) || (ang < 0.40 && m_departTimer > 10.0)) {
 				m_state = eDepartFlyToPort;
 			}
 			break;
 		}
 
 		case eDepartFlyToPort: {
-			m_prop->AIFaceDirection(wantDir);
+			const double ang = m_prop->AIFaceDirection(wantDir);
 
-			// Fly towards the exit mail slot at controlled speed (28 m/s) with active closed-loop lateral centering
-			const double targetSpeed = 28.0;
-			vector3d desiredVelInStation = m_corridorDir * targetSpeed - offAxisVec * 2.0;
+			// If off course from the path between station axis and exit waypoint, return to path before advancing through doorway
+			vector3d returnVel = -offPathVec.NormalizedSafe() * std::min(22.0, offPathDist * 2.2);
+			double courseAlignFactor = Clamp(1.0 - (offPathDist - 6.0) / 10.0, 0.0, 1.0);
+			if (ang > 0.35) {
+				courseAlignFactor = 0.0;
+			}
+
+			const double targetSpeed = 30.0 * trafficSpeedMult * courseAlignFactor;
+			vector3d desiredVelInStation = m_corridorDir * targetSpeed + returnVel;
 			vector3d desiredVelFrame = m_station->GetOrient() * desiredVelInStation;
 			vector3d vdiff = desiredVelFrame - relVelFrame;
 
 			m_prop->AIChangeVelDir(vdiff * ship->GetOrient());
 
-			// Transition when ship has passed through the airlock mail slot:
-			// axialDist >= 15.0m confirms ship is physically through the opening and in space
-			if (axialDist >= 15.0) {
+			// Transition when ship has passed completely through the airlock mail slot:
+			const double shipLength = std::max(30.0, ship->GetClipRadius() * 1.2);
+			if (axialDist >= shipLength) {
 				m_state = eDepartFlyToClearance;
 			}
 			break;
 		}
 
 		case eDepartFlyToClearance: {
-			m_prop->AIFaceDirection(wantDir);
+			// If knocked back inside the doorway, return to eDepartFlyToPort
+			if (axialDist < 10.0) {
+				m_state = eDepartFlyToPort;
+				break;
+			}
 
-			// Accelerate away into open space at 65 m/s
-			const double targetSpeed = 65.0;
-			vector3d desiredVelInStation = m_corridorDir * targetSpeed - offAxisVec * 0.5;
+			// Navigate along the path from the station axis to the outside waypoint m_clearPos.
+			// If knocked off course, return to the path line between the station axis and the waypoint!
+			vector3d returnVel = -offPathVec.NormalizedSafe() * std::min(25.0, offPathDist * 2.0);
+			const double courseAlignFactor = Clamp(1.0 - (offPathDist - 12.0) / 28.0, 0.0, 1.0);
+			const double targetSpeed = 65.0 * trafficSpeedMult * courseAlignFactor;
+
+			vector3d aimDirInStation = (m_corridorDir * 45.0 - offPathVec * 1.5).NormalizedSafe();
+			m_prop->AIFaceDirection(m_station->GetOrient() * aimDirInStation);
+
+			vector3d desiredVelInStation = m_corridorDir * targetSpeed + returnVel;
 			vector3d desiredVelFrame = m_station->GetOrient() * desiredVelInStation;
 			vector3d vdiff = desiredVelFrame - relVelFrame;
 
 			m_prop->AIChangeVelDir(vdiff * ship->GetOrient());
 
-			const double distFromStation = ship->GetPositionRelTo(m_station).Length();
-			const double clearanceRad = m_station->GetClipRadius() * 1.5 + 500.0;
-			const double clearCorridorDist = (m_clearPos - m_portPos).Length();
+			const double distToWaypoint = (shipPosInStation - (m_clearPos + desiredStrafeOffset)).Length();
+			// Once reaching the outside clearance waypoint, transition to peel-off breakout
+			if (distToWaypoint < 65.0 || (axialDist >= clearCorridorDist - 35.0 && offPathDist < 80.0)) {
+				m_state = eDepartBreakout;
+				m_station->NotifyCorridorCleared(ship);
+				break;
+			}
+			break;
+		}
 
-			// Only complete when safely outside in open space!
-			if (distFromStation >= clearanceRad || axialDist >= clearCorridorDist) {
+		case eDepartBreakout: {
+			// Peel off laterally away from the central station corridor axis
+			// so the arrival/departure corridor centerline remains 100% clear of loitering traffic
+			vector3d peelDir = laneDir;
+			if (desiredStrafeOffset.LengthSqr() > 1.0) {
+				peelDir = desiredStrafeOffset.NormalizedSafe();
+			}
+			const vector3d breakoutDir = (m_corridorDir * 0.7 + peelDir * 1.0).NormalizedSafe();
+			m_prop->AIFaceDirection(m_station->GetOrient() * breakoutDir);
+
+			const double targetSpeed = 75.0;
+			const vector3d desiredVelInStation = breakoutDir * targetSpeed;
+			const vector3d desiredVelFrame = m_station->GetOrient() * desiredVelInStation;
+			const vector3d vdiff = desiredVelFrame - relVelFrame;
+			m_prop->AIChangeVelDir(vdiff * ship->GetOrient());
+
+			if (offPathDist >= 320.0 || m_departTimer > 40.0 || axialDist >= clearCorridorDist + 1200.0) {
 				m_state = eDepartComplete;
 				m_station->NotifyCorridorCleared(ship);
 				return true;
@@ -2242,11 +2320,10 @@ bool AICmdDepart::TimeStepUpdate()
 		}
 
 		// Never timeout-complete while still inside the station!
-		// If timer exceeds 120s and still inside, reset timer and force recenter/exit
 		if (m_departTimer > 120.0) {
-			if (axialDist < 20.0) {
+			if (axialDist < 30.0) {
 				m_departTimer = 0.0;
-				m_state = eDepartRecenter;
+				m_state = eDepartAlignCorridor;
 			} else {
 				m_station->NotifyCorridorCleared(ship);
 				return true;
@@ -2295,7 +2372,7 @@ bool AICmdDepart::TimeStepUpdate()
 			m_prop->AIChangeVelDir(vdiff * ship->GetOrient());
 
 			const double distFromStation = relPos.Length();
-			if (distFromStation > 550.0 || vertDist > 350.0 || m_departTimer > 18.0) {
+			if ((distFromStation > 3500.0 && vertDist > 2000.0) || vertDist > 3000.0 || m_departTimer > 45.0) {
 				m_state = eDepartComplete;
 				m_station->NotifyCorridorCleared(ship);
 				return true;

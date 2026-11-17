@@ -69,6 +69,13 @@ public:
 	void SetDocked(Ship *ship, const int port);
 	void SwapDockedShipsPort(const int oldPort, const int newPort);
 
+	// Multi-lane corridor traffic control and dynamic collision avoidance
+	static bool IsLargeCorridorShip(const Ship *ship);
+	bool GetCorridorGeometry(vector3d &outPortPos, vector3d &outCorridorDir, vector3d &outLaneDir) const;
+	double GetCorridorLaneOffset(const Ship *ship, bool isInbound) const;
+	double EvaluateCorridorTrafficAvoidance(Ship *ship, bool isInbound, const vector3d &corridorDir, const vector3d &laneDir, double axialDist, vector3d &outDesiredLateralOffset) const;
+	bool BeginOrbitalDockingSequence(Ship *s);
+
 	int GetNearbyTraffic(double radius);
 
 	bool GetDockingClearance(Ship *s);

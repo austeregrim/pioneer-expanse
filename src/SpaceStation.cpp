@@ -327,51 +327,369 @@ void SpaceStation::SwapDockedShipsPort(const int oldBay, const int newBay)
 	SwitchToStage(oldBay, DockStage::NONE);
 }
 
-bool SpaceStation::IsCorridorOccupied(const Ship *excludeShip) const
+bool SpaceStation::IsLargeCorridorShip(const Ship *ship)
 {
-	if (!m_corridorShip || m_corridorShip == excludeShip)
-		return false;
+	if (!ship) return false;
+	if (ship->GetClipRadius() > 22.0) return true;
+	const Aabb &aabb = ship->GetAabb();
+	const double width = aabb.max.x - aabb.min.x;
+	const double height = aabb.max.y - aabb.min.y;
+	if (width > 28.0 || height > 28.0) return true;
+	if (ship->GetShipType() && ship->GetShipType()->hullMass >= 180) return true;
+	return false;
+}
 
-	if (m_corridorShip->IsDead() || m_corridorShip->GetFlightState() == Ship::HYPERSPACE ||
-		m_corridorShip->GetFlightState() == Ship::DOCKED) {
-		const_cast<SpaceStation*>(this)->m_corridorShip = nullptr;
+bool SpaceStation::GetCorridorGeometry(vector3d &outPortPos, vector3d &outCorridorDir, vector3d &outLaneDir) const
+{
+	if (!m_type || !m_type->IsOrbitalStation()) return false;
+
+	SpaceStationType::positionOrient_t portPosOrient;
+	SpaceStationType::positionOrient_t clearPosOrient;
+	if (!m_type->GetShipApproachWaypoints(0, DockStage::APPROACH2, portPosOrient) ||
+		!m_type->GetShipApproachWaypoints(0, DockStage::APPROACH1, clearPosOrient)) {
 		return false;
 	}
 
-	// Safety timeout: corridor departure/arrival lock cannot exceed 45 seconds under any circumstance
-	if (Pi::game) {
+	outPortPos = portPosOrient.pos;
+	const vector3d d = clearPosOrient.pos - portPosOrient.pos;
+	if (d.LengthSqr() > 1.0)
+		outCorridorDir = d.NormalizedSafe();
+	else
+		outCorridorDir = vector3d(0.0, 0.0, 1.0);
+
+	// Transverse horizontal axis across the mail slot entrance:
+	vector3d lDir = portPosOrient.xaxis.NormalizedSafe();
+	if (fabs(lDir.Dot(outCorridorDir)) > 0.8) {
+		lDir = outCorridorDir.Cross(portPosOrient.yaxis).NormalizedSafe();
+		if (lDir.LengthSqr() < 0.1) {
+			lDir = outCorridorDir.Cross(vector3d(0.0, 1.0, 0.0)).NormalizedSafe();
+		}
+	} else {
+		lDir = (lDir - outCorridorDir * (lDir.Dot(outCorridorDir))).NormalizedSafe();
+	}
+	outLaneDir = lDir;
+	return true;
+}
+
+double SpaceStation::GetCorridorLaneOffset(const Ship *ship, bool isInbound) const
+{
+	if (!m_type || !m_type->IsOrbitalStation() || !ship) return 0.0;
+
+	// Leaving ships navigate on the direct path from the station center/axis to the external waypoint
+	if (!isInbound) {
+		return 0.0;
+	}
+
+	// Larger ships have center priority to avoid clipping the station doorway
+	if (IsLargeCorridorShip(ship)) {
+		return 0.0;
+	}
+
+	// Smaller inbound ships (and player autopilot on smaller ships) use a starboard offset on approach
+	return 12.0;
+}
+
+double SpaceStation::EvaluateCorridorTrafficAvoidance(
+	Ship *ship,
+	bool isInbound,
+	const vector3d &corridorDir,
+	const vector3d &laneDir,
+	double axialDist,
+	vector3d &outDesiredLateralOffset) const
+{
+	const double baseLaneOffset = GetCorridorLaneOffset(ship, isInbound);
+	// Taper baseline inbound offset near the doorway so the vessel passes cleanly through the entrance trigger
+	double taperedBaseOffset = baseLaneOffset;
+	if (isInbound && axialDist < 120.0) {
+		taperedBaseOffset *= Clamp((axialDist - 15.0) / 105.0, 0.0, 1.0);
+	}
+	outDesiredLateralOffset = laneDir * taperedBaseOffset;
+
+	if (!ship) return 1.0;
+
+	// Players docking autopilot determines lane from ship size, but players watch out for traffic on their own
+	if (ship->IsType(ObjectType::PLAYER)) {
+		return 1.0;
+	}
+
+	if (!Pi::game || !Pi::game->GetSpace()) return 1.0;
+
+	vector3d portPos, cDir, lDir;
+	if (!GetCorridorGeometry(portPos, cDir, lDir)) return 1.0;
+
+	const double scanRadius = std::max(GetClipRadius() * 1.5 + 800.0, 2600.0);
+	Space::BodyNearList nearby = Pi::game->GetSpace()->GetBodiesMaybeNear(const_cast<SpaceStation*>(this), scanRadius);
+
+	const double myRadius = ship->GetClipRadius();
+	const double myMassMetric = ship->GetShipType() ? double(ship->GetShipType()->hullMass) * 0.12 : 0.0;
+	const double mySize = std::max(myRadius, myMassMetric);
+	const bool myIsLarge = IsLargeCorridorShip(ship);
+	const matrix3x3d stOrient = GetOrient();
+	const vector3d myPosInStation = ship->GetPositionRelTo(this) * stOrient;
+	const vector3d myCenterPos = portPos + axialDist * corridorDir;
+	const vector3d myCurrentLateral = myPosInStation - myCenterPos;
+
+	double speedMultiplier = 1.0;
+	double maxStrafeNeeded = 0.0;
+	vector3d bestStrafeDir = isInbound ? laneDir : -laneDir;
+
+	for (Body *b : nearby) {
+		if (!b || b == ship || !b->IsType(ObjectType::SHIP)) continue;
+		Ship *other = static_cast<Ship*>(b);
+		if (other->IsDead() || other->GetFlightState() == Ship::DOCKED ||
+			other->GetFlightState() == Ship::HYPERSPACE || other->GetFlightState() == Ship::JUMPING)
+			continue;
+
+		const vector3d otherPosInStation = other->GetPositionRelTo(this) * stOrient;
+		const vector3d otherVelInStation = other->GetVelocityRelTo(this) * stOrient;
+		const double otherAxialDist = (otherPosInStation - portPos).Dot(corridorDir);
+		const vector3d otherCenterPos = portPos + otherAxialDist * corridorDir;
+		const vector3d otherLateralVec = otherPosInStation - otherCenterPos;
+		const double otherLateralDist = otherLateralVec.Length();
+
+		// Ignore ships outside the corridor cylinder (-800m to +2400m axial, < 160m lateral)
+		if (otherAxialDist < -800.0 || otherAxialDist > 2400.0 || otherLateralDist > 160.0)
+			continue;
+
+		const double otherRadius = other->GetClipRadius();
+		const double otherMassMetric = other->GetShipType() ? double(other->GetShipType()->hullMass) * 0.12 : 0.0;
+		const double otherSize = std::max(otherRadius, otherMassMetric);
+		const bool otherIsLarge = IsLargeCorridorShip(other);
+		const bool otherIsPlayer = other->IsType(ObjectType::PLAYER);
+		const int otherBay = GetMyDockingPort(other);
+		const bool otherIsLeaving = (other->GetAICommand() && other->GetAICommand()->GetType() == AICommand::CMD_DEPART) ||
+			(otherBay >= 0 && SpaceStationType::IsUndockStage(m_shipDocking[otherBay].stage)) ||
+			(otherVelInStation.Dot(corridorDir) > 4.0 && !(other->GetAICommand() && other->GetAICommand()->GetType() == AICommand::CMD_DOCK));
+		const bool otherIsInbound = !otherIsLeaving;
+
+		// CASE 1: Same-direction traffic (both leaving or both entering)
+		if (isInbound == otherIsInbound) {
+			// A vessel ahead along our direction of travel has right of way; NEVER stop or yield for a vessel behind us!
+			const double axialAheadDist = isInbound ? (axialDist - otherAxialDist) : (otherAxialDist - axialDist);
+			if (axialAheadDist <= 1.0 || axialAheadDist > 380.0)
+				continue;
+
+			// If identical axial distance within 2m, break tie deterministically by ship size then pointer
+			if (axialAheadDist < 3.0 && mySize > otherSize)
+				continue;
+
+			const double minFollowDist = myRadius + otherRadius + 65.0;
+			if (axialAheadDist < minFollowDist) {
+				speedMultiplier = 0.0;
+			} else if (axialAheadDist < minFollowDist + 100.0) {
+				speedMultiplier = std::min(speedMultiplier, (axialAheadDist - minFollowDist) / 100.0);
+			}
+
+			// If we are smaller and close behind a larger ship, strafe out of its wake
+			if (!myIsLarge && (otherIsLarge || otherSize > mySize * 1.25) && axialAheadDist < 140.0) {
+				vector3d diffLat = myCurrentLateral - otherLateralVec;
+				diffLat -= corridorDir * diffLat.Dot(corridorDir);
+				vector3d sDir = (diffLat.LengthSqr() > 4.0) ? diffLat.NormalizedSafe() : (isInbound ? laneDir : -laneDir);
+				double strafeMag = std::min(otherLateralDist + myRadius + otherRadius + 18.0, 42.0 - myRadius);
+				if (strafeMag > maxStrafeNeeded) {
+					maxStrafeNeeded = strafeMag;
+					bestStrafeDir = sDir;
+				}
+			}
+			continue;
+		}
+
+		// CASE 2: Opposite-direction traffic (one leaving, one entering)
+		// Check if the other ship has already passed behind us:
+		const double passMargin = myRadius + otherRadius + 25.0;
+		const double axialSep = isInbound ? (axialDist - otherAxialDist) : (otherAxialDist - axialDist);
+		if (axialSep < -passMargin || axialSep > 900.0)
+			continue;
+
+		// Determine Right-of-Way Hierarchy:
+		// 1. Player priority (NPCs give way to player)
+		// 2. Larger ships have right of way over smaller ships ("right of way for larger ships, smaller ships need to strafe out of way")
+		// 3. Leaving ships have right of way over entering ships ("right of way for ships leaving")
+		bool weMustYield = false;
+		if (otherIsPlayer) {
+			weMustYield = true;
+		} else if (otherIsLarge && !myIsLarge) {
+			weMustYield = true;
+		} else if (myIsLarge && !otherIsLarge) {
+			weMustYield = false;
+		} else if (otherSize > mySize * 1.30 + 3.0) {
+			weMustYield = true;
+		} else if (mySize > otherSize * 1.30 + 3.0) {
+			weMustYield = false;
+		} else {
+			// Comparable size: leaving ship has right of way over entering ship!
+			weMustYield = isInbound;
+		}
+
+		if (!weMustYield) {
+			// We have right of way! Continue along our primary path.
+			continue;
+		}
+
+		// We must give way and strafe out of the way!
+		vector3d diffLat = myCurrentLateral - otherLateralVec;
+		diffLat -= corridorDir * diffLat.Dot(corridorDir);
+		vector3d sDir = (diffLat.LengthSqr() > 4.0) ? diffLat.NormalizedSafe() : (isInbound ? laneDir : -laneDir);
+
+		const double neededClearance = otherLateralDist + myRadius + otherRadius + 22.0;
+		double allowedStrafe = neededClearance;
+		if (axialDist > 70.0) {
+			// Outside the station entrance in open space: strafe wide out of the corridor
+			allowedStrafe = Clamp(neededClearance, 60.0, 110.0);
+		} else if (axialDist < -50.0) {
+			// Inside the wide station interior cylinder: strafe toward cylinder side
+			const double maxInterior = std::max(22.0, 75.0 - myRadius);
+			allowedStrafe = Clamp(neededClearance, 35.0, maxInterior);
+		} else {
+			// Inside the airlock doorway throat: strafe to doorway edge without hitting the wall
+			const double maxDoorway = std::max(14.0, 44.0 - myRadius);
+			allowedStrafe = std::min(neededClearance, maxDoorway);
+		}
+
+		if (allowedStrafe > maxStrafeNeeded) {
+			maxStrafeNeeded = allowedStrafe;
+			bestStrafeDir = sDir;
+		}
+
+		const double currentLateralSep = (myCurrentLateral - otherLateralVec).Length();
+		const double safePassSep = myRadius + otherRadius + 14.0;
+
+		if (isInbound && axialDist > 40.0) {
+			// Inbound ship outside station: hold forward progress while strafing clear of the leaving/larger ship
+			speedMultiplier = 0.0;
+		} else if (!isInbound && axialDist < -40.0 && otherAxialDist <= 220.0 && otherAxialDist >= -120.0) {
+			// Smaller leaving ship inside station yielding to a larger entering ship: hold at strafed offset inside until it passes
+			speedMultiplier = 0.0;
+		} else {
+			// In the throat or passing: if lateral separation is not yet safe, hold forward motion while strafing; otherwise clear throat
+			if (currentLateralSep < safePassSep && axialSep > 0.0) {
+				speedMultiplier = 0.0;
+			} else {
+				speedMultiplier = std::min(speedMultiplier, 0.65);
+			}
+		}
+	}
+
+	if (maxStrafeNeeded > 0.0) {
+		outDesiredLateralOffset = bestStrafeDir * maxStrafeNeeded;
+	}
+
+	return speedMultiplier;
+}
+
+bool SpaceStation::IsCorridorOccupied(const Ship *excludeShip) const
+{
+	if (excludeShip && excludeShip->IsType(ObjectType::PLAYER))
+		return false;
+
+	if (m_corridorShip && (m_corridorShip->IsDead() || m_corridorShip->GetFlightState() == Ship::HYPERSPACE ||
+		m_corridorShip->GetFlightState() == Ship::DOCKED)) {
+		const_cast<SpaceStation*>(this)->m_corridorShip = nullptr;
+	}
+
+	if (Pi::game && m_corridorShip) {
 		const double now = Pi::game->GetTime();
 		if (now > 0.0 && (now - m_lastLaunchTime) > 45.0) {
 			const_cast<SpaceStation*>(this)->m_corridorShip = nullptr;
-			return false;
 		}
 	}
 
-	const double dist = m_corridorShip->GetPositionRelTo(this).Length();
-	// Orbital stations clear when past full departure clearance radius (at least 2500m into open space)
-	const double clearDist = IsGroundStation() ? std::min(GetClipRadius() * 0.8 + 200.0, 450.0) : std::max(GetClipRadius() * 1.5 + 500.0, 2500.0);
-	if (dist > clearDist) {
-		const_cast<SpaceStation*>(this)->m_corridorShip = nullptr;
-		return false;
-	}
-
-	// For orbital stations, if the corridor ship was inbound and is now safely inside the interior cylinder,
-	// it has successfully traversed the mail slot entrance and cleared the corridor for subsequent traffic:
-	if (m_type && m_type->IsOrbitalStation() && IsInsideStation(m_corridorShip)) {
-		bool isDeparting = (m_corridorShip->GetAICommand() && m_corridorShip->GetAICommand()->GetType() == AICommand::CMD_DEPART);
-		if (!isDeparting) {
+	// Ground stations use simple radial clearance
+	if (IsGroundStation()) {
+		if (!m_corridorShip || m_corridorShip == excludeShip) return false;
+		const double dist = m_corridorShip->GetPositionRelTo(this).Length();
+		if (dist > std::min(GetClipRadius() * 0.8 + 200.0, 450.0)) {
 			const_cast<SpaceStation*>(this)->m_corridorShip = nullptr;
 			return false;
 		}
+		return true;
 	}
 
-	return true;
+	// Orbital station live corridor & queue check:
+	// 1. Check active docking or undocking animations inside the station cylinder
+	for (Uint32 i = 0; i < m_shipDocking.size(); i++) {
+		const shipDocking_t &dt = m_shipDocking[i];
+		if (!dt.ship || dt.ship->IsDead() || dt.ship == excludeShip) continue;
+		if (SpaceStationType::IsUndockStage(dt.stage) ||
+			dt.stage == DockStage::DOCK_ANIMATION_1 ||
+			dt.stage == DockStage::DOCK_ANIMATION_2) {
+			return true;
+		}
+	}
+
+	// 2. Scan live vessels in the station interior and external corridor
+	if (Pi::game && Pi::game->GetSpace()) {
+		vector3d portPos, corridorDir, laneDir;
+		if (GetCorridorGeometry(portPos, corridorDir, laneDir)) {
+			const matrix3x3d stOrient = GetOrient();
+			const bool excludeIsDeparting = excludeShip && excludeShip->GetAICommand() && excludeShip->GetAICommand()->GetType() == AICommand::CMD_DEPART;
+			const bool excludeIsLarge = excludeShip ? IsLargeCorridorShip(excludeShip) : false;
+			const double excludeSize = excludeShip ? std::max(excludeShip->GetClipRadius(), excludeShip->GetShipType() ? double(excludeShip->GetShipType()->hullMass) * 0.12 : 0.0) : 0.0;
+			const double excludeDist = excludeShip ? excludeShip->GetPositionRelTo(this).Length() : 0.0;
+
+			Space::BodyNearList nearby = Pi::game->GetSpace()->GetBodiesMaybeNear(const_cast<SpaceStation*>(this), 2800.0);
+			for (Body *b : nearby) {
+				if (!b || b == excludeShip || !b->IsType(ObjectType::SHIP)) continue;
+				Ship *other = static_cast<Ship*>(b);
+				if (other->IsDead() || other->GetFlightState() == Ship::DOCKED ||
+					other->GetFlightState() == Ship::HYPERSPACE || other->GetFlightState() == Ship::JUMPING)
+					continue;
+
+				const vector3d otherPosInStation = other->GetPositionRelTo(this) * stOrient;
+				const double otherAxialDist = (otherPosInStation - portPos).Dot(corridorDir);
+				const vector3d otherCenterPos = portPos + otherAxialDist * corridorDir;
+				const double otherLateralDist = (otherPosInStation - otherCenterPos).Length();
+
+				const bool otherIsDeparting = (other->GetAICommand() && other->GetAICommand()->GetType() == AICommand::CMD_DEPART);
+				const bool otherIsDocking = (other->GetAICommand() && other->GetAICommand()->GetType() == AICommand::CMD_DOCK);
+
+				// Right of way for ships leaving: any departing ship inside the station or within 1650m on the exit path
+				// blocks inbound ships from leaving their APPROACH1 holding queue
+				if (otherIsDeparting && otherAxialDist < 1650.0 && otherLateralDist < 130.0) {
+					return true;
+				}
+
+				// Any ship currently inside the station interior cylinder blocks additional corridor entries
+				if (IsInsideStation(other)) {
+					return true;
+				}
+
+				if (!excludeIsDeparting && otherIsDocking) {
+					// Strict 1-at-a-time inbound corridor queue:
+					// If another inbound ship is already traversing the corridor inside 1350m, wait at APPROACH1
+					if (otherAxialDist < 1350.0 && otherAxialDist > -200.0 && otherLateralDist < 130.0) {
+						return true;
+					}
+
+					// Priority in the APPROACH1 holding queue: larger waiting ships have right of way over smaller waiting ships
+					const double otherDist = other->GetPositionRelTo(this).Length();
+					if (otherDist < 2600.0 && excludeDist > 1200.0) {
+						const bool otherIsLarge = IsLargeCorridorShip(other);
+						const double otherSize = std::max(other->GetClipRadius(), other->GetShipType() ? double(other->GetShipType()->hullMass) * 0.12 : 0.0);
+						if ((otherIsLarge && !excludeIsLarge) || (otherSize > excludeSize * 1.30 + 3.0)) {
+							return true;
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if (m_corridorShip && m_corridorShip != excludeShip) {
+		const double dist = m_corridorShip->GetPositionRelTo(this).Length();
+		const double clearDist = std::max(GetClipRadius() * 1.5 + 500.0, 2200.0);
+		if (dist <= clearDist) {
+			return true;
+		}
+		const_cast<SpaceStation*>(this)->m_corridorShip = nullptr;
+	}
+
+	return false;
 }
 
 bool SpaceStation::ClaimCorridor(Ship *ship)
 {
 	if (!ship) return false;
-	if (m_corridorShip == ship) return true;
 	if (IsCorridorOccupied(ship)) return false;
 
 	m_corridorShip = ship;
@@ -393,38 +711,64 @@ bool SpaceStation::CanLaunch(const Ship *ship) const
 
 	if (IsPortLocked(bay)) return false;
 
-	// Check if the departure corridor is currently occupied by another vessel
-	if (IsCorridorOccupied(ship)) {
-		return false; // Corridor occupied by active departure or arriving vessel
-	}
-
-	// Safety separation between consecutive launches
+	// Safety separation between consecutive launches to prevent departure overcrowding
 	if (Pi::game) {
 		const double now = Pi::game->GetTime();
 		if (now > 0.0 && (now - m_lastLaunchTime) < MIN_LAUNCH_SEPARATION) {
-			return false; // Mandatory safety interval not yet elapsed
+			return false;
 		}
 	}
 
-	// Orbital station check: don't launch if an inbound ship is actively traversing or committed to final approach
-	if (m_type && m_type->IsOrbitalStation()) {
-		for (Uint32 i = 0; i < m_shipDocking.size(); i++) {
-			const shipDocking_t &dt = m_shipDocking[i];
-			if (!dt.ship || dt.ship->IsDead() || dt.ship == ship) continue;
+	if (IsGroundStation()) {
+		return !IsCorridorOccupied(ship);
+	}
 
-			if (dt.stage == DockStage::DOCK_ANIMATION_1) {
-				return false;
-			}
+	// Orbital station launch queue:
+	// 1. Do not launch if another bay is currently running undock or dock animations inside the cylinder
+	for (Uint32 i = 0; i < m_shipDocking.size(); i++) {
+		const shipDocking_t &dt = m_shipDocking[i];
+		if (!dt.ship || dt.ship->IsDead() || dt.ship == ship) continue;
 
-			if (dt.stage == DockStage::CLEARANCE_GRANTED) {
-				const vector3d relPos = dt.ship->GetPositionRelTo(this);
-				const double dist = relPos.Length();
-				// If inbound vessel has commenced final corridor ingress (< 2200m) and closing toward station
-				if (dist < 2200.0) {
-					const vector3d relVel = dt.ship->GetVelocityRelTo(this);
-					if (relPos.Dot(relVel) < 0.0) {
-						return false; // Inbound traffic on final approach has corridor right-of-way
-					}
+		if (SpaceStationType::IsUndockStage(dt.stage) ||
+			dt.stage == DockStage::DOCK_ANIMATION_1 ||
+			dt.stage == DockStage::DOCK_ANIMATION_2) {
+			return false;
+		}
+	}
+
+	// 2. Check live ships inside the station and in the immediate doorway throat:
+	// Leaving ships have right of way over inbound ships waiting at APPROACH1 (> 550m),
+	// but must queue one-at-a-time behind preceding departing ships (< 650m) and yield to
+	// any inbound ship already committed inside the final 550m doorway throat (or large inbound ship < 1200m).
+	if (Pi::game && Pi::game->GetSpace()) {
+		vector3d portPos, corridorDir, laneDir;
+		if (GetCorridorGeometry(portPos, corridorDir, laneDir)) {
+			const matrix3x3d stOrient = GetOrient();
+			Space::BodyNearList nearby = Pi::game->GetSpace()->GetBodiesMaybeNear(const_cast<SpaceStation*>(this), 2000.0);
+			for (Body *b : nearby) {
+				if (!b || b == ship || !b->IsType(ObjectType::SHIP)) continue;
+				Ship *other = static_cast<Ship*>(b);
+				if (other->IsDead() || other->GetFlightState() == Ship::DOCKED ||
+					other->GetFlightState() == Ship::HYPERSPACE || other->GetFlightState() == Ship::JUMPING)
+					continue;
+
+				if (IsInsideStation(other)) {
+					return false;
+				}
+
+				const vector3d otherPosInStation = other->GetPositionRelTo(this) * stOrient;
+				const double otherAxialDist = (otherPosInStation - portPos).Dot(corridorDir);
+				const vector3d otherCenterPos = portPos + otherAxialDist * corridorDir;
+				const double otherLateralDist = (otherPosInStation - otherCenterPos).Length();
+
+				const bool otherIsDeparting = (other->GetAICommand() && other->GetAICommand()->GetType() == AICommand::CMD_DEPART);
+				if (otherIsDeparting && otherAxialDist < 650.0 && otherLateralDist < 120.0) {
+					return false; // Wait until previous departing ship is at least 650m outside
+				}
+
+				const double throatDist = IsLargeCorridorShip(other) ? 1100.0 : 550.0;
+				if (!otherIsDeparting && otherAxialDist < throatDist && otherAxialDist > -150.0 && otherLateralDist < 90.0) {
+					return false; // Inbound vessel already committed to doorway throat
 				}
 			}
 		}
@@ -443,12 +787,14 @@ double SpaceStation::GetLaunchWaitTime() const
 			wait = MIN_LAUNCH_SEPARATION - elapsed;
 		}
 	}
-	if (m_corridorShip && !m_corridorShip->IsDead() && m_corridorShip->GetFlightState() != Ship::DOCKED) {
-		const double dist = m_corridorShip->GetPositionRelTo(this).Length();
-		const double clearDist = IsGroundStation() ? std::min(GetClipRadius() * 0.8 + 200.0, 450.0) : std::max(GetClipRadius() * 1.5 + 500.0, 2500.0);
-		if (dist < clearDist) {
-			const double corridorWait = std::max(3.0, (clearDist - dist) / 35.0);
-			wait = std::max(wait, corridorWait);
+	if (IsCorridorOccupied()) {
+		if (m_corridorShip && !m_corridorShip->IsDead() && m_corridorShip->GetFlightState() != Ship::DOCKED) {
+			const double dist = m_corridorShip->GetPositionRelTo(this).Length();
+			const double clearDist = IsGroundStation() ? std::min(GetClipRadius() * 0.8 + 200.0, 450.0) : std::max(GetClipRadius() * 1.5 + 500.0, 2500.0);
+			if (dist < clearDist) {
+				const double corridorWait = std::max(3.0, (clearDist - dist) / 35.0);
+				wait = std::max(wait, corridorWait);
+			}
 		}
 	}
 	if (m_type && m_type->IsOrbitalStation()) {
@@ -569,6 +915,39 @@ bool SpaceStation::GetDockingClearance(Ship *s)
 	return false;
 }
 
+bool SpaceStation::BeginOrbitalDockingSequence(Ship *s)
+{
+	if (!s || IsGroundStation() || s->IsDead()) return false;
+	if (s->GetFlightState() != Ship::FLYING) return false;
+	if (s->ManualDocking()) return false;
+	if (s->GetAICommand() && s->GetAICommand()->GetType() == AICommand::CMD_DEPART) return false;
+
+	int bay = -1;
+	for (Uint32 i = 0; i < m_shipDocking.size(); i++) {
+		if (m_shipDocking[i].ship == s) {
+			bay = i;
+			break;
+		}
+	}
+	if (bay == -1 || IsPortLocked(bay) || m_shipDocking[bay].stage != DockStage::CLEARANCE_GRANTED) {
+		return false;
+	}
+
+	shipDocking_t &sd = m_shipDocking[bay];
+	sd.ship = s;
+	sd.stagePos = 0;
+	sd.fromPos = (s->GetPosition() - GetPosition()) * GetOrient(); // station space
+	sd.fromRot = Quaterniond::FromMatrix3x3(GetOrient().Transpose() * s->GetOrient());
+
+	s->SetFlightState(Ship::DOCKING);
+	s->SetVelocity(vector3d(0.0));
+	s->SetAngVelocity(vector3d(0.0));
+	s->ClearThrusterState();
+
+	SwitchToStage(bay, (m_type->NumUndockStages() == 0) ? DockStage::TOUCHDOWN : DockStage::DOCK_ANIMATION_1);
+	return true;
+}
+
 bool SpaceStation::OnCollision(Body *b, Uint32 flags, double relVel)
 {
 	if (!b->IsType(ObjectType::SHIP)) return true;
@@ -583,8 +962,10 @@ bool SpaceStation::OnCollision(Body *b, Uint32 flags, double relVel)
 	s->RecordCollision(this, surface, relVel);
 
 	// Entrance / mail slot airlock is an open doorway with NO physical barrier.
-	// It must never block, bounce, damage, or seize any ships exiting, entering, or maneuvering.
+	// If an inbound autopilot ship with CLEARANCE_GRANTED reaches the entrance trigger,
+	// transition it into the interior docking sequence; never bounce or damage any ship on ENTRANCE.
 	if (flags & SceneGraph::CollisionGeometry::ENTRANCE) {
+		BeginOrbitalDockingSequence(s);
 		return false;
 	}
 
@@ -701,8 +1082,11 @@ void SpaceStation::SwitchToStage(Uint32 bay, DockStage stage)
 		dt.ship->SetAngVelocity(GetAngVelocity());
 		if (m_type->IsSurfaceStation()) {
 			dt.ship->SetThrusterState(1, 1.0); // up
-		} else {
+		} else if (dt.ship->IsType(ObjectType::PLAYER)) {
 			dt.ship->SetThrusterState(2, -1.0); // forward
+		} else {
+			dt.ship->SetVelocity(GetVelocity());
+			dt.ship->ClearThrusterState();
 		}
 		dt.ship->SetFlightState(Ship::FLYING);
 		SwitchToStage(bay, DockStage::LEAVE);
@@ -938,9 +1322,21 @@ void SpaceStation::TimeStepUpdate(const float timeStep)
 		const double clearDist = IsGroundStation() ? std::min(GetClipRadius() * 0.8 + 200.0, 450.0) : std::max(GetClipRadius() * 1.5 + 500.0, 2500.0);
 		const double elapsed = Pi::game ? (Pi::game->GetTime() - m_lastLaunchTime) : 0.0;
 		bool insideAndInbound = false;
-		if (m_type && m_type->IsOrbitalStation() && IsInsideStation(m_corridorShip)) {
+		if (m_type && m_type->IsOrbitalStation()) {
 			bool isDeparting = (m_corridorShip->GetAICommand() && m_corridorShip->GetAICommand()->GetType() == AICommand::CMD_DEPART);
-			if (!isDeparting) insideAndInbound = true;
+			if (!isDeparting) {
+				vector3d pPos, cDir, lDir;
+				if (GetCorridorGeometry(pPos, cDir, lDir)) {
+					const vector3d relPos = m_corridorShip->GetPositionRelTo(this) * GetOrient();
+					const double axDist = (relPos - pPos).Dot(cDir);
+					const double clearInteriorDist = IsLargeCorridorShip(m_corridorShip) ? -120.0 : -60.0;
+					if (axDist <= clearInteriorDist) {
+						insideAndInbound = true;
+					}
+				} else if (IsInsideStation(m_corridorShip)) {
+					insideAndInbound = true;
+				}
+			}
 		}
 
 		if (m_corridorShip->IsDead() || m_corridorShip->GetFlightState() == Ship::HYPERSPACE ||
@@ -967,6 +1363,31 @@ void SpaceStation::TimeStepUpdate(const float timeStep)
 
 				if (!hasDockingClearance && !isDeparting) {
 					s->AIDepart(this);
+				}
+			}
+		}
+
+		// Also verify that no NPC ship is idling or stranded without orders (CMD_NONE)
+		// directly in the exterior approach/departure corridor cylinder outside the mail slot:
+		vector3d pPos, cDir, lDir;
+		if (GetCorridorGeometry(pPos, cDir, lDir)) {
+			Space::BodyNearList corridorNearby = Pi::game->GetSpace()->GetBodiesMaybeNear(this, 5000.0);
+			for (Body *b : corridorNearby) {
+				if (!b || !b->IsType(ObjectType::SHIP)) continue;
+				Ship *s = static_cast<Ship *>(b);
+				if (s->IsDead() || s->IsType(ObjectType::PLAYER)) continue;
+				if (s->GetFlightState() != Ship::FLYING) continue;
+
+				const vector3d relPosInSt = s->GetPositionRelTo(this) * GetOrient();
+				const double axDist = (relPosInSt - pPos).Dot(cDir);
+				const vector3d latVec = relPosInSt - (pPos + axDist * cDir);
+				const double latDist = latVec.Length();
+
+				if (axDist > 0.0 && axDist < 4500.0 && latDist < 250.0) {
+					const AICommand *cmd = s->GetAICommand();
+					if (!cmd || cmd->GetType() == AICommand::CMD_NONE) {
+						s->AIOrbit(this, 2.0);
+					}
 				}
 			}
 		}
