@@ -64,7 +64,7 @@ namespace Sound {
 	{
 		vector3d pos(0.0);
 
-		if (b != Pi::player) {
+		if (b && Pi::player && b != Pi::player && b->GetFrame().valid() && Pi::player->GetFrame().valid()) {
 			pos = b->GetPositionRelTo(Pi::player);
 			pos = pos * Pi::player->GetOrient();
 		}

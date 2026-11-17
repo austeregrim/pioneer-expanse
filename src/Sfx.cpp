@@ -355,6 +355,7 @@ void SfxManager::FromJson(const Json &jsonObj, FrameId fId)
 SfxManager *SfxManager::AllocSfxInFrame(FrameId fId)
 {
 	Frame *f = Frame::GetFrame(fId);
+	if (!f) return nullptr;
 
 	if (!f->m_sfx) {
 		f->m_sfx.reset(new SfxManager);

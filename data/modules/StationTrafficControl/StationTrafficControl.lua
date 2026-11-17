@@ -152,6 +152,7 @@ local function enforceStationSafetyZone()
 
 	local nearShips = Space.GetBodiesNear(station, exclusionRadius + 400.0, "Ship")
 	local activeShips = {}
+	local toExplode = {}
 
 	for _, ship in ipairs(nearShips) do
 		if ship and ship:exists() and ship ~= Game.player then
@@ -163,8 +164,15 @@ local function enforceStationSafetyZone()
 
 				local isInside = (dist <= exclusionRadius)
 				local hasClearance = (station:GetAssignedBayNumber(ship) >= 0)
-				-- Stalled/derelict (< 3.0 m/s) or unauthorized obstruction inside the flight corridor:
-				local isObstructing = isInside and (speed < 3.0 or (not hasClearance and dist < exclusionRadius * 0.85))
+				local aiCmd = (ship.GetCurrentAICommand and ship:GetCurrentAICommand()) or ""
+				local isDeparting = (aiCmd == "CMD_DEPART")
+
+				-- An unauthorized obstruction is a vessel inside the active exclusion zone that:
+				-- 1. Does not have bay clearance (hasClearance == false)
+				-- 2. Is not actively departing (aiCmd ~= "CMD_DEPART")
+				-- 3. Is essentially motionless / stalled / derelict (speed < 2.5 m/s)
+				-- Active ships departing or flying normally (speed >= 2.5 m/s) are NOT obstructions!
+				local isObstructing = isInside and not isDeparting and not hasClearance and (speed < 2.5)
 
 				if isObstructing then
 					activeShips[ship] = true
@@ -175,16 +183,16 @@ local function enforceStationSafetyZone()
 					local label = ship:GetLabel()
 					local zoneName = isSurface and "airspace" or "airlock corridor"
 
-					if rec.time >= 10.0 and not rec.warned1 then
+					if rec.time >= 15.0 and not rec.warned1 then
 						rec.warned1 = true
 						Comms.Message(string.format("Traffic Control: Vessel \"%s\", you are loitering in an active %s without authorization. Clear the area immediately.", label, zoneName), station.label)
-					elseif rec.time >= 20.0 and not rec.warned2 then
+					elseif rec.time >= 28.0 and not rec.warned2 then
 						rec.warned2 = true
 						Comms.ImportantMessage(string.format("Traffic Control: Vessel \"%s\", final warning! Unauthorized loitering infraction confirmed. Clear the %s or lethal force will be authorized.", label, zoneName), station.label)
-					elseif rec.time >= 28.0 then
+					elseif rec.time >= 40.0 then
 						Comms.ImportantMessage(string.format("Traffic Control: Lethal force authorized against unauthorized obstruction \"%s\". Starport defense grid engaging.", label), station.label)
 						loiterTrack[ship] = nil
-						ship:Explode("Starport Defense Grid (Unauthorized Loitering)")
+						table.insert(toExplode, ship)
 					end
 				end
 			end
@@ -194,6 +202,12 @@ local function enforceStationSafetyZone()
 	for s, _ in pairs(loiterTrack) do
 		if not activeShips[s] then
 			loiterTrack[s] = nil
+		end
+	end
+
+	for _, ship in ipairs(toExplode) do
+		if ship and ship:exists() then
+			ship:Explode("Starport Defense Grid (Unauthorized Loitering)")
 		end
 	end
 end

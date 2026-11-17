@@ -342,6 +342,7 @@ vector3d Frame::GetVelocityRelTo(FrameId relToId) const
 	if (m_thisId == relToId) return vector3d::Zero; // early-out to avoid unnecessary computation
 
 	const Frame *relTo = Frame::GetFrame(relToId);
+	if (!relTo) return m_rootVel;
 	vector3d diff = m_rootVel - relTo->m_rootVel;
 	if (relTo->IsRotFrame())
 		return diff * relTo->m_rootOrient;
@@ -355,6 +356,7 @@ vector3d Frame::GetPositionRelTo(FrameId relToId) const
 	if (m_thisId == relToId) return vector3d::Zero;
 
 	const Frame *relTo = Frame::GetFrame(relToId);
+	if (!relTo) return m_rootPos;
 
 	if (GetParent() == relToId) return m_pos; // relative to parent
 	if (relTo->GetParent() == m_thisId) {	  // relative to child
@@ -381,6 +383,7 @@ vector3d Frame::GetPositionRelTo(FrameId relToId) const
 vector3d Frame::GetInterpPositionRelTo(FrameId relToId) const
 {
 	const Frame *relTo = Frame::GetFrame(relToId);
+	if (!relTo) return m_rootInterpPos;
 
 	// early-outs for simple cases, required for accuracy in large systems
 	if (m_thisId == relToId) return vector3d::Zero;
@@ -408,20 +411,17 @@ vector3d Frame::GetInterpPositionRelTo(FrameId relToId) const
 matrix3x3d Frame::GetOrientRelTo(FrameId relToId) const
 {
 	if (m_thisId == relToId) return matrix3x3d::Identity;
-	return Frame::GetFrame(relToId)->m_rootOrient.Transpose() * m_rootOrient;
+	const Frame *relTo = Frame::GetFrame(relToId);
+	if (!relTo) return matrix3x3d::Identity;
+	return relTo->m_rootOrient.Transpose() * m_rootOrient;
 }
 
 matrix3x3d Frame::GetInterpOrientRelTo(FrameId relToId) const
 {
 	if (m_thisId == relToId) return matrix3x3d::Identity;
-	return Frame::GetFrame(relToId)->m_rootInterpOrient.Transpose() * m_rootInterpOrient;
-	/*	if (IsRotFrame()) {
-		if (relTo->IsRotFrame()) return m_interpOrient * relTo->m_interpOrient.Transpose();
-		else return m_interpOrient;
-	}
-	if (relTo->IsRotFrame()) return relTo->m_interpOrient.Transpose();
-	else return matrix3x3d::Identity;
-*/
+	const Frame *relTo = Frame::GetFrame(relToId);
+	if (!relTo) return matrix3x3d::Identity;
+	return relTo->m_rootInterpOrient.Transpose() * m_rootInterpOrient;
 }
 
 matrix4x4d Frame::GetTransformRelTo(FrameId relToId) const

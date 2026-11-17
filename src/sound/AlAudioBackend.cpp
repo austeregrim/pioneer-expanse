@@ -173,6 +173,10 @@ void Sound::AlAudioBackend::BodyMakeNoise(const Body *b, std::string_view key, f
 	// would be beneficial.
 	constexpr double distance_threshold = 3000;
 
+	if (!b || !Pi::player || !b->GetFrame().valid() || !Pi::player->GetFrame().valid()) {
+		return;
+	}
+
 	auto pos = b->GetPositionRelTo(Pi::player);
 	pos = pos * Pi::player->GetOrient();
 

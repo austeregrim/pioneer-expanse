@@ -205,6 +205,7 @@ Body *Body::FromJson(const Json &jsonObj, Space *space)
 vector3d Body::GetPositionRelTo(FrameId relToId) const
 {
 	Frame *frame = Frame::GetFrame(m_frame);
+	if (!frame || !relToId.valid()) return GetPosition();
 
 	vector3d fpos = frame->GetPositionRelTo(relToId);
 	matrix3x3d forient = frame->GetOrientRelTo(relToId);
@@ -214,6 +215,7 @@ vector3d Body::GetPositionRelTo(FrameId relToId) const
 vector3d Body::GetInterpPositionRelTo(FrameId relToId) const
 {
 	Frame *frame = Frame::GetFrame(m_frame);
+	if (!frame || !relToId.valid()) return GetInterpPosition();
 
 	vector3d fpos = frame->GetInterpPositionRelTo(relToId);
 	matrix3x3d forient = frame->GetInterpOrientRelTo(relToId);
@@ -222,17 +224,20 @@ vector3d Body::GetInterpPositionRelTo(FrameId relToId) const
 
 vector3d Body::GetPositionRelTo(const Body *relTo) const
 {
+	if (!relTo || !relTo->m_frame.valid()) return GetPosition();
 	return GetPositionRelTo(relTo->m_frame) - relTo->GetPosition();
 }
 
 vector3d Body::GetInterpPositionRelTo(const Body *relTo) const
 {
+	if (!relTo || !relTo->m_frame.valid()) return GetInterpPosition();
 	return GetInterpPositionRelTo(relTo->m_frame) - relTo->GetInterpPosition();
 }
 
 matrix3x3d Body::GetOrientRelTo(FrameId relToId) const
 {
 	Frame *frame = Frame::GetFrame(m_frame);
+	if (!frame || !relToId.valid()) return GetOrient();
 
 	matrix3x3d forient = frame->GetOrientRelTo(relToId);
 	return forient * GetOrient();
@@ -241,6 +246,7 @@ matrix3x3d Body::GetOrientRelTo(FrameId relToId) const
 matrix3x3d Body::GetInterpOrientRelTo(FrameId relToId) const
 {
 	Frame *frame = Frame::GetFrame(m_frame);
+	if (!frame || !relToId.valid()) return GetInterpOrient();
 
 	matrix3x3d forient = frame->GetInterpOrientRelTo(relToId);
 	return forient * GetInterpOrient();
@@ -249,6 +255,7 @@ matrix3x3d Body::GetInterpOrientRelTo(FrameId relToId) const
 vector3d Body::GetVelocityRelTo(FrameId relToId) const
 {
 	Frame *frame = Frame::GetFrame(m_frame);
+	if (!frame || !relToId.valid()) return GetVelocity();
 
 	matrix3x3d forient = frame->GetOrientRelTo(relToId);
 	vector3d vel = GetVelocity();
@@ -258,6 +265,7 @@ vector3d Body::GetVelocityRelTo(FrameId relToId) const
 
 vector3d Body::GetVelocityRelTo(const Body *relTo) const
 {
+	if (!relTo || !relTo->m_frame.valid()) return GetVelocity();
 	return GetVelocityRelTo(relTo->m_frame) - relTo->GetVelocityRelTo(relTo->m_frame);
 }
 

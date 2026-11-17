@@ -811,12 +811,14 @@ void Ship::Explode()
 		LuaEvent::Emit();
 	}
 
-	Pi::game->GetSpace()->KillBody(this);
-	const double distToPlayer = (Pi::player && !Pi::player->IsDead()) ? GetPositionRelTo(Pi::player).Length() : 1e9;
-	if (distToPlayer < 50000.0 || (Pi::player && this->GetFrame() == Pi::player->GetFrame())) {
+	const bool hasValidFrames = (Pi::player && !Pi::player->IsDead() && GetFrame().valid() && Pi::player->GetFrame().valid());
+	const double distToPlayer = hasValidFrames ? GetPositionRelTo(Pi::player).Length() : 1e9;
+	if (hasValidFrames && (distToPlayer < 50000.0 || this->GetFrame() == Pi::player->GetFrame())) {
 		SfxManager::AddExplosion(this);
 		Sound::BodyMakeNoise(this, "Explosion_1", 1.0f);
 	}
+
+	Pi::game->GetSpace()->KillBody(this);
 	ClearThrusterState();
 	AIClearInstructions();
 	if (m_supercruise) {
