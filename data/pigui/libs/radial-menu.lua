@@ -2,6 +2,7 @@
 -- Licensed under the terms of the GPL v3. See licenses/GPL-3.txt
 local Lang = require 'Lang'
 local Engine = require 'Engine'
+local Event = require 'Event'
 local pigui = Engine.pigui
 local Game = require 'Game'
 local ui = require 'pigui.baseui'
@@ -48,24 +49,31 @@ local defaultRadialMenuPadding = ui.theme.styles.MainButtonPadding
 --
 function ui.openRadialMenu(id, target, mouse_button, size, actions, padding, pos, action_binding)
 	ui.openPopup("##radialmenupopup")
+	local openMousePos = ui.getMousePos()
+	local rawPos = pos or openMousePos
+	local clampedPos = Vector2(
+		math.min(math.max(rawPos.x, size*3), ui.screenWidth - size*3),
+		math.min(math.max(rawPos.y, size*3), ui.screenHeight - size*3)
+	)
 	radialMenu = {
 		id = id,
 		target = target,
-		pos = pos or ui.getMousePos(),
+		pos = clampedPos,
+		openMousePos = openMousePos,
+		posClamped = (clampedPos.x ~= rawPos.x or clampedPos.y ~= rawPos.y),
 		size = size,
 		iconSize = Vector2(size),
 		actions = actions,
 		padding = padding or 0,
-		actionBinding = action_binding
+		actionBinding = action_binding,
+		sticky = false,
 	}
 	-- ignore mouse button if input action passed
 	radialMenu.mouseButton = action_binding and -1 or mouse_button
-	-- move away from screen edge
-	radialMenu.pos.x = math.min(math.max(radialMenu.pos.x, size*3), ui.screenWidth - size*3)
-	radialMenu.pos.y = math.min(math.max(radialMenu.pos.y, size*3), ui.screenHeight - size*3)
 	if not action_binding then
 		ui.clearMouse()
 	end
+	pigui.DisableMouseFacing(true)
 end
 
 local hasAutopilotLevel = function(level)
@@ -215,24 +223,91 @@ function ui.radialMenu(id)
 	end
 	local n = pigui.RadialMenu(radialMenu.pos, "##radialmenupopup", radialMenu.mouseButton, icons, colors, tooltips, radialMenu.size, radialMenu.padding)
 
-	-- radial menu launched by input action
-	if radialMenu.actionBinding then
-		if radialMenu.actionBinding:IsActive() then
-			return n -- continue show the radial, while the input action is active
-		end
-	-- radial menu launched by mouse click
-	elseif ui.isMouseDown(radialMenu.mouseButton) then
-		pigui.DisableMouseFacing(true)
-		return n -- continue show the radial, while the mouse button is pressed
-	else
+	if n < 0 then
 		pigui.DisableMouseFacing(false)
+		radialMenu.id = nil
+		radialMenu.sticky = false
+		return 0
 	end
 
-	-- closing radial, fire item callback (if selected)
+	pigui.DisableMouseFacing(true)
+
+	local closeMenu = false
+	local selectedItem = 0
+
+	if radialMenu.actionBinding then
+		-- Keyboard or controller action binding: held to display, fires on release
+		if radialMenu.actionBinding:IsActive() then
+			return n
+		else
+			closeMenu = true
+			selectedItem = n
+		end
+	else
+		local btn = radialMenu.mouseButton
+		local isDown = (btn >= 0) and ui.isMouseDown(btn)
+
+		if not radialMenu.sticky then
+			if isDown then
+				-- Holding mouse button (gesture hold-and-drag mode)
+				return n
+			else
+				-- Mouse button was released
+				local movedEnough = (not radialMenu.posClamped) or ((ui.getMousePos() - radialMenu.openMousePos):length() >= 8)
+				if n > 0 and movedEnough then
+					-- Dragged to an option and released: fire selected action!
+					closeMenu = true
+					selectedItem = n
+				else
+					-- Released without selecting an item: enter sticky mode so user can browse and click!
+					radialMenu.sticky = true
+					return n
+				end
+			end
+		else
+			-- Sticky mode: menu stays open until clicked or dismissed
+			if ui.escapeKeyReleased(true) then
+				closeMenu = true
+				selectedItem = 0
+			elseif ui.isMouseClicked(0) or (btn >= 0 and ui.isMouseClicked(btn)) then
+				closeMenu = true
+				selectedItem = n
+			else
+				return n
+			end
+		end
+	end
+
+	-- closing radial
+	if ui.closePopup then
+		ui.closePopup("##radialmenupopup")
+	end
+	if not radialMenu.actionBinding then
+		ui.clearMouse()
+	end
+	pigui.DisableMouseFacing(false)
+	local target = radialMenu.target
+	local actions = radialMenu.actions
 	radialMenu.id = nil
-	if n > 0 then
-		radialMenu.actions[n].action(radialMenu.target)
+	radialMenu.sticky = false
+
+	if closeMenu and selectedItem > 0 and actions[selectedItem] then
+		actions[selectedItem].action(target)
 	end
 
-	return n
+	return selectedItem
 end
+
+local function resetRadialMenu()
+	if radialMenu.id ~= nil then
+		radialMenu.id = nil
+		radialMenu.sticky = false
+		if Game.player then
+			pigui.DisableMouseFacing(false)
+		end
+	end
+end
+
+Event.Register("onViewChanged", resetRadialMenu)
+Event.Register("onGameEnd", resetRadialMenu)
+Event.Register("onEnterMainMenu", resetRadialMenu)

@@ -135,6 +135,7 @@ end
 
 local onShipFiring = function (ship)
 	if not Game.system.path:IsSameSystem(rondel_syspath) then return end
+	if ship:IsPlayer() then return end
 
 	local police = ShipDef[Game.system.faction.policeShip]
 	if ship.shipId ~= police.id then

@@ -83,6 +83,7 @@ public:
 	int GetFreeDockingPort(const Ship *s) const; // returns -1 if none free
 	int GetMyDockingPort(const Ship *s) const;
 	int NumShipsDocked() const;
+	void TakeoverUndock(Ship *ship);
 
 	const SpaceStationType *GetStationType() const { return m_type; }
 	bool IsGroundStation() const;

@@ -462,30 +462,39 @@ local function drawInterCastNews()
 				local textWidth = availableRegion.x - faceWidth - widgetSizes.itemSpacing.x
 
 				ui.child("NewsArticleText", Vector2(textWidth, 0), function()
-					-- Metadata line with Interactive Flag Toggle Button
+					-- Metadata line
 					ui.withFont(pionillium.details, function()
 						ui.textColored(colors.fontDim, string.format("TRANSMISSION DATE: %s   |   ORIGIN: %s", activeArticle.date, formatSystemWithDistance(activeArticle)))
 						ui.textColored(colors.fontDim, string.format("REPORTING BUREAU: %s", activeArticle.bureau))
 					end)
 
 					ui.spacing()
-					local isFlagged = InterCast.IsFlagged(activeArticle.id)
-					local flagBtnText = isFlagged and "[ ! FLAGGED AS IMPORTANT ]" or "[ ! MARK IMPORTANT ]"
-					local flagBtnStyle = isFlagged
-						and { Button = Color(255, 190, 30, 220), Text = colors.black }
-						or { Button = Color(35, 42, 58, 200), Text = colors.white }
-
-					ui.withStyleColors(flagBtnStyle, function()
-						if ui.button(flagBtnText .. "##detailFlagBtn", Vector2(210, 26)) then
-							InterCast.ToggleFlagged(activeArticle.id)
-						end
-					end)
-
-					ui.spacing()
 					ui.separator()
 					ui.spacing()
 
-					-- Headline (wrapped in details view)
+					-- Headline with compact '!' Flag Toggle Button
+					local isFlagged = InterCast.IsFlagged(activeArticle.id)
+					local flagTooltip = isFlagged and "Flagged as important — Click to unmark" or "Mark important"
+					local flagBtnStyle = isFlagged
+						and {
+							Button = Color(255, 190, 30, 220),
+							ButtonHovered = Color(255, 205, 60, 240),
+							ButtonActive = Color(220, 160, 20, 255),
+							Text = colors.black
+						}
+						or {
+							Button = Color(35, 42, 58, 200),
+							ButtonHovered = Color(55, 65, 88, 220),
+							ButtonActive = Color(25, 30, 42, 240),
+							Text = colors.fontDim
+						}
+
+					ui.withStyleColors(flagBtnStyle, function()
+						if ui.button("!##detailFlagBtn", Vector2(24, 24), nil, flagTooltip) then
+							InterCast.ToggleFlagged(activeArticle.id)
+						end
+					end)
+					ui.sameLine(0, widgetSizes.itemSpacing.x)
 					ui.withFont(orbiteer.heading, function()
 						ui.textWrapped(activeArticle.headline)
 					end)

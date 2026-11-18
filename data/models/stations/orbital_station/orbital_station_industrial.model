@@ -1,0 +1,91 @@
+version 2
+
+material "facade" {
+	shader "multi"
+	texture diffuse  "facades_diff.dds"
+	texture glow     "facades_diff.dds"
+	diffuse 0.65 0.55 0.40
+	specular 0.25 0.20 0.15
+	unlit
+}
+
+material "floor" {
+	shader "multi"
+	texture diffuse  "floors_diff.dds"
+	texture glow     "floors_diff.dds"
+	diffuse 0.5 0.45 0.4
+	specular 0.15 0.15 0.1
+	unlit
+}
+
+material "tunnels" {
+	shader "multi"
+	texture diffuse  "spoke_n_misc_diff.dds"
+	texture glow     "spoke_n_misc_diff.dds"
+	diffuse 0.6 0.5 0.4
+	specular 0.1 0.1 0.1
+	unlit
+}
+
+material "facade_window" {
+	shader "multi"
+	texture diffuse  "facades_diff.dds"
+	texture glow     "facades_diff.dds"
+	diffuse 1.0 0.8 0.3
+	specular 0.6 0.5 0.2
+	opacity 40
+	
+	render_state {
+		blend alpha
+		depth_write off
+	}
+}
+
+material "ring" {
+	shader "multi"
+	texture diffuse  "ring_diff.dds"
+	texture specular "ring_diff_s.dds"
+	texture glow     "ring_glow.dds"
+	diffuse 0.6 0.5 0.42
+}
+
+material "ring_glass" {
+	shader "multi"
+	texture diffuse  "ring_diff.dds"
+	diffuse 0.9 0.7 0.3
+	specular 0.7 0.6 0.3
+	opacity 40
+	
+	render_state {
+		blend alpha
+		depth_write off
+	}
+}
+
+material "strut" {
+	shader "multi"
+	texture diffuse  "struts_diff.dds"
+	diffuse 0.5 0.45 0.4
+	specular 0.2 0.15 0.1
+}
+
+material "spokes" {
+	shader "multi"
+	texture diffuse  "spoke_n_misc_diff.dds"
+	diffuse 0.6 0.5 0.4
+	specular 0.15 0.1 0.1
+	use_patterns
+}
+
+lod 100 {
+	mesh "station_hub_B.dae"
+	mesh "station_docking_B.dae"
+	mesh "station_ring_2-2k.dae"
+}
+
+collision "station_B_coll.dae"
+
+bound capsule interior "tag_interior1" "tag_interior2" 70
+bound capsule interior "tag_interior2" "tag_interior3" 120
+bound capsule interior "tag_interior3" "tag_interior4" 70
+

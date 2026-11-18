@@ -202,7 +202,7 @@ FrameId Frame::FromJson(const Json &frameObj, Space *space, FrameId parent, doub
 		f->m_pos = frameObj["pos"];
 		f->m_angSpeed = frameObj["ang_speed"];
 		f->SetInitialOrient(frameObj["init_orient"], at_time);
-		f->m_sbody = space->GetSystemBodyByIndex(frameObj["index_for_system_body"]);
+		f->m_sbody = space->GetSystemBodyByIndex(frameObj["index_for_system_body"], f->m_label);
 		f->m_astroBodyIndex = frameObj["index_for_astro_body"];
 		f->m_vel = vector3d(0.0); // m_vel is set to zero.
 

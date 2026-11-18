@@ -22,7 +22,7 @@ public:
 	void PostLoadFixup(Space *s) override;
 	void StaticUpdate(float timeStep) override;
 	bool IsMouseActive() const { return m_mouseActive; }
-	void SetDisableMouseFacing(bool disabled) { m_disableMouseFacing = disabled; }
+	void SetDisableMouseFacing(bool disabled);
 	double GetCruiseSpeed() const override { return m_cruiseSpeed; }
 	void ChangeCruiseSpeed(double delta) override { m_cruiseSpeed += delta; }
 	FlightControlState GetFlightControlState() const override { return m_flightControlState; }
@@ -173,6 +173,7 @@ private:
 
 	FollowMode m_followMode = FOLLOW_POS;
 	CruiseDirection m_cruiseDirection = CRUISE_FWD;
+	float m_undockElapsed = 0.0f;
 
 	ConnectionTicket m_connRotationDampingToggleKey;
 	ConnectionTicket m_fireMissileKey;

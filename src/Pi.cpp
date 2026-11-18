@@ -693,6 +693,8 @@ void MainMenu::Start()
 	ImGui::ClearActiveID();
 	ImGui::SetWindowFocus(nullptr);
 
+	Pi::input->EnableBindings(true);
+
 	LuaEvent::Queue("onEnterMainMenu");
 }
 
@@ -916,6 +918,12 @@ void GameLoop::Start()
 	// this is a bit brittle. skank may be forgotten and survive between
 	// games
 	Pi::input->InitGame();
+	Pi::input->EnableBindings(true);
+
+	// Ensure any menu Dear ImGui active popups, active ID, and focus are cleared
+	ImGui::ClosePopupsOverWindow(nullptr, false);
+	ImGui::ClearActiveID();
+	ImGui::SetWindowFocus(nullptr);
 
 	if (!Pi::config->Int("DisableSound")) AmbientSounds::Init();
 
@@ -1067,11 +1075,13 @@ void GameLoop::Update(float deltaTime)
 	perfTimer.SoftReset();
 	Pi::pigui->NewFrame();
 
-	if (Pi::game && !Pi::player->IsDead()) {
+	if (Pi::game) {
 		// TODO: this mechanism still isn't perfect, but it gets us out of newUI
-		if (Pi::luaConsole->IsActive())
+		if (Pi::luaConsole->IsActive()) {
 			Pi::luaConsole->Draw();
-		else {
+		} else if (Pi::GetView() == Pi::game->GetDeathView()) {
+			Pi::GetView()->DrawPiGui();
+		} else if (!Pi::player->IsDead()) {
 			Pi::GetView()->DrawPiGui();
 			PiGui::EmitEvents();
 			PiGui::RunHandler(deltaTime, "game");
@@ -1155,8 +1165,9 @@ void GameLoop::End()
 	ImGui::ClearActiveID();
 	ImGui::SetWindowFocus(nullptr);
 
-	// Clean up any left-over mouse state
+	// Clean up any left-over mouse and input state
 	Pi::input->SetCapturingMouse(false);
+	Pi::input->EnableBindings(true);
 
 #ifdef REMOTE_LUA_REPL
 	Pi::luaConsole->CloseTCPDebugConnection();

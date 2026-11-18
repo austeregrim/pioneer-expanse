@@ -140,6 +140,13 @@ void ShipViewController::Deactivated()
 	Pi::player->SetFlag(Body::FLAG_DRAW_EXCLUDE, false);
 	Pi::input->RemoveInputFrame(&InputBindings);
 
+	if (m_mouseActive) {
+		m_mouseActive = false;
+		if (Pi::input) {
+			Pi::input->SetCapturingMouse(false);
+		}
+	}
+
 	m_onMouseWheelCon.disconnect();
 }
 

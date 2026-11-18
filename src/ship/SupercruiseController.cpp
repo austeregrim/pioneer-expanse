@@ -385,7 +385,7 @@ bool SupercruiseController::StartCharge()
 	if (m_ship && m_ship->IsHyperspaceActive()) {
 		if (isPlayer) {
 			ShowStatusMessage("FSD BUSY: HYPERJUMP IN PROGRESS", 4.0f);
-			Sound::BodyMakeNoise(m_ship, "warning", 0.5f);
+			Sound::BodyMakeNoise(m_ship, "notify_beep", 0.7f);
 		}
 		return false;
 	}
@@ -395,7 +395,7 @@ bool SupercruiseController::StartCharge()
 	if (st != SC_READY) {
 		if (isPlayer) {
 			ShowStatusMessage(reason, 4.0f);
-			Sound::BodyMakeNoise(m_ship, "warning", 0.5f);
+			Sound::BodyMakeNoise(m_ship, "notify_beep", 0.7f);
 		}
 		return false;
 	}
@@ -1705,7 +1705,7 @@ bool SupercruiseController::StartInterdiction(Ship *target)
 	if (!CanInterdict(target, &reason)) {
 		if (m_ship && m_ship->IsType(ObjectType::PLAYER)) {
 			ShowStatusMessage(reason, 3.5f);
-			Sound::BodyMakeNoise(m_ship, "warning", 0.6f);
+			Sound::BodyMakeNoise(m_ship, "notify_beep", 0.7f);
 		}
 		return false;
 	}
@@ -1730,6 +1730,8 @@ bool SupercruiseController::StartInterdiction(Ship *target)
 		m_heatSpike = 1.0;
 		m_cooldown = 45.0f;
 		ShowStatusMessage("TARGET ENGAGED INTERDICTION NULLIFIER — FORCED DROPOUT & FSD REBOOT (45s)", 6.0f);
+		LuaEvent::Queue("onInterdictionNullified", m_ship, target);
+		LuaEvent::Emit();
 		if (attackerIsPlayer) {
 			Sound::BodyMakeNoise(m_ship, "warning", 0.9f);
 		}
@@ -1887,6 +1889,8 @@ void SupercruiseController::UpdateInterdiction(float timeStep)
 		ClearInterdiction();
 		targetSc->ShowStatusMessage("INTERDICTION EVADED", 4.5f);
 		EmergencyDrop("INTERDICTION FAILED — FSD OVERLOAD");
+		LuaEvent::Queue("onInterdictionEvaded", m_ship, target);
+		LuaEvent::Emit();
 	}
 }
 
@@ -1976,4 +1980,7 @@ void SupercruiseController::DropPairFromInterdiction(Ship *attacker, Ship *targe
 		attSc->ShowStatusMessage("INTERDICTION SUCCESSFUL — TARGET DROPPED", 4.5f);
 		tgtSc->ShowStatusMessage("INTERDICTED — EMERGENCY DROP & FSD COOLDOWN (25s)", 5.5f);
 	}
+
+	LuaEvent::Queue("onInterdictionDrop", attacker, target, submitted);
+	LuaEvent::Emit();
 }

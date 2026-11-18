@@ -289,7 +289,10 @@ Space::Space(Game *game, RefCountedPtr<Galaxy> galaxy, const Json &jsonObj, doub
 			// needs a clean posAccum for each planet
 			std::vector<vector3d> posAccum;
 			SystemPath planet_path = m_starSystem->GetPathOf(sbody.Get());
-			Planet *planet = static_cast<Planet *>(FindBodyForPath(&planet_path));
+			Body *planetBody = FindBodyForPath(&planet_path);
+			if (!planetBody || !planetBody->IsType(ObjectType::PLANET))
+				continue;
+			Planet *planet = static_cast<Planet *>(planetBody);
 			for (auto kid : sbody->GetChildren()) {
 				if (kid->GetType() == SystemBody::TYPE_STARPORT_SURFACE) {
 					// out arguments
@@ -391,11 +394,26 @@ Body *Space::GetBodyByIndex(Uint32 idx) const
 	return m_bodyIndex[idx];
 }
 
-SystemBody *Space::GetSystemBodyByIndex(Uint32 idx) const
+SystemBody *Space::GetSystemBodyByIndex(Uint32 idx, const std::string &matchingName) const
 {
 	assert(m_sbodyIndexValid);
-	assert(m_sbodyIndex.size() > idx);
-	return m_sbodyIndex[idx];
+	if (idx == 0)
+		return nullptr;
+
+	if (!matchingName.empty()) {
+		if (idx < m_sbodyIndex.size() && m_sbodyIndex[idx] && m_sbodyIndex[idx]->GetName() == matchingName) {
+			return m_sbodyIndex[idx];
+		}
+		for (SystemBody *sb : m_sbodyIndex) {
+			if (sb && sb->GetName() == matchingName)
+				return sb;
+		}
+	}
+
+	if (idx < m_sbodyIndex.size())
+		return m_sbodyIndex[idx];
+
+	return nullptr;
 }
 
 Uint32 Space::GetIndexForBody(const Body *body) const

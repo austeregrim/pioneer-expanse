@@ -13,6 +13,10 @@
 #include "graphics/Renderer.h"
 #include "pigui/PiGui.h"
 #include "profiler/Profiler.h"
+#include "imgui/imgui.h"
+#include "imgui/imgui_internal.h"
+#include "ship/GunManager.h"
+#include "ship/PlayerShipController.h"
 
 #include <cmath>
 
@@ -41,8 +45,22 @@ void DeathView::Init()
 	m_cameraContext->SetCameraOrient(matrix3x3d::Identity);
 	m_deathTimer = 0.0f;
 	if (Pi::input) {
-		Pi::input->SetCapturingMouse(false);
+		Pi::input->ClearAllInput();
 	}
+	if (Pi::player) {
+		if (PlayerShipController *psc = Pi::player->GetPlayerController()) {
+			psc->ResetMouseCapture();
+		}
+		auto gm = Pi::player->GetComponent<GunManager>();
+		if (gm) {
+			gm->SetAllGroupsFiring(false);
+		}
+	}
+	ImGui::GetIO().ClearInputKeys();
+	ImGui::GetIO().ClearInputMouse();
+	ImGui::ClearActiveID();
+	ImGui::SetWindowFocus(nullptr);
+	ImGui::SetMouseCursor(ImGuiMouseCursor_Arrow);
 }
 
 void DeathView::OnSwitchTo()
@@ -74,68 +92,91 @@ void DeathView::DrawPiGui()
 	const float t = m_deathTimer;
 	const ImVec2 scrSize = ImGui::GetIO().DisplaySize;
 
-	ImGui::SetNextWindowPos(ImVec2(0, 0));
-	ImGui::SetNextWindowSize(scrSize);
-	ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs |
-	                         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing;
-
 	if (t < 2.5f) {
 		// Phase 1: Hull Breach & Emergency Ejection Alert
-		flags |= ImGuiWindowFlags_NoBackground;
-		if (ImGui::Begin("##DeathAlert", nullptr, flags)) {
-			const float pulse = (std::sin(t * 12.0f) > 0.0f) ? 1.0f : 0.4f;
-			ImDrawList *dl = ImGui::GetWindowDrawList();
+		const float pulse = (std::sin(t * 12.0f) > 0.0f) ? 1.0f : 0.4f;
+		const float bannerW = 760.0f;
+		const float bannerH = 92.0f;
 
-			const float bannerW = 760.0f;
-			const float bannerH = 92.0f;
-			const ImVec2 bMin((scrSize.x - bannerW) * 0.5f, 120.0f);
-			const ImVec2 bMax(bMin.x + bannerW, bMin.y + bannerH);
+		ImGui::SetNextWindowPos(ImVec2(scrSize.x * 0.5f, 120.0f), ImGuiCond_Always, ImVec2(0.5f, 0.0f));
+		ImGui::SetNextWindowSize(ImVec2(bannerW, bannerH));
 
-			dl->AddRectFilled(bMin, bMax, IM_COL32(180, 15, 15, int(190 * pulse)), 8.0f);
-			dl->AddRect(bMin, bMax, IM_COL32(255, 70, 70, int(255 * pulse)), 8.0f, 0, 2.5f);
+		ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.7f, 0.06f, 0.06f, 0.75f * pulse));
+		ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(1.0f, 0.28f, 0.28f, pulse));
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 8.0f);
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 2.5f);
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(24.0f, 14.0f));
 
-			ImGui::SetCursorPos(ImVec2(bMin.x + 24.0f, bMin.y + 15.0f));
+		ImGuiWindowFlags bFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs |
+		                          ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+		                          ImGuiWindowFlags_NoMove;
+
+		if (ImGui::Begin("##DeathAlert", nullptr, bFlags)) {
 			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, pulse));
 			ImGui::SetWindowFontScale(1.35f);
 			ImGui::TextUnformatted("CRITICAL STRUCTURAL FAILURE - HULL DESTROYED");
 			ImGui::SetWindowFontScale(1.05f);
-			ImGui::SetCursorPos(ImVec2(bMin.x + 24.0f, bMin.y + 54.0f));
+			ImGui::Spacing();
 			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.85f, 0.4f, 1.0f));
 			ImGui::TextUnformatted(">>> EMERGENCY ESCAPE POD EJECTED <<<");
 			ImGui::PopStyleColor(2);
 			ImGui::SetWindowFontScale(1.0f);
 		}
 		ImGui::End();
+		ImGui::PopStyleVar(3);
+		ImGui::PopStyleColor(2);
 	} else {
 		// Phase 2: Fade to deep black with SAR Cryo-Stasis Telemetry Monitor
 		const float fade = Clamp((t - 2.5f) / 1.0f, 0.0f, 1.0f);
-		ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.015f, 0.02f, 0.035f, fade * 0.98f));
-		if (ImGui::Begin("##StasisTelemetry", nullptr, flags)) {
+
+		// Full-screen dark fade overlay
+		ImGui::SetNextWindowPos(ImVec2(0, 0));
+		ImGui::SetNextWindowSize(scrSize);
+		ImGuiWindowFlags bgFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs |
+		                           ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+		                           ImGuiWindowFlags_NoBackground;
+		if (ImGui::Begin("##DeathFadeBg", nullptr, bgFlags)) {
 			ImDrawList *dl = ImGui::GetWindowDrawList();
-			const ImVec2 center(scrSize.x * 0.5f, scrSize.y * 0.46f);
-			const float boxW = 860.0f;
-			const float boxH = 430.0f;
-			const ImVec2 boxMin(center.x - boxW * 0.5f, center.y - boxH * 0.5f);
-			const ImVec2 boxMax(center.x + boxW * 0.5f, center.y + boxH * 0.5f);
+			dl->AddRectFilled(ImVec2(0, 0), scrSize, IM_COL32(3, 5, 9, int(250 * fade)));
+		}
+		ImGui::End();
 
-			// Decorative stasis monitor frame
-			dl->AddRectFilled(boxMin, boxMax, IM_COL32(8, 14, 22, int(245 * fade)), 12.0f);
-			dl->AddRect(boxMin, boxMax, IM_COL32(0, 190, 230, int(230 * fade)), 12.0f, 0, 2.0f);
+		// Centered Telemetry Monitor Window
+		const float boxW = 860.0f;
+		const float boxH = 430.0f;
+		const ImVec2 center(scrSize.x * 0.5f, scrSize.y * 0.46f);
 
-			// Header accent bar
-			dl->AddRectFilled(boxMin, ImVec2(boxMax.x, boxMin.y + 52.0f), IM_COL32(0, 65, 100, int(250 * fade)), 12.0f, ImDrawFlags_RoundCornersTop);
+		ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+		ImGui::SetNextWindowSize(ImVec2(boxW, boxH));
+
+		ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.025f, 0.045f, 0.07f, fade * 0.98f));
+		ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.0f, 0.75f, 0.9f, fade * 0.9f));
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 12.0f);
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 2.0f);
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(32.0f, 16.0f));
+
+		ImGuiWindowFlags mFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs |
+		                          ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+		                          ImGuiWindowFlags_NoMove;
+
+		if (ImGui::Begin("##StasisTelemetryMonitor", nullptr, mFlags)) {
+			// Header accent bar across the top of the monitor window
+			ImDrawList *dl = ImGui::GetWindowDrawList();
+			const ImVec2 wPos = ImGui::GetWindowPos();
+			const ImVec2 wSize = ImGui::GetWindowSize();
+			dl->AddRectFilled(wPos, ImVec2(wPos.x + wSize.x, wPos.y + 48.0f), IM_COL32(0, 65, 100, int(250 * fade)), 12.0f, ImDrawFlags_RoundCornersTop);
 
 			const bool isHardcore = (m_game && m_game->IsHardcore());
 
-			ImGui::SetCursorPos(ImVec2(boxMin.x + 28.0f, boxMin.y + 13.0f));
+			ImGui::SetCursorPosY(12.0f);
 			if (isHardcore) {
 				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.35f, 0.35f, fade));
-				ImGui::SetWindowFontScale(1.25f);
+				ImGui::SetWindowFontScale(1.2f);
 				ImGui::TextUnformatted("HARDCORE IRONMAN CHARTER - NO SEARCH & RESCUE TRANSPONDER");
 				ImGui::SetWindowFontScale(1.0f);
 				ImGui::PopStyleColor();
 
-				ImGui::SetCursorPos(ImVec2(boxMin.x + 36.0f, boxMin.y + 78.0f));
+				ImGui::SetCursorPosY(68.0f);
 				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.85f, 0.88f, 0.95f, fade));
 				ImGui::TextUnformatted("HULL STATUS: CATASTROPHIC DESTRUCTION IN VACUUM");
 				ImGui::Spacing();
@@ -155,13 +196,12 @@ void DeathView::DrawPiGui()
 				ImGui::PopStyleColor();
 			} else {
 				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.35f, 0.92f, 1.0f, fade));
-				ImGui::SetWindowFontScale(1.25f);
+				ImGui::SetWindowFontScale(1.2f);
 				ImGui::TextUnformatted("COSPAS-SARSAT EMERGENCY ESCAPE POD TRANSPONDER");
 				ImGui::SetWindowFontScale(1.0f);
 				ImGui::PopStyleColor();
 
-				// Readout lines
-				ImGui::SetCursorPos(ImVec2(boxMin.x + 36.0f, boxMin.y + 78.0f));
+				ImGui::SetCursorPosY(68.0f);
 				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.85f, 0.88f, 0.95f, fade));
 				ImGui::TextUnformatted("BEACON FREQUENCY: 121.5 MHz / 406.025 MHz (Sub-space Distress Pulse Active)");
 				ImGui::Spacing();
@@ -194,6 +234,7 @@ void DeathView::DrawPiGui()
 			}
 		}
 		ImGui::End();
-		ImGui::PopStyleColor();
+		ImGui::PopStyleVar(3);
+		ImGui::PopStyleColor(2);
 	}
 }

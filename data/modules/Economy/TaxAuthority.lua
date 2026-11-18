@@ -163,6 +163,10 @@ end
 
 function TaxAuthority.RegisterResidency(station)
 	if not station then return false, "No station specified." end
+	local okPenal, PenalSystem = pcall(require, 'modules.Penal.PenalSystem')
+	if okPenal and PenalSystem and PenalSystem.IsPrisonStation(station) then
+		return false, "Civil residency and home-port registration are prohibited at penal facilities."
+	end
 	local canChange, remainingDays = TaxAuthority.CanChangeResidency()
 	if not canChange then
 		return false, string.format("Current residency term active. %d days remaining before re-registration permitted.", remainingDays)

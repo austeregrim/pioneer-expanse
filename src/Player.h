@@ -59,6 +59,10 @@ public:
 	virtual vector3d GetManeuverVelocity() const;
 	virtual int GetManeuverTime() const;
 
+	virtual bool TakeoverUndocking() override;
+	bool IsTakingOff() const { return m_takeoffTimer > 0.0f; }
+	float GetTakeoffTimeElapsed() const { return m_takeoffDuration - m_takeoffTimer; }
+
 protected:
 	virtual void SaveToJson(Json &jsonObj, Space *space) override;
 
@@ -72,6 +76,7 @@ private:
 	vector3d m_atmosAccel;
 	vector3d m_atmosJerk;
 	float m_takeoffTimer;
+	float m_takeoffDuration;
 };
 
 #endif /* _PLAYER_H */

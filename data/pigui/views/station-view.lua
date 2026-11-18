@@ -3,6 +3,7 @@
 
 local Lang = require 'Lang'
 local Game = require 'Game'
+local Event = require 'Event'
 local Format = require 'Format'
 local Passengers = require 'Passengers'
 local PlayerState= require 'PlayerState'
@@ -108,6 +109,10 @@ if not stationView then
 			end)
 		end)
 	end
+
+	Event.Register("onPlayerRescued", function()
+		stationView.currentTab = stationView.tabs["lobby"] or 1
+	end)
 
 	ui.registerHandler("StationView", function(delta_t, refresh)
 		stationView.escapeConsumed = false

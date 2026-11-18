@@ -2,6 +2,8 @@
 -- Licensed under the terms of the GPL v3. See licenses/GPL-3.txt
 
 local Game = require 'Game'
+local Engine = require 'Engine'
+local pigui = Engine.pigui
 local ui = require 'pigui'
 local lui = require 'Lang'.GetResource 'ui-core'
 local StationSig = require 'pigui.libs.station-sig'
@@ -115,6 +117,11 @@ function PiGuiTabView:SwitchTo(id)
 				self.prevTab = self.currentTab
 				self.currentTab = i
 				self.animStartTime = ui.getTime()
+			end
+			-- Only immediately refresh if we are currently inside an ImGui frame.
+			-- Otherwise, renderTabView will refresh the tab on the next frame when the view draws.
+			local ok, stack = pcall(pigui.GetImguiStack)
+			if ok and stack then
 				self:refreshTab(i)
 			end
 			return
@@ -138,11 +145,36 @@ function PiGuiTabView.renderTabView(self, refresh)
 		self.currentTab = 1
 	end
 
+	local isPrison = false
+	if self.name == "StationView" and Game.player then
+		local docked = Game.player:GetDockedWith()
+		if docked then
+			local okPenal, PenalSystem = pcall(require, 'modules.Penal.PenalSystem')
+			if okPenal and PenalSystem and PenalSystem.IsPrisonStation(docked) then
+				isPrison = true
+			end
+		end
+	end
+
+	local PRISON_ALLOWED_TABS = {
+		lobby = true,
+		police = true,
+		insurance = true,
+		commodityMarket = true,
+		interCast = true,
+		news = true,
+	}
+
 	local tab = self.tabs[self.currentTab]
+	if isPrison and tab and not PRISON_ALLOWED_TABS[tab.id] then
+		self:SwitchTo("lobby")
+		tab = self.tabs[self.currentTab]
+	end
 	if not tab then return end
 
-	-- refresh the tab since we're swapping back to the view
-	if refresh then
+	-- refresh the tab if swapping back to the view or if the active tab changed
+	if self.activeRenderTab ~= self.currentTab or refresh then
+		self.activeRenderTab = self.currentTab
 		self:refreshTab(self.currentTab)
 		tab = self.tabs[self.currentTab]
 		if not tab then return end
@@ -229,15 +261,24 @@ function PiGuiTabView.renderTabView(self, refresh)
 			prevTabW = ui.calcTextSize(self.tabs[self.prevTab].name).x + 18 * rescaleVector.x
 		end)
 	end
+	local visibleTabs = {}
+	for i, v in ipairs(self.tabs) do
+		if not isPrison or PRISON_ALLOWED_TABS[v.id] then
+			table.insert(visibleTabs, { index = i, tab = v })
+		end
+	end
+
 	local animatedExpansion = currentTabW * ease + prevTabW * (1 - ease)
-	local buttonBarWidth = bigButtonSize.x * #self.tabs + bigButtonItemSpacing.x * (#self.tabs - 1) + bigButtonWindowPadding.x * 2 + animatedExpansion
+	local buttonBarWidth = bigButtonSize.x * #visibleTabs + bigButtonItemSpacing.x * math.max(0, #visibleTabs - 1) + bigButtonWindowPadding.x * 2 + animatedExpansion
 	local buttonH = bigButtonSize.y + bigButtonWindowPadding.y * 2.0
 
 	ui.setNextWindowSize(Vector2(buttonBarWidth, buttonH), "Always")
 	ui.setNextWindowPos(self.buttonWindowPos or Vector2(viewWindowPadding.x, 0), "Always")
 	ui.withStyleColorsAndVars({ WindowBg = colors.transparent }, { WindowPadding = bigButtonWindowPadding, ItemSpacing = bigButtonItemSpacing }, function()
 		ui.window(self.name .. "-Buttons", staticButtonFlags, function()
-			for i, v in ipairs(self.tabs) do
+			for _, entry in ipairs(visibleTabs) do
+				local i = entry.index
+				local v = entry.tab
 				local isActive = (i == self.currentTab)
 				local isPrev = (i == self.prevTab and animProgress < 1)
 

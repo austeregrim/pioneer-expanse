@@ -58,7 +58,7 @@ TerrainBody::TerrainBody(const Json &jsonObj, Space *space) :
 	try {
 		Json terrainBodyObj = jsonObj["terrain_body"];
 
-		m_sbody = space->GetSystemBodyByIndex(terrainBodyObj["index_for_system_body"]);
+		m_sbody = space->GetSystemBodyByIndex(terrainBodyObj["index_for_system_body"], GetLabel());
 	} catch (Json::type_error &) {
 		throw SavedGameCorruptException();
 	}

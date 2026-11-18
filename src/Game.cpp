@@ -35,8 +35,11 @@
 #include "WorldView.h"
 #include "galaxy/GalaxyGenerator.h"
 #include "galaxy/Sector.h"
+#include "ship/GunManager.h"
 #include "ship/PlayerShipController.h"
 #include "ship/SupercruiseController.h"
+#include "imgui/imgui.h"
+#include "imgui/imgui_internal.h"
 
 Game::Game(const SystemPath &path, const double startDateTime, const char *shipType) :
 	m_galaxy(GalaxyGenerator::Create()),
@@ -685,6 +688,22 @@ void Game::SwitchToNormalSpace()
 	Frame::GetFrame(m_player->GetFrame())->GetCollisionSpace()->RebuildObjectTrees();
 }
 
+static bool IsPrisonStation(const SpaceStation *st)
+{
+	if (!st) return false;
+	const std::string &stType = st->GetSystemBody() ? st->GetSystemBody()->GetSpaceStationType() : "";
+	if (stType == "orbital_station_penal") return true;
+	const std::string &stName = st->GetLabel();
+	if (stName.find("Prison") != std::string::npos ||
+	    stName.find("Penal") != std::string::npos ||
+	    stName.find("Correctional") != std::string::npos ||
+	    stName.find("Penitentiary") != std::string::npos ||
+	    stName.find("Detention") != std::string::npos) {
+		return true;
+	}
+	return false;
+}
+
 void Game::TriggerPlayerEscapePodRecovery()
 {
 	if (!m_player) return;
@@ -697,40 +716,108 @@ void Game::TriggerPlayerEscapePodRecovery()
 	if (PlayerShipController *psc = m_player->GetPlayerController()) {
 		psc->ResetMouseCapture();
 	}
+	auto gm = m_player->GetComponent<GunManager>();
+	if (gm) {
+		gm->SetAllGroupsFiring(false);
+	}
 	m_player->SetNavTarget(nullptr);
 	m_player->SetCombatTarget(nullptr);
 	m_player->SetFollowTarget(nullptr);
 	if (Pi::input) {
-		Pi::input->SetCapturingMouse(false);
+		Pi::input->ClearAllInput();
 	}
+	ImGui::GetIO().ClearInputKeys();
+	ImGui::GetIO().ClearInputMouse();
+	ImGui::ClearActiveID();
+	ImGui::SetWindowFocus(nullptr);
+	ImGui::SetMouseCursor(ImGuiMouseCursor_Arrow);
 
-	// 1. Locate the nearest starport in the current system (preferring orbital stations)
+	// Check if the player is being remanded to correctional custody (outstanding fines / warrants)
+	bool isCriminal = false;
+	lua_State *l = Lua::manager->GetLuaState();
+	pi_lua_import(l, "PlayerState");
+	lua_getfield(l, -1, "GetTotalFinesOutstanding");
+	if (lua_isfunction(l, -1)) {
+		if (lua_pcall(l, 0, 1, 0) == 0) {
+			double fine = lua_tonumber(l, -1);
+			if (fine > 0.0) isCriminal = true;
+			lua_pop(l, 1);
+		}
+	} else {
+		lua_pop(l, 1);
+		lua_getfield(l, -1, "GetCrimeOutstanding");
+		if (lua_isfunction(l, -1)) {
+			if (lua_pcall(l, 0, 2, 0) == 0) {
+				double fine = lua_tonumber(l, -1);
+				if (fine > 0.0) isCriminal = true;
+				lua_pop(l, 2);
+			}
+		} else {
+			lua_pop(l, 1);
+		}
+	}
+	lua_pop(l, 1);
+
+	// 1. Locate starports in current system (only route to prison stations if player is criminal)
 	SpaceStation *targetStation = nullptr;
-	SpaceStation *firstOrbital = nullptr;
-	double bestStationDistSq = 1e36;
-	double bestOrbitalDistSq = 1e36;
+	SpaceStation *foundPrison = nullptr;
+	SpaceStation *foundCivilianOrbital = nullptr;
+	SpaceStation *foundCivilianStation = nullptr;
+	double bestPrisonDistSq = 1e36;
+	double bestCivilianOrbitalDistSq = 1e36;
+	double bestCivilianStationDistSq = 1e36;
+
 	for (Body *b : m_space->GetBodies()) {
 		if (b && b->IsType(ObjectType::SPACESTATION) && !b->IsDead()) {
 			SpaceStation *st = static_cast<SpaceStation *>(b);
 			const double dSq = m_player->GetPositionRelTo(b).LengthSqr();
-			if (!st->IsGroundStation() && dSq < bestOrbitalDistSq) {
-				bestOrbitalDistSq = dSq;
-				firstOrbital = st;
-			}
-			if (dSq < bestStationDistSq) {
-				bestStationDistSq = dSq;
-				targetStation = st;
+			if (IsPrisonStation(st)) {
+				if (dSq < bestPrisonDistSq) {
+					bestPrisonDistSq = dSq;
+					foundPrison = st;
+				}
+			} else {
+				if (!st->IsGroundStation() && dSq < bestCivilianOrbitalDistSq) {
+					bestCivilianOrbitalDistSq = dSq;
+					foundCivilianOrbital = st;
+				}
+				if (dSq < bestCivilianStationDistSq) {
+					bestCivilianStationDistSq = dSq;
+					foundCivilianStation = st;
+				}
 			}
 		}
 	}
-	if (firstOrbital) {
-		targetStation = firstOrbital;
-		bestStationDistSq = bestOrbitalDistSq;
+
+	double bestStationDistSq = 1e36;
+	if (isCriminal && foundPrison) {
+		targetStation = foundPrison;
+		bestStationDistSq = bestPrisonDistSq;
+	} else if (!isCriminal) {
+		// Non-criminal player: MUST ONLY be recovered to a civilian station!
+		if (foundCivilianOrbital) {
+			targetStation = foundCivilianOrbital;
+			bestStationDistSq = bestCivilianOrbitalDistSq;
+		} else if (foundCivilianStation) {
+			targetStation = foundCivilianStation;
+			bestStationDistSq = bestCivilianStationDistSq;
+		}
+		// If current system only has a prison station (e.g. Barnard's Star), targetStation remains nullptr
+		// so SAR will transport the non-criminal player to a nearby civilian system.
+	} else {
+		// Criminal player in a system without a designated penal facility
+		if (foundCivilianOrbital) {
+			targetStation = foundCivilianOrbital;
+			bestStationDistSq = bestCivilianOrbitalDistSq;
+		} else if (foundCivilianStation) {
+			targetStation = foundCivilianStation;
+			bestStationDistSq = bestCivilianStationDistSq;
+		}
 	}
 
 	double recoveryDays = 0.5;
 
-	// 2. Compute SAR recovery time and relocate if no station exists in the current system
+	// 2. Compute SAR recovery time and relocate if no eligible civilian/penal station exists in current system
 	if (targetStation) {
 		// In-system SAR recovery: ~4 to 36 hours depending on AU distance to nearest station
 		const double distAU = std::sqrt(bestStationDistSq) / AU;
@@ -750,6 +837,11 @@ void Game::TriggerPlayerEscapePodRecovery()
 					for (size_t i = 0; i < sec->m_systems.size(); ++i) {
 						const Sector::System &sys = sec->m_systems[i];
 						if (sys.GetPopulation() > 0 && sys.GetNumStars() > 0) {
+							// Avoid selecting current system again if it had no eligible station
+							if (secPath.sectorX == currentPath.sectorX && secPath.sectorY == currentPath.sectorY &&
+							    secPath.sectorZ == currentPath.sectorZ && int(i) == currentPath.systemIndex) {
+								continue;
+							}
 							float dSq = curSec
 								? Sector::DistanceBetweenSqr(curSec, currentPath.systemIndex, sec, i)
 								: float((dx * dx + dy * dy + dz * dz) * Sector::SIZE * Sector::SIZE);
@@ -785,22 +877,64 @@ void Game::TriggerPlayerEscapePodRecovery()
 		m_player->SetFrame(m_space->GetRootFrame());
 		m_space->AddBody(m_player.get());
 
-		SpaceStation *foundOrbital = nullptr;
-		SpaceStation *foundStation = nullptr;
+		SpaceStation *foundPrisonReloc = nullptr;
+		SpaceStation *foundCivilianOrbitalReloc = nullptr;
+		SpaceStation *foundCivilianStationReloc = nullptr;
 		for (Body *b : m_space->GetBodies()) {
 			if (b && b->IsType(ObjectType::SPACESTATION) && !b->IsDead()) {
 				SpaceStation *st = static_cast<SpaceStation *>(b);
-				if (!st->IsGroundStation() && !foundOrbital) {
-					foundOrbital = st;
-				}
-				if (!foundStation) {
-					foundStation = st;
+				if (IsPrisonStation(st)) {
+					if (!foundPrisonReloc) foundPrisonReloc = st;
+				} else {
+					if (!st->IsGroundStation() && !foundCivilianOrbitalReloc) {
+						foundCivilianOrbitalReloc = st;
+					}
+					if (!foundCivilianStationReloc) {
+						foundCivilianStationReloc = st;
+					}
 				}
 			}
 		}
-		targetStation = foundOrbital ? foundOrbital : foundStation;
+
+		if (isCriminal && foundPrisonReloc) {
+			targetStation = foundPrisonReloc;
+		} else if (!isCriminal) {
+			targetStation = foundCivilianOrbitalReloc ? foundCivilianOrbitalReloc : foundCivilianStationReloc;
+			// Safety: If nearestInhabited happened to be a dedicated penal system, redirect clean player to Sol
+			if (!targetStation) {
+				nearestInhabited = SystemPath(0, 0, 0, 0); // Sol
+				LuaEvent::Queue("onLeaveSystem", m_player.get());
+				m_space->RemoveBody(m_player.get());
+				m_space.reset();
+				m_space.reset(new Space(this, m_galaxy, nearestInhabited, nullptr));
+				m_space->GetBackground()->SetDrawFlags(Background::Container::DRAW_SKYBOX | Background::Container::DRAW_STARS);
+				m_player->SetFrame(m_space->GetRootFrame());
+				m_space->AddBody(m_player.get());
+				for (Body *b : m_space->GetBodies()) {
+					if (b && b->IsType(ObjectType::SPACESTATION) && !b->IsDead()) {
+						SpaceStation *st = static_cast<SpaceStation *>(b);
+						if (!IsPrisonStation(st)) {
+							if (!st->IsGroundStation() && !foundCivilianOrbitalReloc) {
+								foundCivilianOrbitalReloc = st;
+							}
+							if (!foundCivilianStationReloc) {
+								foundCivilianStationReloc = st;
+							}
+						}
+					}
+				}
+				targetStation = foundCivilianOrbitalReloc ? foundCivilianOrbitalReloc : foundCivilianStationReloc;
+			}
+		} else {
+			targetStation = foundCivilianOrbitalReloc ? foundCivilianOrbitalReloc : foundCivilianStationReloc;
+		}
 
 		LuaEvent::Queue("onEnterSystem", m_player.get());
+	}
+
+	// Invariable guarantee: Non-criminal player is NEVER placed at a prison station
+	if (!isCriminal && targetStation && IsPrisonStation(targetStation)) {
+		targetStation = nullptr;
 	}
 
 	// 3. Advance simulation clock by calculated SAR recovery duration
@@ -817,8 +951,13 @@ void Game::TriggerPlayerEscapePodRecovery()
 		Frame::GetFrame(m_player->GetFrame())->GetCollisionSpace()->RebuildObjectTrees();
 	}
 	if (Pi::input) {
-		Pi::input->SetCapturingMouse(false);
+		Pi::input->ClearAllInput();
 	}
+	ImGui::GetIO().ClearInputKeys();
+	ImGui::GetIO().ClearInputMouse();
+	ImGui::ClearActiveID();
+	ImGui::SetWindowFocus(nullptr);
+	ImGui::SetMouseCursor(ImGuiMouseCursor_Arrow);
 
 	// 5. Reset flash and switch to Station View
 	m_hyperspaceFlashAlpha = 0.0f;
@@ -826,6 +965,7 @@ void Game::TriggerPlayerEscapePodRecovery()
 
 	// 6. Notify Lua of successful rescue and recovery
 	LuaEvent::Queue("onPlayerRescued", recoveryDays, targetStation);
+	LuaEvent::Emit();
 }
 
 const float Game::s_timeAccelRates[] = {

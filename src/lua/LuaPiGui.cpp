@@ -2112,9 +2112,39 @@ static int l_pigui_close_current_popup(lua_State *l)
 	return 0;
 }
 
+static int l_pigui_close_popup(lua_State *l)
+{
+	PROFILE_SCOPED()
+	std::string id_str = LuaPull<std::string>(l, 1);
+	ImGuiContext &g = *GImGui;
+	if (!g.CurrentWindow)
+		return 0;
+	ImGuiID id = g.CurrentWindow->GetID(id_str.c_str());
+	for (int i = 0; i < g.OpenPopupStack.Size; i++) {
+		if (g.OpenPopupStack[i].PopupId == id) {
+			ImGui::ClosePopupToLevel(i, true);
+			break;
+		}
+	}
+	return 0;
+}
+
+static int l_pigui_close_all_popups(lua_State *l)
+{
+	PROFILE_SCOPED()
+	ImGui::ClosePopupsOverWindow(nullptr, false);
+	return 0;
+}
+
 static int l_pigui_is_any_popup_open(lua_State *l)
 {
 	LuaPush<bool>(l, !ImGui::GetCurrentContext()->OpenPopupStack.empty());
+	return 1;
+}
+
+static int l_pigui_is_any_modal_open(lua_State *l)
+{
+	LuaPush<bool>(l, ImGui::GetTopMostPopupModal() != nullptr);
 	return 1;
 }
 
@@ -2782,8 +2812,10 @@ static int l_pigui_get_targets_nearby(lua_State *l)
 static int l_pigui_disable_mouse_facing(lua_State *l)
 {
 	bool b = LuaPull<bool>(l, 1);
-	auto *p = Pi::player->GetPlayerController();
-	p->SetDisableMouseFacing(b);
+	if (Pi::player) {
+		if (auto *p = Pi::player->GetPlayerController())
+			p->SetDisableMouseFacing(b);
+	}
 	return 0;
 }
 
@@ -3910,7 +3942,10 @@ void LuaObject<PiGui::Instance>::RegisterClass()
 		{ "EndPopup", l_pigui_end_popup },
 		{ "OpenPopup", l_pigui_open_popup },
 		{ "CloseCurrentPopup", l_pigui_close_current_popup },
+		{ "ClosePopup", l_pigui_close_popup },
+		{ "CloseAllPopups", l_pigui_close_all_popups },
 		{ "IsAnyPopupOpen", l_pigui_is_any_popup_open },
+		{ "IsAnyModalOpen", l_pigui_is_any_modal_open },
 		{ "PushID", l_pigui_push_id },
 		{ "PopID", l_pigui_pop_id },
 		{ "IsMouseReleased", l_pigui_is_mouse_released },

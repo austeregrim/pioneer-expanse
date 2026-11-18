@@ -950,6 +950,8 @@ function ui.optionsWindow:close()
 		if Game.player then
 			Game.SetTimeAcceleration("1x")
 			Event.Queue("onPauseMenuClosed")
+		else
+			Input.EnableBindings(true)
 		end
 	end
 end

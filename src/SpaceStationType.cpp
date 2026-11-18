@@ -319,6 +319,18 @@ const SpaceStationType *SpaceStationType::RandomStationType(Random &random, cons
 }
 
 /*static*/
+const SpaceStationType *SpaceStationType::FindByPortCount(unsigned int numPorts, bool bIsGround)
+{
+	const auto &types = bIsGround ? surfaceTypes : orbitalTypes;
+	for (const SpaceStationType *st : types) {
+		if (st && st->NumDockingPorts() == numPorts) {
+			return st;
+		}
+	}
+	return nullptr;
+}
+
+/*static*/
 const SpaceStationType *SpaceStationType::FindByName(const std::string &name)
 {
 	auto iter = s_allTypes.find(name);

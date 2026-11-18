@@ -222,6 +222,7 @@ end
 
 local onShipFiring = function (ship)
 	if piracy or target then return end
+	if ship:IsPlayer() then return end -- Handled via onUnlawfulWeaponsDischarge with grace warning cooldown in CrimeTracking
 
 	local policeId = Game.system.faction.policeShip
 	if ship.shipId ~= policeId then
@@ -231,6 +232,19 @@ local onShipFiring = function (ship)
 				attackShip(ship)
 				break
 			end
+		end
+	end
+end
+
+local onUnlawfulWeaponsDischarge = function (ship, station)
+	if piracy or target then return end
+	if not ship or not ship:IsPlayer() then return end
+
+	for i = 1, #patrol do
+		if patrol[i] and patrol[i]:DistanceTo(ship) <= lawEnforcedRange then
+			Comms.ImportantMessage(string.interp(l_ui_core.X_CANNOT_BE_TOLERATED_HERE, { crime = l_ui_core.UNLAWFUL_WEAPONS_DISCHARGE }), patrol[i].label)
+			attackShip(ship)
+			break
 		end
 	end
 end
@@ -498,6 +512,7 @@ Event.Register("onShipDestroyed", onShipDestroyed)
 Event.Register("onShipHit", onShipHit)
 Event.Register("onShipInterdicted", onShipInterdicted)
 Event.Register("onShipFiring", onShipFiring)
+Event.Register("onUnlawfulWeaponsDischarge", onUnlawfulWeaponsDischarge)
 Event.Register("onJettison", onJettison)
 Event.Register("onGameStart", onGameStart)
 Event.Register("onGameEnd", onGameEnd)

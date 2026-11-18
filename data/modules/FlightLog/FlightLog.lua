@@ -441,6 +441,127 @@ end
 Event.Register("onEnterSystem", AddSystemArrivalToLog)
 Event.Register("onLeaveSystem", AddSystemDepartureToLog)
 Event.Register("onPlayerDocked", AddStationToLog)
+
+-- Interdiction Event Listeners
+local function getShipDesc(ship)
+	if not ship then return "Unknown Contact" end
+	local label = ship.label or "Unknown Contact"
+	local okDef, ShipDef = pcall(require, 'ShipDef')
+	local shipId = ship.shipId
+	local def = okDef and ShipDef and shipId and ShipDef[shipId]
+	if def and def.name then
+		return string.format("%s (%s)", def.name, label)
+	end
+	return label
+end
+
+local onInterdictionDrop = function(attacker, target, submitted)
+	local player = Game.player
+	if not player then return end
+	if attacker ~= player and target ~= player then return end
+
+	local isPlayerTarget = (target == player)
+	local title
+	local outcome
+	local fsdImpact
+
+	if isPlayerTarget then
+		if submitted then
+			title = "FSD Interdiction: Submitted to Tether"
+			outcome = "Voluntary Throttle Submission"
+			fsdImpact = "Controlled Safe Drop — Fast FSD Reboot (5s Cooldown)"
+		else
+			title = "FSD Interdiction: Forced Tether Dropout"
+			outcome = "Interdiction Tether Fracture / Evasion Failure"
+			fsdImpact = "Emergency Dropout — Severe Frame Stress & FSD Reboot (30s Cooldown)"
+		end
+	else
+		if submitted then
+			title = "FSD Interdiction: Target Capitulation"
+			outcome = "Target Throttled Down & Submitted"
+			fsdImpact = "Controlled Safe Drop — Fast FSD Reboot (5s Cooldown)"
+		else
+			title = "FSD Interdiction: Successful Interdiction Capture"
+			outcome = "Target Vector Snapped — Forced Mutual Dropout"
+			fsdImpact = "Frame Stress — Mutual FSD Reboot (30s Cooldown)"
+		end
+	end
+
+	local details = {
+		{ "Engagement Type", "Supercruise FSD Interdiction" },
+		{ "Flight Role", isPlayerTarget and "Target Vessel (Interdicted)" or "Attacking Interdictor" },
+		{ "Hostile / Opposing Vessel", isPlayerTarget and getShipDesc(attacker) or getShipDesc(target) },
+		{ "Resolution Outcome", outcome },
+		{ "Drive Core Telemetry", fsdImpact },
+	}
+
+	FlightLog.RecordTransaction({
+		category = "INTERDICTION",
+		title = title,
+		amount = 0,
+		details = details,
+		note = string.format("FSD interdiction encounter resolved in %s. Resolution: %s.",
+			(Game.system and Game.system.name) or "Deep Space", outcome)
+	})
+end
+
+local onInterdictionEvaded = function(attacker, target)
+	local player = Game.player
+	if not player then return end
+	if attacker ~= player and target ~= player then return end
+
+	local isPlayerTarget = (target == player)
+	local title = isPlayerTarget and "FSD Interdiction: Escape Vector Achieved" or "FSD Interdiction: Target Evaded"
+	local outcome = isPlayerTarget and "Escape Vector Maintained — Attacker Tether Severed" or "Target Maneuvered to Escape Vector — Tether Snapped"
+
+	local details = {
+		{ "Engagement Type", "Supercruise FSD Interdiction" },
+		{ "Flight Role", isPlayerTarget and "Target Vessel (Defending)" or "Attacking Interdictor" },
+		{ "Hostile / Opposing Vessel", isPlayerTarget and getShipDesc(attacker) or getShipDesc(target) },
+		{ "Resolution Outcome", outcome },
+		{ "Drive Core Telemetry", "Supercruise Velocity Maintained — No FSD Dropout" },
+	}
+
+	FlightLog.RecordTransaction({
+		category = "INTERDICTION",
+		title = title,
+		amount = 0,
+		details = details,
+		note = string.format("Supercruise interdiction evasion in %s. %s.",
+			(Game.system and Game.system.name) or "Deep Space", outcome)
+	})
+end
+
+local onInterdictionNullified = function(attacker, target)
+	local player = Game.player
+	if not player then return end
+	if attacker ~= player and target ~= player then return end
+
+	local isPlayerTarget = (target == player)
+	local title = "FSD Interdiction: Tether Nullified"
+	local outcome = isPlayerTarget and "Interdiction Nullifier Pulse Disrupted Attacker Tether" or "Target Deployed Interdiction Nullifier Pulse"
+
+	local details = {
+		{ "Engagement Type", "Supercruise FSD Interdiction" },
+		{ "Flight Role", isPlayerTarget and "Target Vessel (Countermeasures)" or "Attacking Interdictor" },
+		{ "Hostile / Opposing Vessel", isPlayerTarget and getShipDesc(attacker) or getShipDesc(target) },
+		{ "Resolution Outcome", outcome },
+		{ "Drive Core Telemetry", "Tether Field Collapsed — Supercruise Maintained" },
+	}
+
+	FlightLog.RecordTransaction({
+		category = "INTERDICTION",
+		title = title,
+		amount = 0,
+		details = details,
+		note = string.format("Interdiction tether cancelled by tactical nullifier pulse in %s.",
+			(Game.system and Game.system.name) or "Deep Space")
+	})
+end
+
+Event.Register("onInterdictionDrop", onInterdictionDrop)
+Event.Register("onInterdictionEvaded", onInterdictionEvaded)
+Event.Register("onInterdictionNullified", onInterdictionNullified)
 Event.Register("onGameStart", onGameStart)
 Event.Register("onGameEnd", onGameEnd)
 Serializer:Register("FlightLog", serialize, unserialize)

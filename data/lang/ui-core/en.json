@@ -853,7 +853,7 @@
   },
   "FLIGHT_LOG": {
     "description": "Title for flight log screen, in info view",
-    "message": "Flight Log"
+    "message": "Commander's Log"
   },
   "FLIGHT_STATE": {
     "description": "",

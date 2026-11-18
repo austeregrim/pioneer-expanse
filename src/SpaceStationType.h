@@ -167,6 +167,7 @@ public:
 	static void Init();
 
 	static const SpaceStationType *RandomStationType(Random &random, const bool bIsGround);
+	static const SpaceStationType *FindByPortCount(unsigned int numPorts, bool bIsGround);
 	static const SpaceStationType *FindByName(const std::string &name);
 };
 

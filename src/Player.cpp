@@ -31,7 +31,8 @@ static Sound::Event s_soundHyperdrive;
 
 Player::Player(const ShipType::Id &shipId) :
 	Ship(shipId),
-	m_takeoffTimer(0.0f)
+	m_takeoffTimer(0.0f),
+	m_takeoffDuration(4.0f)
 {
 	SetController(new PlayerShipController());
 	InitCockpit();
@@ -44,7 +45,8 @@ Player::Player(const ShipType::Id &shipId) :
 
 Player::Player(const Json &jsonObj, Space *space) :
 	Ship(jsonObj, space),
-	m_takeoffTimer(0.0f)
+	m_takeoffTimer(0.0f),
+	m_takeoffDuration(4.0f)
 {
 	InitCockpit();
 
@@ -195,7 +197,7 @@ void Player::SetAlertState(Ship::AlertState as)
 
 	case ALERT_SHIP_FIRING:
 		Pi::game->log->Add(Lang::LASER_FIRE_DETECTED);
-		Sound::PlaySfx("warning", 0.2f, 0.2f, 0);
+		Sound::PlaySfx("notify_beep", 0.4f, 0.4f, 0);
 		break;
 
 	case ALERT_MISSILE_DETECTED:
@@ -315,7 +317,7 @@ Ship::HyperjumpStatus Player::InitiateHyperjumpTo(const SystemPath &dest, int wa
 			char buf[128];
 			snprintf(buf, sizeof(buf), "FSD COOLDOWN ACTIVE (%.1fs)", sc->GetCooldown());
 			sc->ShowStatusMessage(buf, 4.0f);
-			Sound::BodyMakeNoise(this, "warning", 0.5f);
+			Sound::BodyMakeNoise(this, "notify_beep", 0.7f);
 			return HYPERJUMP_SAFETY_LOCKOUT;
 		}
 	}
@@ -323,7 +325,7 @@ Ship::HyperjumpStatus Player::InitiateHyperjumpTo(const SystemPath &dest, int wa
 	if (const Body *blocker = GetHyperspaceTargetObscuredBy(dest)) {
 		if (SupercruiseController *sc = GetSupercruise())
 			sc->ShowStatusMessage("HYPERJUMP BLOCKED: TARGET OBSCURED BY " + blocker->GetLabel(), 4.5f);
-		Sound::BodyMakeNoise(this, "warning", 0.5f);
+		Sound::BodyMakeNoise(this, "notify_beep", 0.7f);
 		return HYPERJUMP_OBSCURED;
 	}
 
@@ -394,10 +396,33 @@ void Player::StaticUpdate(const float timeStep)
 				// Pad clearance achieved: transition cleanly to forward manual flight mode with full thruster authority
 				con->SetCruiseDirection(PlayerShipController::CRUISE_FWD);
 				con->SetFlightControlState(CONTROL_MANUAL);
-				con->SetFollowTarget(nullptr);
 			}
 		}
 	}
+}
+
+bool Player::TakeoverUndocking()
+{
+	bool handled = false;
+	if (m_takeoffTimer > 0.0f) {
+		m_takeoffTimer = 0.0f;
+		if (PlayerShipController *con = GetPlayerController()) {
+			con->SetCruiseDirection(PlayerShipController::CRUISE_FWD);
+			if (con->GetFlightControlState() != CONTROL_FIXSPEED) {
+				con->SetFlightControlState(CONTROL_MANUAL);
+			}
+		}
+		handled = true;
+	}
+
+	if (GetFlightState() == Ship::UNDOCKING) {
+		handled = Ship::TakeoverUndocking() || handled;
+		if (PlayerShipController *con = GetPlayerController()) {
+			con->SetCruiseDirection(PlayerShipController::CRUISE_FWD);
+		}
+	}
+
+	return handled;
 }
 
 int Player::GetManeuverTime() const
@@ -439,19 +464,23 @@ void Player::DoFixspeedTakeoff(SpaceStation *from)
 	const bool isGround = from ? from->IsGroundStation() : false;
 	double wantSpeed = isGround ? 18.0 : 10.0; // m/s - brisk positive liftoff clear of pad
 	con->ChangeCruiseSpeed(wantSpeed - curSpeed);
-	m_takeoffTimer = 4.0f;
+	m_takeoffDuration = 4.0f;
+	m_takeoffTimer = m_takeoffDuration;
 
 	// special preparations for launch in a rotating orbital
 	if (from && !from->IsGroundStation()) {
 		SetFollowTarget(from);
 		con->SetFollowMode(PlayerShipController::FOLLOW_ORI);
-		auto pPos = GetPosition();
+		auto pPos = GetPositionRelTo(from);
 		SetAngVelocity(from->GetAngVelocity());
 
-		// some actions to avoid collision with the pad at start with a margin
-		SetPosition(GetPosition() + GetOrient().VectorY() * 0.01);
+		// Clear pad collision mesh margin and set positive radial and tangential velocity
+		SetPosition(GetPosition() + GetOrient().VectorY() * 0.2);
 		auto tangent = from->GetAngVelocity().Cross(pPos);
-		auto radial = GetOrient().VectorY() * 0.05;
-		SetVelocity(tangent + radial);
+		auto radial = GetOrient().VectorY() * 1.5;
+		SetVelocity(from->GetVelocity() + tangent + radial);
+	} else if (from && from->IsGroundStation()) {
+		SetPosition(GetPosition() + GetOrient().VectorY() * 0.2);
+		SetVelocity(from->GetVelocity() + GetOrient().VectorY() * 2.0);
 	}
 }

@@ -534,5 +534,14 @@ function ui.aboutWindow:open()
 	end
 end
 
+function ui.aboutWindow:close()
+	ModalWindow.close(self)
+	if Game.player then
+		Game.SetTimeAcceleration("1x")
+		Event.Queue("onPauseMenuClosed")
+	else
+		Input.EnableBindings(true)
+	end
+end
 
 return {}

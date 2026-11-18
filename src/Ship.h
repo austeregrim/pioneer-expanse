@@ -125,6 +125,8 @@ public:
 	virtual bool ManualDocking() const { return false; }
 	void Blastoff();
 	bool Undock();
+	virtual bool TakeoverUndocking();
+	void ResetLaunchLockTimeout() { m_launchLockTimeout = 0.0f; }
 	void TimeStepUpdate(const float timeStep) override;
 	void StaticUpdate(const float timeStep) override;
 
@@ -429,6 +431,7 @@ private:
 	std::deque<CargoBody *> m_cargoSpawnQueue;
 
 	LastCollisionInfo m_lastCollision;
+	std::string m_lastAttackerLabel;
 	std::deque<BlackBoxRecord> m_blackBox;
 	double m_blackBoxRecordTimer;
 

@@ -103,6 +103,69 @@ local function getCrisisCommodityMultiplier(commodityName, isBuy)
 	return 1.0, nil
 end
 
+local function GetStationTradePermissions(station, commodityName)
+	if not station or not commodityName then
+		return true, true, nil, nil
+	end
+
+	-- 1. Penal / Prison Facility check
+	local okPenal, PenalSystem = pcall(require, 'modules.Penal.PenalSystem')
+	if okPenal and PenalSystem and PenalSystem.IsPrisonStation(station) then
+		if PenalSystem.IsPrisonImport(commodityName) then
+			-- Prison strictly consumes and buys these; does not sell back
+			return false, true, "Facility strictly procures this commodity; does not supply public", nil
+		elseif PenalSystem.IsPrisonExport(commodityName) then
+			-- Prison exports these; does not buy them from traders
+			return true, false, nil, "Facility produces this commodity via penal labor; does not purchase from public"
+		else
+			return false, false, "Commodity trade not authorized at correctional facility", "Contraband/unauthorized commodity at correctional facility"
+		end
+	end
+
+	-- 2. Police / Security / Military Outposts
+	local sbody = station.GetSystemBody and station:GetSystemBody()
+	local label = station.label or (station.GetLabel and station:GetLabel()) or (sbody and sbody.name) or ""
+	local stType = (sbody and sbody.spaceStationType) or ""
+	local isPoliceOrSecurity = label:find("Police") ~= nil or
+	                           label:find("Constabulary") ~= nil or
+	                           label:find("Enforcement") ~= nil or
+	                           label:find("Security") ~= nil or
+	                           label:find("Military") ~= nil or
+	                           label:find("Naval") ~= nil or
+	                           stType:find("police") ~= nil
+
+	if isPoliceOrSecurity then
+		-- Police stations consume meats, rations, and medical goods; they do NOT sell food/provisions
+		if commodityName == "animal_meat" or commodityName == "grain" or commodityName == "fruit_and_veg" or commodityName == "water" or commodityName == "medicines" then
+			return false, true, "Enforcement post procures provisions for stationed personnel; does not supply public", nil
+		end
+	end
+
+	-- 3. General Station Economy based on Industry Supply / Demand
+	if sbody then
+		local okEcon, econ = pcall(Economy.GetStationEconomy, sbody)
+		if okEcon and econ and econ.supply and econ.demand then
+			local fS = econ.supply[commodityName] or 0
+			local fD = econ.demand[commodityName] or 0
+
+			-- Pure producer (e.g. Agricultural station for grains/crops, Ice mine / Water plant for water/O2/H2, Ore mine for ores)
+			-- They produce surplus goods and refuse to purchase them back from freighters.
+			if fS > 0 and fD <= 0 then
+				return true, false, nil, "Starport is a primary producer of this commodity; does not purchase local export output"
+			end
+
+			-- Pure consumer / industrial input (e.g. Farm station for fertilizer/machinery, Mine for mining machinery/air processors)
+			-- They consume these goods in local production and do not supply them back to haulers.
+			if fD > 0 and fS <= 0 then
+				return false, true, "Starport consumes this commodity for local operations; does not supply public", nil
+			end
+		end
+	end
+
+	-- Standard commercial starport / diversified trade hub
+	return true, true, nil, nil
+end
+
 local CommodityMarketWidget = {}
 
 function CommodityMarketWidget.New(id, title, config)
@@ -189,26 +252,53 @@ function CommodityMarketWidget.New(id, title, config)
 
 			ui.nextColumn()
 
-			config.columnText(Format.Money(config.getBuyPrice(self, item)), "RIGHT")
-			config.columnText(Format.Money(config.getSellPrice(self, item)), "RIGHT")
-			config.columnText(config.getStock(self, item), "RIGHT")
+			local canSellToPlayer, canBuyFromPlayer = GetStationTradePermissions(self.station, item.name)
+
+			local buyPriceText = canSellToPlayer and Format.Money(config.getBuyPrice(self, item)) or "—"
+			local sellPriceText = canBuyFromPlayer and Format.Money(config.getSellPrice(self, item)) or "—"
+			local stockVal = config.getStock(self, item)
+			local stockText = canSellToPlayer and tostring(stockVal) or "—"
+
+			config.columnText(buyPriceText, "RIGHT")
+			config.columnText(sellPriceText, "RIGHT")
+			config.columnText(stockText, "RIGHT")
 			local n = self.cargoMgr:CountCommodity(item)
 			config.columnText(n > 0 and n or '', "RIGHT")
 		end)
 	end
 
 	config.canDisplayItem = config.canDisplayItem or function (self, commodity)
+		local okPenal, PenalSystem = pcall(require, 'modules.Penal.PenalSystem')
+		if okPenal and PenalSystem and PenalSystem.IsPrisonStation(self.station) then
+			return PenalSystem.IsPrisonCommodity(commodity.name)
+		end
 		return commodity.purchasable and Game.system:IsCommodityLegal(commodity.name)
 	end
 	config.borders = true
 
 	-- how much of this item do we have in stock?
     config.getStock = config.getStock or function (self, commodity)
+		if not self.station or (self.station.exists and not self.station:exists()) then return 0 end
+		local canSellToPlayer = GetStationTradePermissions(self.station, commodity.name)
+		if not canSellToPlayer then
+			return 0
+		end
+		local okPenal, PenalSystem = pcall(require, 'modules.Penal.PenalSystem')
+		if okPenal and PenalSystem and PenalSystem.IsPrisonStation(self.station) then
+			if PenalSystem.IsPrisonExport(commodity.name) then
+				return math.max(30, self.station:GetCommodityStock(commodity))
+			end
+		end
         return self.station:GetCommodityStock(commodity)
     end
 
     -- what do we charge for this item if we are buying
     config.getBuyPrice = config.getBuyPrice or function (self, commodity)
+		if not self.station or (self.station.exists and not self.station:exists()) then return commodity.price end
+		local okPenal, PenalSystem = pcall(require, 'modules.Penal.PenalSystem')
+		if okPenal and PenalSystem and PenalSystem.IsPrisonStation(self.station) then
+			return math.floor(commodity.price * 0.90) -- Convict-extracted materials sold at wholesale rate
+		end
 		local price = self.station:GetCommodityPrice(commodity)
 		local baseCost = price * (1.0 + math.sign(price) * Economy.TradeFeeSplit * 0.01)
 		local mult = getCrisisCommodityMultiplier(commodity.name, true)
@@ -217,14 +307,29 @@ function CommodityMarketWidget.New(id, title, config)
 
     -- what do we get for this item if we are selling
     config.getSellPrice = config.getSellPrice or function (self, commodity)
+		if not self.station or (self.station.exists and not self.station:exists()) then return commodity.price end
+		local okPenal, PenalSystem = pcall(require, 'modules.Penal.PenalSystem')
+		if okPenal and PenalSystem and PenalSystem.IsPrisonStation(self.station) then
+			if PenalSystem.IsPrisonImport(commodity.name) then
+				return math.floor(commodity.price * 1.05) -- Statutory government procurement rate (105% base)
+			end
+			return math.floor(commodity.price * 0.80)
+		end
         local price = self.station:GetCommodityPrice(commodity)
 		local baseCost = price * (1.0 - math.sign(price) * Economy.TradeFeeSplit * 0.01)
 		local mult = getCrisisCommodityMultiplier(commodity.name, false)
 		return math.floor(baseCost * mult * 100) / 100
     end
 
-	config.onClickBuy = config.onClickBuy or function(self, commodity) return true end
-	config.onClickSell = config.onClickSell or function(self, commodity) return true end
+	config.onClickBuy = config.onClickBuy or function(self, commodity)
+		local canSellToPlayer = GetStationTradePermissions(self.station, commodity.name)
+		return canSellToPlayer
+	end
+
+	config.onClickSell = config.onClickSell or function(self, commodity)
+		local _, canBuyFromPlayer = GetStationTradePermissions(self.station, commodity.name)
+		return canBuyFromPlayer
+	end
 
 	config.bought = config.bought or function (self, commodity, tradeamount)
 		local count = tradeamount or 1
@@ -496,7 +601,8 @@ function CommodityMarketWidget:TradeMenu()
 	ui.child(self.id .. "TradeMenu", vZero, nil, commsChildFlags, function()
 		local panelW = ui.getContentRegion().x
 		local item = self.selectedItem
-		local stock = self.funcs.getStock(self, item)
+		local canSellToPlayer, canBuyFromPlayer, reasonSellDisabled, reasonBuyDisabled = GetStationTradePermissions(self.station, item.name)
+		local stock = canSellToPlayer and self.funcs.getStock(self, item) or 0
 		local owned = self.cargoMgr:CountCommodity(item)
 		local buyPrice = self.funcs.getBuyPrice(self, item)
 		local sellPrice = self.funcs.getSellPrice(self, item)
@@ -548,13 +654,31 @@ function CommodityMarketWidget:TradeMenu()
 		ui.textColored(ui.theme.colors.uiPrimaryLight, "MARKET INVENTORY & CARGO HOLD STATUS:")
 		ui.columns(2, "##commStatusCols", false)
 		ui.textColored(ui.theme.colors.fontDim, "Station Market Stock:")
-		ui.text(string.format("%d tons in stock @ %s / ton", stock, Format.Money(buyPrice)))
+		if canSellToPlayer then
+			ui.text(string.format("%d tons in stock @ %s / ton", stock, Format.Money(buyPrice)))
+		else
+			ui.textColored(ui.theme.colors.alertYellow, "Station does not supply this commodity")
+			if reasonSellDisabled then
+				ui.withFont(pionillium.details, function()
+					ui.textColored(ui.theme.colors.fontDim, reasonSellDisabled)
+				end)
+			end
+		end
 		ui.nextColumn()
 
 		ui.textColored(ui.theme.colors.fontDim, "In Your Cargo Hold:")
 		if owned > 0 then
-			local totalVal = owned * sellPrice
-			ui.textColored(ui.theme.colors.econProfit, string.format("%d tons owned (@ %s = %s)", owned, Format.Money(sellPrice), Format.Money(totalVal)))
+			if canBuyFromPlayer then
+				local totalVal = owned * sellPrice
+				ui.textColored(ui.theme.colors.econProfit, string.format("%d tons owned (@ %s = %s)", owned, Format.Money(sellPrice), Format.Money(totalVal)))
+			else
+				ui.textColored(ui.theme.colors.alertYellow, string.format("%d tons owned (Station does not buy this)", owned))
+				if reasonBuyDisabled then
+					ui.withFont(pionillium.details, function()
+						ui.textColored(ui.theme.colors.fontDim, reasonBuyDisabled)
+					end)
+				end
+			end
 		else
 			ui.textColored(ui.theme.colors.fontDim, string.format("0 tons (Hold Free: %d tons)", freeCargo))
 		end
@@ -567,26 +691,37 @@ function CommodityMarketWidget:TradeMenu()
 		-- 3. Dedicated Owned Cargo Liquidation (Quick Sell)
 		if owned > 0 then
 			ui.textColored(Color(255, 170, 50, 255), "OWNED CARGO LIQUIDATION:")
-			ui.textColored(ui.theme.colors.fontDim, "Instant liquidation of cargo currently loaded in your vessel's hold:")
+			if canBuyFromPlayer then
+				ui.textColored(ui.theme.colors.fontDim, "Instant liquidation of cargo currently loaded in your vessel's hold:")
 
-			local qSellBtns = {
-				{ frac = 0.25, label = "25%" },
-				{ frac = 0.50, label = "50%" },
-				{ frac = 1.00, label = string.format("SELL ALL (%d TONS)", owned) },
-			}
-			local qSp = 6
-			local qW = math.floor((panelW - (#qSellBtns - 1) * qSp) / #qSellBtns)
-			for i, sb in ipairs(qSellBtns) do
-				local sQty = math.max(1, math.floor(owned * sb.frac + 0.0001))
-				if sb.frac >= 0.99 then sQty = owned end
-				local sProceeds = sQty * sellPrice
-				local bLabel = string.format("%s (%s)##qSell%d", sb.label, Format.Money(sProceeds), i)
-				if ui.button(bLabel, Vector2(qW, 28)) then
-					self:DoSell(sQty)
+				local qSellBtns = {
+					{ frac = 0.25, label = "25%" },
+					{ frac = 0.50, label = "50%" },
+					{ frac = 1.00, label = string.format("SELL ALL (%d TONS)", owned) },
+				}
+				local qSp = 6
+				local qW = math.floor((panelW - (#qSellBtns - 1) * qSp) / #qSellBtns)
+				for i, sb in ipairs(qSellBtns) do
+					local sQty = math.max(1, math.floor(owned * sb.frac + 0.0001))
+					if sb.frac >= 0.99 then sQty = owned end
+					local sProceeds = sQty * sellPrice
+					local bLabel = string.format("%s (%s)##qSell%d", sb.label, Format.Money(sProceeds), i)
+					if ui.button(bLabel, Vector2(qW, 28)) then
+						self:DoSell(sQty)
+					end
+					if i < #qSellBtns then ui.sameLine(nil, qSp) end
 				end
-				if i < #qSellBtns then ui.sameLine(nil, qSp) end
+				ui.newLine()
+			else
+				ui.withStyleColors({
+					Button = ui.theme.buttonColors.disabled.normal,
+					ButtonHovered = ui.theme.buttonColors.disabled.normal,
+					ButtonActive = ui.theme.buttonColors.disabled.normal,
+					Text = ui.theme.colors.fontDim
+				}, function()
+					ui.button("STATION DOES NOT PURCHASE THIS COMMODITY##disSellAll", Vector2(panelW, 28), nil, reasonBuyDisabled or "Local starport authority does not purchase this commodity")
+				end)
 			end
-			ui.newLine()
 			ui.spacing()
 			ui.separator()
 			ui.spacing()
@@ -594,8 +729,8 @@ function CommodityMarketWidget:TradeMenu()
 
 		-- 4. Order Quantity Counter
 		ui.textColored(ui.theme.colors.uiPrimaryLight, "CUSTOM TRANSACTION ORDER DESK:")
-		local maxBuy = math.max(0, math.min(stock, freeCargo, buyPrice > 0 and math.floor(playerMoney / buyPrice) or stock))
-		local maxLimit = math.max(maxBuy, owned)
+		local maxBuy = canSellToPlayer and math.max(0, math.min(stock, freeCargo, buyPrice > 0 and math.floor(playerMoney / buyPrice) or stock)) or 0
+		local maxLimit = math.max(maxBuy, canBuyFromPlayer and owned or 0)
 		if maxLimit <= 0 then maxLimit = 1 end
 
 		local qSp = 6
@@ -620,46 +755,86 @@ function CommodityMarketWidget:TradeMenu()
 		local buyTotal = self.tradeAmount * buyPrice
 		local sellTotal = self.tradeAmount * sellPrice
 		ui.text(string.format("Order Quantity: %d tons  |  Purchase Cost: %s  |  Sale Proceeds: %s",
-			self.tradeAmount, Format.Money(buyTotal), Format.Money(sellTotal)))
+			self.tradeAmount,
+			canSellToPlayer and Format.Money(buyTotal) or "N/A",
+			canBuyFromPlayer and Format.Money(sellTotal) or "N/A"))
 		ui.spacing()
 
 		-- 5. Direct Action Buttons
 		if owned > 0 then
 			local actW = math.floor((panelW - 12) / 2)
-			local canBuy = (self.tradeAmount > 0 and self.tradeAmount <= maxBuy and buyTotal <= playerMoney)
-			local buyText = string.format("BUY %d TONS (%s)##DoBuyBtn", self.tradeAmount, Format.Money(buyTotal))
-			if not canBuy and self.tradeAmount > 0 then
-				if buyTotal > playerMoney then buyText = "INSUFFICIENT FUNDS"
-				elseif self.tradeAmount > freeCargo then buyText = "HOLD FULL"
-				elseif self.tradeAmount > stock then buyText = "OUT OF STOCK" end
-			end
 
-			if ui.button(buyText, Vector2(actW, 36)) then
-				if canBuy then self:DoBuy(self.tradeAmount) end
+			-- BUY BUTTON
+			if not canSellToPlayer then
+				ui.withStyleColors({
+					Button = ui.theme.buttonColors.disabled.normal,
+					ButtonHovered = ui.theme.buttonColors.disabled.normal,
+					ButtonActive = ui.theme.buttonColors.disabled.normal,
+					Text = ui.theme.colors.fontDim
+				}, function()
+					ui.button("NOT SUPPLIED##DoBuyDis", Vector2(actW, 36), nil, reasonSellDisabled or "Station does not supply this commodity")
+				end)
+			else
+				local canBuy = (self.tradeAmount > 0 and self.tradeAmount <= maxBuy and buyTotal <= playerMoney)
+				local buyText = string.format("BUY %d TONS (%s)##DoBuyBtn", self.tradeAmount, Format.Money(buyTotal))
+				if not canBuy and self.tradeAmount > 0 then
+					if buyTotal > playerMoney then buyText = "INSUFFICIENT FUNDS"
+					elseif self.tradeAmount > freeCargo then buyText = "HOLD FULL"
+					elseif self.tradeAmount > stock then buyText = "OUT OF STOCK" end
+				end
+				local buyVariant = canBuy and ui.theme.buttonColors.default or ui.theme.buttonColors.disabled
+				if ui.button(buyText, Vector2(actW, 36), buyVariant) then
+					if canBuy then self:DoBuy(self.tradeAmount) end
+				end
 			end
 			ui.sameLine(nil, 12)
 
-			local canSell = (self.tradeAmount > 0 and self.tradeAmount <= owned)
-			local sellText = string.format("SELL %d TONS (%s)##DoSellBtn", self.tradeAmount, Format.Money(sellTotal))
-			if not canSell and self.tradeAmount > 0 then
-				sellText = "EXCEEDS HOLD QUANTITY"
-			end
-			if ui.button(sellText, Vector2(actW, 36)) then
-				if canSell then self:DoSell(self.tradeAmount) end
+			-- SELL BUTTON
+			if not canBuyFromPlayer then
+				ui.withStyleColors({
+					Button = ui.theme.buttonColors.disabled.normal,
+					ButtonHovered = ui.theme.buttonColors.disabled.normal,
+					ButtonActive = ui.theme.buttonColors.disabled.normal,
+					Text = ui.theme.colors.fontDim
+				}, function()
+					ui.button("NOT PURCHASED##DoSellDis", Vector2(actW, 36), nil, reasonBuyDisabled or "Station does not purchase this commodity")
+				end)
+			else
+				local canSell = (self.tradeAmount > 0 and self.tradeAmount <= owned)
+				local sellText = string.format("SELL %d TONS (%s)##DoSellBtn", self.tradeAmount, Format.Money(sellTotal))
+				if not canSell and self.tradeAmount > 0 then
+					sellText = "EXCEEDS HOLD QUANTITY"
+				end
+				local sellVariant = canSell and ui.theme.buttonColors.default or ui.theme.buttonColors.disabled
+				if ui.button(sellText, Vector2(actW, 36), sellVariant) then
+					if canSell then self:DoSell(self.tradeAmount) end
+				end
 			end
 		else
-			local canBuy = (self.tradeAmount > 0 and self.tradeAmount <= maxBuy and buyTotal <= playerMoney)
-			local buyText = string.format("BUY %d TONS (%s)##DoBuyBtn", self.tradeAmount, Format.Money(buyTotal))
-			if self.tradeAmount == 0 then
-				buyText = "SELECT QUANTITY ABOVE TO PURCHASE"
-			elseif not canBuy then
-				if buyTotal > playerMoney then buyText = "INSUFFICIENT FUNDS"
-				elseif self.tradeAmount > freeCargo then buyText = "CARGO HOLD FULL"
-				elseif self.tradeAmount > stock then buyText = "STATION OUT OF STOCK" end
-			end
-
-			if ui.button(buyText, Vector2(panelW, 36)) then
-				if canBuy then self:DoBuy(self.tradeAmount) end
+			-- BUY BUTTON ONLY (HOLD EMPTY)
+			if not canSellToPlayer then
+				ui.withStyleColors({
+					Button = ui.theme.buttonColors.disabled.normal,
+					ButtonHovered = ui.theme.buttonColors.disabled.normal,
+					ButtonActive = ui.theme.buttonColors.disabled.normal,
+					Text = ui.theme.colors.fontDim
+				}, function()
+					ui.button("STATION DOES NOT SUPPLY THIS COMMODITY##DoBuyDisFull", Vector2(panelW, 36), nil, reasonSellDisabled or "Station does not supply this commodity")
+				end)
+			else
+				local canBuy = (self.tradeAmount > 0 and self.tradeAmount <= maxBuy and buyTotal <= playerMoney)
+				local buyText = string.format("BUY %d TONS (%s)##DoBuyBtn", self.tradeAmount, Format.Money(buyTotal))
+				if self.tradeAmount == 0 then
+					buyText = "SELECT QUANTITY ABOVE TO PURCHASE"
+				elseif not canBuy then
+					if buyTotal > playerMoney then buyText = "INSUFFICIENT FUNDS"
+					elseif self.tradeAmount > freeCargo then buyText = "CARGO HOLD FULL"
+					elseif self.tradeAmount > stock then buyText = "STATION OUT OF STOCK" end
+				end
+				local buyVariant = canBuy and ui.theme.buttonColors.default or ui.theme.buttonColors.disabled
+				if ui.button(buyText, Vector2(panelW, 36), buyVariant) then
+					if canBuy then self:DoBuy(self.tradeAmount) end
+				end
 			end
 		end
 	end)
@@ -688,6 +863,11 @@ function CommodityMarketWidget:SetSize(size)
 end
 
 function CommodityMarketWidget:Refresh()
+	---@type CargoManager
+	self.cargoMgr = Game.player:GetComponent('CargoManager')
+	self.station = Game.player:GetDockedWith()
+	self.tradeComputer = Game.player["trade_computer_cap"] or 0
+
 	self.items = {}
 
 	for k, comm in pairs(Commodities) do
@@ -697,11 +877,6 @@ function CommodityMarketWidget:Refresh()
 	end
 
 	table.sort(self.items, self.funcs.sortingFunction)
-
-	---@type CargoManager
-	self.cargoMgr = Game.player:GetComponent('CargoManager')
-	self.station = Game.player:GetDockedWith()
-	self.tradeComputer = Game.player["trade_computer_cap"] or 0
 end
 
 function CommodityMarketWidget:DrawMarketKey()
@@ -736,6 +911,11 @@ function CommodityMarketWidget:DrawMarketKey()
 end
 
 function CommodityMarketWidget:Render(size)
+	local docked = Game.player and Game.player:GetDockedWith()
+	if not self.items or #self.items == 0 or self.station ~= docked then
+		self:Refresh()
+	end
+
 	local fullSize = size or ui.getContentRegion()
 	self:DrawMarketKey()
 	ui.spacing()

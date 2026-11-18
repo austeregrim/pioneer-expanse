@@ -407,7 +407,7 @@ local function drawShipRepair()
 				ui.nextColumn()
 
 				-- Internal tank refill buttons
-				if ui.button(l.REFUEL_FULL, widgetSizes.buttonFullRefuelSize) then refuelInternalTank(100) end
+				if ui.button(l.REFUEL_FULL .. "##internal", widgetSizes.buttonFullRefuelSize) then refuelInternalTank(100) end
 				ui.sameLine()
 				if ui.button("-10%", widgetSizes.buttonSizeBase) then refuelInternalTank(-10) end
 				ui.sameLine()
@@ -443,7 +443,7 @@ local function drawShipRepair()
 					ui.nextColumn()
 
 					-- Hyperspace fuel refill buttons
-					if ui.button(l.REFUEL_FULL, widgetSizes.buttonFullRefuelSize) then refuelHyperdrive(hyperdrive:GetMaxFuel()) end
+					if ui.button(l.REFUEL_FULL .. "##hyperdrive", widgetSizes.buttonFullRefuelSize) then refuelHyperdrive(hyperdrive:GetMaxFuel()) end
 					ui.sameLine()
 					if ui.button("-10t", widgetSizes.buttonSizeBase) then refuelHyperdrive(-10) end
 					ui.sameLine()

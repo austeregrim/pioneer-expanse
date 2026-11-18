@@ -1751,144 +1751,252 @@ void PopulateStarSystemGenerator::PopulateAddStations(SystemBody *sbody, StarSys
 	RefCountedPtr<Random> namerand(new Random);
 	namerand->seed(_init, 6);
 
-	// XXX: station placement code is in need of improvement; the code currently fails to appear "intelligent"
-	// with respect to well-spaced orbital shells (e.g. a "station belt" around a high-population planet)
-	// as well as generating station placement for e.g. research, industrial, or communications stations
-
+	// Contextual Outpost & Multi-Tier Station Placement
 	fixed totalPop = system->GetTotalPop();
+	if (totalPop <= 0) return; // Uninhabited systems have no outposts
 
-	if (sbody->GetPopulationAsFixed() < fixed(1, 1000)) return;
+	// Stars, starports, and gravpoints do not host direct orbital starports
+	if (sbody->GetSuperType() <= SystemBody::SUPERTYPE_STAR ||
+	    sbody->GetSuperType() == SystemBody::SUPERTYPE_STARPORT ||
+	    sbody->GetType() == SystemBody::TYPE_GRAVPOINT)
+		return;
+
+	// Count existing starports on this body (e.g. from custom system definitions)
+	Uint32 existingOrbitals = 0;
+	Uint32 existingSurfaces = 0;
+	for (const auto *kid : sbody->GetChildren()) {
+		if (kid && kid->GetSuperType() == SystemBody::SUPERTYPE_STARPORT) {
+			if (kid->GetType() == SystemBody::TYPE_STARPORT_ORBITAL) ++existingOrbitals;
+			else if (kid->GetType() == SystemBody::TYPE_STARPORT_SURFACE) ++existingSurfaces;
+		}
+	}
+
+	// Accurate physics-based minimum orbital distance for ANY body
+	const double sbodyRadiusM = sbody->GetRadius();
+	const double atmRadiusM = sbody->GetAtmRadius();
+	const double safeAltM = std::max(atmRadiusM, 150000.0) + 150000.0;
+	fixed orbMinS = fixed().FromDouble((sbodyRadiusM + safeAltM) / AU);
+
+	// If body has rings, stations must be stationed outside the outer ring boundary
+	if (sbody->HasRings()) {
+		const double ringOuterM = sbodyRadiusM * sbody->GetRings().maxRadius.ToDouble() * 1.05;
+		orbMinS = std::max(orbMinS, fixed().FromDouble(ringOuterM / AU));
+	}
+
+	// Hill sphere radius for maximum stable orbit
 	fixed orbMaxS = fixed(1, 4) * fixed(CalcHillRadius(sbody));
 
-	const double sbodyAtmosRadius = 1.0 + sbody->GetAtmRadius() / sbody->GetRadius();
-	fixed orbMinS = fixed().FromDouble((sbodyAtmosRadius + +500000.0 / EARTH_RADIUS)) * AU_EARTH_RADIUS;
-	if (sbody->GetNumChildren() > 0)
-		orbMaxS = std::min(orbMaxS, fixed(1, 2) * sbody->GetChildren()[0]->GetOrbMinAsFixed());
-
-	// starports - orbital
-	fixed pop = sbody->GetPopulationAsFixed() + rand.Fixed();
-	if (orbMinS < orbMaxS) {
-
-		// How many stations do we need?
-		pop -= rand.Fixed();
-		Uint32 NumToMake = 0;
-		while (pop >= 0) {
-			++NumToMake;
-			pop -= fixed(1, 1) - rand.NormFixed().Abs();
-		}
-
-		// Always generate a station around a populated high-gravity world
-		if ((NumToMake == 0) && (sbody->CalcSurfaceGravity() > 10.5)) {  // 10.5 m/s2 = 1,07 g
-			NumToMake = 1;
-		}
-
-		// Any to position?
-		if (NumToMake > 0) {
-			const double centralMass = sbody->GetMassAsFixed().ToDouble() * EARTH_MASS;
-
-			// What is our innermost orbit?
-			fixed innerOrbit = orbMinS; // + ((orbMaxS - orbMinS) / 25);
-
-			// Try to limit the inner orbit to at least three hours.
-			{
-				const double minHours = 3.0;
-				const double seconds = Orbit::OrbitalPeriod(innerOrbit.ToDouble() * AU, centralMass);
-				const double hours = seconds / (60.0 * 60.0);
-				if (hours < minHours) {
-					//knowing that T=2*pi*R/sqrt(G*M/R) find R for set T=4 hours:
-					fixed orbitFromPeriod = fixed().FromDouble((std::pow(G * centralMass, 1.0 / 3.0) * std::pow(minHours * 60.0 * 60.0, 2.0 / 3.0)) / (std::pow(2.0 * M_PI, 2.0 / 3.0) * AU));
-					// We can't go higher than our maximum so set it to that.
-					innerOrbit = std::min(orbMaxS, orbitFromPeriod);
-				}
-			}
-
-			// I like to think that we'd fill several "shells" of orbits at once rather than fill one and move out further
-			static const Uint32 MAX_ORBIT_SHELLS = 3;
-			fixed shells[MAX_ORBIT_SHELLS];
-			fixed shellIncl[MAX_ORBIT_SHELLS];
-
-			if (innerOrbit != orbMaxS) {
-				shells[0] = innerOrbit;											 // low
-				shells[1] = innerOrbit + ((orbMaxS - innerOrbit) * fixed(1, 2)); // med
-				shells[2] = orbMaxS;											 // high
-
-				shellIncl[0] = rand.NormFixed() * FIXED_PI;
-				shellIncl[1] = rand.NormFixed() * FIXED_PI;
-				shellIncl[2] = rand.NormFixed() * FIXED_PI;
-			} else {
-				shells[0] = shells[1] = shells[2] = innerOrbit;
-				shellIncl[0] = shellIncl[1] = shellIncl[2] = rand.NormFixed() * FIXED_PI;
-			}
-
-			Uint32 orbitIdx = 0;
-
-			for (Uint32 i = 0; i < NumToMake; i++) {
-				// Pick the orbit we've currently placing a station into.
-				const fixed currOrbit = shells[orbitIdx];
-				const fixed currOrbitIncl = shells[orbitIdx];
-				++orbitIdx;
-				if (orbitIdx >= MAX_ORBIT_SHELLS) // wrap it
-				{
-					orbitIdx = 0;
-				}
-
-				// Begin creation of the new station
-				SystemBody *sp = system->NewBody();
-				sp->m_type = SystemBody::TYPE_STARPORT_ORBITAL;
-				sp->m_seed = rand.Int32();
-				sp->m_parent = sbody;
-				sp->m_rotationPeriod = fixed(1, 3600);
-				sp->m_averageTemp = sbody->GetAverageTemp();
-				sp->m_mass = 0;
-
-				// place stations between min and max orbits to reduce the number of extremely close/fast orbits
-				// This avoids the worst-case of having 3-5 stations all in the exact orbit close to each other
-				sp->m_semiMajorAxis = currOrbit * rand.NormFixed(fixed(12, 10), fixed(2, 10));
-
-				// Generate slightly random orbits for each station in the orbital "shell"
-				// slightly random min/max orbital distance
-				sp->m_eccentricity = rand.NormFixed().Abs() * fixed(1, 8);
-				// perturb the orbital plane to avoid all stations falling in line with each other
-				sp->m_inclination = currOrbitIncl + rand.NormFixed() * fixed(1, 4) * FIXED_PI;
-				// station spacing around the primary body
-				sp->m_argOfPeriapsis = rand.Fixed() * FIXED_PI * 2;
-				// TODO: no axial tilt for stations / axial tilt in general is strangely modeled
-				sp->m_axialTilt = fixed();
-
-				sp->SetOrbitFromParameters();
-
-				sbody->m_children.insert(sbody->m_children.begin(), sp);
-				system->AddSpaceStation(sp);
-				sp->m_orbMin = sp->GetSemiMajorAxisAsFixed();
-				sp->m_orbMax = sp->GetSemiMajorAxisAsFixed();
-
-				sp->m_name = gen_unique_station_name(sp, system, namerand);
-				PopulateStage1(sp, system, totalPop);
+	// If the body has moons, constrain station orbits to half the distance to the innermost moon
+	fixed innermostMoonOrbit = fixed(0);
+	for (const auto *kid : sbody->GetChildren()) {
+		if (kid && kid->GetSuperType() != SystemBody::SUPERTYPE_STARPORT) {
+			if (innermostMoonOrbit == fixed(0) || kid->GetOrbMinAsFixed() < innermostMoonOrbit) {
+				innermostMoonOrbit = kid->GetOrbMinAsFixed();
 			}
 		}
 	}
-	// starports - surface
-	// give it a fighting chance of having a decent number of starports (*3)
-	pop = sbody->GetPopulationAsFixed() + (rand.Fixed() * 3);
-	std::vector<fixed> previousOrbits;
-	previousOrbits.reserve(8);
-	int max = 6;
-	while (max-- > 0) {
-		pop -= (fixed(1, 1) - rand.NormFixed());
-		if (pop < 0) break;
+	if (innermostMoonOrbit > fixed(0)) {
+		orbMaxS = std::min(orbMaxS, fixed(1, 2) * innermostMoonOrbit);
+	}
 
+	if (orbMaxS <= orbMinS) {
+		orbMaxS = orbMinS * fixed(14, 10);
+	}
+
+	// Helper lambda to instantiate, position, and register a contextual orbital station
+	auto createOrbitalStation = [&](const fixed &orbitDist, const fixed &orbitIncl, const std::string &stType) -> SystemBody * {
 		SystemBody *sp = system->NewBody();
-		sp->m_type = SystemBody::TYPE_STARPORT_SURFACE;
+		sp->m_type = SystemBody::TYPE_STARPORT_ORBITAL;
 		sp->m_seed = rand.Int32();
 		sp->m_parent = sbody;
+		sp->m_rotationPeriod = fixed(1, 3600);
 		sp->m_averageTemp = sbody->GetAverageTemp();
 		sp->m_mass = 0;
-		sp->m_name = gen_unique_station_name(sp, system, namerand);
-		sp->m_orbit = Orbit();
-		PositionSettlementOnPlanet(sp, previousOrbits);
+		sp->m_spaceStationType = stType;
+
+		sp->m_semiMajorAxis = orbitDist;
+		sp->m_eccentricity = rand.NormFixed().Abs() * fixed(1, 20);
+		sp->m_inclination = orbitIncl + rand.NormFixed() * fixed(1, 10) * FIXED_PI;
+		sp->m_argOfPeriapsis = rand.Fixed() * FIXED_PI * 2;
+		sp->m_axialTilt = fixed();
+
+		sp->SetOrbitFromParameters();
+
 		sbody->m_children.insert(sbody->m_children.begin(), sp);
 		system->AddSpaceStation(sp);
+		sp->m_orbMin = sp->GetSemiMajorAxisAsFixed();
+		sp->m_orbMax = sp->GetSemiMajorAxisAsFixed();
+
+		sp->m_name = gen_unique_station_name(sp, system, namerand);
 		PopulateStage1(sp, system, totalPop);
+		return sp;
+	};
+
+	// 1. Populated Worlds: Dense multi-shell orbital platforms & surface starports
+	if (sbody->GetPopulationAsFixed() >= fixed(1, 1000)) {
+		fixed popVal = sbody->GetPopulationAsFixed();
+		Uint32 targetOrbitals = 2;
+		if (popVal >= fixed(1, 10)) targetOrbitals = 3;
+		if (popVal >= fixed(1, 1))  targetOrbitals = 4;
+		if (popVal >= fixed(3, 1))  targetOrbitals = 5;
+		if (popVal >= fixed(6, 1))  targetOrbitals = 6;
+
+		Uint32 needOrbitals = (targetOrbitals > existingOrbitals) ? (targetOrbitals - existingOrbitals) : 0;
+		if (needOrbitals > 0 && orbMinS < orbMaxS) {
+			const double centralMass = sbody->GetMassAsFixed().ToDouble() * EARTH_MASS;
+			fixed innerOrbit = orbMinS;
+			const double minHours = 2.5;
+			const double seconds = Orbit::OrbitalPeriod(innerOrbit.ToDouble() * AU, centralMass);
+			const double hours = seconds / (60.0 * 60.0);
+			if (hours < minHours) {
+				fixed orbitFromPeriod = fixed().FromDouble((std::pow(G * centralMass, 1.0 / 3.0) * std::pow(minHours * 60.0 * 60.0, 2.0 / 3.0)) / (std::pow(2.0 * M_PI, 2.0 / 3.0) * AU));
+				innerOrbit = std::min(orbMaxS, std::max(orbMinS, orbitFromPeriod));
+			}
+
+			static const Uint32 MAX_ORBIT_SHELLS = 4;
+			fixed shells[MAX_ORBIT_SHELLS];
+			fixed shellIncl[MAX_ORBIT_SHELLS];
+			if (innerOrbit < orbMaxS) {
+				shells[0] = innerOrbit;
+				shells[1] = innerOrbit + ((orbMaxS - innerOrbit) * fixed(1, 3));
+				shells[2] = innerOrbit + ((orbMaxS - innerOrbit) * fixed(2, 3));
+				shells[3] = orbMaxS;
+			} else {
+				shells[0] = shells[1] = shells[2] = shells[3] = innerOrbit;
+			}
+			for (Uint32 s = 0; s < MAX_ORBIT_SHELLS; s++) {
+				shellIncl[s] = rand.NormFixed() * fixed(1, 6) * FIXED_PI;
+			}
+
+			Uint32 orbitIdx = 0;
+			for (Uint32 i = 0; i < needOrbitals; i++) {
+				const fixed currOrbit = shells[orbitIdx];
+				const fixed currOrbitIncl = shellIncl[orbitIdx];
+				++orbitIdx;
+				if (orbitIdx >= MAX_ORBIT_SHELLS) orbitIdx = 0;
+
+				std::string stType = "orbital_station_2-5k";
+				if (i == 0 && existingOrbitals == 0) {
+					stType = (popVal >= fixed(4, 1)) ? "orbital_station_2-10k" : "orbital_station_2-5k";
+				} else if (i == 1 || (existingOrbitals > 0 && i == 0)) {
+					// Agricultural Biosphere Platform
+					stType = "orbital_station_agri";
+				} else if (i == 2) {
+					// Heavy Industrial / Smelting / Shipyard Hub
+					stType = "orbital_station_industrial";
+				} else if (i == 3) {
+					// High-orbit Technological & Science Observatory
+					stType = "orbital_station_science";
+				} else {
+					stType = "orbital_station_2-2k";
+				}
+
+				fixed stOrbit = currOrbit * rand.NormFixed(fixed(11, 10), fixed(15, 100));
+				if (stOrbit >= orbMaxS) stOrbit = currOrbit;
+				createOrbitalStation(stOrbit, currOrbitIncl, stType);
+			}
+		}
+
+		// Surface Starports: scaled with world population
+		Uint32 targetSurfaces = 2;
+		if (popVal >= fixed(1, 10)) targetSurfaces = 3;
+		if (popVal >= fixed(1, 1))  targetSurfaces = 5;
+		if (popVal >= fixed(4, 1))  targetSurfaces = 7;
+		if (popVal >= fixed(8, 1))  targetSurfaces = 9;
+
+		int needSurfaces = int(targetSurfaces) - int(existingSurfaces);
+		if (needSurfaces > 0) {
+			std::vector<fixed> previousOrbits;
+			previousOrbits.reserve(12);
+			while (needSurfaces-- > 0) {
+				SystemBody *sp = system->NewBody();
+				sp->m_type = SystemBody::TYPE_STARPORT_SURFACE;
+				sp->m_seed = rand.Int32();
+				sp->m_parent = sbody;
+				sp->m_averageTemp = sbody->GetAverageTemp();
+				sp->m_mass = 0;
+				sp->m_name = gen_unique_station_name(sp, system, namerand);
+				sp->m_orbit = Orbit();
+				PositionSettlementOnPlanet(sp, previousOrbits);
+				sbody->m_children.insert(sbody->m_children.begin(), sp);
+				system->AddSpaceStation(sp);
+				PopulateStage1(sp, system, totalPop);
+			}
+		}
+	} else if (orbMinS < orbMaxS && totalPop > fixed(1, 100)) {
+		// 2. Contextual Outposts for uninhabited/resource bodies in inhabited systems
+		if (sbody->GetType() == SystemBody::TYPE_PLANET_GAS_GIANT) {
+			// Gas Giant Atmospheric Siphon & Hydrogen Fuel Depot
+			if (existingOrbitals == 0 && rand.Fixed() < fixed(85, 100)) {
+				fixed siphonOrbit = orbMinS * rand.NormFixed(fixed(112, 100), fixed(8, 100));
+				if (siphonOrbit < orbMaxS) {
+					createOrbitalStation(siphonOrbit, rand.NormFixed() * fixed(1, 8) * FIXED_PI, "orbital_station_siphon");
+				}
+				// Dual siphon for supermassive gas giants
+				if (sbody->GetMassAsFixed() > fixed(200, 1) && rand.Fixed() < fixed(5, 10)) {
+					fixed siphonOrbit2 = orbMinS * rand.NormFixed(fixed(135, 100), fixed(1, 10));
+					if (siphonOrbit2 < orbMaxS) {
+						createOrbitalStation(siphonOrbit2, rand.NormFixed() * FIXED_PI, "orbital_station_siphon");
+					}
+				}
+			}
+			// Ring Mining & Refining Platform at outer ring edge
+			if (sbody->HasRings() && rand.Fixed() < fixed(80, 100)) {
+				const double ringOuterAU = (sbodyRadiusM * sbody->GetRings().maxRadius.ToDouble() * 1.06) / AU;
+				fixed ringOrbit = std::max(orbMinS, fixed().FromDouble(ringOuterAU));
+				if (ringOrbit < orbMaxS) {
+					createOrbitalStation(ringOrbit, rand.NormFixed() * fixed(1, 16) * FIXED_PI, "orbital_station_industrial");
+				}
+			}
+		} else if (sbody->HasRings()) {
+			// Ringed terrestrial / dwarf world mining hub
+			if (rand.Fixed() < fixed(75, 100)) {
+				const double ringOuterAU = (sbodyRadiusM * sbody->GetRings().maxRadius.ToDouble() * 1.06) / AU;
+				fixed ringOrbit = std::max(orbMinS, fixed().FromDouble(ringOuterAU));
+				if (ringOrbit < orbMaxS) {
+					createOrbitalStation(ringOrbit, rand.NormFixed() * fixed(1, 16) * FIXED_PI, "orbital_station_industrial");
+				}
+			}
+		} else if (sbody->GetType() == SystemBody::TYPE_PLANET_ASTEROID) {
+			// Asteroid belt ore extraction & refinery platform
+			if (existingOrbitals == 0 && (sbody->GetMetallicityAsFixed() > fixed(25, 100) || rand.Fixed() < fixed(7, 10))) {
+				fixed astOrbit = orbMinS * rand.NormFixed(fixed(125, 100), fixed(1, 10));
+				if (astOrbit < orbMaxS) {
+					createOrbitalStation(astOrbit, rand.NormFixed() * FIXED_PI, "orbital_station_industrial");
+				}
+			}
+		} else if (sbody->GetNumChildren() == 0) {
+			// Moons & Terrestrial Planetoids: Penal Colony, Deep Space Science, or Industrial Rig
+			bool hasPrison = false;
+			for (const auto *st : system->GetSpaceStations()) {
+				if (st && (st->GetSpaceStationType() == "orbital_station_penal" ||
+				           st->GetName().find("Prison") != std::string::npos ||
+				           st->GetName().find("Penal") != std::string::npos ||
+				           st->GetName().find("Correctional") != std::string::npos)) {
+					hasPrison = true;
+					break;
+				}
+			}
+
+			if (!hasPrison && (sbody->GetAverageTemp() < 270 || sbody->GetParent()->GetType() == SystemBody::TYPE_PLANET_GAS_GIANT) && rand.Fixed() < fixed(5, 10)) {
+				fixed prisonOrbit = orbMinS * rand.NormFixed(fixed(15, 10), fixed(2, 10));
+				if (prisonOrbit < orbMaxS) {
+					createOrbitalStation(prisonOrbit, rand.NormFixed() * fixed(1, 4) * FIXED_PI, "orbital_station_penal");
+				}
+			} else if (rand.Fixed() < fixed(45, 100)) {
+				// Deep space science laboratory & sensor observatory
+				fixed sciOrbit = orbMinS * rand.NormFixed(fixed(13, 10), fixed(15, 100));
+				if (sciOrbit < orbMaxS) {
+					createOrbitalStation(sciOrbit, rand.NormFixed() * FIXED_PI, "orbital_station_science");
+				}
+			} else if (sbody->GetMetallicityAsFixed() > fixed(35, 100) && rand.Fixed() < fixed(4, 10)) {
+				// Mineral prospecting & extraction station
+				fixed indOrbit = orbMinS * rand.NormFixed(fixed(12, 10), fixed(1, 10));
+				if (indOrbit < orbMaxS) {
+					createOrbitalStation(indOrbit, rand.NormFixed() * FIXED_PI, "orbital_station_industrial");
+				}
+			}
+		}
 	}
 
 	// guarantee that there is always a star port on a populated world
@@ -1901,7 +2009,8 @@ void PopulateStarSystemGenerator::PopulateAddStations(SystemBody *sbody, StarSys
 		sp->m_mass = 0;
 		sp->m_name = gen_unique_station_name(sp, system, namerand);
 		sp->m_orbit = Orbit();
-		PositionSettlementOnPlanet(sp, previousOrbits);
+		std::vector<fixed> fallbackOrbits;
+		PositionSettlementOnPlanet(sp, fallbackOrbits);
 		sbody->m_children.insert(sbody->m_children.begin(), sp);
 		system->AddSpaceStation(sp);
 		PopulateStage1(sp, system, totalPop);
@@ -1987,7 +2096,6 @@ bool PopulateStarSystemGenerator::Apply(Random &rng, RefCountedPtr<Galaxy> galax
 	GalaxyGenerator::StarSystemConfig *config)
 {
 	PROFILE_SCOPED()
-	const bool addSpaceStations = !config->isCustomOnly;
 	Uint32 _init[5] = { Uint32(system->GetSeed()), Uint32(system->GetPath().sectorX), Uint32(system->GetPath().sectorY), Uint32(system->GetPath().sectorZ), UNIVERSE_SEED };
 	Random rand;
 	rand.seed(_init, 5);
@@ -2028,7 +2136,8 @@ bool PopulateStarSystemGenerator::Apply(Random &rng, RefCountedPtr<Galaxy> galax
 	SetSysPolit(sec, system, system->GetTotalPop());
 	SetCommodityLegality(system);
 
-	if (addSpaceStations) {
+	// Generate contextual outposts and multi-tier orbital shells for all inhabited systems (procedural and custom)
+	if (system->GetTotalPop() > 0) {
 		PopulateAddStations(system->GetRootBody().Get(), system.Get());
 	}
 

@@ -7,6 +7,7 @@ local AutoSave    = require 'modules.AutoSave.AutoSave'
 local PlayerState = require 'PlayerState'
 local Insurance   = require 'modules.Insurance.Insurance'
 local TaxAuthority = require 'modules.Economy.TaxAuthority'
+local Event       = require 'Event'
 
 local Game = require 'Game'
 local Rand = require 'Rand'
@@ -59,6 +60,78 @@ local popup = ModalWindow.New('lobbyPopup', function(self)
 		self:close()
 	end
 end)
+
+local incarcerationModal = ModalWindow.New('incarcerationModal', function(self)
+	local rec = Insurance.GetIncarcerationRecord()
+	if not rec then
+		self:close()
+		return
+	end
+
+	ui.withFont(orbiteer.title, function()
+		ui.textColored(colors.alertRed, "DEPARTMENT OF CORRECTIONS // JUDICIAL DISCHARGE RECORD")
+	end)
+	ui.separator()
+	ui.spacing()
+
+	ui.withFont(pionillium.body, function()
+		ui.textWrapped("Pilot remand protocol completed. In accordance with Interstellar Judicial Standard Charter 44-B, mandatory holding period and compulsory fine restitution have been satisfied.")
+	end)
+	ui.spacing()
+
+	local details = {
+		{ "Correctional Facility", rec.stationName or "Detention Center" },
+		{ "Destroyed Vessel", string.format("%s (%s)", rec.shipName or "Unregistered", rec.hullName or "Unknown") },
+		{ "Intake Date", rec.startDateStr or "Unknown" },
+		{ "Discharge Date", rec.releaseDateStr or "Present" },
+		{ "Statutory Custody Term", string.format("%d Standard Days", rec.baseDays or 0) },
+		{ "Unpaid Fine Commutation", (rec.extraDays and rec.extraDays > 0) and string.format("%d Standard Days (commuted at 150 Cr/day)", rec.extraDays) or "0 Days (Fine satisfied)" },
+		{ "Total Time Served", string.format("%d Standard Days", rec.totalDays or 0) },
+		{ "Outstanding Fines Assessed", Format.Money(rec.totalFine or 0) },
+		{ "Liquid Capital Garnished", Format.Money(rec.finePaid or 0) },
+		{ "Unpaid Balance Remitted", (rec.unpaidFine and rec.unpaidFine > 0) and string.format("%s (Discharged via Labor)", Format.Money(rec.unpaidFine)) or "0.00 Cr" },
+		{ "Criminal Record & Warrants", "CLEARED & EXPUNGED (TIME SERVED)" },
+		{ "Current Assigned Vessel", "Discharged Scout (Coronatrix - Pad Cleared)" },
+		{ "Insurance Claim Status", "Underwriter Claim Open (Rebuy or payout at Insurance Office)" },
+	}
+
+	ui.columns(2, "IncarcerationDetails", false)
+	ui.setColumnWidth(0, 310 * rescaleVector.x)
+	for _, row in ipairs(details) do
+		ui.withFont(pionillium.body, function()
+			ui.textColored(colors.fontDim, row[1])
+		end)
+		ui.nextColumn()
+		ui.withFont(pionillium.body, function()
+			ui.textWrapped(row[2])
+		end)
+		ui.nextColumn()
+	end
+	ui.columns(1, "IncarcerationDetailsEnd", false)
+
+	ui.spacing()
+	ui.separator()
+	ui.spacing()
+
+	local btnText = "ACCEPT DISCHARGE & ENTER CONCOURSE"
+	ui.withFont(orbiteer.medlarge, function()
+		local btnTextW = ui.calcTextSize(btnText).x
+		local btnWidth = math.max(520 * rescaleVector.x, btnTextW + 48 * rescaleVector.x)
+		local availW = ui.getContentRegion().x
+		if availW > btnWidth then
+			ui.dummy(Vector2((availW - btnWidth) / 2, 0))
+			ui.sameLine()
+		end
+		ui.withStyleColors({ Button = colors.uiPrimaryLight }, function()
+			if ui.button(btnText, Vector2(btnWidth, widgetSizes.buttonSizeBase.y)) then
+				Insurance.DismissIncarcerationRecord()
+				self:close()
+			end
+		end)
+	end)
+end)
+incarcerationModal.centered = true
+incarcerationModal.size = Vector2(920 * rescaleVector.x, 0)
 
 local requestLaunch = function (station)
 	local _, fine = PlayerState.GetCrimeOutstanding()
@@ -162,36 +235,51 @@ local function drawCivilAdministrationSection(station)
 		end
 
 		ui.spacing()
-		ui.withFont(orbiteer.medlarge, function()
-			ui.textColored(colors.fontDim, "RESIDENCY PRIVILEGES & INCENTIVES")
-		end)
-		ui.bulletText("Subsidized Ship Insurance: 40% reduction on rebuy deductible (3% vs 5%).")
-		ui.bulletText("Academic Cartography Credit: +10% scan value & 25% tax rebate at Home Port.")
-		ui.bulletText("Faction Legal Standing: System defense patrol protection in core lanes.")
+		local okPenal, PenalSystem = pcall(require, 'modules.Penal.PenalSystem')
+		local isPrison = okPenal and PenalSystem and PenalSystem.IsPrisonStation(station)
 
-		ui.spacing()
-		if station then
-			local isCurrentHome = (resInfo.isResident and resInfo.homeStationName == station.label)
+		ui.withFont(orbiteer.medlarge, function()
+			ui.textColored(isPrison and colors.alertRed or colors.fontDim, isPrison and "HIGH-SECURITY CORRECTIONAL FACILITY" or "RESIDENCY PRIVILEGES & INCENTIVES")
+		end)
+
+		if isPrison then
+			ui.bulletText("Incarceration Jurisdiction: Station strictly serves penal and judicial functions.")
+			ui.bulletText("Civil Status Suspended: Commercial residency and tax domicile are strictly prohibited.")
+			ui.bulletText("Starport Flight Clearance: Granted only to discharged pilots or verified couriers.")
+			ui.spacing()
 			local actionBtnSize = Vector2(ui.getContentRegion().x, 36 * rescaleVector.y)
-			if isCurrentHome then
-				ui.withStyleColors({ Button = ui.theme.buttonColors.disabled.normal, Text = colors.fontDim }, function()
-					ui.button("CURRENT REGISTERED HOME STATION##lobbyRes", actionBtnSize)
-				end)
-			elseif not resInfo.canChange then
-				ui.withStyleColors({ Button = ui.theme.buttonColors.disabled.normal, Text = colors.fontDim }, function()
-					ui.button(string.format("RESIDENCY LOCKED (%d DAYS REMAINING)##lobbyRes", resInfo.remainingDays), actionBtnSize)
-				end)
-			else
-				local regLabel = string.format("REGISTER RESIDENCY AT %s (90-DAY TERM)##lobbyRes", string.upper(station.label))
-				if ui.button(regLabel, actionBtnSize) then
-					local ok, msg = TaxAuthority.RegisterResidency(station)
-					if ok then
-						residencyStatusBanner = msg
-						residencyBannerColor = colors.econProfit or colors.uiPrimaryLight
-						ui.playSfx("OK")
-					else
-						residencyStatusBanner = msg
-						residencyBannerColor = colors.alertRed
+			ui.withStyleColors({ Button = ui.theme.buttonColors.disabled.normal, Text = colors.fontDim }, function()
+				ui.button("CIVIL RESIDENCY PROHIBITED AT CORRECTIONAL FACILITY##lobbyRes", actionBtnSize)
+			end)
+		else
+			ui.bulletText("Subsidized Ship Insurance: 40% reduction on rebuy deductible (3% vs 5%).")
+			ui.bulletText("Academic Cartography Credit: +10% scan value & 25% tax rebate at Home Port.")
+			ui.bulletText("Faction Legal Standing: System defense patrol protection in core lanes.")
+
+			ui.spacing()
+			if station then
+				local isCurrentHome = (resInfo.isResident and resInfo.homeStationName == station.label)
+				local actionBtnSize = Vector2(ui.getContentRegion().x, 36 * rescaleVector.y)
+				if isCurrentHome then
+					ui.withStyleColors({ Button = ui.theme.buttonColors.disabled.normal, Text = colors.fontDim }, function()
+						ui.button("CURRENT REGISTERED HOME STATION##lobbyRes", actionBtnSize)
+					end)
+				elseif not resInfo.canChange then
+					ui.withStyleColors({ Button = ui.theme.buttonColors.disabled.normal, Text = colors.fontDim }, function()
+						ui.button(string.format("RESIDENCY LOCKED (%d DAYS REMAINING)##lobbyRes", resInfo.remainingDays), actionBtnSize)
+					end)
+				else
+					local regLabel = string.format("REGISTER RESIDENCY AT %s (90-DAY TERM)##lobbyRes", string.upper(station.label))
+					if ui.button(regLabel, actionBtnSize) then
+						local ok, msg = TaxAuthority.RegisterResidency(station)
+						if ok then
+							residencyStatusBanner = msg
+							residencyBannerColor = colors.econProfit or colors.uiPrimaryLight
+							ui.playSfx("OK")
+						else
+							residencyStatusBanner = msg
+							residencyBannerColor = colors.alertRed
+						end
 					end
 				end
 			end
@@ -295,8 +383,14 @@ local function drawCivilAdministrationSection(station)
 end
 
 local function drawPlayerInfo()
+	if Insurance.HasIncarcerationRecord() and not incarcerationModal.isOpen and incarcerationModal.stackIdx == -1 then
+		incarcerationModal:open()
+	end
 
 	local station = Game.player:GetDockedWith()
+	if not shipDef and Game.player then
+		shipDef = ShipDef[Game.player.shipId]
+	end
 
 	if(not (station and shipDef)) then return end
 
@@ -379,21 +473,30 @@ local function drawPlayerInfo()
 					ui.spacing()
 
 					local size = Vector2(ui.getContentRegion().x, widgetSizes.buttonLaunchSize.y)
-					if Insurance.HasPendingClaim() then
-						ui.withFont(orbiteer.large, function()
-							ui.withStyleColors({ Button = colors.alertRed }, function()
-								if ui.button("SETTLE INSURANCE CLAIM TO LAUNCH", size) then
+					local claim = Insurance.GetActiveClaim()
+					if claim and not claim.resolved then
+						ui.withFont(pionillium.body, function()
+							local shipDef = ShipDef[claim.hullId]
+							local name = claim.shipName or (shipDef and shipDef.name) or "destroyed vessel"
+							ui.textColored(colors.uiPrimaryLight, string.format("NOTICE: Open insurance claim pending for %s. Rebuy ship or collect payout at Insurance Office.", name))
+						end)
+						ui.spacing()
+						local rebuyBtnSize = Vector2(ui.getContentRegion().x, 36 * rescaleVector.y)
+						ui.withFont(orbiteer.medlarge, function()
+							ui.withStyleColors({ Button = colors.uiPrimaryLight }, function()
+								if ui.button("OPEN INSURANCE OFFICE // REBUY SHIP##lobbyInsurance", rebuyBtnSize) then
 									StationView:SwitchTo("insurance")
 								end
 							end)
 						end)
-					else
-						ui.withFont(orbiteer.title, function()
-							if ui.button(l.REQUEST_LAUNCH, size) then
-								requestLaunch(station)
-							end
-						end)
+						ui.spacing()
 					end
+
+					ui.withFont(orbiteer.title, function()
+						if ui.button(l.REQUEST_LAUNCH, size) then
+							requestLaunch(station)
+						end
+					end)
 				end)
 			end)
 
@@ -421,12 +524,17 @@ StationView:registerView({
 			end
 		end
 
-		if Insurance.ShouldOpenModal() then
-			StationView:SwitchTo("insurance")
-			return
+		if Insurance.HasIncarcerationRecord() and not incarcerationModal.isOpen and incarcerationModal.stackIdx == -1 then
+			incarcerationModal:open()
 		end
 	end,
 	debugReload = function()
 		package.reimport()
 	end
 })
+
+Event.Register("onPlayerRescued", function()
+	if Insurance.HasIncarcerationRecord() and not incarcerationModal.isOpen and incarcerationModal.stackIdx == -1 then
+		incarcerationModal:open()
+	end
+end)

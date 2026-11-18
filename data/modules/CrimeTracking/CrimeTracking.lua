@@ -8,6 +8,8 @@ local Timer = require 'Timer'
 local Serializer = require 'Serializer'
 local Legal = require 'Legal'
 local PlayerState = require 'PlayerState'
+local Comms = require 'Comms'
+local pigui = require 'pigui'
 
 -- Fine at which police will launch and hunt down outlaw player
 -- This is the level above which the player counts as a criminal
@@ -16,6 +18,15 @@ local maxFineTolerated = 5500
 
 -- store which station sent them out
 local policeDispatched = false
+
+-- Weapons discharge warning tracking
+local weaponsWarningGiven = false
+local weaponsWarningTime = 0
+local lastDischargeReportTime = 0
+local lastDischargeTime = 0
+local WARNING_COOLDOWN_DURATION = 3.0 -- 3s grace cooldown allowing accidental shots
+local SUBSEQUENT_REPORT_INTERVAL = 3.0 -- report subsequent discharges once every 3s
+local WARNING_RESET_INTERVAL = 30.0 -- if player stops firing for 30s, reset warning status
 
 -- check if we should dispatch police, or call them back
 local function doLawAndOrder ()
@@ -121,8 +132,47 @@ end
 
 
 local onShipFiring = function(ship)
-	if ship:IsPlayer() then
-		Legal:notifyOfCrime(ship,"WEAPONS_DISCHARGE")
+	if not ship:IsPlayer() then return end
+
+	local station = Game.player:FindNearestTo("SPACESTATION")
+	if not station then return end
+	if station.lawEnforcedRange < station:DistanceTo(Game.player) then return end
+
+	local now = Game.time
+
+	-- If ceasefire has lasted more than WARNING_RESET_INTERVAL, reset warning state
+	if weaponsWarningGiven and (now - lastDischargeTime > WARNING_RESET_INTERVAL) then
+		weaponsWarningGiven = false
+		weaponsWarningTime = 0
+		lastDischargeReportTime = 0
+	end
+	lastDischargeTime = now
+
+	-- Case 1: First accidental fire / warning not yet given
+	if not weaponsWarningGiven then
+		weaponsWarningGiven = true
+		weaponsWarningTime = now
+		lastDischargeReportTime = now
+		pigui.playSfx("notify_beep", 1.0, 1.0)
+		Comms.ImportantMessage(
+			string.format("Traffic Control: Vessel \"%s\", cease weapons discharge immediately within station control perimeter! Stand down.", ship:GetLabel()),
+			station.label
+		)
+		return
+	end
+
+	-- Case 2: Within 3s grace cooldown window following the warning
+	if (now - weaponsWarningTime) < WARNING_COOLDOWN_DURATION then
+		-- Grace cooldown active: player is permitted a few accidental shots without fine or police attack
+		return
+	end
+
+	-- Case 3: Past 3s grace cooldown - player continues firing!
+	if (now - lastDischargeReportTime) >= SUBSEQUENT_REPORT_INTERVAL then
+		lastDischargeReportTime = now
+		pigui.playSfx("notify_beep", 1.0, 1.0)
+		Legal:notifyOfCrime(ship, "WEAPONS_DISCHARGE")
+		Event.Queue("onUnlawfulWeaponsDischarge", ship, station)
 	end
 end
 
@@ -137,6 +187,10 @@ end
 local onLeaveSystem = function(ship)
 	-- if we leave the system, the space station object will be invalid
 	policeDispatched = nil
+	weaponsWarningGiven = false
+	weaponsWarningTime = 0
+	lastDischargeReportTime = 0
+	lastDischargeTime = 0
 
 	if not ship:IsHyperjumpAllowed() then
 		Legal:notifyOfCrime(ship,"ILLEGAL_JUMP")
@@ -146,6 +200,10 @@ end
 
 local onGameEnd = function ()
 	policeDispatched = nil
+	weaponsWarningGiven = false
+	weaponsWarningTime = 0
+	lastDischargeReportTime = 0
+	lastDischargeTime = 0
 end
 
 

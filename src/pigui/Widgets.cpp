@@ -123,6 +123,7 @@ int Draw::RadialPopupSelectMenu(const ImVec2 center, const char *popup_id, int m
 		ImGui::EndPopup();
 	} else {
 		// Output("WARNING: RadialPopupSelectMenu BeginPopup failed: %s\n", popup_id);
+		ret = -1;
 	}
 	ImGui::PopStyleColor(3);
 	return ret;

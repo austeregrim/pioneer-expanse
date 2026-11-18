@@ -853,6 +853,23 @@ function PlayerFleet.StorePlayerShipAndBuy(sos, advertData)
 	spawnOrUpdateLiveFleetShip(storedEntry, false, false)
 	addLog(storedEntry.shipName, string.format("Stored flagship in hangar at %s upon purchasing %s.", station.label, sos.def.name), -cost)
 
+	local okFlightLog, FlightLog = pcall(require, 'modules.FlightLog.FlightLog')
+	if okFlightLog and FlightLog and FlightLog.RecordTransaction then
+		FlightLog.RecordTransaction({
+			category = "SHIP",
+			title = string.format("Fleet Procurement: %s (%s)", sos.def.name, Format.Money(-cost)),
+			amount = -cost,
+			details = {
+				{ "Procured Vessel Model", sos.def.name },
+				{ "Procured Vessel Registration", sos.label or "Unnamed" },
+				{ "Previous Flagship Stored", storedEntry.shipName },
+				{ "Hangar Station", station.label or "Starport Hangar" },
+				{ "Total Procurement Cost", Format.Money(cost) },
+			},
+			note = string.format("Purchased %s (%s) from shipyard and docked previous flagship in station hangar.", sos.def.name, sos.label or "Unnamed")
+		})
+	end
+
 	return true, string.format("%s stored in hangar at %s. Boarded new %s.", storedEntry.shipName, station.label, sos.def.name)
 end
 
@@ -915,6 +932,23 @@ function PlayerFleet.BuyShipToHangar(sos, advertData)
 	table.insert(fleetState.ships, entry)
 	spawnOrUpdateLiveFleetShip(entry, false, false)
 	addLog(entry.shipName, string.format("Purchased into hangar at %s.", station.label), -cost)
+
+	local okFlightLog, FlightLog = pcall(require, 'modules.FlightLog.FlightLog')
+	if okFlightLog and FlightLog and FlightLog.RecordTransaction then
+		FlightLog.RecordTransaction({
+			category = "SHIP",
+			title = string.format("Fleet Hangar Acquisition: %s (%s)", def.name, Format.Money(-cost)),
+			amount = -cost,
+			details = {
+				{ "Procured Vessel Model", def.name },
+				{ "Procured Vessel Registration", label },
+				{ "Assigned Hangar Location", station.label or "Starport Hangar" },
+				{ "Cargo Capacity", string.format("%d t", def.cargo or 0) },
+				{ "Total Acquisition Cost", Format.Money(cost) },
+			},
+			note = string.format("Purchased %s into fleet reserve hangar at %s.", entry.shipName, station.label)
+		})
+	end
 
 	return true, string.format("Purchased %s into hangar at %s.", entry.shipName, station.label)
 end

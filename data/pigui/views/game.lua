@@ -110,7 +110,7 @@ local function displayOnScreenObjects()
 	local small_iconsize = Vector2(18,18)
 	local label_offset = 14 -- enough so that the target rectangle fits
 	local cluster_size = iconsize.x -- size of clusters to be collapsed into single bodies
-	local click_radius = cluster_size * 0.5
+	local click_radius = math.max(18, cluster_size * 0.9)
 	-- make click_radius sufficiently smaller than the cluster size
 	-- to prevent overlap of selection regions
 
@@ -256,6 +256,8 @@ Event.Register("onGameStart", function()
 	-- Game view will be refreshed on first appearing
 	gameView.leftSidebar:Reset()
 	gameView.rightSidebar:Reset()
+	lastTimeAcceleration = "1x"
+	Input.EnableBindings(true)
 end)
 
 Event.Register("onPauseMenuOpen", function()

@@ -161,8 +161,12 @@ local function outstanding_fines()
 			local pay_fine_text = string.interp(l.PAY_FINE_OF_N,
 				{ amount = Format.Money(fine) })
 
-			if ui.button(pay_fine_text, nil, not canPay and ui.theme.buttonColors.disabled) then
+			if canPay and ui.button(pay_fine_text, nil) then
 				payfine(fine)
+			elseif not canPay then
+				ui.withStyleColors({ Button = ui.theme.buttonColors.disabled.normal, Text = ui.theme.colors.fontDim }, function()
+					ui.button(pay_fine_text, nil)
+				end)
 			end
 
 			if not canPay and ui.isItemHovered() then

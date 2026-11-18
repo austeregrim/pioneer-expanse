@@ -26,6 +26,7 @@
 #include "SpaceStation.h"
 #include "WorldView.h"
 #include "collider/CollisionContact.h"
+#include "collider/CollisionSpace.h"
 #include "graphics/RenderState.h"
 #include "graphics/Renderer.h"
 #include "graphics/TextureBuilder.h"
@@ -44,6 +45,8 @@
 #include "ship/GunManager.h"
 #include "ship/PlayerShipController.h"
 #include "ship/SupercruiseController.h"
+#include "imgui/imgui.h"
+#include "imgui/imgui_internal.h"
 
 #include <algorithm>
 #include <cmath>
@@ -619,6 +622,7 @@ bool Ship::OnDamage(Body *attacker, float kgDamage, const CollisionContact &cont
 		Properties().Set("hullPercent", 100.0f * (m_stats.hull_mass_left / float(m_type->hullMass)));
 		if (m_stats.hull_mass_left < 0) {
 			if (attacker) {
+				m_lastAttackerLabel = attacker->GetLabel();
 				LuaEvent::Queue("onShipDestroyed", this, attacker);
 			}
 
@@ -644,9 +648,6 @@ bool Ship::OnDamage(Body *attacker, float kgDamage, const CollisionContact &cont
 
 void Ship::RecordCollision(const Body *other, const std::string &surface, double relVel)
 {
-	if (!Pi::config || Pi::config->Int("EnableBlackBox", 0) == 0)
-		return;
-
 	m_lastCollision.time = Pi::game ? Pi::game->GetTime() : 0.0;
 	m_lastCollision.otherLabel = other ? other->GetLabel() : "Unknown";
 	m_lastCollision.surface = surface;
@@ -803,7 +804,19 @@ void Ship::Explode()
 	DumpBlackBoxReport();
 
 	if (IsType(ObjectType::PLAYER)) {
-		LuaEvent::Queue("onPlayerShipDestroyed", this);
+		std::string cause;
+		double speed = 0.0;
+		if (!m_lastAttackerLabel.empty()) {
+			cause = "Combat: Hostile Fire from " + m_lastAttackerLabel;
+			speed = GetVelocity().Length();
+		} else if (m_lastCollision.valid) {
+			cause = "Collision: " + m_lastCollision.surface + " (" + m_lastCollision.otherLabel + ")";
+			speed = m_lastCollision.relVel;
+		} else {
+			cause = "Catastrophic Structural Failure";
+			speed = GetVelocity().Length();
+		}
+		LuaEvent::Queue("onPlayerShipDestroyed", this, cause, speed);
 		LuaEvent::Emit();
 	} else {
 		std::string cause = m_lastCollision.valid ? m_lastCollision.surface : "Impact / Collision";
@@ -825,8 +838,24 @@ void Ship::Explode()
 	if (m_supercruise) {
 		m_supercruise->Reset();
 	}
-	if (IsType(ObjectType::PLAYER) && Pi::input) {
-		Pi::input->SetCapturingMouse(false);
+	if (IsType(ObjectType::PLAYER)) {
+		if (Pi::input) {
+			Pi::input->ClearAllInput();
+		}
+		if (Player *p = static_cast<Player *>(this)) {
+			if (PlayerShipController *psc = p->GetPlayerController()) {
+				psc->ResetMouseCapture();
+			}
+		}
+		auto gm = GetComponent<GunManager>();
+		if (gm) {
+			gm->SetAllGroupsFiring(false);
+		}
+		ImGui::GetIO().ClearInputKeys();
+		ImGui::GetIO().ClearInputMouse();
+		ImGui::ClearActiveID();
+		ImGui::SetWindowFocus(nullptr);
+		ImGui::SetMouseCursor(ImGuiMouseCursor_Arrow);
 	}
 }
 
@@ -843,11 +872,34 @@ void Ship::Revive()
 	SetAngVelocity(vector3d::Zero);
 	SetTorque(vector3d::Zero);
 	AIClearInstructions();
+	m_wheelTransition = 0;
+	m_wheelState = 1.0f;
+	m_forceWheelUpdate = true;
+	if (m_landingGearAnimation) {
+		m_landingGearAnimation->SetProgress(1.0f);
+		m_landingGearAnimation->Interpolate();
+	}
 	if (m_supercruise) {
 		m_supercruise->Reset();
 	}
-	if (IsType(ObjectType::PLAYER) && Pi::input) {
-		Pi::input->SetCapturingMouse(false);
+	if (IsType(ObjectType::PLAYER)) {
+		if (Pi::input) {
+			Pi::input->ClearAllInput();
+		}
+		if (Player *p = static_cast<Player *>(this)) {
+			if (PlayerShipController *psc = p->GetPlayerController()) {
+				psc->ResetMouseCapture();
+			}
+		}
+		auto gm = GetComponent<GunManager>();
+		if (gm) {
+			gm->SetAllGroupsFiring(false);
+		}
+		ImGui::GetIO().ClearInputKeys();
+		ImGui::GetIO().ClearInputMouse();
+		ImGui::ClearActiveID();
+		ImGui::SetWindowFocus(nullptr);
+		ImGui::SetMouseCursor(ImGuiMouseCursor_Arrow);
 	}
 }
 
@@ -1133,7 +1185,7 @@ void Ship::SetFlightState(Ship::FlightState newState)
 
 	if (newState == FLYING) {
 		m_testLanded = false;
-		if (m_flightState == DOCKING || m_flightState == DOCKED)
+		if (m_flightState == DOCKING || m_flightState == DOCKED || m_flightState == UNDOCKING)
 			onUndock.emit();
 
 		const bool wasDockedOrUndocking = (m_flightState == DOCKING || m_flightState == DOCKED || m_flightState == UNDOCKING);
@@ -1824,9 +1876,10 @@ void Ship::StaticUpdate(const float timeStep)
 		} else if (this->IsType(ObjectType::PLAYER)) {
 			if (!is_equal_exact(m_wheelState, 0.0f)) {
 				AbortHyperjump();
-				Sound::BodyMakeNoise(this, "Missile_Inbound", 1.0f);
+				Sound::BodyMakeNoise(this, "notify_beep", 0.7f);
 			} else if (const Body *blocker = GetHyperspaceTargetObscuredBy(m_hyperspace.dest)) {
 				AbortHyperjump();
+				Sound::BodyMakeNoise(this, "notify_beep", 0.7f);
 				if (m_supercruise)
 					m_supercruise->ShowStatusMessage("HYPERJUMP ABORTED: TARGET OBSCURED BY " + blocker->GetLabel(), 4.5f);
 			} else {
@@ -1965,6 +2018,28 @@ bool Ship::Undock()
 	return (m_dockedWith && m_dockedWith->LaunchShip(this, m_dockedWithPort));
 }
 
+bool Ship::TakeoverUndocking()
+{
+	if (m_flightState != UNDOCKING) return false;
+
+	SpaceStation *st = m_dockedWith;
+	if (!st) {
+		Frame *f = Frame::GetFrame(GetFrame());
+		if (f && f->GetBody() && f->GetBody()->IsType(ObjectType::SPACESTATION)) {
+			st = static_cast<SpaceStation *>(f->GetBody());
+		}
+	}
+
+	if (st) {
+		st->TakeoverUndock(this);
+		return true;
+	}
+
+	SetFlightState(FLYING);
+	m_launchLockTimeout = 0.0f;
+	return true;
+}
+
 void Ship::SetDockedWith(SpaceStation *s, int port)
 {
 	if (s) {
@@ -1976,6 +2051,10 @@ void Ship::SetDockedWith(SpaceStation *s, int port)
 		m_wheelTransition = 0;
 		m_wheelState = 1.0f;
 		m_forceWheelUpdate = true;
+		if (m_landingGearAnimation) {
+			m_landingGearAnimation->SetProgress(1.0f);
+			m_landingGearAnimation->Interpolate();
+		}
 		// hand position/state responsibility over to station
 		m_dockedWith->SetDocked(this, port);
 		onDock.emit();
@@ -2316,6 +2395,21 @@ void Ship::SetShipType(const ShipType::Id &shipId)
 	onFlavourChanged.emit();
 	if (IsType(ObjectType::PLAYER))
 		Pi::game->GetWorldView()->shipView->GetCameraController()->Reset();
+
+	if (m_dockedWith) {
+		m_wheelTransition = 0;
+		m_wheelState = 1.0f;
+		m_forceWheelUpdate = true;
+		if (m_landingGearAnimation) {
+			m_landingGearAnimation->SetProgress(1.0f);
+			m_landingGearAnimation->Interpolate();
+		}
+		m_dockedWith->SetDocked(this, m_dockedWithPort);
+		UpdateInterpTransform(1.0);
+		if (GetFrame()) {
+			Frame::GetFrame(GetFrame())->GetCollisionSpace()->RebuildObjectTrees();
+		}
+	}
 
 	LuaObject<Ship>::CallMethod(this, "OnShipTypeChanged");
 

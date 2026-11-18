@@ -149,7 +149,7 @@ end
 -- Add money to the player's account. Add a negative amount to remove money.
 ---@param amt number
 function PlayerState.AddMoney(amt)
-	finances.cash = finances.cash + amt
+	finances.cash = math.max(0, finances.cash + amt)
 end
 
 -- Function: SetMoney
@@ -157,7 +157,7 @@ end
 -- Set the money in the player's account.
 ---@param amt number
 function PlayerState.SetMoney(amt)
-	finances.cash = amt
+	finances.cash = math.max(0, amt)
 end
 
 -- Function: GetMoney
@@ -321,6 +321,21 @@ function PlayerState.GetCrimeOutstanding (faction)
 	else
 		return record.crimetype, record.fine
 	end
+end
+
+--
+-- Function: GetTotalFinesOutstanding
+--
+-- Get the player's total outstanding fines across all galactic factions
+---@return number
+function PlayerState.GetTotalFinesOutstanding()
+	local total = 0
+	for _, rec in pairs(crime_record) do
+		if rec and rec.fine and rec.fine > 0 then
+			total = total + rec.fine
+		end
+	end
+	return total
 end
 
 --

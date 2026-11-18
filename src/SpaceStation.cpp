@@ -31,6 +31,7 @@
 #include "scenegraph/MatrixTransform.h"
 #include "scenegraph/Model.h"
 #include "scenegraph/ModelSkin.h"
+#include "ship/PlayerShipController.h"
 #include "ship/SupercruiseController.h"
 #include "utils.h"
 
@@ -91,7 +92,7 @@ SpaceStation::SpaceStation(const Json &jsonObj, Space *space) :
 				port.inUse = portArrayEl["in_use"];
 		}
 
-		m_sbody = space->GetSystemBodyByIndex(spaceStationObj["index_for_system_body"]);
+		m_sbody = space->GetSystemBodyByIndex(spaceStationObj["index_for_system_body"], GetLabel());
 
 		m_doorAnimationStep = spaceStationObj["door_animation_step"];
 		m_doorAnimationState = spaceStationObj["door_animation_state"];
@@ -190,8 +191,15 @@ void SpaceStation::InitStation()
 		if (m_type == nullptr)
 			Output("WARNING: SpaceStation::InitStation wants to initialize a custom station of type %s, but no station type with that id has been found.\n", space_station_type.c_str());
 	}
-	if (m_type == nullptr)
-		m_type = SpaceStationType::RandomStationType(rand, ground);
+	if (m_type == nullptr) {
+		// If m_shipDocking was already loaded from a savegame, match station type
+		// by loaded port count (e.g. 18 ports for 2k vs 64 ports for 5k/10k)
+		if (!m_shipDocking.empty()) {
+			m_type = SpaceStationType::FindByPortCount(m_shipDocking.size(), ground);
+		}
+		if (m_type == nullptr)
+			m_type = SpaceStationType::RandomStationType(rand, ground);
+	}
 
 	if (m_shipDocking.empty()) {
 		m_shipDocking.reserve(m_type->NumDockingPorts());
@@ -200,6 +208,8 @@ void SpaceStation::InitStation()
 		}
 		// only (re)set these if we've not come from the ::Load method
 		m_doorAnimationStep = m_doorAnimationState = 0.0;
+	} else if (m_shipDocking.size() != m_type->NumDockingPorts()) {
+		m_shipDocking.resize(m_type->NumDockingPorts());
 	}
 	assert(m_shipDocking.size() == m_type->NumDockingPorts());
 
@@ -304,6 +314,9 @@ void SpaceStation::SetDocked(Ship *ship, const int bay)
 {
 	assert(m_shipDocking.size() > Uint32(bay));
 	m_shipDocking[bay].ship = ship;
+	m_shipDocking[bay].fromPos = vector3d::Zero;
+	m_shipDocking[bay].fromRot = Quaterniond(1.0, 0.0, 0.0, 0.0);
+	m_shipDocking[bay].stagePos = 0.0;
 
 	// have to do this crap again in case it was called directly (Ship::SetDockWith())
 	ship->SetFlightState(Ship::DOCKED);
@@ -856,6 +869,62 @@ bool SpaceStation::LaunchShip(Ship *ship, const int bay)
 	return true;
 }
 
+void SpaceStation::TakeoverUndock(Ship *ship)
+{
+	if (!ship) return;
+	for (Uint32 i = 0; i < m_shipDocking.size(); i++) {
+		shipDocking_t &dt = m_shipDocking[i];
+		if (dt.ship == ship && SpaceStationType::IsUndockStage(dt.stage)) {
+			// Update the ship's position to its exact interpolated location right now
+			PositionDockingShip(ship, i);
+
+			// Match station rotational reference frame
+			ship->SetAngVelocity(GetAngVelocity());
+			const vector3d pPos = ship->GetPositionRelTo(this);
+			const vector3d tangent = GetAngVelocity().Cross(pPos);
+			const vector3d radial = ship->GetOrient().VectorY() * 1.5;
+			ship->SetVelocity(GetVelocity() + tangent + radial);
+			ship->ClearLinThrusterState();
+			ship->ClearAngThrusterState();
+
+			// Release ship to free flight
+			ship->SetFlightState(Ship::FLYING);
+			ship->ResetLaunchLockTimeout();
+
+			if (ship->IsType(ObjectType::PLAYER)) {
+				Player *p = static_cast<Player *>(ship);
+				if (PlayerShipController *con = p->GetPlayerController()) {
+					con->SetCruiseDirection(PlayerShipController::CRUISE_FWD);
+					if (con->GetFlightControlState() != CONTROL_FIXSPEED) {
+						con->SetFlightControlState(CONTROL_MANUAL);
+					}
+					if (!IsGroundStation()) {
+						con->SetFollowTarget(this);
+						con->SetFollowMode(PlayerShipController::FOLLOW_ORI);
+					}
+				}
+			}
+
+			// Free docking bay and trigger undocked event
+			ship->OnUndocked(this, i);
+			dt.ship = nullptr;
+			dt.stagePos = 0;
+			dt.maxOffset = 0;
+			LockPort(i, false);
+
+			// Keep airlock open if inside an orbital station cylinder
+			if (m_type && m_type->IsOrbitalStation() && IsInsideStation(ship)) {
+				m_doorAnimationStep = 0.3;
+			} else {
+				m_doorAnimationStep = -0.3;
+			}
+
+			SwitchToStage(i, DockStage::NONE);
+			return;
+		}
+	}
+}
+
 // gets number of undocked ships within a given radius from the station
 int SpaceStation::GetNearbyTraffic(double radius)
 {
@@ -1294,7 +1363,8 @@ void SpaceStation::TimeStepUpdate(const float timeStep)
 	m_oldAngDisplacement = len;
 
 	// reposition the ships that are docked or docking here
-	for (unsigned int i = 0; i < m_type->NumDockingPorts(); i++) {
+	const unsigned int numPorts = std::min(static_cast<unsigned int>(m_shipDocking.size()), m_type->NumDockingPorts());
+	for (unsigned int i = 0; i < numPorts; i++) {
 		const shipDocking_t &dt = m_shipDocking[i];
 		if (!dt.ship) { //free
 			m_navLights->SetColor(i + 1, NavLights::NAVLIGHT_OFF);

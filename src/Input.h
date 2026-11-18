@@ -220,6 +220,7 @@ public:
 	// has actually changed.
 	void SetCapturingMouse(bool enabled);
 	void ClearMouse();
+	void ClearAllInput();
 
 	// Get the default speed modifier to apply to movement (scrolling, zooming...), depending on the "shift" keys.
 	// This is a default value only, centralized here to promote uniform user expericience.

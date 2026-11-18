@@ -4,6 +4,7 @@
 local ui = require 'pigui'
 
 local Event = require 'Event'
+local Input = require 'Input'
 local Module = require 'pigui.libs.module'
 local utils = require 'utils'
 
@@ -23,6 +24,7 @@ function ModalWindow.New(name, render, outerHandler, flags)
 		flags = flags or defaultModalFlags,
 		stackIdx = -1,
 		isOpen = false,
+		popupRequested = false,
 		render = render,
 		outerHandler = outerHandler,
 	}
@@ -43,6 +45,7 @@ function ModalWindow:open(...)
 		self.stackIdx = #modalStack
 	end
 	self.isOpen = false
+	self.popupRequested = false
 
 	self:message("onOpen", ...)
 end
@@ -56,10 +59,15 @@ function ModalWindow:close(...)
 	for i=#modalStack, self.stackIdx, -1 do
 		modalStack[i].stackIdx = -1
 		modalStack[i].isOpen = false
+		modalStack[i].popupRequested = false
 		table.remove(modalStack, i)
 	end
 
 	self:message("onClose", ...)
+
+	if #modalStack == 0 and ui.closeAllPopups then
+		ui.closeAllPopups()
+	end
 end
 
 function ModalWindow:onOpen() end
@@ -74,8 +82,8 @@ local function drawModals(idx)
 	if idx <= #modalStack then
 		local win = modalStack[idx]
 
-		if (not win.isOpen) then
-			win.isOpen = true
+		if (not win.popupRequested) then
+			win.popupRequested = true
 			ui.openPopup(win.name)
 		end
 
@@ -95,6 +103,7 @@ local function drawModals(idx)
 			end
 
 			if ui.beginPopupModal(win.name, win.flags) then
+				win.isOpen = true
 				win:render()
 				-- modal could close in handler
 				if win.isOpen then
@@ -135,6 +144,9 @@ function ModalWindow:topmost()
 end
 
 ui.registerModule('modal', function()
+	if #modalStack == 0 and ui.isAnyModalOpen and ui.isAnyModalOpen() then
+		ui.closeAllPopups()
+	end
 	drawModals(1)
 end)
 
@@ -144,15 +156,29 @@ local function closeAllModals()
 		if win then
 			win.stackIdx = -1
 			win.isOpen = false
+			win.popupRequested = false
 			table.remove(modalStack, i)
 			win:message("onClose")
 		end
 	end
 	modalStack = {}
+	if ui.closeAllPopups then
+		ui.closeAllPopups()
+	end
+	Input.EnableBindings(true)
 end
 
 Event.Register("onGameEnd", closeAllModals)
 Event.Register("onEnterMainMenu", closeAllModals)
+
+Event.Register("onPlayerShipDestroyed", function()
+	for i = #modalStack, 1, -1 do
+		local win = modalStack[i]
+		if win and win.name and win.name ~= "Options" and win.name ~= "SaveGameWindow" then
+			win:close()
+		end
+	end
+end)
 
 Event.Register("onPlayerUndocked", function()
 	for i = #modalStack, 1, -1 do
@@ -164,7 +190,7 @@ Event.Register("onPlayerUndocked", function()
 end)
 
 Event.Register("onViewChanged", function(currView)
-	if currView == "WorldView" then
+	if currView == "WorldView" or currView == "DeathView" then
 		for i = #modalStack, 1, -1 do
 			local win = modalStack[i]
 			if win and win.name and win.name ~= "Options" and win.name ~= "SaveGameWindow" and win.name ~= "About" then

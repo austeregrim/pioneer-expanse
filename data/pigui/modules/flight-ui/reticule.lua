@@ -578,6 +578,9 @@ local flight_assist_buttons = {
 		tooltip = lui.HUD_BUTTON_CRUISE_FORWARD,
 		color = color_active,
 		action = function(_)
+			if Game.player.TakeoverUndocking and (Game.player:GetFlightState() == "UNDOCKING" or (Game.player.IsTakingOff and Game.player:IsTakingOff())) then
+				Game.player:TakeoverUndocking()
+			end
 			Game.player:SetCruiseDirection("CRUISE_FWD")
 			Game.player:SetFlightControlState("CONTROL_FIXSPEED")
 		end
@@ -588,6 +591,9 @@ local flight_assist_buttons = {
 		tooltip = lui.HUD_BUTTON_CRUISE_UP,
 		color = color_active,
 		action = function(_)
+			if Game.player.TakeoverUndocking and (Game.player:GetFlightState() == "UNDOCKING" or (Game.player.IsTakingOff and Game.player:IsTakingOff())) then
+				Game.player:TakeoverUndocking()
+			end
 			Game.player:SetCruiseDirection("CRUISE_UP")
 			Game.player:SetFlightControlState("CONTROL_FIXSPEED")
 		end
@@ -597,7 +603,12 @@ local flight_assist_buttons = {
 		icon = icons.circ_clear_flwtarget,
 		tooltip = lui.HUD_BUTTON_DISABLE_CRUISE,
 		color = color_disable,
-		action = function(_) Game.player:SetFlightControlState("CONTROL_MANUAL") end
+		action = function(_)
+			if Game.player.TakeoverUndocking and (Game.player:GetFlightState() == "UNDOCKING" or (Game.player.IsTakingOff and Game.player:IsTakingOff())) then
+				Game.player:TakeoverUndocking()
+			end
+			Game.player:SetFlightControlState("CONTROL_MANUAL")
+		end
 	},
 
 	disable_follow = {
@@ -773,15 +784,22 @@ local function flightAssistButton(pos)
 	end
 
 	-- keyboard
-	if (flightstate == "FLYING" and ui.noModifierHeld() and ui.isKeyReleased(ui.keys.f5)) then
-		local newState = "CONTROL_MANUAL"
-		if ui.ctrlHeld() and flightcontrolstate == "CONTROL_FIXSPEED" then
-			newState = "CONTROL_FIXHEADING_FORWARD"
-		elseif flightcontrolstate == "CONTROL_MANUAL" then
-			newState = "CONTROL_FIXSPEED"
+	if (ui.noModifierHeld() and ui.isKeyReleased(ui.keys.f5)) then
+		local canToggle = (flightstate == "FLYING" or flightstate == "UNDOCKING" or (player.IsTakingOff and player:IsTakingOff()))
+		if canToggle then
+			if player.TakeoverUndocking and (flightstate == "UNDOCKING" or (player.IsTakingOff and player:IsTakingOff())) then
+				player:TakeoverUndocking()
+			end
+			local newState = "CONTROL_MANUAL"
+			if ui.ctrlHeld() and flightcontrolstate == "CONTROL_FIXSPEED" then
+				newState = "CONTROL_FIXHEADING_FORWARD"
+			elseif flightcontrolstate == "CONTROL_MANUAL" then
+				player:SetCruiseDirection("CRUISE_FWD")
+				newState = "CONTROL_FIXSPEED"
+			end
+			Game.player:SetFlightControlState(newState)
+			ui.playBoinkNoise()
 		end
-		Game.player:SetFlightControlState(newState)
-		ui.playBoinkNoise()
 	end
 
 	-- mouse wheel
@@ -948,6 +966,20 @@ local function displayReticule()
 
 	displayReticulePitchHorizonCompass()
 	displayAlertMarker()
+
+	if player and (player:GetFlightState() == "UNDOCKING" or (player.IsTakingOff and player:IsTakingOff())) then
+		ui.withFont(pionillium.heading, function()
+			local prompt = "UNDOCK IN PROGRESS — USE CONTROLS OR CLICK TO TAKE OVER"
+			local sz = ui.calcTextSize(prompt)
+			local promptPos = Vector2(center.x - (sz.x + 24) / 2, center.y + reticuleCircleRadius * 1.3)
+			ui.setCursorScreenPos(promptPos)
+			if ui.button(prompt .. "##takeoverUndockBtn", Vector2(sz.x + 24, 28), ui.theme.buttonColors.selected) then
+				if player.TakeoverUndocking then
+					player:TakeoverUndocking()
+				end
+			end
+		end)
+	end
 end
 
 gameView.registerModule("reticule", {

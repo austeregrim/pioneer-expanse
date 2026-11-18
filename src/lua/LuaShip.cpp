@@ -12,6 +12,7 @@
 #include "LuaVector.h"
 #include "Missile.h"
 #include "Pi.h"
+#include "Player.h"
 #include "SectorView.h"
 #include "Ship.h"
 #include "ShipAICmd.h"
@@ -485,6 +486,43 @@ static int l_ship_undock(lua_State *l)
 		luaL_error(l, "Can't undock if not already docked");
 	bool undocking = s->Undock();
 	lua_pushboolean(l, undocking);
+	return 1;
+}
+
+/* Method: TakeoverUndocking
+ *
+ * Cancel automated undocking procedure and take over manual flight control immediately.
+ *
+ * > success = ship:TakeoverUndocking()
+ *
+ * Return:
+ *   success - true if ship took over flight control
+ */
+static int l_ship_takeover_undocking(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	bool ok = s->TakeoverUndocking();
+	lua_pushboolean(l, ok);
+	return 1;
+}
+
+/* Method: IsTakingOff
+ *
+ * Check if the ship is currently undergoing vertical takeoff liftoff.
+ *
+ * > takingOff = ship:IsTakingOff()
+ *
+ * Return:
+ *   takingOff - true if ship is in vertical takeoff liftoff
+ */
+static int l_ship_is_taking_off(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	bool takingOff = false;
+	if (s->IsType(ObjectType::PLAYER)) {
+		takingOff = static_cast<Player *>(s)->IsTakingOff();
+	}
+	lua_pushboolean(l, takingOff);
 	return 1;
 }
 
@@ -1952,6 +1990,8 @@ void LuaObject<Ship>::RegisterClass()
 		{ "GetDockedWith", l_ship_get_docked_with },
 		{ "SetDockedWith", l_ship_set_docked_with },
 		{ "Undock", l_ship_undock },
+		{ "TakeoverUndocking", l_ship_takeover_undocking },
+		{ "IsTakingOff", l_ship_is_taking_off },
 		{ "BlastOff", l_ship_blast_off },
 
 		{ "Explode", l_ship_explode },

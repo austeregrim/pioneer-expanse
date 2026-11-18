@@ -268,6 +268,7 @@ void Manager::InitGame()
 	keyState.clear();
 	keyModState = 0;
 	ClearMouse();
+	EnableBindings(true);
 
 	// Force a rebuild of key chords and modifier state
 	m_frameListChanged = true;
@@ -893,6 +894,39 @@ void Manager::ClearMouse()
 {
 	mouseButton.fill(0);
 	mouseMotion.fill(0);
+}
+
+void Manager::ClearAllInput()
+{
+	SetCapturingMouse(false);
+	ClearMouse();
+	keyState.clear();
+	keyModState = 0;
+	m_modifiers.clear();
+
+	for (auto *frame : m_inputFrames) {
+		ClearInputFrameState(frame);
+	}
+	for (auto *action : m_activeActions) {
+		action->binding.m_active = false;
+		action->binding.m_queuedEvents = 0;
+		action->binding2.m_active = false;
+		action->binding2.m_queuedEvents = 0;
+		if (action->m_active) {
+			action->m_active = false;
+			action->onReleased.emit();
+		}
+	}
+	for (auto *axis : m_activeAxes) {
+		axis->negative.m_active = false;
+		axis->negative.m_queuedEvents = false;
+		axis->positive.m_active = false;
+		axis->positive.m_queuedEvents = false;
+		if (axis->m_value != 0.0) {
+			axis->m_value = 0.0;
+			axis->onAxisValue.emit(0.0);
+		}
+	}
 }
 
 float Manager::GetMoveSpeedShiftModifier()

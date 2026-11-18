@@ -3,6 +3,7 @@
 
 local Event       = require 'Event'
 local Game        = require 'Game'
+local Format      = require 'Format'
 local ShipDef     = require 'ShipDef'
 local Equipment   = require 'Equipment'
 local EquipSet    = require 'EquipSet'
@@ -30,6 +31,7 @@ local Insurance = {}
 
 local activeClaim = nil
 local openModalRequested = false
+local incarcerationRecord = nil
 
 function Insurance.IsHardcore()
 	if Game.IsHardcore then
@@ -42,8 +44,42 @@ function Insurance.GetActiveClaim()
 	return activeClaim
 end
 
-function Insurance.HasPendingClaim()
-	return activeClaim ~= nil and activeClaim.pending == true
+function Insurance.HasClaim()
+	return activeClaim ~= nil and not activeClaim.resolved
+end
+
+Insurance.HasPendingClaim = Insurance.HasClaim
+
+function Insurance.HasImpoundedShip()
+	return false
+end
+
+function Insurance.GetImpoundedShip()
+	return nil
+end
+
+function Insurance.IsArrestClaim()
+	return activeClaim ~= nil and activeClaim.isArrest == true
+end
+
+function Insurance.GetSentenceDays()
+	return activeClaim and activeClaim.totalSentenceDays or (activeClaim and activeClaim.sentenceDays or 0)
+end
+
+function Insurance.GetFinePaid()
+	return activeClaim and activeClaim.finePaid or (activeClaim and activeClaim.fineDue or 0)
+end
+
+function Insurance.HasIncarcerationRecord()
+	return incarcerationRecord ~= nil
+end
+
+function Insurance.GetIncarcerationRecord()
+	return incarcerationRecord
+end
+
+function Insurance.DismissIncarcerationRecord()
+	incarcerationRecord = nil
 end
 
 function Insurance.ShouldOpenModal()
@@ -114,9 +150,38 @@ local function ensureMinimumCrew(player)
 	end
 end
 
--- Rebuy option: Player pays 5% deductible to restore their exact ship and outfitting
+local function giveDefaultStarterShip(label)
+	local player = Game.player
+	if not player then return end
+
+	player:SetShipType('coronatrix')
+	player:SetLabel(label or "Free Trader")
+
+	local equipSet = player:GetComponent('EquipSet')
+	if equipSet then
+		local hullConfig = HullConfig.GetHullConfig('coronatrix')
+		if hullConfig and hullConfig.slots then
+			for slotId, slot in pairs(hullConfig.slots) do
+				if slot.default then
+					local proto = Equipment.Get(slot.default)
+					if proto then
+						local handle = equipSet:GetSlotHandle(slotId)
+						if handle and equipSet:CanInstallInSlot(handle, proto) then
+							pcall(function() equipSet:Install(proto:Instance(), handle) end)
+						end
+					end
+				end
+			end
+		end
+	end
+
+	player:SetFuelPercent(100)
+	ensureMinimumCrew(player)
+end
+
+-- Rebuy option: Player pays 5% deductible to replace their destroyed ship and outfitting
 function Insurance.RebuyShip()
-	if not activeClaim or not activeClaim.pending then
+	if not activeClaim or activeClaim.resolved then
 		return false, "No active claim."
 	end
 
@@ -155,13 +220,34 @@ function Insurance.RebuyShip()
 	ensureMinimumCrew(player)
 
 	activeClaim.pending = false
+	activeClaim.isImpounded = false
 	activeClaim.resolved = true
+
+	local okFlightLog, FlightLog = pcall(require, 'modules.FlightLog.FlightLog')
+	if okFlightLog and FlightLog and FlightLog.RecordTransaction then
+		local def = ShipDef[activeClaim.hullId]
+		FlightLog.RecordTransaction({
+			category = "INSURANCE",
+			title = string.format("Insurance Hull Rebuy: %s (%s)", def and def.name or activeClaim.hullId, Format.Money(-activeClaim.deductible)),
+			amount = -activeClaim.deductible,
+			details = {
+				{ "Restored Vessel Hull", def and def.name or activeClaim.hullId },
+				{ "Restored Vessel Registration", activeClaim.shipName or "Unnamed" },
+				{ "Total Insured Valuation", Format.Money(activeClaim.totalValue) },
+				{ "Deductible Paid (5%)", Format.Money(activeClaim.deductible) },
+				{ "Restored Outfitting", string.format("%d modules restored to factory specification", #(activeClaim.equipment or {})) },
+				{ "Restoration Bay", "Pad 1 (Factory-Fresh Replacement Fully Restored & Fueled)" },
+			},
+			note = string.format("Exercised statutory underwriter hull rebuy option. 5%% deductible paid; destroyed vessel and outfitting restored on Pad 1.")
+		})
+	end
+
 	return true, "Replacement vessel fully restored, equipped, and fueled on Pad 1."
 end
 
--- Claim cash settlement and starter loaner vessel
+-- Claim cash settlement and keep current default starter craft
 function Insurance.ClaimPayoutAndLoaner()
-	if not activeClaim or not activeClaim.pending then
+	if not activeClaim or activeClaim.resolved then
 		return false, "No active claim."
 	end
 
@@ -170,40 +256,33 @@ function Insurance.ClaimPayoutAndLoaner()
 		PlayerState.AddMoney(payout)
 	end
 
-	local player = Game.player
-	player:SetShipType('coronatrix')
-	player:SetLabel("Free Trader")
+	activeClaim.pending = false
+	activeClaim.isImpounded = false
+	activeClaim.resolved = true
 
-	local equipSet = player:GetComponent('EquipSet')
-	if equipSet then
-		local hullConfig = HullConfig.GetHullConfig('coronatrix')
-		if hullConfig and hullConfig.slots then
-			for slotId, slot in pairs(hullConfig.slots) do
-				if slot.default then
-					local proto = Equipment.Get(slot.default)
-					if proto then
-						local handle = equipSet:GetSlotHandle(slotId)
-						if handle and equipSet:CanInstallInSlot(handle, proto) then
-							pcall(function()
-								equipSet:Install(proto:Instance(), handle)
-							end)
-						end
-					end
-				end
-			end
-		end
+	local okFlightLog, FlightLog = pcall(require, 'modules.FlightLog.FlightLog')
+	if okFlightLog and FlightLog and FlightLog.RecordTransaction then
+		local def = ShipDef[activeClaim.hullId]
+		FlightLog.RecordTransaction({
+			category = "INSURANCE",
+			title = string.format("Insurance Settlement Payout: +%s", Format.Money(payout)),
+			amount = payout,
+			details = {
+				{ "Liquidated Claim Vessel", def and def.name or activeClaim.hullId },
+				{ "Total Claim Valuation", Format.Money(activeClaim.totalValue) },
+				{ "Deductible Withheld (5%)", Format.Money(activeClaim.deductible) },
+				{ "Net Cash Settlement Deposited", Format.Money(payout) },
+				{ "Active Assigned Craft", "Starter Scout (Retained as Primary)" },
+			},
+			note = string.format("Accepted underwriter cash insurance settlement. Net equity proceeds deposited and starter craft retained.")
+		})
 	end
 
-	player:SetFuelPercent(100)
-	ensureMinimumCrew(player)
-
-	activeClaim.pending = false
-	activeClaim.resolved = true
-	return true, string.format("Settlement of %s CR deposited. Starter loaner craft prepared on Pad 1.", tostring(payout))
+	return true, string.format("Settlement of %s deposited. Retaining current starter vessel.", Format.Money(payout))
 end
 
 -- Event: Player ship was destroyed
-local function onPlayerShipDestroyed(ship)
+local function onPlayerShipDestroyed(ship, cause, speed)
 	if ship ~= Game.player then return end
 	if Insurance.IsHardcore() then return end
 
@@ -261,9 +340,24 @@ local function onPlayerShipDestroyed(ship)
 	end
 
 	local sysName = (Game.system and Game.system.name) or "Deep Space Sector"
+	local flightState = (ship.GetFlightState and ship:GetFlightState()) or "FLYING"
+
+	-- Judicial / Incarceration Check: Was player destroyed while carrying criminal warrants/fines?
+	local fine = 0
+	if PlayerState.GetTotalFinesOutstanding then
+		fine = PlayerState.GetTotalFinesOutstanding()
+	else
+		local _, outFine = PlayerState.GetCrimeOutstanding()
+		fine = outFine or 0
+	end
+	local isCriminal = (fine > 0)
+	local isArrest = isCriminal
+	local sentenceDays = isArrest and math.clamp(math.ceil(fine / 1000), 3, 60) or 0
 
 	activeClaim = {
-		pending = true,
+		isArrest = isArrest,
+		fineDue = fine,
+		sentenceDays = sentenceDays,
 		hullId = ship.shipId,
 		shipName = ship.label,
 		skin = ship:GetSkin(),
@@ -275,14 +369,139 @@ local function onPlayerShipDestroyed(ship)
 		systemName = sysName,
 		resolved = false
 	}
+
+	-- Record Catastrophic Vessel Loss with Black Box Telemetry in Commander's Log
+	local okFlightLog, FlightLog = pcall(require, 'modules.FlightLog.FlightLog')
+	if okFlightLog and FlightLog and FlightLog.RecordTransaction then
+		local details = {
+			{ "Vessel Designation", string.format("%s (%s)", shipDef and shipDef.name or ship.shipId, ship.label or "Unnamed") },
+			{ "Flight Regime", flightState },
+			{ "Cause of Destruction", cause or "Hull Structural Failure / Catastrophic Explosive Decompression" },
+		}
+		if speed and speed > 0 then
+			table.insert(details, { "Relative Impact Velocity", string.format("%.1f m/s (%.1f km/h)", speed, speed * 3.6) })
+		end
+		table.insert(details, { "Insured Hull Valuation", Format.Money(hullPrice) })
+		table.insert(details, { "Insured Outfitting Total", Format.Money(totalEquipValue) })
+		table.insert(details, { "Total Replacement Claim Value", Format.Money(totalVal) })
+		table.insert(details, { "Statutory Deductible (5%)", Format.Money(deductibleVal) })
+		if #droppedCargoList > 0 then
+			local cargoDesc = {}
+			for _, c in ipairs(droppedCargoList) do
+				table.insert(cargoDesc, string.format("%s (%d units)", c.name, c.count))
+			end
+			table.insert(details, { "Jettisoned Cargo Flotsam", table.concat(cargoDesc, ", ") })
+		end
+		table.insert(details, { "Life Support Telemetry", "COSPAS-SARSAT Cryo-Stasis Escape Pod Deployed" })
+
+		FlightLog.RecordTransaction({
+			category = "SHIP_LOSS",
+			title = string.format("Catastrophic Vessel Loss: %s", shipDef and shipDef.name or ship.shipId),
+			amount = 0,
+			details = details,
+			note = string.format("Vessel was catastrophically destroyed in %s. Cryogenic escape pod transponder acquired by SAR transponders.", sysName)
+		})
+	end
 end
 
--- Event: Player was recovered by SAR and docked at station
+-- Event: Player was recovered by SAR or remanded to starport correctional custody
 local function onPlayerRescued(recoveryDays, station)
 	if not activeClaim then return end
 	activeClaim.recoveryDays = recoveryDays
 	activeClaim.stationName = station and station.label or "Regional Starport Medical Bay"
-	Insurance.OpenClaimModal()
+
+	if activeClaim.isArrest then
+		-- Advance time and process incarceration
+		local totalFine = activeClaim.fineDue or 1500
+		local currentCash = math.max(0, PlayerState.GetMoney())
+
+		-- Fine is deducted ONLY up to available cash. Player cash NEVER becomes negative!
+		local finePaid = math.min(currentCash, totalFine)
+		local unpaidFine = totalFine - finePaid
+
+		-- Base judicial sentence: 3 to 60 days
+		local baseDays = math.clamp(math.ceil(totalFine / 1000), 3, 60)
+
+		-- Unpaid fine commuted to hard-labor extension: 1 day per 150 CR unpaid
+		local extraDays = unpaidFine > 0 and math.ceil(unpaidFine / 150) or 0
+		local totalSentenceDays = baseDays + extraDays
+
+		local startTime = Game.time
+		local sentenceSeconds = totalSentenceDays * 86400.0
+		Game.time = Game.time + sentenceSeconds
+		local releaseTime = Game.time
+
+		if finePaid > 0 then
+			PlayerState.AddMoney(-finePaid)
+		end
+		-- Safety clamp to ensure zero debt
+		if PlayerState.GetMoney() < 0 then
+			PlayerState.AddMoney(-PlayerState.GetMoney())
+		end
+
+		-- Clear all outstanding criminal warrants and fines (time served)
+		PlayerState.ClearCrimeFine(nil, false)
+
+		activeClaim.finePaid = finePaid
+		activeClaim.unpaidFine = unpaidFine
+		activeClaim.baseDays = baseDays
+		activeClaim.extraDays = extraDays
+		activeClaim.totalSentenceDays = totalSentenceDays
+		activeClaim.startTime = startTime
+		activeClaim.releaseTime = releaseTime
+
+		-- Issue baseline starter scout craft upon discharge
+		giveDefaultStarterShip("Discharged Scout")
+
+		-- Record incarceration certificate for modal presentation
+		incarcerationRecord = {
+			stationName = activeClaim.stationName,
+			shipName = activeClaim.shipName or "Unregistered",
+			hullName = (ShipDef[activeClaim.hullId] and ShipDef[activeClaim.hullId].name) or activeClaim.hullId,
+			deductible = activeClaim.deductible,
+			totalFine = totalFine,
+			finePaid = finePaid,
+			unpaidFine = unpaidFine,
+			baseDays = baseDays,
+			extraDays = extraDays,
+			totalDays = totalSentenceDays,
+			startDateStr = Format.Date(startTime),
+			releaseDateStr = Format.Date(releaseTime),
+		}
+
+		-- Record Judicial Remand and Sentence into Commander's Log
+		local okFlightLog, FlightLog = pcall(require, 'modules.FlightLog.FlightLog')
+		if okFlightLog and FlightLog and FlightLog.RecordTransaction then
+			local details = {
+				{ "Correctional Facility", activeClaim.stationName },
+				{ "Intake Date", Format.Date(startTime) },
+				{ "Discharge Date", Format.Date(releaseTime) },
+				{ "Statutory Custody Term", string.format("%d Standard Days", baseDays) },
+			}
+			if extraDays > 0 then
+				table.insert(details, { "Commuted Labor Extension", string.format("%d Standard Days (commuted at 150 Cr/day)", extraDays) })
+			end
+			table.insert(details, { "Total Sentence Served", string.format("%d Standard Days", totalSentenceDays) })
+			table.insert(details, { "Outstanding Fines Assessed", Format.Money(totalFine) })
+			table.insert(details, { "Liquid Capital Garnished", Format.Money(finePaid) })
+			table.insert(details, { "Unpaid Balance Remitted", Format.Money(unpaidFine) .. " (Discharged via Labor)" })
+			table.insert(details, { "Criminal Record & Warrants", "CLEARED & EXPUNGED (TIME SERVED)" })
+			table.insert(details, { "Current Assigned Vessel", "Discharged Starter Scout (Pad 1)" })
+
+			FlightLog.RecordTransaction({
+				category = "INCARCERATION",
+				title = string.format("Judicial Incarceration: %s", activeClaim.stationName),
+				amount = -finePaid,
+				details = details,
+				note = string.format("Remanded to judicial correctional custody at %s. Served %d standard days; criminal fines settled and legal status restored to Clean.", activeClaim.stationName, totalSentenceDays),
+				stationName = activeClaim.stationName,
+				systemp = station and station.path
+			})
+		end
+	else
+		-- Civilian SAR recovery: issue baseline starter loaner craft
+		giveDefaultStarterShip("Loaner Scout")
+	end
 end
 
 Event.Register("onPlayerShipDestroyed", onPlayerShipDestroyed)
@@ -294,13 +513,15 @@ Event.Register("onPlayerRescued", onPlayerRescued)
 local function resetState()
 	activeClaim = nil
 	openModalRequested = false
+	incarcerationRecord = nil
 end
 
 Event.Register("onGameEnd", resetState)
 
 local function serialize()
 	return {
-		activeClaim = activeClaim
+		activeClaim = activeClaim,
+		incarcerationRecord = incarcerationRecord,
 	}
 end
 
@@ -309,6 +530,13 @@ local function unserialize(data)
 	resetState()
 	if data and data.activeClaim then
 		activeClaim = data.activeClaim
+	end
+	if data and data.incarcerationRecord then
+		incarcerationRecord = data.incarcerationRecord
+	end
+	-- Heal negative cash balance if present from previous fine deduction
+	if PlayerState.GetMoney() < 0 then
+		PlayerState.AddMoney(-PlayerState.GetMoney())
 	end
 end
 

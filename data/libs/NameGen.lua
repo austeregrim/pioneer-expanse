@@ -177,21 +177,17 @@ NameGen = {
 		if body.type == "STARPORT_ORBITAL" then
 			local formats = NameGen.orbitalStarportFormats
 			local p = body.parent
-			if p then
-				-- Tier 2 Economic Archetype Coupling based on host planetary context:
-				-- 1. Agricultural / Hydroponic Stations (food, grain, aquaponics)
-				if (p.agricultural and p.agricultural > 0.35) or (p.life and p.life > 0.4) then
-					formats = NameGen.agriculturalOrbitalFormats
-				-- 2. Industrial / Smelting / Extraction / Mining Platforms (ores, metals, rings)
-				elseif (p.hasRings and p.ringType == 1) or (p.metallicity and p.metallicity > 0.55) or p.type == "PLANET_ASTEROID" then
-					formats = NameGen.industrialOrbitalFormats
-				-- 3. Gas Giant Harvesting / Atmospheric Siphon / Fuel Depots
-				elseif p.type == "PLANET_GAS_GIANT" then
-					formats = NameGen.gasGiantOrbitalFormats
-				-- 4. High-Tech Science, Research & Laboratories
-				elseif rand:Number() < 0.22 then
-					formats = NameGen.researchOrbitalFormats
-				end
+			local stType = body.spaceStationType or ""
+			if stType == "orbital_station_penal" or (p and p.type == "PLANET_ASTEROID" and rand:Number() < 0.35) then
+				formats = NameGen.penalOrbitalFormats
+			elseif stType == "orbital_station_agri" or (p and ((p.agricultural and p.agricultural > 0.35) or (p.life and p.life > 0.4))) then
+				formats = NameGen.agriculturalOrbitalFormats
+			elseif stType == "orbital_station_industrial" or (p and ((p.hasRings and p.ringType == 1) or (p.metallicity and p.metallicity > 0.55) or p.type == "PLANET_ASTEROID")) then
+				formats = NameGen.industrialOrbitalFormats
+			elseif stType == "orbital_station_siphon" or (p and p.type == "PLANET_GAS_GIANT") then
+				formats = NameGen.gasGiantOrbitalFormats
+			elseif stType == "orbital_station_science" or (rand:Number() < 0.22) then
+				formats = NameGen.researchOrbitalFormats
 			end
 			return string.interp(r(formats, rand), { name = name, number = number })
 		end
@@ -262,6 +258,17 @@ NameGen.orbitalStarportFormats = {
 	"{name} Anchorage",
 	"{name} Waystation",
 	"{name} Station{number}",
+}
+
+NameGen.penalOrbitalFormats = {
+	"High Security Prison {name}",
+	"Penal Facility {name}",
+	"Correctional Complex {name}",
+	"{name} Detention Outpost",
+	"{name} Penal Colony",
+	"{name} Maximum Security Station",
+	"{name} Detention Facility",
+	"Federal Penitentiary {name}",
 }
 
 NameGen.researchOrbitalFormats = {

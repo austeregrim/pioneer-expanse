@@ -534,6 +534,51 @@ void PlayerShipController::StaticUpdate(const float timeStep)
 
 	UpdateLandingGear();
 
+	if (Player *player = static_cast<Player *>(m_ship)) {
+		if (player->IsTakingOff()) {
+			// Player can break out of automated takeoff and take over manual controls early
+			bool takeover = false;
+			// Require a 0.2s grace interval after launch so the initial button click / press doesn't instantly cancel
+			if (player->GetTakeoffTimeElapsed() > 0.2f) {
+				if (IsAnyLinearThrusterKeyDown() || IsAnyAngularThrusterKeyDown()) {
+					takeover = true;
+				} else if (InputBindings.thrustForward->IsActive() || InputBindings.thrustUp->IsActive() || InputBindings.thrustLeft->IsActive()) {
+					takeover = true;
+				} else if (InputBindings.primaryFire->IsActive() || InputBindings.secondaryFire->IsActive() ||
+				           InputBindings.toggleCruise->IsActive() || InputBindings.killRot->IsActive() ||
+				           InputBindings.toggleLandingGear->IsActive() || InputBindings.toggleSpeedLimiter->IsActive()) {
+					takeover = true;
+				}
+			}
+			if (takeover) {
+				player->TakeoverUndocking();
+			}
+		}
+	}
+
+	if (m_ship->GetFlightState() == Ship::UNDOCKING) {
+		m_undockElapsed += timeStep;
+		// Player can break out of the automated undock procedure at any time by engaging controls
+		bool takeover = false;
+		if (m_undockElapsed > 0.2f) {
+			if (IsAnyLinearThrusterKeyDown() || IsAnyAngularThrusterKeyDown()) {
+				takeover = true;
+			} else if (InputBindings.thrustForward->IsActive() || InputBindings.thrustUp->IsActive() || InputBindings.thrustLeft->IsActive()) {
+				takeover = true;
+			} else if (InputBindings.primaryFire->IsActive() || InputBindings.secondaryFire->IsActive() ||
+			           InputBindings.toggleCruise->IsActive() || InputBindings.killRot->IsActive() ||
+			           InputBindings.toggleLandingGear->IsActive() || InputBindings.toggleSpeedLimiter->IsActive()) {
+				takeover = true;
+			}
+		}
+
+		if (takeover) {
+			m_ship->TakeoverUndocking();
+		}
+	} else {
+		m_undockElapsed = 0.0f;
+	}
+
 	if (m_ship->GetFlightState() == Ship::SUPERCRUISE) {
 		SetFlightControlState(CONTROL_MANUAL);
 		PollControls(timeStep, mouseMotion, act);
@@ -791,6 +836,17 @@ void PlayerShipController::PollControls(const float timeStep, int *mouseMotion, 
 	}
 }
 
+void PlayerShipController::SetDisableMouseFacing(bool disabled)
+{
+	m_disableMouseFacing = disabled;
+	if (disabled && m_mouseActive) {
+		m_mouseActive = false;
+		if (Pi::input) {
+			Pi::input->SetCapturingMouse(false);
+		}
+	}
+}
+
 bool PlayerShipController::IsAnyAngularThrusterKeyDown()
 {
 	return InputBindings.pitch->IsActive() || InputBindings.yaw->IsActive() || InputBindings.roll->IsActive();
@@ -803,6 +859,13 @@ bool PlayerShipController::IsAnyLinearThrusterKeyDown()
 
 void PlayerShipController::SetFlightControlState(FlightControlState s)
 {
+	if (m_ship && m_ship->IsType(ObjectType::PLAYER)) {
+		Player *player = static_cast<Player *>(m_ship);
+		if ((player->IsTakingOff() || m_ship->GetFlightState() == Ship::UNDOCKING) && s != CONTROL_MANUAL) {
+			player->TakeoverUndocking();
+		}
+	}
+
 	if (m_flightControlState == s)
 		return;
 
@@ -1020,10 +1083,20 @@ void PlayerShipController::CycleHostiles()
 
 void PlayerShipController::ToggleCruise()
 {
+	if (Player *player = static_cast<Player *>(m_ship)) {
+		if (player->IsTakingOff() || m_ship->GetFlightState() == Ship::UNDOCKING) {
+			player->TakeoverUndocking();
+			SetCruiseDirection(CRUISE_FWD);
+			SetFlightControlState(CONTROL_FIXSPEED);
+			return;
+		}
+	}
+
 	if (m_ship->GetFlightState() != Ship::FLYING)
 		return;
 
 	if (GetFlightControlState() != CONTROL_FIXSPEED) {
+		SetCruiseDirection(CRUISE_FWD);
 		SetFlightControlState(CONTROL_FIXSPEED);
 	} else {
 		SetFlightControlState(CONTROL_MANUAL);
@@ -1097,6 +1170,13 @@ void PlayerShipController::SetFollowTarget(Body *const target)
 
 void PlayerShipController::SetCruiseDirection(CruiseDirection dir)
 {
+	if (m_ship && m_ship->IsType(ObjectType::PLAYER)) {
+		Player *player = static_cast<Player *>(m_ship);
+		if (dir == CRUISE_FWD && (player->IsTakingOff() || m_ship->GetFlightState() == Ship::UNDOCKING)) {
+			player->TakeoverUndocking();
+		}
+	}
+
 	m_cruiseDirection = dir;
 	if (m_flightControlState == CONTROL_FIXSPEED) Util::SetCruiseSpeedFromActualVelocity(*this);
 }
