@@ -7,11 +7,14 @@
 #include "rayleigh-lib.glsl"
 
 uniform int NumShadows;
+uniform float enhancedGraphics;
 uniform sampler2D densityLUT;
 uniform sampler2D scatterLUT;
 
 out vec3 varyingEyepos;
 out vec3 varyingNormal;
+out vec3 objNormal;
+out vec3 rawAlbedo;
 out vec4 vertexColor;
 
 out vec2 texCoord0;
@@ -21,6 +24,8 @@ void main(void)
 {
 	gl_Position = matrixTransform();
 	vertexColor = a_color;
+	rawAlbedo = a_color.rgb;
+	objNormal = normalize(a_normal);
 	varyingEyepos = vec3(uViewMatrix * a_vertex);
 	varyingNormal = normalize(normalMatrix() * a_normal);
 
@@ -62,6 +67,14 @@ void main(void)
 		float intensity = 1.f / length(lightPosAU);
 
 		vec4 lightColor = toLinear(uLight[i].diffuse);
+		if (enhancedGraphics >= 0.5) {
+			float lMax = max(max(lightColor.r, lightColor.g), lightColor.b);
+			float lMin = min(min(lightColor.r, lightColor.g), lightColor.b);
+			float lSat = (lMax > 0.001) ? (lMax - lMin) / lMax : 0.0;
+			float lLum = dot(lightColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+			float wbStrength = smoothstep(0.45, 0.88, lSat) * 0.24;
+			lightColor.rgb = mix(lightColor.rgb, vec3(max(lLum, 0.24)), wbStrength);
+		}
 
 		// start with diffuse terrain color
 		vec3 terrain = vertexColor.xyz * lightColor.xyz * uneclipsed * max(0.f, dot(L, tnorm)) * intensity;

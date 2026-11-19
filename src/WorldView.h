@@ -99,6 +99,7 @@ private:
 	void DrawCombatTargetIndicator(const Indicator &target, const Indicator &lead, const Color &c);
 	void DrawEdgeMarker(const Indicator &marker, const Color &c);
 	void DrawSupercruiseShips();
+	void DrawStarLensFlare();
 	void DrawSupercruiseOverlays();
 	void DrawSurfaceScanOverlay();
 	void DrawHyperspaceJumpStreaks();
@@ -137,6 +138,7 @@ private:
 	std::unique_ptr<Graphics::Material> m_indicatorMat;
 	Graphics::Drawables::Lines m_indicator;
 	std::unique_ptr<Graphics::Material> m_scGlowMat;
+	std::unique_ptr<Graphics::Material> m_lensFlareMat;
 
 	struct InputBinding : public Input::InputFrame {
 		using InputFrame::InputFrame;

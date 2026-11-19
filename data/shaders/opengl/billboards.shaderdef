@@ -5,6 +5,7 @@ Shader billboards
 
 Texture sampler2D texture0
 PushConstant float coordDownScale
+PushConstant float enhancedGraphics
 
 Buffer DrawData binding=1
 

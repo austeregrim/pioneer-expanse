@@ -495,6 +495,42 @@ void GeoSphere::Render(Graphics::Renderer *renderer, const matrix4x4d &modelView
 	if (s_debugFlags & GeoSphere::DebugFlags::DEBUG_WIREFRAME)
 		renderer->SetWireFrameMode(false);
 
+	// Enhanced Graphics: procedural terrestrial cloud layer shell (visible both from orbit and surface sky)
+	if (renderer->IsEnhancedGraphicsEnabled() && m_cloudMaterial.Valid() &&
+		m_atmosphereParameters.atmosDensity > 0.08f &&
+		GetSystemBody()->GetSuperType() != SystemBody::SUPERTYPE_STAR &&
+		GetSystemBody()->GetType() != SystemBody::TYPE_BROWN_DWARF) {
+		const SystemBody *sbody = GetSystemBody();
+		const double hydro = sbody->GetVolatileLiquid();
+		const double atmo = double(m_atmosphereParameters.atmosDensity);
+		float coverage = 0.0f;
+		if (hydro > 0.01) {
+			coverage = float(Clamp(0.36 + 0.34 * std::min(hydro, 1.0) + 0.12 * std::min(atmo, 1.5), 0.32, 0.72));
+		} else if (atmo > 0.35) {
+			coverage = float(Clamp(0.18 + 0.24 * std::min(atmo, 2.0), 0.18, 0.52));
+		}
+
+		if (coverage > 0.05f && m_atmos) {
+			const double planetRadM = std::max(sbody->GetRadius(), 100000.0);
+			const double cloudAltM = std::clamp(planetRadM * 0.0022, 6500.0, 14000.0);
+			const float cloudRad = 1.0f + float(cloudAltM / planetRadM);
+			const float seed = float(sbody->GetSeed() & 0xFFFFu) * 0.001f;
+			const float camAlt = float(campos.Length());
+			const Color4f aCol = m_atmosphereParameters.atmosCol.ToColor4f();
+
+			static const size_t s_cloudParamsName = "cloudParams"_hash;
+			static const size_t s_cloudTintName = "cloudTint"_hash;
+			m_cloudMaterial->SetPushConstant(s_cloudParamsName, vector3f(coverage, seed, camAlt), cloudRad);
+			m_cloudMaterial->SetPushConstant(s_cloudTintName, vector3f(
+				Clamp(0.75f + 0.25f * aCol.r, 0.0f, 1.0f),
+				Clamp(0.78f + 0.22f * aCol.g, 0.0f, 1.0f),
+				Clamp(0.82f + 0.18f * aCol.b, 0.0f, 1.0f)), 0.88f);
+
+			renderer->SetTransform(matrix4x4f(trans * matrix4x4d::ScaleMatrix(cloudRad)));
+			m_atmos->Draw(renderer, m_cloudMaterial.Get());
+		}
+	}
+
 	renderer->SetAmbientColor(oldAmbient);
 
 	renderer->GetStats().AddToStatCount(Graphics::Stats::STAT_PLANETS, 1);
@@ -589,4 +625,13 @@ void GeoSphere::CreateAtmosphereMaterial()
 		m_atmosphereMaterial.Reset(Pi::renderer->CreateMaterial("geosphere_sky", skyDesc, rsd, atmosVtxFmt));
 		break;
 	}
+
+	Graphics::RenderStateDesc cloudRsd;
+	cloudRsd.blendMode = Graphics::BLEND_ALPHA;
+	cloudRsd.cullMode = Graphics::CULL_NONE;
+	cloudRsd.depthWrite = false;
+
+	Graphics::MaterialDescriptor cloudDesc;
+	cloudDesc.lighting = true;
+	m_cloudMaterial.Reset(Pi::renderer->CreateMaterial("planet_clouds", cloudDesc, cloudRsd, atmosVtxFmt));
 }

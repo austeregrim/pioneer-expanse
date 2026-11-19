@@ -583,6 +583,23 @@ static int l_engine_set_volumetric_rings(lua_State *l)
 	return 0;
 }
 
+static int l_engine_get_enhanced_graphics(lua_State *l)
+{
+	lua_pushboolean(l, Pi::config->Int("EnhancedGraphics", 1) != 0);
+	return 1;
+}
+
+static int l_engine_set_enhanced_graphics(lua_State *l)
+{
+	if (lua_isnone(l, 1))
+		return luaL_error(l, "SetEnhancedGraphics takes one boolean argument");
+	const bool enabled = lua_toboolean(l, 1);
+	Pi::config->SetInt("EnhancedGraphics", enabled ? 1 : 0);
+	if (Pi::renderer)
+		Pi::renderer->SetEnhancedGraphics(enabled);
+	return 0;
+}
+
 static int l_engine_get_autosave_enabled(lua_State *l)
 {
 	lua_pushboolean(l, Pi::config->Int("EnableAutosave") != 0);
@@ -1165,6 +1182,8 @@ void LuaEngine::Register()
 		{ "SetFOV", l_engine_set_fov },
 		{ "GetVolumetricRings", l_engine_get_volumetric_rings },
 		{ "SetVolumetricRings", l_engine_set_volumetric_rings },
+		{ "GetEnhancedGraphics", l_engine_get_enhanced_graphics },
+		{ "SetEnhancedGraphics", l_engine_set_enhanced_graphics },
 
 		{ "GetAnisoFiltering", l_engine_get_aniso_enabled },
 		{ "SetAnisoFiltering", l_engine_set_aniso_enabled },

@@ -1218,16 +1218,18 @@ void SupercruiseController::UpdateEnvironmentAndTarget(float timeStep, Body **ou
 			strain = 1.0 / (1.0 + std::pow(std::max(0.01, strainDist), 1.35));
 		} else {
 			// Planetary/lunar gravity well: parameterized by planetary radii (hRadii = h / r)
-			// Near celestial bodies and orbital/surface stations (hRadii <= 1.0):
-			// dragged down to 100 km/s - 800 km/s (safe drop envelope)
+			// Scale envelope speed with body radius relative to Earth so approaching huge gas giants
+			// (r = 50,000-80,000 km) takes ~15-20s instead of crawling for minutes, while Earth-sized
+			// worlds keep the exact 100 km/s - 800 km/s safe drop envelope.
 			const double hRadii = h / r;
+			const double rScale = Clamp(std::pow(r / 6371000.0, 0.88), 0.75, 16.0);
 			if (hRadii <= 1.0) {
-				vBody = 100000.0 + 700000.0 * hRadii; // 100 km/s to 800 km/s
+				vBody = (100000.0 + 700000.0 * hRadii) * rScale;
 			} else if (hRadii <= 5.0) {
-				vBody = 800000.0 + 4000000.0 * (hRadii - 1.0) / 4.0; // 800 km/s to 4.8 Mm/s
+				vBody = (800000.0 + 4000000.0 * (hRadii - 1.0) / 4.0) * rScale;
 			} else {
 				const double outerH = hRadii - 5.0;
-				vBody = 4800000.0 + LIGHT_SPEED * (0.05 * std::pow(outerH, 1.35) + 0.01 * outerH * outerH);
+				vBody = 4800000.0 * rScale + LIGHT_SPEED * (0.05 * std::pow(outerH, 1.35) + 0.01 * outerH * outerH) * std::min(rScale, 4.0);
 			}
 
 			strain = 1.0 / (1.0 + std::pow(h / (r * 2.0), 1.25));

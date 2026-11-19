@@ -7,6 +7,7 @@
 
 out vec3 varyingEyepos;
 out vec3 varyingNormal;
+out vec3 objNormal;
 out vec4 vertexColor;
 
 out vec2 texCoord0;
@@ -22,6 +23,7 @@ void main(void)
 	vertexColor = a_color;
 	varyingEyepos = vec3(uViewMatrix * a_vertex);
 	varyingNormal = normalize(normalMatrix() * a_normal);
+	objNormal = normalize(a_normal);
 
 	texCoord0 = a_uv0.xy;
 	dist = length(varyingEyepos);

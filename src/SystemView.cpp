@@ -124,14 +124,18 @@ void SystemView::CalculateFramePositionAtTime(FrameId frameId, double t, vector3
 
 double SystemView::CalculateStarportHeight(const SystemBody *body)
 {
+	if (!body)
+		return 0.0;
+
 	// if we look at the current system, the relief is known, we take the height from the physical body
 	if (m_viewingCurrentSystem && m_game->IsNormalSpace()) {
-		assert(body != NULL);
-		return m_game->GetSpace()->FindBodyForPath(&(body->GetPath()))->GetPosition().Length();
+		if (Body *physBody = m_game->GetSpace()->FindBodyForPath(&(body->GetPath()))) {
+			return physBody->GetPosition().Length();
+		}
 	}
 
-	// if the remote system - take the radius of the planet
-	return body->GetParent()->GetRadius();
+	// if the remote system (or older save missing a newly generated starport) - take the radius of the planet
+	return body->GetParent() ? body->GetParent()->GetRadius() : body->GetRadius();
 }
 
 void SystemView::RefreshShips(void)

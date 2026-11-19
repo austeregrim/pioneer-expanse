@@ -1,0 +1,15 @@
+## Copyright © 2008-2026 Pioneer Developers. See AUTHORS.txt for details
+## Licensed under the terms of the GPL v3. See licenses/GPL-3.txt
+
+# Procedural star glare, diffraction spikes, and optical lens flare (Enhanced Graphics)
+
+Shader lens_flare
+
+PushConstant vec4 starParams
+PushConstant vec4 starColor
+PushConstant vec4 flareParams
+
+Buffer DrawData binding=1
+
+Vertex "lens_flare.vert"
+Fragment "lens_flare.frag"

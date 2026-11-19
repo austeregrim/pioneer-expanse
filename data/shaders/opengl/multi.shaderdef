@@ -17,6 +17,7 @@ Texture sampler2D heatGradient
 
 PushConstant vec4 lightIntensity binding=1
 PushConstant vec4 heatingNormal
+PushConstant float enhancedGraphics
 
 Buffer LightData binding=0
 Buffer DrawData binding=1

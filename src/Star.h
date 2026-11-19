@@ -29,9 +29,12 @@ public:
 protected:
 	void InitStar();
 	void BuildHaloBuffer(Graphics::Renderer *renderer, double rad);
+	void BuildCoronaBuffer(Graphics::Renderer *renderer);
 
 	std::unique_ptr<Graphics::Material> m_haloMat;
 	std::unique_ptr<Graphics::MeshObject> m_haloMesh;
+	std::unique_ptr<Graphics::Material> m_coronaMat;
+	std::unique_ptr<Graphics::MeshObject> m_coronaMesh;
 };
 
 #endif /* _STAR_H */

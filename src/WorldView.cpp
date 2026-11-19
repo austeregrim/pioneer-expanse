@@ -121,6 +121,16 @@ void WorldView::InitObject()
 	Graphics::Texture *scGlowTex = Graphics::TextureBuilder::Billboard("textures/halo.dds").GetOrCreateTexture(Pi::renderer, "billboard");
 	m_scGlowMat->SetTexture("texture0"_hash, scGlowTex);
 
+	Graphics::RenderStateDesc flareRsd;
+	flareRsd.blendMode = Graphics::BLEND_ALPHA_ONE;
+	flareRsd.depthWrite = false;
+	flareRsd.depthTest = false;
+	flareRsd.cullMode = Graphics::CULL_NONE;
+	Graphics::MaterialDescriptor flareDesc;
+	auto flareVfmt = Graphics::VertexFormatDesc::FromAttribSet(
+		Graphics::ATTRIB_POSITION | Graphics::ATTRIB_UV0);
+	m_lensFlareMat.reset(Pi::renderer->CreateMaterial("lens_flare", flareDesc, flareRsd, flareVfmt));
+
 	/*
 	  NEW UI
 	*/
@@ -226,6 +236,9 @@ void WorldView::Draw3D()
 	// (could also draw this using ImGui methods in DrawPiGui, but this is a quick patch for release)
 	m_renderer->SetProjection(matrix4x4f::OrthoFrustum(0, m_renderer->GetWindowWidth(), m_renderer->GetWindowHeight(), 0, 0, 1));
 	m_renderer->SetTransform(matrix4x4f::Identity);
+
+	// Enhanced Graphics: procedural star glare, diffraction starburst, and optical lens flare
+	DrawStarLensFlare();
 
 	// Supercruise ships appear as radiant points of light across the system
 	DrawSupercruiseShips();
@@ -675,6 +688,167 @@ vector3d WorldView::GetTargetIndicatorScreenPosition(const Body *body) const
 	vector3d pos = body->GetInterpPositionRelTo(m_cameraContext->GetCameraFrame());
 	pos += body->GetInterpOrientRelTo(m_cameraContext->GetCameraFrame()) * body->GetTargetIndicatorPosition();
 	return WorldSpaceToScreenSpace(pos);
+}
+
+void WorldView::DrawStarLensFlare()
+{
+	if (!m_renderer || !m_renderer->IsEnhancedGraphicsEnabled() || !m_lensFlareMat)
+		return;
+	if (!Pi::player || !m_game || !m_game->GetSpace())
+		return;
+
+	const Ship::FlightState pState = Pi::player->GetFlightState();
+	if (pState == Ship::DOCKED || pState == Ship::HYPERSPACE || Pi::player->GetDockedWith() != nullptr)
+		return;
+
+	const FrameId camFrameId = m_cameraContext->GetTempFrame();
+	if (!camFrameId.valid())
+		return;
+
+	const float winW = float(m_renderer->GetWindowWidth());
+	const float winH = float(m_renderer->GetWindowHeight());
+	if (winW <= 1.0f || winH <= 1.0f)
+		return;
+	const float aspect = winW / winH;
+
+	// Collect celestial and orbital station occluders in camera space for smooth eclipse attenuation
+	struct FlareOccluder {
+		vector3d pos;
+		double dist;
+		double radius;
+	};
+	std::vector<FlareOccluder> occluders;
+	for (Body *b : m_game->GetSpace()->GetBodies()) {
+		if (!b)
+			continue;
+
+		if (b->IsType(ObjectType::SPACESTATION)) {
+			const vector3d p = b->GetInterpPositionRelTo(camFrameId);
+			const double dist = p.Length();
+			const SpaceStation *st = static_cast<const SpaceStation *>(b);
+			if (!st->IsGroundStation() && dist < b->GetClipRadius())
+				return; // Camera is inside an orbital station bay; hide exterior star flare
+			const double r = std::max(b->GetPhysRadius(), 350.0);
+			if (dist > r)
+				occluders.push_back({ p, dist, r });
+			continue;
+		}
+
+		if (!b->IsType(ObjectType::TERRAINBODY) || b->IsType(ObjectType::STAR))
+			continue;
+		const SystemBody *sb = b->GetSystemBody();
+		const double r = sb ? sb->GetRadius() : b->GetPhysRadius();
+		if (r <= 0.0)
+			continue;
+		const vector3d p = b->GetInterpPositionRelTo(camFrameId);
+		const double dist = p.Length();
+		if (dist > r * 0.995)
+			occluders.push_back({ p, dist, r });
+	}
+
+	const double fovRad = DEG2RAD(std::max(10.0f, m_cameraContext->GetFovAng()));
+	const double tanHalfFov = std::tan(fovRad * 0.5);
+
+	Graphics::VertexArray quad(Graphics::ATTRIB_POSITION | Graphics::ATTRIB_UV0);
+	quad.Add(vector3f(0.0f, 0.0f, 0.0f), vector2f(0.0f, 0.0f));
+	quad.Add(vector3f(winW, 0.0f, 0.0f), vector2f(1.0f, 0.0f));
+	quad.Add(vector3f(winW, winH, 0.0f), vector2f(1.0f, 1.0f));
+	quad.Add(vector3f(0.0f, 0.0f, 0.0f), vector2f(0.0f, 0.0f));
+	quad.Add(vector3f(winW, winH, 0.0f), vector2f(1.0f, 1.0f));
+	quad.Add(vector3f(0.0f, winH, 0.0f), vector2f(0.0f, 1.0f));
+
+	static const size_t s_starParamsName = "starParams"_hash;
+	static const size_t s_starColorName = "starColor"_hash;
+	static const size_t s_flareParamsName = "flareParams"_hash;
+	const float bgVis = m_camera ? Clamp(m_camera->GetBackgroundIntensity(), 0.0f, 1.0f) : 1.0f;
+
+	for (Body *b : m_game->GetSpace()->GetBodies()) {
+		if (!b || !b->IsType(ObjectType::STAR))
+			continue;
+
+		const SystemBody *sb = b->GetSystemBody();
+		if (!sb)
+			continue;
+		// Skip black holes (non-luminous gravitational singularities)
+		if (sb->GetType() >= SystemBody::TYPE_STAR_S_BH && sb->GetType() <= SystemBody::TYPE_STAR_IM_BH)
+			continue;
+
+		const vector3d starCamPos = b->GetInterpPositionRelTo(camFrameId);
+		if (starCamPos.z >= -1.0)
+			continue; // Behind camera
+
+		const double dist = starCamPos.Length();
+		if (dist <= 1.0)
+			continue;
+
+		const vector3d screenPos = projectToScreenSpace(starCamPos, m_cameraContext, false);
+		const float ndcX = (float(screenPos.x) / winW) * 2.0f - 1.0f;
+		const float ndcY = (float(screenPos.y) / winH) * 2.0f - 1.0f;
+
+		// Smooth off-screen fade so glare/streaks glide cleanly across viewport edges
+		const float maxEdge = std::max(std::abs(ndcX), std::abs(ndcY));
+		if (maxEdge > 1.45f)
+			continue;
+		const float edgeFade = Clamp(1.0f - std::max(0.0f, (maxEdge - 0.92f) / 0.53f), 0.0f, 1.0f);
+
+		const double starR = std::max(1000.0, sb->GetRadius());
+		const double angStar = std::asin(Clamp(starR / dist, 0.0, 1.0));
+		const vector3d starDir = starCamPos / dist;
+
+		// Smooth angular eclipse occlusion against planets, moons, and stations
+		float visibility = 1.0f;
+		for (const FlareOccluder &occ : occluders) {
+			if (occ.dist >= dist)
+				continue;
+			const vector3d occDir = occ.pos / occ.dist;
+			const double dotDir = Clamp(starDir.Dot(occDir), -1.0, 1.0);
+			if (dotDir <= 0.0)
+				continue;
+			const double angOcc = std::asin(Clamp(occ.radius / occ.dist, 0.0, 1.0));
+			const double angSep = std::acos(dotDir);
+			if (angSep <= angOcc - angStar) {
+				visibility = 0.0f;
+				break;
+			}
+			if (angSep < angOcc + angStar) {
+				const float frac = float(Clamp((angSep - (angOcc - angStar)) / std::max(2.0 * angStar, 1e-5), 0.0, 1.0));
+				visibility = std::min(visibility, frac * frac * (3.0f - 2.0f * frac));
+			}
+		}
+		if (visibility <= 0.005f)
+			continue;
+
+		const double lum = (sb->GetType() <= SystemBody::TYPE_STAR_MAX) ? std::max(0.01, StarSystem::starLuminosities[sb->GetType()]) : 1.0;
+		const double effDistRadii = dist / (starR * std::max(0.65, std::pow(lum, 0.35)));
+		const float distFade = float(Clamp(1.0 / (1.0 + std::pow(effDistRadii / 180.0, 1.15)), 0.14, 1.0));
+		const float lumBoost = float(Clamp(0.65 + 0.35 * std::pow(lum, 0.18), 0.45, 1.15));
+
+		// Gently soften lens flare when deep inside a thick atmosphere
+		float atmoAtten = 1.0f;
+		if (m_camera && m_camera->IsInAtmosphere()) {
+			atmoAtten = 0.72f;
+		}
+
+		const float intensity = Clamp(distFade * lumBoost * edgeFade * visibility * atmoAtten * 0.92f, 0.0f, 1.0f);
+		if (intensity <= 0.005f)
+			continue;
+
+		const float discRadiusNdc = float(Clamp(std::tan(angStar) / std::max(tanHalfFov, 0.1), 0.01, 0.65));
+		const Color4f starCol = sb->GetStarColor().ToColor4f();
+
+		// Fade out pinpoint glare lines & diffraction spikes as the star resolves into a visible orb
+		// and as camera exposure darkens the background skybox
+		const float orbFade = Clamp(1.0f - (discRadiusNdc - 0.022f) / 0.085f, 0.0f, 1.0f);
+		const float skyExposureFade = Clamp((bgVis - 0.20f) / 0.72f, 0.0f, 1.0f);
+		const float pinpointFactor = orbFade * orbFade * skyExposureFade;
+		const float ghostFactor = Clamp(0.55f + 0.45f * bgVis, 0.45f, 1.0f);
+
+		m_lensFlareMat->SetPushConstant(s_starParamsName, vector3f(ndcX, ndcY, aspect), intensity);
+		m_lensFlareMat->SetPushConstant(s_starColorName, vector3f(starCol.r, starCol.g, starCol.b), discRadiusNdc);
+		m_lensFlareMat->SetPushConstant(s_flareParamsName, vector3f(pinpointFactor, ghostFactor, 0.0f), 0.0f);
+
+		m_renderer->DrawBuffer(&quad, m_lensFlareMat.get());
+	}
 }
 
 void WorldView::DrawSupercruiseShips()

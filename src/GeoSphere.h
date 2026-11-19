@@ -119,6 +119,7 @@ private:
 
 	RefCountedPtr<Graphics::Texture> m_texHi;
 	RefCountedPtr<Graphics::Texture> m_texLo;
+	RefCountedPtr<Graphics::Material> m_cloudMaterial;
 
 	enum EGSInitialisationStage {
 		eBuildFirstPatches = 0,

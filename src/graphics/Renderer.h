@@ -254,6 +254,12 @@ namespace Graphics {
 
 		virtual bool Screendump(ScreendumpState &sd) { return false; }
 
+		void SetEnhancedGraphics(bool enabled) { m_enhancedGraphics = enabled; }
+		bool IsEnhancedGraphicsEnabled() const { return m_enhancedGraphics; }
+
+		void SetShaderTime(float seconds) { m_shaderTime = seconds; }
+		float GetShaderTime() const { return m_shaderTime; }
+
 		Stats &GetStats() { return m_stats; }
 
 		// Returns a hashed name for referring to material constant slots and other constant-size string names
@@ -266,6 +272,8 @@ namespace Graphics {
 		Light m_lights[4];
 		Stats m_stats;
 		SDL_Window *m_window;
+		bool m_enhancedGraphics = true;
+		float m_shaderTime = 0.0f;
 
 		virtual void PushState() = 0;
 		virtual void PopState() = 0;

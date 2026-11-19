@@ -363,6 +363,8 @@ void Pi::App::OnStartup()
 
 	Graphics::RendererOGL::RegisterRenderer();
 	Pi::renderer = StartupRenderer(Pi::config, false, config->Int("DebugWindowResize"));
+	if (Pi::renderer)
+		Pi::renderer->SetEnhancedGraphics(config->Int("EnhancedGraphics", 1) != 0);
 
 	Pi::rng.IncRefCount(); // so nothing tries to free it
 	Pi::rng.seed(time(0));
@@ -894,6 +896,14 @@ void Pi::App::PreUpdate()
 {
 	PROFILE_SCOPED()
 	Pi::frameTime = DeltaTime();
+	if (Pi::renderer) {
+		if (Pi::game) {
+			// Tie animated shaders (clouds, oceans, star plasma) to simulation time so Time Stop freezes them cleanly
+			Pi::renderer->SetShaderTime(float(std::fmod(Pi::game->GetTime(), 86400.0)));
+		} else {
+			Pi::renderer->SetShaderTime(float(SDL_GetTicks64() % 3600000ULL) * 0.001f);
+		}
+	}
 }
 
 void Pi::App::PostUpdate()

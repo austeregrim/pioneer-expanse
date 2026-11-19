@@ -36,6 +36,8 @@ namespace Graphics {
 		static size_t s_lightDataName = "LightData"_hash;
 		static size_t s_drawDataName = "DrawData"_hash;
 		static size_t s_lightIntensityName = "lightIntensity"_hash;
+		static size_t s_enhancedGraphicsName = "enhancedGraphics"_hash;
+		static size_t s_timeName = "uTime"_hash;
 
 		// XXX potential target for allocation optimization
 		// (e.g. use renderer-owned freelist block allocator and align and group all three buffers into one allocation?)
@@ -107,6 +109,9 @@ namespace Graphics {
 
 				SetPushConstant(s_lightIntensityName, Color4f(intensity[0], intensity[1], intensity[2], intensity[3]));
 			}
+
+			SetPushConstant(s_enhancedGraphicsName, m_renderer->IsEnhancedGraphicsEnabled() ? 1.0f : 0.0f);
+			SetPushConstant(s_timeName, m_renderer->GetShaderTime());
 
 			// this should always be present, but just in case...
 			if (m_perDrawBinding != Shader::InvalidBinding) {

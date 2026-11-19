@@ -201,6 +201,7 @@ local function showVideoOptions()
 	}
 
 	local realisticScattering = Engine.GetRealisticScattering()
+	local enhancedGraphics = Engine.GetEnhancedGraphics()
 
 	local cityDetail = keyOf(detailLabels,keyOf(detailLevels, Engine.GetCityDetailLevel()))-1
 	local displayNavTunnels = Engine.GetDisplayNavTunnels()
@@ -240,6 +241,11 @@ local function showVideoOptions()
 	end
 
 	ui.separator()
+
+	c,enhancedGraphics = checkbox(lui.ENHANCED_GRAPHICS or "Enhanced Graphics (PBR, Glare & Lens Flare)", enhancedGraphics, lui.ENHANCED_GRAPHICS_DESC or "Enables enhanced PBR ship/station materials, star glare, and optical lens flare. Disable to restore Classic Pioneer graphics immediately.")
+	if c then
+		Engine.SetEnhancedGraphics(enhancedGraphics)
+	end
 
 	c,selectedAA = combo(lui.MULTISAMPLING, selectedAA, aaLabels, lui.MULTISAMPLING_DESC)
 	if c then

@@ -3,6 +3,9 @@
 
 Shader geosphere_star
 
+PushConstant float enhancedGraphics
+PushConstant float uTime
+
 Buffer DrawData binding=1
 
 Vertex "geosphere_star.vert"

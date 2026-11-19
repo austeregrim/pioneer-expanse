@@ -1,0 +1,14 @@
+## Copyright © 2008-2026 Pioneer Developers. See AUTHORS.txt for details
+## Licensed under the terms of the GPL v3. See licenses/GPL-3.txt
+
+# Procedural animated stellar corona, chromosphere atmosphere, and solar prominence flares
+
+Shader star_corona
+
+PushConstant vec4 starColor
+PushConstant float uTime
+
+Buffer DrawData binding=1
+
+Vertex "star_corona.vert"
+Fragment "star_corona.frag"

@@ -40,6 +40,7 @@ GameConfig::GameConfig(const map_string &override_)
 	map["AntiAliasingMode"] = "2";
 	map["MaxFPS"] = "0"; // 0 = unlimited / off
 	map["VolumetricRings"] = "3"; // 0=Disabled, 1=Low, 2=Medium, 3=High, 4=Ultra
+	map["EnhancedGraphics"] = "1"; // 0=Classic Fallback, 1=Enhanced Graphics (PBR, Glare, Lens Flare, etc.)
 	map["JoystickDeadzone"] = "0.2"; // 20% deadzone is common
 	map["DefaultLowThrustPower"] = "0.25";
 	map["VSync"] = "1";

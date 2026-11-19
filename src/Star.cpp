@@ -50,6 +50,26 @@ void Star::InitStar()
 
 	auto vtxFormat = Graphics::VertexFormatDesc::FromAttribSet(Graphics::ATTRIB_POSITION | Graphics::ATTRIB_DIFFUSE);
 	m_haloMat.reset(Pi::renderer->CreateMaterial("vtxColor", desc, rsd, vtxFormat));
+
+	Graphics::MaterialDescriptor coronaDesc;
+	Graphics::RenderStateDesc coronaRsd;
+	coronaRsd.blendMode = Graphics::BLEND_ALPHA_ONE;
+	coronaRsd.depthWrite = false;
+	coronaRsd.cullMode = Graphics::CULL_NONE;
+	auto coronaVfmt = Graphics::VertexFormatDesc::FromAttribSet(Graphics::ATTRIB_POSITION | Graphics::ATTRIB_UV0);
+	m_coronaMat.reset(Pi::renderer->CreateMaterial("star_corona", coronaDesc, coronaRsd, coronaVfmt));
+}
+
+void Star::BuildCoronaBuffer(Graphics::Renderer *renderer)
+{
+	Graphics::VertexArray va(Graphics::ATTRIB_POSITION | Graphics::ATTRIB_UV0);
+	va.Add(vector3f(-1.f, -1.f, 0.f), vector2f(0.f, 0.f));
+	va.Add(vector3f(1.f, -1.f, 0.f), vector2f(1.f, 0.f));
+	va.Add(vector3f(1.f, 1.f, 0.f), vector2f(1.f, 1.f));
+	va.Add(vector3f(-1.f, -1.f, 0.f), vector2f(0.f, 0.f));
+	va.Add(vector3f(1.f, 1.f, 0.f), vector2f(1.f, 1.f));
+	va.Add(vector3f(-1.f, 1.f, 0.f), vector2f(0.f, 1.f));
+	m_coronaMesh.reset(renderer->CreateMeshObjectFromArray(&va));
 }
 
 void Star::BuildHaloBuffer(Graphics::Renderer *renderer, double rad)
@@ -95,13 +115,51 @@ void Star::Render(Graphics::Renderer *renderer, const Camera *camera, const vect
 	if (!m_haloMesh) {
 		BuildHaloBuffer(renderer, rad);
 	}
-	// scale the halo by the new radius from it's unit size
-	renderer->SetTransform(matrix4x4f(trans * matrix4x4d::ScaleMatrix(rad) * rot));
-	//render star halo
-	renderer->DrawMesh(m_haloMesh.get(), m_haloMat.get());
 
-	// the transform will be reset within TerrainBody::Render or it's subsequent calls
-	TerrainBody::Render(renderer, camera, viewCoords, viewTransform);
+	const SystemBody *sbody = GetSystemBody();
+	const bool isBlackHole = sbody && (sbody->GetType() >= SystemBody::TYPE_STAR_S_BH && sbody->GetType() <= SystemBody::TYPE_STAR_IM_BH);
+
+	if (renderer->IsEnhancedGraphicsEnabled() && m_coronaMat && !isBlackHole) {
+		if (!m_coronaMesh) {
+			BuildCoronaBuffer(renderer);
+		}
+		// Render the star photosphere first, then layer the animated chromosphere, corona streamers, and solar flares
+		TerrainBody::Render(renderer, camera, viewCoords, viewTransform);
+
+		constexpr float kCoronaExtentRadii = 2.6f;
+		double coronaRad = std::max(GetPhysRadius(), sbody ? sbody->GetRadius() : GetPhysRadius()) * kCoronaExtentRadii;
+		vector3d cfpos = viewCoords;
+		double clen = cfpos.Length();
+		while (clen > 1000.0) {
+			coronaRad *= 0.25;
+			cfpos = 0.25 * cfpos;
+			clen *= 0.25;
+		}
+		matrix4x4d ctrans = matrix4x4d::Identity;
+		ctrans.Translate(float(cfpos.x), float(cfpos.y), float(cfpos.z));
+
+		const Color4f col = sbody ? sbody->GetStarColor().ToColor4f() : Color4f(1.0f, 0.85f, 0.65f, 1.0f);
+		static const size_t s_starColorName = "starColor"_hash;
+		m_coronaMat->SetPushConstant(s_starColorName, vector3f(col.r, col.g, col.b), kCoronaExtentRadii);
+
+		// Anchor the corona billboard's up-axis to the star's own 3D rotational pole in camera space
+		// so coronal plumes and solar prominence flares stay locked to the star instead of rolling with the ship
+		vector3d starUp = viewTransform.ApplyRotationOnly(vector3d(0.0, 1.0, 0.0)).NormalizedSafe();
+		if (std::abs(starUp.Dot(zaxis)) > 0.995) {
+			starUp = viewTransform.ApplyRotationOnly(vector3d(1.0, 0.0, 0.0)).NormalizedSafe();
+		}
+		vector3d cxaxis = starUp.Cross(zaxis).NormalizedSafe();
+		vector3d cyaxis = zaxis.Cross(cxaxis).NormalizedSafe();
+		matrix4x4d coronaRot = matrix4x4d::MakeRotMatrix(cxaxis, cyaxis, zaxis).Inverse();
+
+		renderer->SetTransform(matrix4x4f(ctrans * matrix4x4d::ScaleMatrix(coronaRad) * coronaRot));
+		renderer->DrawMesh(m_coronaMesh.get(), m_coronaMat.get());
+	} else {
+		// Classic Pioneer fallback
+		renderer->SetTransform(matrix4x4f(trans * matrix4x4d::ScaleMatrix(rad) * rot));
+		renderer->DrawMesh(m_haloMesh.get(), m_haloMat.get());
+		TerrainBody::Render(renderer, camera, viewCoords, viewTransform);
+	}
 
 	renderer->GetStats().AddToStatCount(Graphics::Stats::STAT_STARS, 1);
 }

@@ -1,0 +1,16 @@
+## Copyright © 2008-2026 Pioneer Developers. See AUTHORS.txt for details
+## Licensed under the terms of the GPL v3. See licenses/GPL-3.txt
+
+# Procedural terrestrial planet cloud layer (Enhanced Graphics)
+
+Shader planet_clouds
+
+PushConstant vec4 cloudParams
+PushConstant vec4 cloudTint
+PushConstant float uTime
+
+Buffer LightData binding=0
+Buffer DrawData binding=1
+
+Vertex "planet_clouds.vert"
+Fragment "planet_clouds.frag"
