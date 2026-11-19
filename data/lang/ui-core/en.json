@@ -667,6 +667,14 @@
     "description": "Tooltip for the Main Menu button in the pause menu",
     "message": "End the current game and return to the main menu. Any unsaved progress will be lost."
   },
+  "ENHANCED_GRAPHICS": {
+    "description": "Label of the enhanced graphics checkbox in the video settings menu",
+    "message": "Enhanced Graphics (PBR, Glare & Lens Flare)"
+  },
+  "ENHANCED_GRAPHICS_DESC": {
+    "description": "Tooltip of the enhanced graphics checkbox in the video settings menu",
+    "message": "Enables enhanced PBR ship/station materials, star glare, and optical lens flare. Disable to restore Classic Pioneer graphics immediately."
+  },
   "ENGINEERING": {
     "description": "Engineering skills of crew",
     "message": "Engineering"
@@ -1407,6 +1415,10 @@
     "description": "Shown on HUD as a warning flasher",
     "message": "DESCENT RATE"
   },
+  "HUD_WARNING_DUST_STORM_ADVISORY": {
+    "description": "Shown on HUD during heavy atmospheric dust storms",
+    "message": "DUST STORM ADVISORY"
+  },
   "HUD_WARNING_IMPACT": {
     "description": "Alert tooltip",
     "message": "Impact warning"
@@ -1415,9 +1427,21 @@
     "description": "Alert tooltip",
     "message": "Impact imminent"
   },
+  "HUD_WARNING_SEVERE_TURBULENCE": {
+    "description": "Shown on HUD during severe atmospheric turbulence",
+    "message": "SEVERE TURBULENCE"
+  },
+  "HUD_WARNING_STORM_ADVISORY": {
+    "description": "Shown on HUD during strong atmospheric storms",
+    "message": "STORM ADVISORY"
+  },
   "HUD_WARNING_TWR_DESTINATION": {
     "description": "TWR (Thrust to Weight Ratio) HUD warning",
     "message": "TWR at destination is {value}"
+  },
+  "HUD_WARNING_WIND_SHEAR": {
+    "description": "Shown on HUD during strong low-altitude atmospheric wind shear",
+    "message": "WIND SHEAR"
   },
   "HULL_DOES_NOT_REQUIRE_REPAIR": {
     "description": "",
@@ -3002,6 +3026,14 @@
   "WAGE": {
     "description": "Salary of crew shown in crew roster",
     "message": "Wage"
+  },
+  "WATER_QUALITY": {
+    "description": "Label of the water surface quality dropdown in the video settings menu",
+    "message": "Water Surface Quality"
+  },
+  "WATER_QUALITY_DESC": {
+    "description": "Tooltip of the water surface quality dropdown in the video settings menu",
+    "message": "Controls ocean wave layers, whitecap foam, and close-up ripple detail. Lower values significantly improve planetary surface FPS (applies immediately)."
   },
   "WEIGHT_EMPTY": {
     "description": "",

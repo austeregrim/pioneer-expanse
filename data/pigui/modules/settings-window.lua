@@ -188,6 +188,11 @@ local function showVideoOptions()
 	local curRing = Engine.GetVolumetricRings()
 	local selectedRing = math.max(0, math.min(4, curRing))
 
+	-- Ocean Water Surface Quality
+	local waterLevels = { 0, 1, 2, 3 }
+	local waterLabels = { lui.LOW, lui.MEDIUM, lui.HIGH, lui.VERY_HIGH }
+	local selectedWater = math.max(0, math.min(3, Engine.GetWaterQuality()))
+
 	local textCompress = Engine.GetTextureCompressionEnabled()
 	local gpuJobs = Engine.GetGpuJobsEnabled()
 	local disableScreenshotInfo = Engine.GetDisableScreenshotInfo()
@@ -266,6 +271,11 @@ local function showVideoOptions()
 	c,selectedRing = combo(lui.VOLUMETRIC_RINGS or "Volumetric Planetary Rings", selectedRing, ringLabels, lui.VOLUMETRIC_RINGS_DESC or "Controls 3D boulder and dust density in planetary rings.")
 	if c then
 		Engine.SetVolumetricRings(ringLevels[selectedRing+1])
+	end
+
+	c,selectedWater = combo(lui.WATER_QUALITY or "Water Surface Quality", selectedWater, waterLabels, lui.WATER_QUALITY_DESC or "Controls ocean wave layers, whitecap foam, and close-up ripple detail. Lower values significantly improve planetary surface FPS (applies immediately).")
+	if c then
+		Engine.SetWaterQuality(waterLevels[selectedWater+1])
 	end
 
 	c,selectedDetail = combo(lui.PLANET_DETAIL_DISTANCE, selectedDetail, detailLabels, lui.DETAIL_DESC)

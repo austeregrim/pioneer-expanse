@@ -18,31 +18,27 @@ TerrainColorFractal<TerrainColorAsteroid>::TerrainColorFractal(const SystemBody 
 template <>
 vector3d TerrainColorFractal<TerrainColorAsteroid>::GetColor(const vector3d &p, double height, const vector3d &norm) const
 {
-	double n = m_invMaxHeight * height / 2;
+	const double hNorm = Clamp(m_invMaxHeight * height, 0.0, 1.0);
+	const double flatness = Clamp(p.Dot(norm), 0.0, 1.0);
+	const double steepness = Clamp(1.0 - pow(flatness, 4.0), 0.0, 1.0);
 
-	if (n <= 0.02) {
-		const double flatness = pow(p.Dot(norm), 6.0);
-		const vector3d color_cliffs = m_rockColor[1];
+	// Space-weathered regolith vs freshly exposed crater walls and ridges
+	const double regolithVar = octavenoise(6, 0.52, 2.1, p * 4.5);
+	const double mineralBand = octavenoise(5, 0.5, 2.0, p * 1.8 + vector3d(0.0, hNorm * 1.5, 0.0));
 
-		double equatorial_desert = (2.0) * (-1.0 + 2.0 * octavenoise(12, 0.5, 2.0, (n * 2.0) * p)) *
-			1.0 * (2.0) * (1.0 - p.y * p.y);
+	const vector3d darkRegolith = m_darkrockColor[0] * 0.65 + m_greyrockColor[0] * 0.25;
+	const vector3d midRegolith = interpolate_color(mineralBand, m_greyrockColor[1] * 0.85, m_rockColor[0] * 0.82);
+	const vector3d freshRock = interpolate_color(regolithVar, m_greyrockColor[2] * 1.08, m_rockColor[2] * 1.05);
 
-		vector3d col;
-		col = interpolate_color(equatorial_desert, m_rockColor[0], m_greyrockColor[3]);
-		col = interpolate_color(n, col, vector3d(1.5, 1.35, 1.3));
-		col = interpolate_color(flatness, color_cliffs, col);
-		return col;
-	} else {
-		const double flatness = pow(p.Dot(norm), 6.0);
-		const vector3d color_cliffs = m_greyrockColor[1];
+	// Deeper basins collect darker weathered dust; higher ridges & crater rims expose brighter silicate/iron
+	vector3d col = interpolate_color(Clamp(hNorm * 1.35 + (regolithVar - 0.5) * 0.25, 0.0, 1.0), darkRegolith, midRegolith);
+	col = interpolate_color(steepness, col, freshRock);
 
-		double equatorial_desert = (2.0) * (-1.0 + 2.0 * octavenoise(12, 0.5, 2.0, (n * 2.0) * p)) *
-			1.0 * (2.0) * (1.0 - p.y * p.y);
-
-		vector3d col;
-		col = interpolate_color(equatorial_desert, m_greyrockColor[0], m_greyrockColor[2]);
-		col = interpolate_color(n, col, m_rockColor[3]);
-		col = interpolate_color(flatness, color_cliffs, col);
-		return col;
+	// Subtle frost/bright mineral glint on icy asteroids
+	if (m_icyness > 0.25) {
+		const double frostMask = Clamp((m_icyness - 0.25) * 1.2 * (0.4 + 0.6 * steepness) * regolithVar, 0.0, 0.75);
+		col = interpolate_color(frostMask, col, vector3d(0.82, 0.86, 0.92));
 	}
+
+	return col;
 }

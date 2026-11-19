@@ -21,6 +21,7 @@ PushConstant float enhancedGraphics
 
 Buffer LightData binding=0
 Buffer DrawData binding=1
+Buffer SpotLightData binding=3
 
 Vertex "multi.vert"
 Fragment "multi.frag"

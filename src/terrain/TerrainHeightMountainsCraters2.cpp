@@ -81,10 +81,13 @@ void TerrainHeightFractal<TerrainHeightMountainsCraters2>::GetHeights(const vect
 		else
 			n += m;
 
-		for (size_t i = 5; i < 10; i++) {
-			n += crater_function(m_fracdef[i], m_quatDefs[i] * p);
-		}
+		// Smooth low valley floors for realistic landable basins alongside towering cratered peaks
+		n = smooth_basin_floor(n, 0.14, 0.05);
+
+		// True multi-scale cellular impact craters with central rebound peaks on major basins
+		n += multi_scale_craters(p, 4.0, 4, 0.14, 0.54, 0.26, m_seed ^ 0xA7C2u);
+
 		n *= m_maxHeight;
-		heightsOut[i] = (n > 0.0 ? n : 0.0);
+		heightsOut[i] = Clamp(n, 0.0, m_maxHeight);
 	}
 }

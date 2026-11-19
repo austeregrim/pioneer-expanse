@@ -7,6 +7,13 @@ Shader planet_clouds
 
 PushConstant vec4 cloudParams
 PushConstant vec4 cloudTint
+PushConstant vec4 weatherParams
+PushConstant vec4 cloudScale
+PushConstant vec4 cloudGeom
+PushConstant vec3 cloudCenter
+PushConstant vec4 layerParams
+PushConstant vec4 flashCell
+PushConstant vec3 camDirObj
 PushConstant float uTime
 
 Buffer LightData binding=0

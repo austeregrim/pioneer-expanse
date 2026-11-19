@@ -84,10 +84,13 @@ void TerrainHeightFractal<TerrainHeightHillsCraters2>::GetHeights(const vector3d
 		else
 			n += m;
 
-		for (size_t i = 3; i < 9; i++) {
-			n += crater_function(m_fracdef[i], m_quatDefs[i] * p);
-		}
+		// Smoothly level low plains for landable/drivable basins while preserving hills & rims
+		n = smooth_basin_floor(n, 0.12, 0.05);
+
+		// True multi-scale cellular impact craters (bowls, rims, ejecta aprons)
+		n += multi_scale_craters(p, 4.5, 4, 0.12, 0.56, 0.20, m_seed ^ 0xC2A7u);
+
 		n *= m_maxHeight;
-		heightsOut[i] = (n > 0.0 ? n : 0.0);
+		heightsOut[i] = Clamp(n, 0.0, m_maxHeight);
 	}
 }

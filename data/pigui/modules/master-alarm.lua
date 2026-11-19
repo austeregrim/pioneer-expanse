@@ -1,6 +1,7 @@
 -- Copyright © 2008-2026 Pioneer Developers. See AUTHORS.txt for details
 -- Licensed under the terms of the GPL v3. See licenses/GPL-3.txt
 
+local Event = require 'Event'
 local Game = require 'Game'
 local Gravity = require 'pigui.libs.gravity'
 local gameView = require 'pigui.views.game'
@@ -19,6 +20,26 @@ local alreadyAlertedFuel = false
 local alreadyAlertedPres = false
 local alreadyAlertedDescent = false
 local alreadyAlertedImpact = false
+local alreadyAlertedWindShear = false
+local alreadyAlertedTurb = false
+local alreadyAlertedStorm = false
+local lastWindShearChimeTime = -1000
+local lastTurbChimeTime = -1000
+local lastStormChimeTime = -1000
+
+Event.Register("onGameStart", function()
+	alreadyAlertedTemp = false
+	alreadyAlertedFuel = false
+	alreadyAlertedPres = false
+	alreadyAlertedDescent = false
+	alreadyAlertedImpact = false
+	alreadyAlertedWindShear = false
+	alreadyAlertedTurb = false
+	alreadyAlertedStorm = false
+	lastWindShearChimeTime = -1000
+	lastTurbChimeTime = -1000
+	lastStormChimeTime = -1000
+end)
 
 local TWR_BLINK_PERIOD = 2.0
 local TWR_HUD_WARNING_THRESHOLD = 1.1
@@ -130,8 +151,7 @@ local function alarm ()
 				ui.addStyledText(uiTextPos, ui.anchor.center, ui.anchor.top, lui.HUD_WARNING_DESCENT_RATE, colors.alertRed, pionillium.large, nil, colors.lightBlackBackground)
 			end
 			if not alreadyAlertedDescent then
-				-- FIXME: alarm_descent is *REALLY* loud. Needs to be properly mixed.
-				ui.playSfx("alarm_descent", 0.2, 0.2)
+				ui.playSfx("alarm_descent", 0.75, 0.75)
 				alreadyAlertedDescent = true
 			end
 
@@ -182,6 +202,69 @@ local function alarm ()
 				end
 			end
 		end
+	end
+
+	-- Atmospheric weather advisories (soft aviation chimes + HUD callouts with hysteresis & cooldown)
+	local weather = (Game.player.flightState == "FLYING" and frame and frame:IsPlanet() and frame.GetWeatherState) and frame:GetWeatherState(Game.player) or nil
+	if weather and weather.hasAtmosphere and weather.density > 0.02 then
+		local now = ui.getTime()
+		local uiTextPos = Vector2(ui.screenWidth / 2, ui.screenHeight / 3 - 10)
+		local canDrawHud = (Game.CurrentView() == "WorldView") and (not ui.optionsWindow.isOpen) and (not showingHudWarning)
+
+		-- Wind shear caution below 12 km
+		local windShearActive = (weather.windShear >= 0.55) and (weather.altitude < 12000)
+		if windShearActive then
+			if not alreadyAlertedWindShear and (now - lastWindShearChimeTime) >= 20.0 then
+				ui.playSfx("weather_windshear", 0.75, 0.75)
+				lastWindShearChimeTime = now
+			end
+			alreadyAlertedWindShear = true
+			if canDrawHud then
+				showingHudWarning = true
+				canDrawHud = false
+				ui.addStyledText(uiTextPos, ui.anchor.center, ui.anchor.top, lui.HUD_WARNING_WIND_SHEAR, colors.alertYellow, pionillium.large, nil, colors.lightBlackBackground)
+			end
+		elseif weather.windShear < 0.35 or weather.altitude >= 12000 then
+			alreadyAlertedWindShear = false
+		end
+
+		-- Severe turbulence caution
+		if weather.turbulence >= 0.65 then
+			if not alreadyAlertedTurb and (now - lastTurbChimeTime) >= 25.0 then
+				ui.playSfx("weather_turbulence", 0.70, 0.70)
+				lastTurbChimeTime = now
+			end
+			alreadyAlertedTurb = true
+			if canDrawHud then
+				showingHudWarning = true
+				canDrawHud = false
+				ui.addStyledText(uiTextPos, ui.anchor.center, ui.anchor.top, lui.HUD_WARNING_SEVERE_TURBULENCE, colors.alertYellow, pionillium.large, nil, colors.lightBlackBackground)
+			end
+		elseif weather.turbulence < 0.45 then
+			alreadyAlertedTurb = false
+		end
+
+		-- Storm / dust storm advisory
+		if weather.stormIntensity >= 0.60 then
+			if not alreadyAlertedStorm and (now - lastStormChimeTime) >= 45.0 then
+				ui.playSfx("weather_advisory", 0.65, 0.65)
+				lastStormChimeTime = now
+			end
+			alreadyAlertedStorm = true
+			if canDrawHud then
+				showingHudWarning = true
+				local isDust = (weather.precipType == "DUST")
+				local text = isDust and lui.HUD_WARNING_DUST_STORM_ADVISORY or lui.HUD_WARNING_STORM_ADVISORY
+				local col = isDust and colors.alertYellow or ui.theme.styleColors.accent_200
+				ui.addStyledText(uiTextPos, ui.anchor.center, ui.anchor.top, text, col, pionillium.large, nil, colors.lightBlackBackground)
+			end
+		elseif weather.stormIntensity < 0.40 then
+			alreadyAlertedStorm = false
+		end
+	else
+		alreadyAlertedWindShear = false
+		alreadyAlertedTurb = false
+		alreadyAlertedStorm = false
 	end
 
 end

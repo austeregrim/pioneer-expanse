@@ -149,6 +149,14 @@ namespace Graphics {
 	};
 	static_assert(sizeof(LightData) == 48, "LightData glsl struct has incorrect size/alignment in C++");
 
+	struct SpotLightUBO {
+		Graphics::SpotLight lights[Graphics::MAX_SPOT_LIGHTS];
+		float count;
+		float pad[3];
+	};
+	static_assert(sizeof(Graphics::SpotLight) == 48, "SpotLight glsl struct has incorrect size/alignment in C++");
+	static_assert(sizeof(SpotLightUBO) == 208, "SpotLightUBO glsl struct has incorrect size/alignment in C++");
+
 	// static method instantiations
 	void RendererOGL::RegisterRenderer()
 	{
@@ -295,6 +303,7 @@ namespace Graphics {
 		GetDrawUniformBuffer(0);
 
 		m_lightUniformBuffer = {};
+		m_spotLightUniformBuffer = {};
 	}
 
 	RendererOGL::~RendererOGL()
@@ -304,6 +313,7 @@ namespace Graphics {
 		}
 
 		m_lightUniformBuffer = {};
+		m_spotLightUniformBuffer = {};
 
 		m_tempVtxBuffers.clear();
 
@@ -582,6 +592,7 @@ namespace Graphics {
 		stat.SetStatCount(Stats::STAT_NUM_SHADER_PROGRAMS, numShaderPrograms);
 
 		m_lightUniformBuffer = {};
+		m_spotLightUniformBuffer = {};
 
 		return true;
 	}
@@ -819,6 +830,19 @@ namespace Graphics {
 		}
 
 		return true;
+	}
+
+	void RendererOGL::SetSpotLights(uint32_t numLights, const SpotLight *lights)
+	{
+		const uint32_t clampedCount = lights ? std::min(numLights, Graphics::MAX_SPOT_LIGHTS) : 0u;
+		auto spotData = GetDrawUniformBuffer(sizeof(SpotLightUBO))->Allocate<SpotLightUBO>(m_spotLightUniformBuffer);
+		assert(spotData.isValid());
+		SpotLightUBO &ubo = *spotData.data();
+		ubo = {};
+		ubo.count = float(clampedCount);
+		for (uint32_t i = 0; i < clampedCount; ++i) {
+			ubo.lights[i] = lights[i];
+		}
 	}
 
 	bool RendererOGL::SetAmbientColor(const Color &c)
@@ -1185,6 +1209,16 @@ namespace Graphics {
 	const BufferBinding<UniformBuffer> &RendererOGL::GetLightUniformBuffer()
 	{
 		return m_lightUniformBuffer;
+	}
+
+	const BufferBinding<UniformBuffer> &RendererOGL::GetSpotLightUniformBuffer()
+	{
+		if (m_spotLightUniformBuffer.buffer == nullptr) {
+			auto spotData = GetDrawUniformBuffer(sizeof(SpotLightUBO))->Allocate<SpotLightUBO>(m_spotLightUniformBuffer);
+			assert(spotData.isValid());
+			*spotData.data() = {};
+		}
+		return m_spotLightUniformBuffer;
 	}
 
 	OGL::UniformLinearBuffer *RendererOGL::GetDrawUniformBuffer(Uint32 size)

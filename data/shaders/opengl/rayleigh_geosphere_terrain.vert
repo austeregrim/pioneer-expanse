@@ -14,7 +14,12 @@ uniform sampler2D scatterLUT;
 out vec3 varyingEyepos;
 out vec3 varyingNormal;
 out vec3 objNormal;
+out vec3 patchLocalPos;
+out vec3 varyingObjX;
+out vec3 varyingObjY;
+out vec3 varyingObjZ;
 out vec3 rawAlbedo;
+out vec3 varyingInscatter;
 out vec4 vertexColor;
 
 out vec2 texCoord0;
@@ -26,8 +31,13 @@ void main(void)
 	vertexColor = a_color;
 	rawAlbedo = a_color.rgb;
 	objNormal = normalize(a_normal);
+	patchLocalPos = a_vertex.xyz;
 	varyingEyepos = vec3(uViewMatrix * a_vertex);
-	varyingNormal = normalize(normalMatrix() * a_normal);
+	mat3 nMat = normalMatrix();
+	varyingNormal = normalize(nMat * a_normal);
+	varyingObjX = normalize(nMat * vec3(1.0, 0.0, 0.0));
+	varyingObjY = normalize(nMat * vec3(0.0, 1.0, 0.0));
+	varyingObjZ = normalize(nMat * vec3(0.0, 0.0, 1.0));
 
 	texCoord0 = a_uv0.xy;
 	dist = length(varyingEyepos);
@@ -49,6 +59,8 @@ void main(void)
 
 	vec4 terrainColor = vec4(0.f);
 	vec4 atmosphereColor = vec4(0.f);
+	vec3 inscatterColor = vec3(0.f);
+	varyingInscatter = vec3(0.f);
 
 	for (int i=0; i<NUM_LIGHTS; ++i) {
 		vec3 terrainDiffIn = vec3(0.f);
@@ -102,9 +114,13 @@ void main(void)
 		}
 #endif // TERRAIN_WITH_WATER
 
-		// Water has no diffuse reflection, and is fully specular.
-		// TODO: this formulation is likely incorrect, this needs to be Blinn-Phong (N dot H) * (inscattering + direct light * transmittance)
-		terrain = terrain * step(waterSpecular, vec3(0)) + waterSpecular * 20;
+		// Water has no diffuse reflection, and is fully specular in Classic mode.
+		// In Enhanced mode, preserve deep ocean blue diffuse base and let the fragment shader handle turbulent water + Fresnel.
+		if (enhancedGraphics >= 0.5) {
+			terrain = terrain + waterSpecular * 2.6;
+		} else {
+			terrain = terrain * step(waterSpecular, vec3(0)) + waterSpecular * 20;
+		}
 #endif // ATMOSPHERE
 
 		// add lava glow
@@ -124,8 +140,8 @@ void main(void)
 
 		// Apply the optical transmittance of the terrain -> view vector to our accumulated light
 		terrain *= calcTransmittance(opticalDistance);
-		// And add the (pre-damped) inscattering over the same length. We multiply by 4 to fake multiple scattering.
-		terrain += inscattering * 4;
+		// Pass Rayleigh multiple-scattering haze separately so Enhanced surface detail & micro-shading apply before aerial haze
+		inscatterColor += inscattering * 4.0;
 
 #endif // ATMOSPHERE
 
@@ -133,5 +149,8 @@ void main(void)
 	}
 
 	vertexColor = terrainColor;
+	varyingInscatter = inscatterColor;
+#else
+	varyingInscatter = vec3(0.f);
 #endif // (NUM_LIGHTS > 0)
 }

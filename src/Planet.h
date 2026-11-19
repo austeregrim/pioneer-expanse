@@ -7,6 +7,7 @@
 #include "RefCounted.h"
 #include "TerrainBody.h"
 #include "graphics/VertexArray.h"
+#include "planet/WeatherSystem.h"
 
 namespace Graphics {
 	class Renderer;
@@ -30,6 +31,7 @@ public:
 	bool TraceRingRay(FrameId rayFrameId, const vector3d &startPos, const vector3d &dir, double maxLen, bool isMining, double &outHitDist);
 
 	void GetAtmosphericState(double dist, double *outPressure, double *outDensity) const;
+	WeatherState GetWeatherState(const vector3d &posRotFrame, double gameTime) const;
 	double GetAtmosphereRadius() const { return m_atmosphereRadius; }
 
 	friend class ObjectViewerView;

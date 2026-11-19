@@ -24,6 +24,10 @@ namespace SceneGraph {
 	class StaticGeometry;
 }
 
+namespace Graphics {
+	struct SpotLight;
+}
+
 class AICommand;
 class Camera;
 class CargoBody;
@@ -35,12 +39,14 @@ class NavLights;
 class Planet;
 class Sensors;
 class ShipController;
+class ShipLights;
 class SupercruiseController;
 class Space;
 class GunManager;
 
 struct CollisionContact;
 struct HeatGradientParameters_t;
+struct WeatherState;
 
 namespace Graphics {
 	class Renderer;
@@ -154,11 +160,21 @@ public:
 
 	// vector3d CalcAtmoPassiveControl() const;
 	vector3d CalcAtmoTorque() const;
+	bool GetCurrentWeatherState(WeatherState &outWeather) const;
 
 	FlightState GetFlightState() const { return m_flightState; }
 	void SetFlightState(FlightState s);
 	float GetWheelState() const { return m_wheelState; }
 	int GetWheelTransition() const { return m_wheelTransition; }
+	bool GetBeaconsEnabled() const { return m_beaconsEnabled; }
+	void SetBeaconsEnabled(bool on) { m_beaconsEnabled = on; }
+	bool GetForwardLightsEnabled() const { return m_forwardLightsEnabled; }
+	void SetForwardLightsEnabled(bool on) { m_forwardLightsEnabled = on; }
+	bool GetLandingLightsEnabled() const { return m_landingLightsEnabled; }
+	void SetLandingLightsEnabled(bool on) { m_landingLightsEnabled = on; }
+	void CollectSpotLights(const matrix4x4d &shipToCam, std::vector<Graphics::SpotLight> &outLights) const;
+	void RenderCockpitLights(Graphics::Renderer *r, const matrix4x4d &shipToCam);
+	float CalcLightBeamScatter() const;
 	bool SpawnCargo(CargoBody *c_body);
 	void ProcessSpawnQueue();
 
@@ -412,7 +428,11 @@ private:
 
 	SceneGraph::Animation *m_landingGearAnimation;
 	std::unique_ptr<NavLights> m_navLights;
+	std::unique_ptr<ShipLights> m_shipLights;
 	std::unique_ptr<SupercruiseController> m_supercruise;
+	bool m_beaconsEnabled = true;
+	bool m_forwardLightsEnabled = false;
+	bool m_landingLightsEnabled = false;
 
 	std::unique_ptr<Sensors> m_sensors;
 	std::unordered_map<Body *, Uint8> m_relationsMap;

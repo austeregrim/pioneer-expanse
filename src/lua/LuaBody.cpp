@@ -24,6 +24,7 @@
 #include "ModelBody.h"
 #include "Planet.h"
 #include "Player.h"
+#include "planet/WeatherSystem.h"
 #include "Ship.h"
 #include "SpaceStation.h"
 #include "Star.h"
@@ -677,6 +678,47 @@ static int l_body_get_atmospheric_state(lua_State *l)
 	}
 }
 
+static int l_body_get_weather_state(lua_State *l)
+{
+	Body *planetBody = LuaObject<Body>::CheckFromLua(1);
+	Body *b = LuaObject<Body>::CheckFromLua(2);
+	if (!planetBody->IsType(ObjectType::PLANET)) {
+		lua_pushnil(l);
+		return 1;
+	}
+
+	const double gameTime = Pi::game ? Pi::game->GetTime() : 0.0;
+	const vector3d pos = b->GetPositionRelTo(planetBody);
+	const WeatherState w = static_cast<Planet *>(planetBody)->GetWeatherState(pos, gameTime);
+
+	lua_createtable(l, 0, 24);
+	pi_lua_settable(l, "hasAtmosphere", w.hasAtmosphere);
+	pi_lua_settable(l, "pressure", w.pressureAtm);
+	pi_lua_settable(l, "density", w.densityKgM3);
+	pi_lua_settable(l, "altitude", w.altitudeM);
+	pi_lua_settable(l, "localTempK", w.localTempK);
+	pi_lua_settable(l, "windSpeed", w.windSpeed);
+	pi_lua_settable(l, "gustSpeed", w.gustSpeed);
+	pi_lua_settable(l, "totalWindSpeed", w.totalWindSpeed);
+	pi_lua_settable(l, "verticalDraft", w.verticalDraft);
+	pi_lua_settable(l, "windHeading", w.windHeadingDeg);
+	pi_lua_settable(l, "turbulence", w.turbulence);
+	pi_lua_settable(l, "windShear", w.windShear);
+	pi_lua_settable(l, "stormIntensity", w.stormIntensity);
+	pi_lua_settable(l, "cloudCover", w.cloudCover);
+	pi_lua_settable(l, "lowerCloudCover", w.lowerCloudCover);
+	pi_lua_settable(l, "upperCloudCover", w.upperCloudCover);
+	pi_lua_settable(l, "lowerCloudAlt", w.lowerCloudAltM);
+	pi_lua_settable(l, "upperCloudAlt", w.upperCloudAltM);
+	pi_lua_settable(l, "precipIntensity", w.precipIntensity);
+	pi_lua_settable(l, "lightningActivity", w.lightningActivity);
+	pi_lua_settable(l, "precipType", WeatherSystem::GetPrecipitationName(w.precipType));
+	pi_lua_settable(l, "condition", WeatherSystem::GetConditionName(w.condition));
+	pi_lua_settable(l, "climate", WeatherSystem::GetClimateName(w.climateZone));
+	pi_lua_settable(l, "season", WeatherSystem::GetSeasonName(w.season));
+	return 1;
+}
+
 static int l_body_get_label(lua_State *l)
 {
 	Body *b = LuaObject<Body>::CheckFromLua(1);
@@ -828,6 +870,7 @@ void LuaObject<Body>::RegisterClass()
 		{ "GetAltitudeRelTo", l_body_get_altitude_rel_to },
 		{ "GetPhysicalRadius", l_body_get_phys_radius },
 		{ "GetAtmosphericState", l_body_get_atmospheric_state },
+		{ "GetWeatherState", l_body_get_weather_state },
 		{ "GetLabel", l_body_get_label },
 		{ "IsMoreImportantThan", l_body_is_more_important_than },
 		{ "IsMoon", l_body_is_moon },

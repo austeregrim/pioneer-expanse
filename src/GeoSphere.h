@@ -119,7 +119,10 @@ private:
 
 	RefCountedPtr<Graphics::Texture> m_texHi;
 	RefCountedPtr<Graphics::Texture> m_texLo;
+	RefCountedPtr<Graphics::Texture> m_texOceanSwell;
+	RefCountedPtr<Graphics::Texture> m_texOceanChop;
 	RefCountedPtr<Graphics::Material> m_cloudMaterial;
+	RefCountedPtr<Graphics::Material> m_cloudInsideMaterial;
 
 	enum EGSInitialisationStage {
 		eBuildFirstPatches = 0,

@@ -16,12 +16,15 @@
 #include "FileSystem.h"
 #include "Pi.h"
 #include "Planet.h"
+#include "perlin.h"
+#include "planet/WeatherSystem.h"
 #include "galaxy/SystemBody.h"
 #include "Player.h" // <-- Here only for 1 occurrence of "Pi::player" in Ship::Explode
 #include "Sensors.h"
 #include "Sfx.h"
 #include "Shields.h"
 #include "ShipAICmd.h"
+#include "ship/ShipLights.h"
 #include "Space.h"
 #include "SpaceStation.h"
 #include "WorldView.h"
@@ -302,6 +305,9 @@ Ship::Ship(const Json &jsonObj, Space *space) :
 		m_controller->LoadFromJson(shipObj);
 
 		m_navLights->LoadFromJson(shipObj);
+		m_beaconsEnabled = shipObj.value("beacons_enabled", true);
+		m_forwardLightsEnabled = shipObj.value("forward_lights_enabled", false);
+		m_landingLightsEnabled = shipObj.value("landing_lights_enabled", m_wheelState > 0.01f);
 		if (m_supercruise)
 			m_supercruise->LoadFromJson(shipObj);
 
@@ -334,7 +340,8 @@ void Ship::Init()
 	m_sensors.reset(new Sensors(this));
 
 	m_navLights.reset(new NavLights(GetModel()));
-	m_navLights->SetEnabled(true);
+	m_navLights->SetEnabled(m_beaconsEnabled);
+	m_shipLights.reset(new ShipLights(GetModel(), GetPhysRadius()));
 	m_supercruise.reset(new SupercruiseController(this));
 
 	SetMassDistributionFromModel();
@@ -431,6 +438,9 @@ void Ship::SaveToJson(Json &jsonObj, Space *space)
 	m_controller->SaveToJson(shipObj, space);
 
 	m_navLights->SaveToJson(shipObj);
+	shipObj["beacons_enabled"] = m_beaconsEnabled;
+	shipObj["forward_lights_enabled"] = m_forwardLightsEnabled;
+	shipObj["landing_lights_enabled"] = m_landingLightsEnabled;
 	if (m_supercruise)
 		m_supercruise->SaveToJson(shipObj, space);
 
@@ -508,6 +518,57 @@ inline int sign(T num)
 	return (num >= 0) - (num < 0);
 }
 
+static double CalcShipNoisePhase(const std::string &label, double scale)
+{
+	uint32_t h = 2166136261u;
+	for (unsigned char c : label) {
+		h = (h ^ c) * 16777619u;
+	}
+	return double(h & 0xFFFFu) * scale;
+}
+
+static double CalcGroundTurbulenceAtten(const Ship *ship)
+{
+	if (!ship || ship->GetWheelState() <= 0.1f)
+		return 1.0;
+
+	const Frame *f = Frame::GetFrame(ship->GetFrame());
+	const Body *astro = (f && f->IsRotFrame()) ? f->GetBody() : nullptr;
+	if (!astro || !astro->IsType(ObjectType::TERRAINBODY))
+		return 1.0;
+
+	const TerrainBody *terrain = static_cast<const TerrainBody *>(astro);
+	const vector3d pos = ship->GetPosition();
+	const double dist = pos.Length();
+	if (dist <= 1e-6)
+		return 1.0;
+
+	const double groundRadius = terrain->GetTerrainHeight(pos / dist);
+	const double agl = std::max(0.0, dist - groundRadius);
+	if (agl >= 50.0)
+		return 1.0;
+
+	return 0.40 + 0.60 * Clamp(agl / 50.0, 0.0, 1.0);
+}
+
+bool Ship::GetCurrentWeatherState(WeatherState &outWeather) const
+{
+	if (m_flightState == SUPERCRUISE || m_flightState == HYPERSPACE)
+		return false;
+
+	Frame *f = Frame::GetFrame(GetFrame());
+	if (!f || !f->IsRotFrame())
+		return false;
+
+	Body *astro = f->GetBody();
+	if (!astro || !astro->IsType(ObjectType::PLANET))
+		return false;
+
+	const double gameTime = Pi::game ? Pi::game->GetTime() : 0.0;
+	outWeather = static_cast<const Planet *>(astro)->GetWeatherState(GetPosition(), gameTime);
+	return outWeather.hasAtmosphere;
+}
+
 vector3d Ship::CalcAtmosphericForce() const
 {
 	// Data from ship.
@@ -523,19 +584,18 @@ vector3d Ship::CalcAtmosphericForce() const
 
 	const double shipLiftCoeff = GetShipType()->shipLiftCoefficient;
 
-	// By converting the velocity into local space, we can apply the drag individually to each component.
-	const vector3d localVel = GetVelocity() * GetOrient();
-
-	// The drag forces applied to the craft, in local space.
-	// TODO: verify dimensional accuracy and that we're not generating more drag than physically possible.
-	// TODO: use a different drag constant for each side (front, back, etc).
-	// This also handles (most of) the lift due to wing deflection.
-
 	// Get current atmosphere parameters
 	double pressure, density;
 	GetCurrentAtmosphericState(pressure, density);
 	if (is_zero_exact(density))
 		return vector3d(0.0);
+
+	WeatherState weather;
+	const bool applyWeather = (m_flightState == FLYING || m_flightState == DOCKING || m_flightState == UNDOCKING) && GetCurrentWeatherState(weather);
+	const vector3d relAirVel = applyWeather ? (GetVelocity() - weather.windVec) : GetVelocity();
+
+	// By converting the relative airspeed into local space, we can apply drag and lift individually to each component.
+	const vector3d localVel = relAirVel * GetOrient();
 
 	// Precalculate common part of drag components calculation (rho / 2)
 	const auto rho_2 = density / 2.;
@@ -564,7 +624,28 @@ vector3d Ship::CalcAtmosphericForce() const
 		fAtmosLift.y = CalcAtmosphericDrag(pow(localVel.z, 2), topCrossSec, shipLiftCoeff) * -AoAMultiplier * 0.2;
 	}
 
-	return GetOrient() * (fAtmosDrag + fAtmosLift);
+	vector3d totalForce = GetOrient() * (fAtmosDrag + fAtmosLift);
+
+	// Balanced aviation-feel aerodynamic gust buffeting in turbulent weather
+	if (applyWeather && weather.turbulence > 0.02) {
+		const double densityFactor = Clamp(density / 1.225, 0.0, 2.2);
+		const double airspeedFactor = 0.60 + 0.40 * Clamp(relAirVel.Length() / 120.0, 0.0, 1.0);
+		const double aiAtten = (m_curAICmd != nullptr || m_flightState == DOCKING || m_flightState == UNDOCKING) ? 0.35 : 1.0;
+		const double groundAtten = CalcGroundTurbulenceAtten(this);
+		const double areaMassScale = Clamp((topCrossSec + sideCrossSec) / std::max(GetMass() * 0.002, 1.0), 0.55, 1.45);
+		const double gustAccel = Clamp((0.20 + 1.35 * weather.turbulence + 0.025 * weather.gustSpeed) *
+			densityFactor * airspeedFactor * areaMassScale * aiAtten * groundAtten, 0.0, 1.8);
+
+		const double phase = CalcShipNoisePhase(GetLabel(), 0.0173);
+		const double tFreq = (Pi::game ? Pi::game->GetTime() : 0.0) * (1.1 + 1.4 * weather.turbulence);
+		const vector3d gustNoise(
+			noise(vector3d(tFreq + phase, 1.3, 4.7)),
+			noise(vector3d(2.9, tFreq * 1.13 + phase, 7.1)) * 0.65,
+			noise(vector3d(5.3, 8.2, tFreq * 0.94 + phase)));
+		totalForce += gustNoise * (gustAccel * GetMass());
+	}
+
+	return totalForce;
 }
 
 //calculates torque to force the spacecraft go nose-first in atmosphere
@@ -575,16 +656,41 @@ vector3d Ship::CalcAtmoTorque() const
 	double m_frontCrossSec = GetShipType()->frontCrossSection;
 	double m_aeroStabilityMultiplier = GetShipType()->atmoStability;
 
+	WeatherState weather;
+	const bool applyWeather = (m_flightState == FLYING || m_flightState == DOCKING || m_flightState == UNDOCKING) && GetCurrentWeatherState(weather);
+	const vector3d relAirVel = applyWeather ? (GetVelocity() - weather.windVec) : GetVelocity();
+	const double airSpeed = relAirVel.Length();
+
 	vector3d forward = GetOrient().VectorZ();
-	vector3d m_vel = GetVelocity().NormalizedSafe();
+	vector3d m_vel = relAirVel.NormalizedSafe();
 	vector3d m_torqueDir = -m_vel.Cross(-forward); // <--- This is correct
 
 	// TODO: evaluate this function and properly implement based upon ship cross-section.
-	double m_drag = CalcAtmosphericDrag(GetVelocity().LengthSqr(), m_topCrossSec, DEFAULT_DRAG_COEFF);
+	double m_drag = CalcAtmosphericDrag(relAirVel.LengthSqr(), m_topCrossSec, DEFAULT_DRAG_COEFF);
 	vector3d fAtmoTorque = vector3d(0.0);
 
-	if (GetVelocity().Length() > 100) { //don't apply torque at minimal speeds
+	if (airSpeed > 100.0) { //don't apply full weathercock torque at minimal speeds
 		fAtmoTorque = m_drag * m_torqueDir * ((m_topCrossSec + m_sideCrossSec) / (m_frontCrossSec * 4)) * 0.3 * m_aeroStabilityMultiplier * Pi::game->GetInvTimeAccelRate();
+	} else if (applyWeather && airSpeed > 15.0) {
+		const double blend = Clamp((airSpeed - 15.0) / 85.0, 0.0, 1.0);
+		fAtmoTorque = m_drag * m_torqueDir * ((m_topCrossSec + m_sideCrossSec) / (m_frontCrossSec * 4)) * (0.18 * blend) * m_aeroStabilityMultiplier * Pi::game->GetInvTimeAccelRate();
+	}
+
+	if (applyWeather && weather.turbulence > 0.02 && weather.densityKgM3 > 1e-4) {
+		const double densityFactor = Clamp(weather.densityKgM3 / 1.225, 0.0, 1.8);
+		const double aiAtten = (m_curAICmd != nullptr || m_flightState == DOCKING || m_flightState == UNDOCKING) ? 0.30 : 1.0;
+		const double groundAtten = CalcGroundTurbulenceAtten(this);
+		const double invTimeScale = Pi::game ? std::min(1.0, double(Pi::game->GetInvTimeAccelRate())) : 1.0;
+
+		const double phase = CalcShipNoisePhase(GetLabel(), 0.0197);
+		const double tFreq = (Pi::game ? Pi::game->GetTime() : 0.0) * (1.2 + 1.8 * weather.turbulence);
+		const vector3d turbLocal(
+			noise(vector3d(tFreq + phase, 3.1, 6.4)),
+			noise(vector3d(7.2, tFreq * 0.87 + phase, 2.3)) * 0.65,
+			noise(vector3d(1.8, 9.5, tFreq * 1.18 + phase)) * 1.15);
+
+		const double angAccelMax = Clamp(0.18 * weather.turbulence * densityFactor * aiAtten * groundAtten * invTimeScale, 0.0, 0.18);
+		fAtmoTorque += (GetOrient() * turbLocal) * (GetAngularInertia() * angAccelMax);
 	}
 
 	return fAtmoTorque;
@@ -1393,8 +1499,11 @@ void Ship::TimeStepUpdate(const float timeStep)
 		UpdateFuel(timeStep);
 	}
 
-	m_navLights->SetEnabled(m_wheelState > 0.01f);
+	const bool beaconsActive = m_beaconsEnabled && (m_flightState != HYPERSPACE);
+	m_navLights->SetEnabled(beaconsActive);
 	m_navLights->Update(timeStep);
+	if (m_shipLights)
+		m_shipLights->Update(timeStep);
 	if (m_sensors.get()) m_sensors->Update(timeStep);
 
 	// Black Box periodic flight path snapshot every 0.5s for ships in flight
@@ -1957,12 +2066,15 @@ void Ship::SpawnThrusterExhaustParticles(float timeStep)
 		return;
 	}
 
-	// Simple ambient wind model: fixed-speed direction tangent to local surface.
-	const vector3f localUp = vector3f(GetPosition().NormalizedSafe());
-	vector3f windDir = vector3f(0.f, 1.f, 0.f).Cross(localUp);
-	if (windDir.LengthSqr() < 1e-8f) windDir = vector3f(1.f, 0.f, 0.f).Cross(localUp);
-	windDir = windDir.NormalizedSafe();
-	const vector3f windVel = windDir * (SfxParams::EXHAUST_WIND_SPEED * float(Clamp(density, 0.0, 1.0)));
+	WeatherState weather;
+	vector3f windVel(0.f);
+	if (GetCurrentWeatherState(weather)) {
+		vector3d wv = weather.windVec;
+		const double wSpeed = wv.Length();
+		if (wSpeed > 60.0)
+			wv = wv * (60.0 / wSpeed);
+		windVel = vector3f(wv);
+	}
 
 	ExhaustEnvironment env;
 	env.density = density;
@@ -2078,9 +2190,36 @@ bool Ship::SetWheelState(bool down)
 	int newWheelTransition = (down ? 1 : -1);
 	if (newWheelTransition == m_wheelTransition) return false;
 	m_wheelTransition = newWheelTransition;
+	m_landingLightsEnabled = down;
 	if (m_landingGearAnimation)
 		GetModel()->SetAnimationActive(GetModel()->FindAnimationIndex(m_landingGearAnimation), true);
 	return true;
+}
+
+float Ship::CalcLightBeamScatter() const
+{
+	float scatter = 0.26f;
+	WeatherState weather;
+	if (GetCurrentWeatherState(weather) && weather.hasAtmosphere && weather.densityKgM3 > 0.002) {
+		const float densFactor = float(Clamp(weather.densityKgM3 / 1.225, 0.0, 1.5));
+		const float weatherBoost = float(Clamp(weather.precipIntensity * 0.45 + weather.stormIntensity * 0.25 + weather.cloudCover * 0.12, 0.0, 0.55));
+		scatter = Clamp(0.30f + 0.18f * densFactor + weatherBoost, 0.26f, 0.85f);
+	}
+	return scatter;
+}
+
+void Ship::CollectSpotLights(const matrix4x4d &shipToCam, std::vector<Graphics::SpotLight> &outLights) const
+{
+	if (!m_shipLights || IsDead() || m_flightState == HYPERSPACE)
+		return;
+	m_shipLights->CollectSpotLights(shipToCam, m_forwardLightsEnabled, m_landingLightsEnabled, outLights);
+}
+
+void Ship::RenderCockpitLights(Graphics::Renderer *r, const matrix4x4d &shipToCam)
+{
+	if (!m_shipLights || IsDead() || m_flightState == HYPERSPACE)
+		return;
+	m_shipLights->RenderCockpitBeams(r, shipToCam, m_forwardLightsEnabled, m_landingLightsEnabled, CalcLightBeamScatter());
 }
 
 void Ship::Render(Graphics::Renderer *renderer, const Camera *camera, const vector3d &viewCoords, const matrix4x4d &viewTransform)
@@ -2106,6 +2245,10 @@ void Ship::Render(Graphics::Renderer *renderer, const Camera *camera, const vect
 	//strncpy(params.pText[0], GetLabel().c_str(), sizeof(params.pText));
 	RenderModel(renderer, camera, viewCoords, viewTransform);
 	m_navLights->Render(renderer);
+	if (m_shipLights && m_flightState != HYPERSPACE) {
+		const matrix4x4d shipToCam = viewTransform * GetInterpMatrix();
+		m_shipLights->RenderExterior(renderer, shipToCam, m_beaconsEnabled, m_forwardLightsEnabled, m_landingLightsEnabled, CalcLightBeamScatter());
+	}
 
 	if (m_shieldModel && shieldsVisible)
 		m_shieldModel->Render(matrix4x4f(viewTransform * GetInterpMatrix()));

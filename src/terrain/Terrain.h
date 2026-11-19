@@ -165,6 +165,7 @@ class TerrainHeightAsteroid;
 class TerrainHeightAsteroid2;
 class TerrainHeightAsteroid3;
 class TerrainHeightAsteroid4;
+class TerrainHeightDwarfPlanet;
 class TerrainHeightBarrenRock;
 class TerrainHeightBarrenRock2;
 class TerrainHeightBarrenRock3;
@@ -222,6 +223,7 @@ class TerrainHeightWaterSolidCanyons;
 class TerrainHeightWaterSolid;
 
 class TerrainColorAsteroid;
+class TerrainColorDwarfPlanet;
 class TerrainColorBandedRock;
 class TerrainColorBlack;
 class TerrainColorDesert;

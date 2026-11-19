@@ -118,6 +118,14 @@ void Planet::GetAtmosphericState(double dist, double *outPressure, double *outDe
 	*outDensity = sbody->GetAtmDensity(height_h, *outPressure);
 }
 
+WeatherState Planet::GetWeatherState(const vector3d &posRotFrame, double gameTime) const
+{
+	const vector3d unitDir = (posRotFrame.LengthSqr() > 1e-12) ? posRotFrame.Normalized() : vector3d(0.0, 1.0, 0.0);
+	const double terrainRad = GetTerrainHeight(unitDir);
+	const double aglM = std::max(0.0, posRotFrame.Length() - terrainRad);
+	return WeatherSystem::SampleWithAgl(GetSystemBody(), posRotFrame, gameTime, aglM);
+}
+
 void Planet::GenerateRings(Graphics::Renderer *renderer)
 {
 	const SystemBody *sbody = GetSystemBody();

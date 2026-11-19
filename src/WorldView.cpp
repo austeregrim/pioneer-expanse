@@ -13,11 +13,15 @@
 #include "Json.h"
 #include "lua/LuaEvent.h"
 #include "Pi.h"
+#include "Planet.h"
 #include "Player.h"
 #include <SDL_keycode.h>
 #include "SectorView.h"
 #include "Sensors.h"
 #include "SpeedLines.h"
+#include "TerrainBody.h"
+#include "planet/WeatherEffects.h"
+#include "planet/WeatherSystem.h"
 #include "graphics/Graphics.h"
 #include "graphics/Material.h"
 #include "graphics/Renderer.h"
@@ -136,6 +140,7 @@ void WorldView::InitObject()
 	*/
 
 	m_speedLines.reset(new SpeedLines(Pi::player));
+	m_weatherEffects.reset(new WeatherEffects(Pi::player));
 
 	//get near & far clipping distances
 	//XXX m_renderer not set yet
@@ -210,9 +215,27 @@ void WorldView::Draw3D()
 	m_viewController->Draw(m_camera.get());
 
 	// Draw 3D HUD
-	// Speed lines
+	// Speed lines and weather particles
 	if (Pi::AreSpeedLinesDisplayed())
 		m_speedLines->Render(m_renderer);
+
+	if (m_weatherEffects)
+		m_weatherEffects->Render(m_renderer);
+
+	// Cockpit view: render active volumetric forward/landing beam cones ahead of the ship
+	if (Pi::player && !Pi::player->IsDead() && shipView && !shipView->IsExteriorView() &&
+		Pi::player->GetFlightState() != Ship::HYPERSPACE &&
+		(!Pi::player->IsDocked() || (Pi::player->GetDockedWith() && Pi::player->GetDockedWith()->IsGroundStation())) &&
+		(Pi::player->GetForwardLightsEnabled() || Pi::player->GetLandingLightsEnabled())) {
+		const FrameId camFrameId = m_cameraContext->GetTempFrame();
+		Frame *shipFrame = Frame::GetFrame(Pi::player->GetFrame());
+		if (camFrameId.valid() && shipFrame) {
+			matrix4x4d shipToCam = shipFrame->GetInterpOrientRelTo(camFrameId);
+			shipToCam.SetTranslate(shipFrame->GetInterpPositionRelTo(camFrameId));
+			shipToCam = shipToCam * Pi::player->GetInterpMatrix();
+			Pi::player->RenderCockpitLights(m_renderer, shipToCam);
+		}
+	}
 
 	// Contact trails (sublight contacts only; Supercruise ships draw short white/Doppler FTL wakes)
 	if (Pi::AreHudTrailsDisplayed()) {
@@ -312,16 +335,20 @@ void WorldView::Update()
 
 	FrameId playerFrameId = Pi::player->GetFrame();
 	FrameId camFrameId = m_cameraContext->GetTempFrame();
+	matrix4x4d frameRotToCam;
+	Frame::GetFrameTransform(playerFrameId, camFrameId, frameRotToCam);
+	frameRotToCam[12] = frameRotToCam[13] = frameRotToCam[14] = 0.0;
+	frameRotToCam[15] = 1.0;
 
 	//speedlines and contact trails need camFrame for transform, so they must be updated here
 	if (m_speedLines.get() && Pi::AreSpeedLinesDisplayed()) {
 		m_speedLines->Update(m_game->GetTimeStep());
+		m_speedLines->SetTransform(frameRotToCam);
+	}
 
-		matrix4x4d trans;
-		Frame::GetFrameTransform(playerFrameId, camFrameId, trans);
-		trans[12] = trans[13] = trans[14] = 0.0;
-		trans[15] = 1.0;
-		m_speedLines->SetTransform(trans);
+	if (m_weatherEffects) {
+		m_weatherEffects->Update(m_game->GetTimeStep());
+		m_weatherEffects->SetTransform(frameRotToCam);
 	}
 
 	if (Pi::AreHudTrailsDisplayed()) {
@@ -711,11 +738,31 @@ void WorldView::DrawStarLensFlare()
 		return;
 	const float aspect = winW / winH;
 
-	// Collect celestial and orbital station occluders in camera space for smooth eclipse attenuation
+	// Gently soften lens flare inside atmosphere & under thick overcast cloud decks
+	float atmoAtten = 1.0f;
+	if (m_camera && m_camera->IsInAtmosphere()) {
+		atmoAtten = 0.72f;
+		const Frame *camFrame = Frame::GetFrame(camFrameId);
+		const Frame *camParent = camFrame ? Frame::GetFrame(camFrame->GetParent()) : nullptr;
+		if (camParent && camParent->IsRotFrame() && camParent->GetBody() && camParent->GetBody()->IsType(ObjectType::PLANET)) {
+			const Planet *planet = static_cast<const Planet *>(camParent->GetBody());
+			const vector3d camInRot = -(camParent->GetInterpOrientRelTo(camFrameId).Transpose() * camParent->GetInterpPositionRelTo(camFrameId));
+			const WeatherState weather = planet->GetWeatherState(camInRot, m_game->GetTime());
+			if (weather.hasAtmosphere && weather.altitudeM < weather.lowerCloudAltM + 1500.0) {
+				const float cloudOcc = Clamp(float(weather.lowerCloudCover * 0.85 + weather.upperCloudCover * 0.25), 0.0f, 1.0f);
+				atmoAtten = 0.72f * (1.0f - 0.80f * cloudOcc);
+			}
+		}
+	}
+
+	// Collect celestial and orbital station occluders in camera space for smooth eclipse & terrain ray occlusion
 	struct FlareOccluder {
 		vector3d pos;
 		double dist;
 		double radius;
+		double maxRadius;
+		matrix3x3d orientToCam;
+		const TerrainBody *terrainBody;
 	};
 	std::vector<FlareOccluder> occluders;
 	for (Body *b : m_game->GetSpace()->GetBodies()) {
@@ -730,20 +777,22 @@ void WorldView::DrawStarLensFlare()
 				return; // Camera is inside an orbital station bay; hide exterior star flare
 			const double r = std::max(b->GetPhysRadius(), 350.0);
 			if (dist > r)
-				occluders.push_back({ p, dist, r });
+				occluders.push_back({ p, dist, r, r, matrix3x3d::Identity, nullptr });
 			continue;
 		}
 
 		if (!b->IsType(ObjectType::TERRAINBODY) || b->IsType(ObjectType::STAR))
 			continue;
-		const SystemBody *sb = b->GetSystemBody();
-		const double r = sb ? sb->GetRadius() : b->GetPhysRadius();
+		const TerrainBody *tb = static_cast<const TerrainBody *>(b);
+		const SystemBody *sb = tb->GetSystemBody();
+		const double r = sb ? sb->GetRadius() : tb->GetPhysRadius();
 		if (r <= 0.0)
 			continue;
-		const vector3d p = b->GetInterpPositionRelTo(camFrameId);
+		const double maxR = std::max(r, tb->GetMaxFeatureRadius());
+		const vector3d p = tb->GetInterpPositionRelTo(camFrameId);
 		const double dist = p.Length();
-		if (dist > r * 0.995)
-			occluders.push_back({ p, dist, r });
+		if (dist > 1.0)
+			occluders.push_back({ p, dist, r, maxR, tb->GetInterpOrientRelTo(camFrameId), tb });
 	}
 
 	const double fovRad = DEG2RAD(std::max(10.0f, m_cameraContext->GetFovAng()));
@@ -795,24 +844,38 @@ void WorldView::DrawStarLensFlare()
 		const double angStar = std::asin(Clamp(starR / dist, 0.0, 1.0));
 		const vector3d starDir = starCamPos / dist;
 
-		// Smooth angular eclipse occlusion against planets, moons, and stations
+		// Smooth angular eclipse & 3D terrain ridge occlusion against planets, mountains, moons, and stations
 		float visibility = 1.0f;
 		for (const FlareOccluder &occ : occluders) {
 			if (occ.dist >= dist)
 				continue;
 			const vector3d occDir = occ.pos / occ.dist;
 			const double dotDir = Clamp(starDir.Dot(occDir), -1.0, 1.0);
-			if (dotDir <= 0.0)
-				continue;
-			const double angOcc = std::asin(Clamp(occ.radius / occ.dist, 0.0, 1.0));
-			const double angSep = std::acos(dotDir);
-			if (angSep <= angOcc - angStar) {
-				visibility = 0.0f;
-				break;
+			if (occ.dist > occ.radius && dotDir > 0.0) {
+				const double angOcc = std::asin(Clamp(occ.radius / occ.dist, 0.0, 1.0));
+				const double angSep = std::acos(dotDir);
+				if (angSep <= angOcc - angStar) {
+					visibility = 0.0f;
+					break;
+				}
+				if (angSep < angOcc + angStar) {
+					const float frac = float(Clamp((angSep - (angOcc - angStar)) / std::max(2.0 * angStar, 1e-5), 0.0, 1.0));
+					visibility = std::min(visibility, frac * frac * (3.0f - 2.0f * frac));
+				}
 			}
-			if (angSep < angOcc + angStar) {
-				const float frac = float(Clamp((angSep - (angOcc - angStar)) / std::max(2.0 * angStar, 1e-5), 0.0, 1.0));
-				visibility = std::min(visibility, frac * frac * (3.0f - 2.0f * frac));
+
+			if (visibility > 0.005f && occ.terrainBody && occ.maxRadius > occ.radius + 1.0) {
+				const matrix3x3d camToBody = occ.orientToCam.Transpose();
+				const vector3d camPosP = camToBody * (-occ.pos);
+				const vector3d starDirP = (camToBody * starDir).NormalizedSafe();
+				const float terrVis = WeatherSystem::ComputeTerrainRayVisibility(
+					camPosP, starDirP, dist, occ.radius, occ.maxRadius, angStar,
+					[tb = occ.terrainBody](const vector3d &u) { return tb->GetTerrainHeight(u); });
+				visibility = std::min(visibility, terrVis);
+				if (visibility <= 0.005f) {
+					visibility = 0.0f;
+					break;
+				}
 			}
 		}
 		if (visibility <= 0.005f)
@@ -822,12 +885,6 @@ void WorldView::DrawStarLensFlare()
 		const double effDistRadii = dist / (starR * std::max(0.65, std::pow(lum, 0.35)));
 		const float distFade = float(Clamp(1.0 / (1.0 + std::pow(effDistRadii / 180.0, 1.15)), 0.14, 1.0));
 		const float lumBoost = float(Clamp(0.65 + 0.35 * std::pow(lum, 0.18), 0.45, 1.15));
-
-		// Gently soften lens flare when deep inside a thick atmosphere
-		float atmoAtten = 1.0f;
-		if (m_camera && m_camera->IsInAtmosphere()) {
-			atmoAtten = 0.72f;
-		}
 
 		const float intensity = Clamp(distFade * lumBoost * edgeFade * visibility * atmoAtten * 0.92f, 0.0f, 1.0f);
 		if (intensity <= 0.005f)

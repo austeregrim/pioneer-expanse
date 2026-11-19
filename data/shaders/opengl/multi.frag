@@ -4,6 +4,7 @@
 #include "attributes.glsl"
 #include "lib.glsl"
 #include "sgaussian.glsl"
+#include "spotlights.glsl"
 
 #ifdef TEXTURE0
 uniform sampler2D texture0; //diffuse
@@ -238,6 +239,8 @@ void main(void)
 		vec3 iblSpecular = envColor * F_ibl * mix(1.25, 0.28, roughness);
 		vec3 ambientTerm = (iblDiffuse + iblSpecular) * surface.ambientOcclusion;
 
+		Lo += EvalShipSpotLights(eyePos, N, V, albedo, roughness, 0.0);
+
 		// Tone-map lit hull cleanly, then layer vivid incandescent station/ship emissive lights on top
 		vec3 litSRGB = toSRGB(ACESFilm(ambientTerm + Lo));
 		float emLum = dot(surface.emissive, vec3(0.2126, 0.7152, 0.0722));
@@ -264,7 +267,8 @@ void main(void)
 			BlinnPhongDirectionalLight(uLight[i], intensity[i], surface, eyePos, diffuse, specular);
 		}
 
-		final_color = diffuse * surface.ambientOcclusion + surface.emissive + specular;
+		vec3 spotClassic = EvalShipSpotLights(eyePos, surface.normal, normalize(-eyePos), surface.color.rgb, 0.5, 0.0);
+		final_color = diffuse * surface.ambientOcclusion + surface.emissive + specular + (1.0 - exp(-spotClassic * 0.85));
 	}
 
 	frag_color = vec4(final_color, surface.color.w);

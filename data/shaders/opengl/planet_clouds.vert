@@ -4,14 +4,16 @@
 #include "attributes.glsl"
 #include "lib.glsl"
 
-out vec3 objPos;
-out vec3 viewNormal;
 out vec3 eyePos;
+flat out vec3 objAxisX;
+flat out vec3 objAxisY;
+flat out vec3 objAxisZ;
 
 void main(void)
 {
 	gl_Position = matrixTransform();
-	objPos = normalize(a_vertex.xyz);
-	viewNormal = normalize(normalMatrix() * normalize(a_vertex.xyz));
 	eyePos = vec3(uViewMatrix * a_vertex);
+	objAxisX = normalize(uViewMatrix[0].xyz);
+	objAxisY = normalize(uViewMatrix[1].xyz);
+	objAxisZ = normalize(uViewMatrix[2].xyz);
 }

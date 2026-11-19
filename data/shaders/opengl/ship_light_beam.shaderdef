@@ -1,0 +1,12 @@
+## Copyright © 2008-2026 Pioneer Developers. See AUTHORS.txt for details
+## Licensed under the terms of the GPL v3. See licenses/GPL-3.txt
+
+Shader ship_light_beam
+
+PushConstant vec4 beamColor
+PushConstant float nearFade
+
+Buffer DrawData binding=1
+
+Vertex "ship_light_beam.vert"
+Fragment "ship_light_beam.frag"

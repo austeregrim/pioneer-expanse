@@ -673,9 +673,8 @@ void PlayerShipController::StaticUpdate(const float timeStep)
 	} else {
 		SetFlightControlState(CONTROL_MANUAL);
 
-		// TODO: this is a bit monkey-patched, but calling from SetFlightControlState doesn't properly clear the mouse capture state.
-		// Do it here so we properly react to becoming docked while holding the mouse button down
-		if (m_ship->GetFlightState() == Ship::DOCKED && m_mouseActive) {
+		// Release mouse-steering capture whenever we leave active flight (docked, landed, docking, hyperspace, etc.)
+		if (m_mouseActive) {
 			ResetMouseCapture();
 		}
 	}

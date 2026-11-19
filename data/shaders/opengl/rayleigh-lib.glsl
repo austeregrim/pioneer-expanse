@@ -340,8 +340,10 @@ vec3 calculateRayInscattering(inout vec2 opticalDepth, const in vec3 rayStart, c
 
 		vec2 deltaDensity = iSegmentLength * avgDensity;
 
-		// find if this ray intersects the terrain
-		vec2 intersect = raySphereIntersect(-c, lightDir, 1);
+		// Smooth geometric planet-horizon shadow (fixes step(0, intersect.y) which was always 1.0)
+		float rSq = max(dot(c, c), 1.0);
+		float horizonCos = -sqrt(max(0.0, 1.0 - 1.0 / rSq));
+		float sunLit = smoothstep(horizonCos - 0.018, horizonCos + 0.018, dot(normalize(c), lightDir));
 
 		// outscattering of light reaching this point
 		vec3 color0 = lightColor * calculateRayTransmittance(c, lightDir, scatterLUT);
@@ -356,8 +358,53 @@ vec3 calculateRayInscattering(inout vec2 opticalDepth, const in vec3 rayStart, c
 		vec3 color2 = color1 * calcTransmittance(opticalDepth);
 
 		opticalDepth += deltaDensity;
-		color += step(0, intersect.y) * color2;
+		color += sunLit * color2;
 	}
 
 	return color;
+}
+
+// Fast 6-sample Rayleigh+Mie sky radiance along an upward reflected ray from the planet surface.
+// Matches rayleigh_geosphere_sky_full.frag exposure and spectrum so ocean reflections mirror the true sky dome.
+vec3 calculateReflectedSkyColor(const in vec3 surfaceP, const in vec3 reflDir, const in vec3 lightDir, const in vec3 lightColor, const in sampler2D densityLUT, const in sampler2D scatterLUT)
+{
+	float rStart = max(length(surfaceP), 1.0001);
+	vec3 pStart = normalize(surfaceP) * rStart;
+	vec2 atmos = raySphereIntersect(-pStart, reflDir, geosphereAtmosTopRad);
+	if (atmos.y <= 0.0)
+		return vec3(0.0);
+
+	const int kReflSamples = 6;
+	float segLen = geosphereRadius * atmos.y / float(kReflSamples);
+	if (segLen <= 0.0)
+		return vec3(0.0);
+
+	float mu = dot(reflDir, lightDir);
+	float phaseR = rayleighPhaseFunction(mu);
+	float phaseM = miePhaseFunction(0.76f, mu);
+	const vec3 betaR = 1e-6 * vec3(3.8, 13.5, 33.1);
+	const vec3 betaM = 1e-6 * vec3(21.0);
+
+	vec2 iDensity = vec2(0.0);
+	vec3 accum = vec3(0.0);
+	vec3 pEnd = pStart + reflDir * atmos.y;
+
+	for (int i = 0; i < kReflSamples; ++i) {
+		vec3 c = mix(pStart, pEnd, (float(i) + 0.5) / float(kReflSamples));
+		float heightRatio = clamp((length(c) - 1.0) / max(geosphereAtmosTopRad - 1.0, 1e-5), 0.0, 1.0);
+		vec2 deltaDensity = segLen * exp(texture(densityLUT, vec2(0.0, heightRatio)).xy);
+
+		float rSq = max(dot(c, c), 1.0);
+		float horizonCos = -sqrt(max(0.0, 1.0 - 1.0 / rSq));
+		float sunLit = smoothstep(horizonCos - 0.015, horizonCos + 0.015, dot(normalize(c), lightDir));
+
+		if (sunLit > 0.001) {
+			vec3 color0 = lightColor * calculateRayTransmittance(c, lightDir, scatterLUT);
+			vec3 color1 = color0 * (betaR * phaseR * deltaDensity.x + betaM * phaseM * deltaDensity.y);
+			vec3 color2 = color1 * calcTransmittance(iDensity);
+			accum += sunLit * color2;
+		}
+		iDensity += deltaDensity;
+	}
+	return accum;
 }

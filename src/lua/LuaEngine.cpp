@@ -583,6 +583,19 @@ static int l_engine_set_volumetric_rings(lua_State *l)
 	return 0;
 }
 
+static int l_engine_get_water_quality(lua_State *l)
+{
+	lua_pushinteger(l, Clamp(Pi::config->Int("WaterQuality", 2), 0, 3));
+	return 1;
+}
+
+static int l_engine_set_water_quality(lua_State *l)
+{
+	const int level = Clamp(int(luaL_checkinteger(l, 1)), 0, 3);
+	Pi::config->SetInt("WaterQuality", level);
+	return 0;
+}
+
 static int l_engine_get_enhanced_graphics(lua_State *l)
 {
 	lua_pushboolean(l, Pi::config->Int("EnhancedGraphics", 1) != 0);
@@ -1182,6 +1195,8 @@ void LuaEngine::Register()
 		{ "SetFOV", l_engine_set_fov },
 		{ "GetVolumetricRings", l_engine_get_volumetric_rings },
 		{ "SetVolumetricRings", l_engine_set_volumetric_rings },
+		{ "GetWaterQuality", l_engine_get_water_quality },
+		{ "SetWaterQuality", l_engine_set_water_quality },
 		{ "GetEnhancedGraphics", l_engine_get_enhanced_graphics },
 		{ "SetEnhancedGraphics", l_engine_set_enhanced_graphics },
 

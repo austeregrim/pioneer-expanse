@@ -12,6 +12,7 @@
 class Body;
 class Camera;
 class SpeedLines;
+class WeatherEffects;
 class Game;
 
 enum VelIconType {
@@ -121,6 +122,7 @@ private:
 	ViewController *m_viewController;
 
 	std::unique_ptr<SpeedLines> m_speedLines;
+	std::unique_ptr<WeatherEffects> m_weatherEffects;
 
 	bool m_labelsOn;
 

@@ -27,6 +27,14 @@
     "description": "Like an airline pilot announcing local weather conditions",
     "message": "Local gravity is {grav}, pressure is {press}."
   },
+  "STATION_WEATHER_CAUTION": {
+    "description": "Aviation ATIS caution note during hazardous weather",
+    "message": "Caution: {advisory} reported on approach."
+  },
+  "STATION_WEATHER_WIND": {
+    "description": "Aviation ATIS surface wind and weather conditions",
+    "message": "Surface wind {heading}° at {wind} m/s{gust}. Conditions: {condition}."
+  },
   "WATCH_FOR_TRAFFIC_ON_APPROACH": {
     "description": "",
     "message": "Please watch for traffic on your approach."

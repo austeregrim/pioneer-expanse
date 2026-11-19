@@ -970,6 +970,75 @@ static int l_ship_toggle_wheel_state(lua_State *l)
 	return 0;
 }
 
+static int l_ship_get_beacons_enabled(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushboolean(l, s->GetBeaconsEnabled());
+	return 1;
+}
+
+static int l_ship_set_beacons_enabled(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	s->SetBeaconsEnabled(lua_toboolean(l, 2) != 0);
+	return 0;
+}
+
+static int l_ship_toggle_beacons(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	const bool next = !s->GetBeaconsEnabled();
+	s->SetBeaconsEnabled(next);
+	lua_pushboolean(l, next);
+	return 1;
+}
+
+static int l_ship_get_forward_lights_enabled(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushboolean(l, s->GetForwardLightsEnabled());
+	return 1;
+}
+
+static int l_ship_set_forward_lights_enabled(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	s->SetForwardLightsEnabled(lua_toboolean(l, 2) != 0);
+	return 0;
+}
+
+static int l_ship_toggle_forward_lights(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	const bool next = !s->GetForwardLightsEnabled();
+	s->SetForwardLightsEnabled(next);
+	lua_pushboolean(l, next);
+	return 1;
+}
+
+static int l_ship_get_landing_lights_enabled(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushboolean(l, s->GetLandingLightsEnabled());
+	return 1;
+}
+
+static int l_ship_set_landing_lights_enabled(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	s->SetLandingLightsEnabled(lua_toboolean(l, 2) != 0);
+	return 0;
+}
+
+static int l_ship_toggle_landing_lights(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	const bool next = !s->GetLandingLightsEnabled();
+	s->SetLandingLightsEnabled(next);
+	lua_pushboolean(l, next);
+	return 1;
+}
+
 /*
  * Method: GetVelocity
  *
@@ -2027,6 +2096,15 @@ void LuaObject<Ship>::RegisterClass()
 
 		{ "GetWheelState", l_ship_get_wheel_state },
 		{ "ToggleWheelState", l_ship_toggle_wheel_state },
+		{ "GetBeaconsEnabled", l_ship_get_beacons_enabled },
+		{ "SetBeaconsEnabled", l_ship_set_beacons_enabled },
+		{ "ToggleBeacons", l_ship_toggle_beacons },
+		{ "GetForwardLightsEnabled", l_ship_get_forward_lights_enabled },
+		{ "SetForwardLightsEnabled", l_ship_set_forward_lights_enabled },
+		{ "ToggleForwardLights", l_ship_toggle_forward_lights },
+		{ "GetLandingLightsEnabled", l_ship_get_landing_lights_enabled },
+		{ "SetLandingLightsEnabled", l_ship_set_landing_lights_enabled },
+		{ "ToggleLandingLights", l_ship_toggle_landing_lights },
 		{ "GetFlightState", l_ship_get_flight_state },
 		{ "GetCruiseSpeed", l_ship_get_cruise_speed },
 		{ "GetFollowTarget", l_ship_get_follow_target },

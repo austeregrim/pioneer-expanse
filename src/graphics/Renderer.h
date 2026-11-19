@@ -41,6 +41,18 @@ namespace Graphics {
 	struct RenderStateDesc;
 	struct RenderTargetDesc;
 
+	// Dynamic ship forward/landing spotlight payload (48-byte std140 UBO element)
+	struct SpotLight {
+		vector3f position = vector3f(0.0f);               // View-space position (meters)
+		float range = 0.0f;                               // Max effective range (meters); <= 0 inactive
+		vector3f direction = vector3f(0.0f, 0.0f, -1.0f); // Normalized view-space light direction
+		float innerCos = 0.96f;                           // cos(innerHalfAngle)
+		vector3f color = vector3f(0.0f);                  // Linear RGB * intensity
+		float outerCos = 0.86f;                           // cos(outerHalfAngle)
+	};
+
+	static constexpr uint32_t MAX_SPOT_LIGHTS = 4;
+
 	// Renderer base, functions return false if
 	// failed/unsupported
 	class Renderer {
@@ -126,6 +138,7 @@ namespace Graphics {
 			return m_lights[idx];
 		}
 		virtual Uint32 GetNumLights() const { return 0; }
+		virtual void SetSpotLights(uint32_t numLights, const SpotLight *lights) {}
 		virtual bool SetAmbientColor(const Color &c) = 0;
 		const Color &GetAmbientColor() const { return m_ambient; }
 

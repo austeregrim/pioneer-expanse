@@ -28,6 +28,14 @@ namespace TerrainFeature {
 	double megavolcano_function(const fracdef_t &def, const vector3d &p);
 	double river_function(const fracdef_t &def, const vector3d &p, int style = 0);
 
+	// True spherical 3D cellular impact craters (parabolic/flat-floor bowl, raised rim, ejecta apron, optional central peak)
+	double cellular_crater_layer(const vector3d &p, double frequency, double density, double depth, double rimHeight, double centralPeak = 0.0, uint32_t seedOffset = 0);
+	double multi_scale_craters(const vector3d &p, double baseFreq, int layers, double baseDepth, double density, double centralPeakScale = 0.0, uint32_t seedOffset = 0);
+
+	// C1-smooth basin/plain floor shaping for realistic landable & drivable terrain
+	double smooth_basin_floor(double h, double floorLevel, double smoothness);
+	double smooth_terrace(double h, double stepSize, double sharpness);
+
 } // namespace TerrainFeature
 
 #endif

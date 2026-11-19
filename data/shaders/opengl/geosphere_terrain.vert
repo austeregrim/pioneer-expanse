@@ -8,6 +8,10 @@
 out vec3 varyingEyepos;
 out vec3 varyingNormal;
 out vec3 objNormal;
+out vec3 patchLocalPos;
+out vec3 varyingObjX;
+out vec3 varyingObjY;
+out vec3 varyingObjZ;
 out vec4 vertexColor;
 
 out vec2 texCoord0;
@@ -22,8 +26,13 @@ void main(void)
 	gl_Position = matrixTransform();
 	vertexColor = a_color;
 	varyingEyepos = vec3(uViewMatrix * a_vertex);
-	varyingNormal = normalize(normalMatrix() * a_normal);
+	mat3 nMat = normalMatrix();
+	varyingNormal = normalize(nMat * a_normal);
 	objNormal = normalize(a_normal);
+	patchLocalPos = a_vertex.xyz;
+	varyingObjX = normalize(nMat * vec3(1.0, 0.0, 0.0));
+	varyingObjY = normalize(nMat * vec3(0.0, 1.0, 0.0));
+	varyingObjZ = normalize(nMat * vec3(0.0, 0.0, 1.0));
 
 	texCoord0 = a_uv0.xy;
 	dist = length(varyingEyepos);

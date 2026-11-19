@@ -284,7 +284,17 @@ Terrain *Terrain::InstanceTerrain(const SystemBody *body)
 
 		// Frozen world
 		if ((body->GetVolatileIcesAsFixed() > fixed(8, 10)) && (body->GetAverageTemp() < 250)) {
+			if (body->GetRadius() < 0.28 * EARTH_RADIUS && body->GetVolatileGasAsFixed() <= fixed(1, 10)) {
+				const GeneratorInstancer choices[] = {
+					InstanceGenerator<TerrainHeightDwarfPlanet, TerrainColorDwarfPlanet>,
+					InstanceGenerator<TerrainHeightDwarfPlanet, TerrainColorIce>,
+					InstanceGenerator<TerrainHeightWaterSolidCanyons, TerrainColorDwarfPlanet>
+				};
+				gi = choices[rand.Int32(COUNTOF(choices))];
+				break;
+			}
 			const GeneratorInstancer choices[] = {
+				InstanceGenerator<TerrainHeightDwarfPlanet, TerrainColorDwarfPlanet>,
 				InstanceGenerator<TerrainHeightHillsDunes, TerrainColorIce>,
 				InstanceGenerator<TerrainHeightHillsCraters, TerrainColorIce>,
 				InstanceGenerator<TerrainHeightMountainsCraters, TerrainColorIce>,
@@ -347,7 +357,19 @@ Terrain *Terrain::InstanceTerrain(const SystemBody *body)
 			break;
 		}
 
+		// Small airless dwarf planets & rocky/icy sub-satellites (Ceres, Pluto, Charon, Moon-scale bodies)
+		if (body->GetRadius() < 0.28 * EARTH_RADIUS) {
+			const GeneratorInstancer choices[] = {
+				InstanceGenerator<TerrainHeightDwarfPlanet, TerrainColorDwarfPlanet>,
+				InstanceGenerator<TerrainHeightDwarfPlanet, TerrainColorRock>,
+				InstanceGenerator<TerrainHeightHillsCraters2, TerrainColorDwarfPlanet>
+			};
+			gi = choices[rand.Int32(COUNTOF(choices))];
+			break;
+		}
+
 		const GeneratorInstancer choices[] = {
+			InstanceGenerator<TerrainHeightDwarfPlanet, TerrainColorDwarfPlanet>,
 			InstanceGenerator<TerrainHeightHillsCraters2, TerrainColorRock>,
 			InstanceGenerator<TerrainHeightMountainsCraters2, TerrainColorRock>,
 			InstanceGenerator<TerrainHeightBarrenRock3, TerrainColorRock>

@@ -84,6 +84,7 @@ namespace Graphics {
 		bool SetLightIntensity(Uint32 numlights, const float *intensity) final;
 		bool SetLights(Uint32 numlights, const Light *l) final;
 		Uint32 GetNumLights() const final { return m_numLights; }
+		void SetSpotLights(uint32_t numLights, const SpotLight *lights) final;
 		bool SetAmbientColor(const Color &c) final;
 
 		bool FlushCommandBuffers() final;
@@ -108,6 +109,7 @@ namespace Graphics {
 		const RenderStateDesc &GetMaterialRenderState(const Graphics::Material *m) final;
 
 		const BufferBinding<UniformBuffer> &GetLightUniformBuffer();
+		const BufferBinding<UniformBuffer> &GetSpotLightUniformBuffer();
 		OGL::UniformLinearBuffer *GetDrawUniformBuffer(Uint32 size);
 		OGL::RenderStateCache *GetStateCache() { return m_renderStateCache.get(); }
 
@@ -136,6 +138,7 @@ namespace Graphics {
 		std::vector<std::unique_ptr<OGL::UniformLinearBuffer>> m_drawUniformBuffers;
 		std::unique_ptr<OGL::RenderStateCache> m_renderStateCache;
 		BufferBinding<UniformBuffer> m_lightUniformBuffer;
+		BufferBinding<UniformBuffer> m_spotLightUniformBuffer;
 		bool m_useNVDepthRanged;
 		OGL::RenderTarget *m_activeRenderTarget = nullptr;
 		std::unique_ptr<OGL::CommandList> m_drawCommandList;

@@ -34,6 +34,7 @@ namespace Graphics {
 		static_assert(sizeof(DrawDataBlock) == 256, "");
 
 		static size_t s_lightDataName = "LightData"_hash;
+		static size_t s_spotLightDataName = "SpotLightData"_hash;
 		static size_t s_drawDataName = "DrawData"_hash;
 		static size_t s_lightIntensityName = "lightIntensity"_hash;
 		static size_t s_enhancedGraphicsName = "enhancedGraphics"_hash;
@@ -110,6 +111,7 @@ namespace Graphics {
 				SetPushConstant(s_lightIntensityName, Color4f(intensity[0], intensity[1], intensity[2], intensity[3]));
 			}
 
+			SetBuffer(s_spotLightDataName, m_renderer->GetSpotLightUniformBuffer());
 			SetPushConstant(s_enhancedGraphicsName, m_renderer->IsEnhancedGraphicsEnabled() ? 1.0f : 0.0f);
 			SetPushConstant(s_timeName, m_renderer->GetShaderTime());
 

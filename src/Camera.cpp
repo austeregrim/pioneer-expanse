@@ -365,6 +365,38 @@ void Camera::Draw(const Body *excludeBody)
 		m_renderer->SetLights(rendererLights.size(), &rendererLights[0]);
 	}
 
+	{
+		std::vector<Graphics::SpotLight> spotLights;
+		spotLights.reserve(Graphics::MAX_SPOT_LIGHTS);
+		auto collectShipSpots = [&](const Ship *s) {
+			if (!s || s->IsDead() || s->GetFlightState() == Ship::HYPERSPACE)
+				return;
+			if (s->IsDocked() && (!s->GetDockedWith() || !s->GetDockedWith()->IsGroundStation()))
+				return;
+			if (!s->GetForwardLightsEnabled() && !s->GetLandingLightsEnabled())
+				return;
+			Frame *f = Frame::GetFrame(s->GetFrame());
+			if (!f)
+				return;
+			matrix4x4d viewT = f->GetInterpOrientRelTo(camFrameId);
+			viewT.SetTranslate(f->GetInterpPositionRelTo(camFrameId));
+			s->CollectSpotLights(viewT * s->GetInterpMatrix(), spotLights);
+		};
+		if (Pi::player) {
+			collectShipSpots(Pi::player);
+		}
+		for (const BodyAttrs &attrs : m_sortedBodies) {
+			if (spotLights.size() >= Graphics::MAX_SPOT_LIGHTS)
+				break;
+			if (!attrs.body || attrs.body == Pi::player || !attrs.body->IsType(ObjectType::SHIP))
+				continue;
+			if (attrs.camDist > 1600.0)
+				continue;
+			collectShipSpots(static_cast<const Ship *>(attrs.body));
+		}
+		m_renderer->SetSpotLights(uint32_t(spotLights.size()), spotLights.empty() ? nullptr : spotLights.data());
+	}
+
 	// Save lights for later restoring
 	oldLightIntensities.clear();
 	std::vector<float> lightIntensities;

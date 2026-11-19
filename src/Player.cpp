@@ -20,6 +20,7 @@
 #include "lua/LuaEvent.h"
 #include "lua/LuaObject.h"
 #include "pigui/LuaPiGui.h"
+#include "planet/WeatherSystem.h"
 #include "ship/PlayerShipController.h"
 #include "ship/ShipController.h"
 #include "ship/SupercruiseController.h"
@@ -366,14 +367,21 @@ void Player::StaticUpdate(const float timeStep)
 	bool playCreak = false;
 
 	// play creaking sfx if the acceleration along the Y axis (up/down directions) is higher than 1g
-	// and the rate of change of acceleration is more than 2.5 m s-3
+	// and the rate of change of acceleration is more than 2.5 m s-3, or during heavy atmospheric turbulence
 	if ((abs(m_atmosAccel.Dot(Player::m_interpOrient.VectorY()))) > 10 && abs(m_atmosJerk.Dot(Player::m_interpOrient.VectorY())) > 2.5) {
 		playCreak = true;
 	}
 
+	float creakVol = fmax(0.f, fmin(float((m_atmosJerk.Length() - 50) * 0.05f), 0.3f));
+	WeatherState weather;
+	if (GetFlightState() == FLYING && GetCurrentWeatherState(weather) && weather.turbulence > 0.55 && weather.densityKgM3 > 0.15) {
+		playCreak = true;
+		const float turbCreakVol = float(Clamp((weather.turbulence - 0.55) / 0.45, 0.0, 1.0)) * 0.16f;
+		creakVol = std::max(creakVol, turbCreakVol);
+	}
+
 	if (playCreak) {
 		if (!m_creakSound.IsPlaying()) {
-			float creakVol = fmax(0.f, fmin(float((m_atmosJerk.Length() - 50) * 0.05f), 0.3f));
 			m_creakSound.Play("metal_creaking", creakVol, creakVol, Sound::OP_REPEAT);
 			m_creakSound.VolumeAnimate(creakVol, creakVol, 0.3f, 0.3f);
 		}

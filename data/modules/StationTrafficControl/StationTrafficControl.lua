@@ -55,7 +55,7 @@ local function getAtmoState(station)
 	local parent_systemBody = station.path:GetSystemBody().parent
 	local parent_frameBody = Space.GetBody(parent_systemBody.index)
 	local gravity, pressure = parent_systemBody.gravity, parent_systemBody.hasAtmosphere and parent_frameBody:GetAtmosphericState(station)
-	return gravity / 9.8, parent_systemBody.hasAtmosphere, pressure
+	return gravity / 9.8, parent_systemBody.hasAtmosphere, pressure, parent_frameBody
 end
 
 local function onDockingClearanceGranted(station, ship)
@@ -70,7 +70,7 @@ local function onDockingClearanceGranted(station, ship)
 	end
 	local bayNum = station:GetAssignedBayNumber(ship)
 	local nearby = station:GetNearbyTraffic(50000) -- 50km
-	local gravity, hasAtmo, pressure = getAtmoState(station)
+	local gravity, hasAtmo, pressure, parent_frameBody = getAtmoState(station)
 
 	Comms.Message(l.CLEARANCE_GRANTED_BAY_N:interp({ bay = station:GetAssignedBayNumber(ship) + 1 }), station.label)
 
@@ -80,6 +80,27 @@ local function onDockingClearanceGranted(station, ship)
 			conditionMessage = l.STATION_GRAV_PRESS:interp({
 				grav = ui.Format.Gravity(gravity),
 				press = ui.Format.Pressure(pressure)})
+			local weather = parent_frameBody and parent_frameBody.GetWeatherState and parent_frameBody:GetWeatherState(station)
+			if weather and weather.hasAtmosphere and weather.density > 0.005 then
+				local headingInt = math.floor(weather.windHeading + 0.5) % 360
+				local windInt = math.floor(weather.windSpeed + 0.5)
+				local gustStr = (weather.gustSpeed >= 3.0) and string.format(", gusts to %d m/s", math.floor(weather.gustSpeed + 0.5)) or ""
+				conditionMessage = conditionMessage .. " " .. l.STATION_WEATHER_WIND:interp({
+					heading = string.format("%03d", headingInt),
+					wind = tostring(windInt),
+					gust = gustStr,
+					condition = weather.condition,
+				})
+				local advisories = {}
+				if weather.windShear >= 0.45 then table.insert(advisories, "wind shear") end
+				if weather.turbulence >= 0.60 then table.insert(advisories, "severe turbulence") end
+				if weather.stormIntensity >= 0.55 then table.insert(advisories, "storm activity") end
+				if #advisories > 0 then
+					conditionMessage = conditionMessage .. " " .. l.STATION_WEATHER_CAUTION:interp({
+						advisory = table.concat(advisories, ", ")
+					})
+				end
+			end
 		else
 			conditionMessage = l.STATION_GRAV:interp({ grav = ui.Format.Gravity(gravity) })
 		end

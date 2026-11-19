@@ -341,7 +341,20 @@ void GeoPatch::RenderImmediate(Graphics::Renderer *renderer, const vector3d &cam
 		// per-patch detail texture scaling value
 		const float fDetailFrequency = pow(2.0f, float(m_geosphere->GetMaxDepth()) - float(m_depth));
 
+		// Seamless world-locked tri-planar tile offset (exact modulo 4096m in double precision; 16x multiple of 256m ocean period)
+		const double planetRad = m_geosphere->GetSystemBody()->GetRadius();
+		constexpr double kTriTilePeriod = 4096.0;
+		auto wrapMod = [](double v, double period) {
+			double r = fmod(v, period);
+			return r < 0.0 ? r + period : r;
+		};
+		const vector3f tileOffset(
+			float(wrapMod(m_clipCentroid.x * planetRad, kTriTilePeriod)),
+			float(wrapMod(m_clipCentroid.y * planetRad, kTriTilePeriod)),
+			float(wrapMod(m_clipCentroid.z * planetRad, kTriTilePeriod)));
+
 		m_geosphere->GetSurfaceMaterial()->SetPushConstant("PatchDetailFrequency"_hash, fDetailFrequency);
+		m_geosphere->GetSurfaceMaterial()->SetPushConstant("PatchTileOffset"_hash, tileOffset);
 		renderer->DrawMesh(m_patchVBOData->m_patchMesh.get(), m_geosphere->GetSurfaceMaterial().Get());
 
 #if DEBUG_CENTROIDS
