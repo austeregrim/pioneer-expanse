@@ -6,10 +6,11 @@ local Vector2 = _G.Vector2
 
 local ui = require 'pigui'
 
-local pionillium = ui.fonts.pionillium
+local icons = ui.theme.icons
 local sc = ui.theme.styleColors
+local buttonSize = ui.theme.styles.MainButtonSize
 
-local flags = ui.WindowFlags { "NoDecoration", "NoMove", "NoSavedSettings", "NoFocusOnAppearing", "NoBringToFrontOnFocus" }
+local flags = ui.WindowFlags { "NoDecoration", "NoMove", "NoSavedSettings", "NoFocusOnAppearing", "NoBringToFrontOnFocus", "NoBackground" }
 
 local offVariant = {
 	normal  = sc.panel_800:opacity(0.82),
@@ -36,7 +37,7 @@ local landingOnVariant = {
 }
 
 local function displayShipLights()
-	if Game.CurrentView() ~= "WorldView" then return end
+	if Game.CurrentView() ~= "WorldView" or not ui.shouldDrawUI() then return end
 	if Game.InHyperspace() then return end
 
 	local player = Game.player
@@ -47,50 +48,39 @@ local function displayShipLights()
 	local forwardOn = player:GetForwardLightsEnabled()
 	local landingOn = player:GetLandingLightsEnabled()
 
-	ui.withFont(pionillium.body, function()
-		local pad = Vector2(ui.rescaleUI(8), ui.rescaleUI(3))
-		local btnH = ui.getTextLineHeight() + pad.y * 2
-		local btnW = ui.calcTextSize("LDG").x + pad.x * 2 + ui.rescaleUI(4)
-		local spacing = ui.getItemSpacing()
-		local winPad = ui.getWindowPadding()
-		local labelW = ui.calcTextSize("LIGHTS").x
+	local spacing = ui.getItemSpacing()
+	local winPad = ui.getWindowPadding()
 
-		local totalW = labelW + spacing.x + btnW * 3 + spacing.x * 2 + winPad.x * 2
-		local totalH = btnH + winPad.y * 2
-		local bottomOffset = (ui.planetaryInfoHeight or 0) + ui.rescaleUI(4)
+	local totalW = buttonSize.x * 3 + spacing.x * 2 + winPad.x * 2
+	local totalH = buttonSize.y + winPad.y * 2
+	local bottomOffset = (ui.planetaryInfoHeight or 0) + ui.rescaleUI(2)
 
-		ui.setNextWindowSize(Vector2(totalW, totalH), "Always")
-		ui.setNextWindowPos(Vector2(ui.screenWidth, ui.screenHeight - bottomOffset), "Always", Vector2(1, 1))
+	ui.setNextWindowSize(Vector2(totalW, totalH), "Always")
+	ui.setNextWindowPos(Vector2(ui.screenWidth, ui.screenHeight - bottomOffset), "Always", Vector2(1, 1))
 
-		ui.withStyleColors({ WindowBg = sc.panel_900:opacity(0.78) }, function()
-			ui.window("ShipLightsBar", flags, function()
-				ui.withStyleColors({ Text = sc.gray_300 }, function()
-					ui.alignTextToLineHeight(btnH)
-					ui.textShadowed("LIGHTS")
-				end)
-				ui.sameLine()
+	ui.window("ShipLightsBar", flags, function()
+		if ui.iconButton("##ship_lights_bcn", icons.lights_beacon,
+			beaconsOn and "Beacon Lights: ON (Click to disable)" or "Beacon Lights: OFF (Click to enable)",
+			beaconsOn and beaconOnVariant or offVariant, buttonSize) then
+			player:ToggleBeacons()
+			ui.playSfx("OK")
+		end
+		ui.sameLine()
 
-				if ui.button("BCN##ship_lights_bcn", Vector2(btnW, btnH), beaconsOn and beaconOnVariant or offVariant,
-					beaconsOn and "Beacon & Strobe Lights: ON (Click to disable)" or "Beacon & Strobe Lights: OFF (Click to enable)", pad) then
-					player:ToggleBeacons()
-					ui.playSfx("OK")
-				end
-				ui.sameLine()
+		if ui.iconButton("##ship_lights_fwd", icons.lights_forward,
+			forwardOn and "Forward Lights: ON (Click to disable)" or "Forward Lights: OFF (Click to enable)",
+			forwardOn and forwardOnVariant or offVariant, buttonSize) then
+			player:ToggleForwardLights()
+			ui.playSfx("OK")
+		end
+		ui.sameLine()
 
-				if ui.button("FWD##ship_lights_fwd", Vector2(btnW, btnH), forwardOn and forwardOnVariant or offVariant,
-					forwardOn and "Forward Searchlight Beams: ON (Click to disable)" or "Forward Searchlight Beams: OFF (Click to enable)", pad) then
-					player:ToggleForwardLights()
-					ui.playSfx("OK")
-				end
-				ui.sameLine()
-
-				if ui.button("LDG##ship_lights_ldg", Vector2(btnW, btnH), landingOn and landingOnVariant or offVariant,
-					landingOn and "Landing Floodlight Beams: ON (Click to disable)" or "Landing Floodlight Beams: OFF (Click to enable)", pad) then
-					player:ToggleLandingLights()
-					ui.playSfx("OK")
-				end
-			end)
-		end)
+		if ui.iconButton("##ship_lights_ldg", icons.lights_landing,
+			landingOn and "Landing Lights: ON (Click to disable)" or "Landing Lights: OFF (Click to enable)",
+			landingOn and landingOnVariant or offVariant, buttonSize) then
+			player:ToggleLandingLights()
+			ui.playSfx("OK")
+		end
 	end)
 end
 

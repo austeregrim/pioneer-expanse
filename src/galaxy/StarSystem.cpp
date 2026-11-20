@@ -203,7 +203,10 @@ SystemBody *StarSystem::GetBodyByPath(const SystemPath &path) const
 	PROFILE_SCOPED()
 	assert(m_path.IsSameSystem(path));
 	assert(path.IsBodyPath());
-	assert(path.bodyIndex < m_bodies.size());
+	if (m_bodies.empty())
+		return nullptr;
+	if (path.bodyIndex >= m_bodies.size())
+		return m_bodies.back().Get();
 
 	return m_bodies[path.bodyIndex].Get();
 }

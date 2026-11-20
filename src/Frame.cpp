@@ -3,12 +3,14 @@
 
 #include "Frame.h"
 
+#include "Body.h"
 #include "GameSaveError.h"
 #include "Json.h"
 #include "JsonUtils.h"
 #include "Sfx.h"
 #include "Space.h"
 #include "collider/CollisionSpace.h"
+#include "galaxy/SystemBody.h"
 #include "utils.h"
 
 std::vector<Frame> Frame::s_frames;
@@ -291,10 +293,23 @@ void Frame::PostUnserializeFixup(FrameId fId, Space *space)
 	Frame *f = Frame::GetFrame(fId);
 	f->UpdateRootRelativeVars();
 	f->m_astroBody = space->GetBodyByIndex(f->m_astroBodyIndex);
+	if (f->m_astroBody && f->m_astroBody->GetSystemBody()) {
+		f->m_sbody = const_cast<SystemBody *>(f->m_astroBody->GetSystemBody());
+		f->m_label = f->m_sbody->GetName();
+	}
 	// build the object trees once after loading so they're initialized while paused.
 	f->GetCollisionSpace()->RebuildObjectTrees();
 	for (FrameId kid : f->GetChildren())
 		PostUnserializeFixup(kid, space);
+
+	f = Frame::GetFrame(fId);
+	if (!f->m_astroBody && f->HasRotFrame()) {
+		Frame *rotF = Frame::GetFrame(f->GetRotFrame());
+		if (rotF && rotF->GetSystemBody()) {
+			f->m_sbody = rotF->GetSystemBody();
+			f->m_label = f->m_sbody->GetName();
+		}
+	}
 }
 
 void Frame::CollideFrames(void (*callback)(CollisionContact *))

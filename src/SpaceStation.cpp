@@ -92,7 +92,9 @@ SpaceStation::SpaceStation(const Json &jsonObj, Space *space) :
 				port.inUse = portArrayEl["in_use"];
 		}
 
-		m_sbody = space->GetSystemBodyByIndex(spaceStationObj["index_for_system_body"], GetLabel());
+		m_sbody = space->GetStationSystemBodyByIndex(spaceStationObj["index_for_system_body"], GetLabel());
+		if (m_sbody && m_sbody->GetName() != GetLabel())
+			SetLabel(m_sbody->GetName().c_str());
 
 		m_doorAnimationStep = spaceStationObj["door_animation_step"];
 		m_doorAnimationState = spaceStationObj["door_animation_state"];

@@ -717,7 +717,10 @@ theme.icons = {
 	gavel = 325,
 	gavel_horizontal = 326, -- unused
 	towel = 327,
-	-- 328 - 335 : empty
+	lights_beacon = 328,
+	lights_forward = 329,
+	lights_landing = 330,
+	-- 331 - 335 : empty
 
 	shipmarket_compare_better = 38,
 	shipmarket_compare_worse = 40,

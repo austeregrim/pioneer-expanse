@@ -33,6 +33,8 @@
 
 //#define DEBUG_CACHE
 
+static FrameId MakeFramesFor(const double at_time, SystemBody *sbody, Body *b, FrameId fId, std::vector<vector3d> &prevPositions);
+
 static void RelocateStarportIfNecessary(SystemBody *sbody, Planet *planet, vector3d &pos, matrix3x3d &rot, const std::vector<vector3d> &prevPositions)
 {
 	const double radius = planet->GetSystemBody()->GetRadius();
@@ -281,6 +283,52 @@ Space::Space(Game *game, RefCountedPtr<Galaxy> galaxy, const Json &jsonObj, doub
 	for (Body *b : m_bodies)
 		b->PostLoadFixup(this);
 
+	// Synthesize physical Body and Frame for any SystemBody added to the galaxy generator
+	// after an older savefile was created (e.g., expanded contextual starports).
+	bool addedMissingBodies = false;
+	for (auto sbody : m_starSystem->GetBodies()) {
+		if (!sbody || sbody->GetType() == SystemBody::TYPE_GRAVPOINT)
+			continue;
+		SystemPath sbodyPath = m_starSystem->GetPathOf(sbody.Get());
+		if (FindBodyForPath(&sbodyPath))
+			continue;
+
+		SystemBody *parentSBody = sbody->GetParent();
+		FrameId parentFrameId = parentSBody ? GetFrameWithSystemBody(parentSBody) : m_rootFrameId;
+		if (!parentFrameId.valid())
+			parentFrameId = m_rootFrameId;
+
+		if (sbody->GetType() == SystemBody::TYPE_STARPORT_SURFACE) {
+			Frame *pf = Frame::GetFrame(parentFrameId);
+			if (!pf || !pf->GetRotFrame().valid())
+				continue;
+			Frame *rf = Frame::GetFrame(pf->GetRotFrame());
+			if (!rf || !rf->GetBody() || !rf->GetBody()->IsType(ObjectType::PLANET))
+				continue;
+		}
+
+		Body *b = nullptr;
+		if (sbody->GetSuperType() == SystemBody::SUPERTYPE_STAR) {
+			b = new Star(sbody.Get());
+		} else if (sbody->GetType() == SystemBody::TYPE_STARPORT_ORBITAL ||
+			sbody->GetType() == SystemBody::TYPE_STARPORT_SURFACE) {
+			b = new SpaceStation(sbody.Get());
+		} else {
+			b = new Planet(sbody.Get());
+		}
+		b->SetLabel(sbody->GetName().c_str());
+		b->SetPosition(vector3d::Zero);
+		AddBody(b);
+
+		std::vector<vector3d> posAccum;
+		MakeFramesFor(at_time, sbody.Get(), b, parentFrameId, posAccum);
+		addedMissingBodies = true;
+	}
+	if (addedMissingBodies) {
+		RebuildBodyIndex();
+		Frame::UpdateOrbitRails(at_time, 0.0);
+	}
+
 	// some spaceports could be moved, now their physical bodies were loaded from
 	// json, with offsets, now we should move the system bodies also so that
 	// there is no mismatch
@@ -414,6 +462,108 @@ SystemBody *Space::GetSystemBodyByIndex(Uint32 idx, const std::string &matchingN
 		return m_sbodyIndex[idx];
 
 	return nullptr;
+}
+
+SystemBody *Space::GetStationSystemBodyByIndex(Uint32 idx, const std::string &matchingName) const
+{
+	assert(m_sbodyIndexValid);
+	if (idx == 0)
+		return nullptr;
+
+	auto isClaimed = [this](const SystemBody *sb) {
+		for (const Body *b : m_bodies) {
+			if (b && b->GetSystemBody() == sb)
+				return true;
+		}
+		return false;
+	};
+
+	if (!matchingName.empty()) {
+		if (idx < m_sbodyIndex.size() && m_sbodyIndex[idx] &&
+			m_sbodyIndex[idx]->GetSuperType() == SystemBody::SUPERTYPE_STARPORT &&
+			m_sbodyIndex[idx]->GetName() == matchingName && !isClaimed(m_sbodyIndex[idx])) {
+			return m_sbodyIndex[idx];
+		}
+		for (SystemBody *sb : m_sbodyIndex) {
+			if (sb && sb->GetSuperType() == SystemBody::SUPERTYPE_STARPORT &&
+				sb->GetName() == matchingName && !isClaimed(sb))
+				return sb;
+		}
+		for (SystemBody *sb : m_sbodyIndex) {
+			if (sb && sb->GetSuperType() == SystemBody::SUPERTYPE_STARPORT &&
+				sb->GetName() == matchingName)
+				return sb;
+		}
+	}
+
+	if (idx < m_sbodyIndex.size() && m_sbodyIndex[idx] &&
+		m_sbodyIndex[idx]->GetSuperType() == SystemBody::SUPERTYPE_STARPORT &&
+		!isClaimed(m_sbodyIndex[idx])) {
+		return m_sbodyIndex[idx];
+	}
+
+	// Pick the nearest unclaimed STARPORT SystemBody to idx (handles procedural station name/index shifts in legacy saves)
+	SystemBody *bestUnclaimed = nullptr;
+	Uint32 bestUnclaimedDist = SDL_MAX_UINT32;
+	SystemBody *bestAny = nullptr;
+	Uint32 bestAnyDist = SDL_MAX_UINT32;
+
+	for (Uint32 i = 1; i < m_sbodyIndex.size(); ++i) {
+		SystemBody *sb = m_sbodyIndex[i];
+		if (!sb || sb->GetSuperType() != SystemBody::SUPERTYPE_STARPORT)
+			continue;
+		Uint32 dist = (i > idx) ? (i - idx) : (idx - i);
+		if (dist < bestAnyDist) {
+			bestAnyDist = dist;
+			bestAny = sb;
+		}
+		if (!isClaimed(sb) && dist < bestUnclaimedDist) {
+			bestUnclaimedDist = dist;
+			bestUnclaimed = sb;
+		}
+	}
+
+	return bestUnclaimed ? bestUnclaimed : bestAny;
+}
+
+SystemBody *Space::GetTerrainSystemBodyByIndex(Uint32 idx, const std::string &matchingName) const
+{
+	assert(m_sbodyIndexValid);
+	if (idx == 0)
+		return nullptr;
+
+	auto isTerrainSBody = [](const SystemBody *sb) {
+		return sb && sb->GetSuperType() != SystemBody::SUPERTYPE_STARPORT &&
+			sb->GetType() != SystemBody::TYPE_GRAVPOINT;
+	};
+
+	if (!matchingName.empty()) {
+		if (idx < m_sbodyIndex.size() && isTerrainSBody(m_sbodyIndex[idx]) &&
+			m_sbodyIndex[idx]->GetName() == matchingName) {
+			return m_sbodyIndex[idx];
+		}
+		for (SystemBody *sb : m_sbodyIndex) {
+			if (isTerrainSBody(sb) && sb->GetName() == matchingName)
+				return sb;
+		}
+	}
+
+	if (idx < m_sbodyIndex.size() && isTerrainSBody(m_sbodyIndex[idx]))
+		return m_sbodyIndex[idx];
+
+	SystemBody *best = nullptr;
+	Uint32 bestDist = SDL_MAX_UINT32;
+	for (Uint32 i = 1; i < m_sbodyIndex.size(); ++i) {
+		SystemBody *sb = m_sbodyIndex[i];
+		if (!isTerrainSBody(sb))
+			continue;
+		Uint32 dist = (i > idx) ? (i - idx) : (idx - i);
+		if (dist < bestDist) {
+			bestDist = dist;
+			best = sb;
+		}
+	}
+	return best;
 }
 
 Uint32 Space::GetIndexForBody(const Body *body) const

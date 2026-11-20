@@ -323,11 +323,10 @@ static int l_sbodypath_get_system_body(lua_State *l)
 		return 0;
 	}
 
-	// Lua should never be able to get an invalid SystemPath
-	// (note: this may change if it becomes possible to remove systems during the game)
-	assert(path->bodyIndex < sys->GetNumBodies());
-
+	// Clamp out-of-range body indices from legacy saves gracefully
 	SystemBody *sbody = sys->GetBodyByPath(path);
+	if (!sbody)
+		return 0;
 	LuaObject<SystemBody>::PushToLua(sbody);
 	return 1;
 }

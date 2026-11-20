@@ -1098,10 +1098,20 @@ local discardShip = function (ship)
 end
 
 local placeAdvert = function (station, ad)
+	if not station or not station.AddAdvert then return end
 	local starport_label, planet_label, system_label
-	if ad.station_target then starport_label = ad.station_target:GetSystemBody().name else starport_label = nil end
-	if ad.planet_target then planet_label = ad.planet_target:GetSystemBody().name else planet_label = nil end
-	if ad.system_target then system_label = ad.system_target:GetStarSystem().name else system_label = nil end
+	if ad.station_target then
+		local ok, sb = pcall(function() return ad.station_target:GetSystemBody() end)
+		starport_label = (ok and sb) and sb.name or nil
+	end
+	if ad.planet_target then
+		local ok, sb = pcall(function() return ad.planet_target:GetSystemBody() end)
+		planet_label = (ok and sb) and sb.name or nil
+	end
+	if ad.system_target then
+		local ok, sys = pcall(function() return ad.system_target:GetStarSystem() end)
+		system_label = (ok and sys) and sys.name or nil
+	end
 	local desc = string.interp(ad.flavour.adtext, {
 		starport = starport_label,
 	    planet = planet_label,
@@ -1952,23 +1962,25 @@ local onUpdateBB = function (station)
 
 	-- remove ads based on time until due
 	for ref,ad in pairs(ads) do
-
+		local st = ad.station_local and Space.GetBody(ad.station_local.bodyIndex)
+		if not st or not st.RemoveAdvert then
+			ads[ref] = nil
 		-- 30 minute timeout for very close missions (same planet)
-		if ad.flavour.loctype == "CLOSE_PLANET" or ad.flavour.loctype == "CLOSE_SPACE" then
+		elseif ad.flavour.loctype == "CLOSE_PLANET" or ad.flavour.loctype == "CLOSE_SPACE" then
 			if ad.due < Game.time + 30*60 then
-				Space.GetBody(ad.station_local.bodyIndex):RemoveAdvert(ref)
+				st:RemoveAdvert(ref)
 			end
 
 			-- one day timeout for medium distance missions (same system)
 		elseif ad.flavour.loctype == "MEDIUM_PLANET" then
 			if ad.due < Game.time + 60*60*24 then
-				Space.GetBody(ad.station_local.bodyIndex):RemoveAdvert(ref)
+				st:RemoveAdvert(ref)
 			end
 
 			-- five day timeout as catch-all for everything else
 		else
 			if ad.due < Game.time + 5*60*60*24 then
-				Space.GetBody(ad.station_local.bodyIndex):RemoveAdvert(ref)
+				st:RemoveAdvert(ref)
 			end
 		end
 	end
@@ -2071,7 +2083,10 @@ local onGameStart = function ()
 
 	-- fill the global containers with previously saved data if this is a reload
 	for _,ad in pairs(loaded_data.ads) do
-		placeAdvert(Space.GetBody(ad.station_local.bodyIndex), ad)
+		local st = ad.station_local and Space.GetBody(ad.station_local.bodyIndex)
+		if st and st.AddAdvert then
+			placeAdvert(st, ad)
+		end
 	end
 	missions = loaded_data.missions
 	aircontrol_chars = loaded_data.aircontrol_chars
