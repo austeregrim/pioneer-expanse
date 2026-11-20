@@ -995,7 +995,7 @@ void GameLoop::Update(float deltaTime)
 	// Presumably if we're rendering < 4 FPS, we don't care about physics error either
 	// if (Pi::frameTime > 0.25) Pi::frameTime = 0.25;
 
-	accumulator += deltaTime * Pi::game->GetTimeAccelRate();
+	accumulator += static_cast<double>(deltaTime) * Pi::game->GetTimeAccelRate();
 
 	const float step = Pi::game->GetTimeStep();
 	if (step > 0.0f) {

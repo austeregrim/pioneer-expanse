@@ -30,7 +30,7 @@ SpeedLines::SpeedLines(Ship *s) :
 	// init the static data
 	SpeedLines::Init();
 
-	m_points.reserve(DEPTH * DEPTH * DEPTH);
+	m_points.reserve(static_cast<size_t>(DEPTH) * DEPTH * DEPTH);
 	for (int x = -DEPTH / 2; x < DEPTH / 2; x++) {
 		for (int y = -DEPTH / 2; y < DEPTH / 2; y++) {
 			for (int z = -DEPTH / 2; z < DEPTH / 2; z++) {

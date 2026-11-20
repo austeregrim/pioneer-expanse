@@ -871,10 +871,10 @@ namespace Graphics {
 		auto binding = CreateTempVertexBuffer(v->GetNumVerts(), stride);
 		assert(binding.buffer);
 
-		uint8_t *buffer = binding.buffer->MapRange<uint8_t>(binding.offset * stride, binding.size * stride, BUFFER_MAP_WRITE);
+		uint8_t *buffer = binding.buffer->MapRange<uint8_t>(static_cast<size_t>(binding.offset) * stride, static_cast<size_t>(binding.size) * stride, BUFFER_MAP_WRITE);
 
 		if (buffer) {
-			v->PopulateRange(desc, buffer, binding.size * stride);
+			v->PopulateRange(desc, buffer, static_cast<size_t>(binding.size) * stride);
 
 			// Don't flush the data to the GPU just yet.
 			binding.buffer->UnmapRange(false);
@@ -922,9 +922,9 @@ namespace Graphics {
 
 		// Upload all not-yet-flushed scratch buffers.
 		for (auto &tmp : m_tempVtxBuffers) {
-			size_t size = tmp.buffer->GetSize() * tmp.buffer->GetStride();
+			size_t size = static_cast<size_t>(tmp.buffer->GetSize()) * tmp.buffer->GetStride();
 
-			if (size - tmp.flushed > 0) {
+			if (size > tmp.flushed) {
 				tmp.buffer->FlushRange(tmp.flushed, size - tmp.flushed);
 				tmp.flushed = size;
 			}

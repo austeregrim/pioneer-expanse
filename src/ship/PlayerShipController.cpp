@@ -736,11 +736,11 @@ void PlayerShipController::PollControls(const float timeStep, int *mouseMotion, 
 
 	if (IsAnyLinearThrusterKeyDown()) {
 		if (InputBindings.thrustForward->IsActive())
-			outParams.desiredLinear.z = -thrustPower * InputBindings.thrustForward->GetValue();
+			outParams.desiredLinear.z = -static_cast<double>(thrustPower) * InputBindings.thrustForward->GetValue();
 		if (InputBindings.thrustUp->IsActive())
-			outParams.desiredLinear.y = thrustPower * InputBindings.thrustUp->GetValue();
+			outParams.desiredLinear.y = static_cast<double>(thrustPower) * InputBindings.thrustUp->GetValue();
 		if (InputBindings.thrustLeft->IsActive())
-			outParams.desiredLinear.x = -thrustPower * InputBindings.thrustLeft->GetValue();
+			outParams.desiredLinear.x = -static_cast<double>(thrustPower) * InputBindings.thrustLeft->GetValue();
 	}
 	// only linear thrust ^ is allowed in the system map
 	if (Pi::GetView() == Pi::game->GetSystemView()) return;
@@ -800,9 +800,9 @@ void PlayerShipController::PollControls(const float timeStep, int *mouseMotion, 
 	}
 
 	vector3d wantAngVel = vector3d(
-		InputBindings.pitch->GetValue() * thrustPower,
-		InputBindings.yaw->GetValue() * thrustPower,
-		InputBindings.roll->GetValue() * thrustPower);
+		static_cast<double>(InputBindings.pitch->GetValue()) * thrustPower,
+		static_cast<double>(InputBindings.yaw->GetValue()) * thrustPower,
+		static_cast<double>(InputBindings.roll->GetValue()) * thrustPower);
 
 	// for any acceleration of time, the ship will turn at the same apparent speed
 	if (Pi::game->GetTimeAccel() != Game::TIMEACCEL_1X) {

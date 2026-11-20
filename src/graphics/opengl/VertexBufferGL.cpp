@@ -187,7 +187,7 @@ namespace Graphics {
 			assert(mode != BUFFER_MAP_NONE);
 			assert(m_mapMode == BUFFER_MAP_NONE);
 			assert(m_mapLength == 0);
-			assert(start + range <= m_capacity * m_stride);
+			assert(start + range <= static_cast<size_t>(m_capacity) * m_stride);
 
 			m_mapMode = mode;
 			m_mapStart = start;
@@ -225,7 +225,7 @@ namespace Graphics {
 			PROFILE_SCOPED()
 			assert(m_mapMode == BUFFER_MAP_NONE);
 			assert(m_usage == BUFFER_USAGE_DYNAMIC);
-			assert(start + range <= m_capacity * m_stride);
+			assert(start + range <= static_cast<size_t>(m_capacity) * m_stride);
 
 			glBindBuffer(GL_ARRAY_BUFFER, m_buffer);
 			glBufferSubData(GL_ARRAY_BUFFER, start, range, m_data + start);
@@ -249,7 +249,7 @@ namespace Graphics {
 			assert(m_mapMode == BUFFER_MAP_NONE);
 
 			glBindBuffer(GL_ARRAY_BUFFER, m_buffer);
-			glBufferData(GL_ARRAY_BUFFER, m_capacity * m_stride, nullptr, get_buffer_usage(m_usage));
+			glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(m_capacity) * m_stride, nullptr, get_buffer_usage(m_usage));
 			glBindBuffer(GL_ARRAY_BUFFER, 0);
 		}
 

@@ -432,7 +432,7 @@ void CityOnPlanet::Generate(SpaceStation *station)
 
 	// Reserve space for all buildings we expect to generate
 	m_buildings.clear();
-	m_buildings.reserve(cityExtents * cityExtents); // estimate 25% occupancy
+	m_buildings.reserve(static_cast<size_t>(cityExtents) * cityExtents); // estimate 25% occupancy
 
 	bool hasAtmo = m_body->HasAtmosphere();
 

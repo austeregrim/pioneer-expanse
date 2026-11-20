@@ -205,17 +205,17 @@ public:
 	matrix3x3<U> ToMatrix3x3() const
 	{
 		matrix3x3<U> m;
-		U xx = x * x;
-		U xy = x * y;
-		U xz = x * z;
-		U xw = x * w;
+		U xx = U(x) * U(x);
+		U xy = U(x) * U(y);
+		U xz = U(x) * U(z);
+		U xw = U(x) * U(w);
 
-		U yy = y * y;
-		U yz = y * z;
-		U yw = y * w;
+		U yy = U(y) * U(y);
+		U yz = U(y) * U(z);
+		U yw = U(y) * U(w);
 
-		U zz = z * z;
-		U zw = z * w;
+		U zz = U(z) * U(z);
+		U zw = U(z) * U(w);
 
 		m[0] = 1.0 - 2.0 * (yy + zz);
 		m[1] = 2.0 * (xy - zw);

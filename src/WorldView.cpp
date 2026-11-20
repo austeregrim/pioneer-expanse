@@ -658,8 +658,8 @@ std::tuple<double, double, double> WorldView::CalculateHeadingPitchRoll(PlaneTyp
 // Project a point in camera space to the screen
 static vector3d projectToScreenSpace(const vector3d &pos, RefCountedPtr<CameraContext> cameraContext, const bool adjustZ = true)
 {
-	const float h = cameraContext->GetHeight();
-	const float w = cameraContext->GetWidth();
+	const double h = cameraContext->GetHeight();
+	const double w = cameraContext->GetWidth();
 
 	vector3f screenPos = Graphics::ProjectToScreen(vector3f(pos), cameraContext->GetProjectionMatrix());
 	vector3d proj = vector3d(screenPos.x * w, h - screenPos.y * h, screenPos.z);

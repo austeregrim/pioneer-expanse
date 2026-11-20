@@ -2504,9 +2504,9 @@ void ImTextureData::Create(ImTextureFormat format, int w, int h)
     Height = h;
     BytesPerPixel = ImTextureDataGetFormatBytesPerPixel(format);
     UseColors = false;
-    Pixels = (unsigned char*)IM_ALLOC(Width * Height * BytesPerPixel);
+    Pixels = (unsigned char*)IM_ALLOC((size_t)Width * Height * BytesPerPixel);
     IM_ASSERT(Pixels != NULL);
-    memset(Pixels, 0, Width * Height * BytesPerPixel);
+    memset(Pixels, 0, (size_t)Width * Height * BytesPerPixel);
     UsedRect.x = UsedRect.y = UsedRect.w = UsedRect.h = 0;
     UpdateRect.x = UpdateRect.y = (unsigned short)~0;
     UpdateRect.w = UpdateRect.h = 0;
@@ -2985,7 +2985,7 @@ void ImFontAtlasTextureBlockCopy(ImTextureData* src_tex, int src_x, int src_y, I
     IM_ASSERT(dst_x >= 0 && dst_x + w <= dst_tex->Width);
     IM_ASSERT(dst_y >= 0 && dst_y + h <= dst_tex->Height);
     for (int y = 0; y < h; y++)
-        memcpy(dst_tex->GetPixelsAt(dst_x, dst_y + y), src_tex->GetPixelsAt(src_x, src_y + y), w * dst_tex->BytesPerPixel);
+        memcpy(dst_tex->GetPixelsAt(dst_x, dst_y + y), src_tex->GetPixelsAt(src_x, src_y + y), (size_t)w * dst_tex->BytesPerPixel);
 }
 
 void ImFontAtlasTextureBlockQueueUpload(ImFontAtlas* atlas, ImTextureData* tex, int x, int y, int w, int h)
@@ -4807,7 +4807,7 @@ static bool ImGui_ImplStbTrueType_FontBakedLoadGlyph(ImFontAtlas* atlas, ImFontC
         ImFontAtlasBuilder* builder = atlas->Builder;
         builder->TempBuffer.resize(w * h * 1);
         unsigned char* bitmap_pixels = builder->TempBuffer.Data;
-        memset(bitmap_pixels, 0, w * h * 1);
+        memset(bitmap_pixels, 0, (size_t)w * h * 1);
 
         // Render with oversampling
         // (those functions conveniently assert if pixels are not cleared, which is another safety layer)

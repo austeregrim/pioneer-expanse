@@ -916,9 +916,9 @@ void SystemMapViewport::HandleInput(float ft)
 			m_rot_y_to += motion[0] * 20 * ft * speedMod;
 		} else {
 			const double pixToUnits = m_viewportSize.h / m_atlasViewH;
-			const float mouseAcceleration = m_rotateWithMouseButton ? 1.0f : 1.5f;
-			m_atlasPosTo.x += motion[0] * m_atlasZoom / pixToUnits * mouseAcceleration;
-			m_atlasPosTo.y += motion[1] * m_atlasZoom / pixToUnits * mouseAcceleration;
+			const double mouseAcceleration = m_rotateWithMouseButton ? 1.0 : 1.5;
+			m_atlasPosTo.x += static_cast<double>(motion[0]) * m_atlasZoom / pixToUnits * mouseAcceleration;
+			m_atlasPosTo.y += static_cast<double>(motion[1]) * m_atlasZoom / pixToUnits * mouseAcceleration;
 		}
 	} else if (m_zoomView) {
 		inputMgr->SetCapturingMouse(true);

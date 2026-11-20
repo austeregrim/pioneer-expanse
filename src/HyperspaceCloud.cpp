@@ -204,7 +204,7 @@ void HyperspaceCloud::Render(Renderer *renderer, const Camera *camera, const vec
 	trans.Translate(float(viewCoords.x), float(viewCoords.y), float(viewCoords.z));
 
 	// precise to the rendered frame (better than PHYSICS_HZ granularity)
-	const double preciseTime = Pi::game->GetTime() + Pi::GetGameTickAlpha() * Pi::game->GetTimeStep();
+	const double preciseTime = Pi::game->GetTime() + static_cast<double>(Pi::GetGameTickAlpha()) * Pi::game->GetTimeStep();
 
 	// Flickering gradient circle, departure clouds are red and arrival clouds blue
 	// XXX could just alter the scale instead of recreating the model

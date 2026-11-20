@@ -143,7 +143,7 @@ namespace SceneGraph {
 
 			//save positions, normals, uvs, and optional tangents interleaved (only known format now)
 			const uint8_t *vtxPtr = mesh.vertexBuffer->Map<uint8_t>(Graphics::BUFFER_MAP_READ);
-			db.wr->Raw(vtxPtr, mesh.vertexBuffer->GetSize() * mesh.vertexBuffer->GetStride());
+			db.wr->Raw(vtxPtr, static_cast<size_t>(mesh.vertexBuffer->GetSize()) * mesh.vertexBuffer->GetStride());
 			mesh.vertexBuffer->Unmap();
 
 			//indices

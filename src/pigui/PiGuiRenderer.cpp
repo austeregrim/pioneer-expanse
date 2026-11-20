@@ -203,11 +203,11 @@ void InstanceRenderer::UpdateFontTexture(ImTextureData *tex)
 		auto *ptr = reinterpret_cast<Graphics::Texture *>(tex->TexID);
 
 		// Texture::Update expects the source region to be fully contiguous
-		uint8_t *texel_data = new uint8_t[tex->UpdateRect.w * tex->UpdateRect.h * tex->BytesPerPixel];
+		const size_t width = static_cast<size_t>(tex->UpdateRect.w) * tex->BytesPerPixel;
+		uint8_t *texel_data = new uint8_t[width * tex->UpdateRect.h];
 
 		uint8_t *blit_ptr = texel_data;
 		for (int y = 0; y < tex->UpdateRect.h; y++) {
-			size_t width = tex->UpdateRect.w * tex->BytesPerPixel;
 			std::memcpy(blit_ptr, tex->GetPixelsAt(tex->UpdateRect.x, tex->UpdateRect.y + y), width);
 			blit_ptr += width;
 		}
