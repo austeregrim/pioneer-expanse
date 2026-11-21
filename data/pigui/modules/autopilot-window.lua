@@ -98,7 +98,7 @@ end
 
 local function button_undock()
 	if player:IsLanded() then
-		if ui.mainMenuButton(icons.autopilot_blastoff, lui.HUD_BUTTON_BLASTOFF) or (ui.noModifierHeld() and ui.isKeyReleased(ui.keys.f5)) then
+		if ui.mainMenuButton(icons.autopilot_blastoff, "Launch from Surface [F5] (or hold Thrust Up)") or (ui.noModifierHeld() and ui.isKeyReleased(ui.keys.f5)) then
 			Game.SetTimeAcceleration("1x")
 			AutoSave.Save()
 			player:BlastOff()

@@ -86,6 +86,9 @@ void ShipViewController::LoadFromJson(const Json &jsonObj)
 	if (!jsonObj["cam_type"].is_number_integer())
 		throw SavedGameCorruptException();
 
+	m_freelookLocked = false;
+	m_ignoreMouseLookUntilRelease = false;
+
 	SetCamType(jsonObj["cam_type"]);
 
 	m_internalCameraController->LoadFromJson(jsonObj);
@@ -110,6 +113,8 @@ void ShipViewController::Init()
 	m_externalCameraController.reset(new ExternalCameraController(m_cameraContext, Pi::player));
 	m_siderealCameraController.reset(new SiderealCameraController(m_cameraContext, Pi::player));
 	m_flybyCameraController.reset(new FlyByCameraController(m_cameraContext, Pi::player));
+	m_freelookLocked = false;
+	m_ignoreMouseLookUntilRelease = false;
 	SetCamType(m_camType); //set the active camera
 
 	// setup camera smoothing
@@ -142,6 +147,7 @@ void ShipViewController::Deactivated()
 
 	if (m_mouseActive) {
 		m_mouseActive = false;
+		m_ignoreMouseLookUntilRelease = false;
 		if (Pi::input) {
 			Pi::input->SetCapturingMouse(false);
 		}
@@ -180,6 +186,8 @@ void ShipViewController::SetCamType(enum CamType c)
 	m_camType = c;
 	if (m_camType != CAM_INTERNAL) {
 		headtracker_input_priority = false;
+		m_freelookLocked = false;
+		m_ignoreMouseLookUntilRelease = false;
 	}
 
 	Pi::player->SetFlag(Body::FLAG_DRAW_EXCLUDE, !IsExteriorView());
@@ -188,6 +196,22 @@ void ShipViewController::SetCamType(enum CamType c)
 	m_activeCameraController->Reset();
 
 	onChangeCamType.emit();
+}
+
+void ShipViewController::SetFreelookLocked(bool locked)
+{
+	m_freelookLocked = locked;
+	if (!m_freelookLocked && m_internalCameraController) {
+		m_internalCameraController->SetSmoothingEnabled(true);
+		m_internalCameraController->SetRotationAngles({ 0.0f, 0.0f, 0.0f });
+	}
+}
+
+bool ShipViewController::ToggleFreelookLocked()
+{
+	SetFreelookLocked(!m_freelookLocked);
+	Sound::PlaySfx("Click", 0.3, 0.3, false);
+	return m_freelookLocked;
 }
 
 bool ShipViewController::IsExteriorView() const
@@ -283,14 +307,18 @@ void ShipViewController::Update()
 
 	if (InputBindings.cameraZoom->IsActive())
 		cam->ZoomEvent(-InputBindings.cameraZoom->GetValue() * ZOOM_SPEED * frameTime);
-	if (InputBindings.resetCamera->IsActive())
+	if (InputBindings.resetCamera->IsActive()) {
 		cam->Reset();
+		m_freelookLocked = false;
+	}
 	cam->ZoomEventUpdate(frameTime);
 
 	int mouseMotion[2];
 	Pi::input->GetMouseMotion(mouseMotion);
 
-	// external camera mouselook (double-click middle mouse resets view like Home)
+	// camera mouselook:
+	// - in internal view, double-clicking MMB toggles persistent Freelook Lock ON/OFF
+	// - in exterior views, double-clicking MMB resets camera orientation like Home
 	bool mouse_down = Pi::input->MouseButtonState(SDL_BUTTON_MIDDLE);
 	if (mouse_down && !headtracker_input_priority) {
 		if (!m_mouseActive) {
@@ -299,35 +327,48 @@ void ShipViewController::Update()
 
 			const Uint32 nowMs = SDL_GetTicks();
 			if (m_lastMiddleClickMs != 0 && (nowMs - m_lastMiddleClickMs) <= 350) {
-				cam->Reset();
+				if (!IsExteriorView()) {
+					ToggleFreelookLocked();
+					m_ignoreMouseLookUntilRelease = !m_freelookLocked;
+				} else {
+					cam->Reset();
+				}
 				m_lastMiddleClickMs = 0;
 			} else {
 				m_lastMiddleClickMs = nowMs;
 			}
 		}
 
-		// invert the mouse input to convert between screen coordinates and
-		// right-hand coordinate system rotation.
-		cam->YawCamera(float(-mouseMotion[0]) * MOUSELOOK_SPEED / M_PI);
-		cam->PitchCamera(float(-mouseMotion[1]) * MOUSELOOK_SPEED / M_PI);
+		if (!m_ignoreMouseLookUntilRelease) {
+			if (!IsExteriorView() && m_internalCameraController) {
+				m_internalCameraController->SetSmoothingEnabled(Pi::config->Int("CameraSmoothing", 0) != 0);
+			}
+
+			// invert the mouse input to convert between screen coordinates and
+			// right-hand coordinate system rotation.
+			cam->YawCamera(float(-mouseMotion[0]) * MOUSELOOK_SPEED / M_PI);
+			cam->PitchCamera(float(-mouseMotion[1]) * MOUSELOOK_SPEED / M_PI);
+		}
 	}
 
 	if (!mouse_down && m_mouseActive) {
 		m_mouseActive = false;
+		m_ignoreMouseLookUntilRelease = false;
 		Pi::input->SetCapturingMouse(false);
 	}
 
 	// In internal cockpit view, the 2D HUD center reticle is fixed at the viewport center.
-	// When middle-mouse freelook and headlook are released (or during hyperjump alignment/surge),
-	// return internal camera rotation angles to (0, 0) so the cockpit camera, skybox, and HUD alignment
-	// markers always match the ship's true forward vector (-Z).
+	// When middle-mouse freelook and headlook are released (and freelook is not locked),
+	// or during hyperjump alignment/surge, return internal camera rotation angles to (0, 0)
+	// so the cockpit camera, skybox, and HUD alignment markers match the ship's true forward vector (-Z).
 	if (!IsExteriorView() && m_internalCameraController) {
 		if (Pi::player && Pi::player->IsHyperspaceJumpSurging()) {
 			if (m_internalCameraController->GetMode() != InternalCameraController::MODE_FRONT)
 				m_internalCameraController->SetMode(InternalCameraController::MODE_FRONT);
+			m_freelookLocked = false;
 			m_internalCameraController->SetSmoothingEnabled(false);
 			m_internalCameraController->SetRotationAngles({ 0.0f, 0.0f, 0.0f });
-		} else if (!mouse_down && !headtracker_input_priority) {
+		} else if (!mouse_down && !headtracker_input_priority && !m_freelookLocked) {
 			m_internalCameraController->SetSmoothingEnabled(true);
 			m_internalCameraController->SetRotationAngles({ 0.0f, 0.0f, 0.0f });
 		}

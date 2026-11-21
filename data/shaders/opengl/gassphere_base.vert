@@ -8,6 +8,7 @@
 out vec3 varyingEyepos;
 out vec3 varyingNormal;
 out vec3 varyingTexCoord0;
+flat out vec3 varyingPoleView;
 
 void main(void)
 {
@@ -15,4 +16,5 @@ void main(void)
 	varyingEyepos = vec3(uViewMatrix * a_vertex);
 	varyingNormal = normalize(normalMatrix() * a_normal);
 	varyingTexCoord0 = a_normal.xyz;
+	varyingPoleView = normalize(normalMatrix() * vec3(0.0, 1.0, 0.0));
 }

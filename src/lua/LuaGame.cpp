@@ -588,6 +588,24 @@ static int l_game_set_world_cam_type(lua_State *l)
 	return 0;
 }
 
+static int l_game_is_freelook_locked(lua_State *l)
+{
+	const bool locked = (Pi::game && Pi::game->GetWorldView() && Pi::game->GetWorldView()->shipView)
+		? Pi::game->GetWorldView()->shipView->IsFreelookLocked()
+		: false;
+	lua_pushboolean(l, locked);
+	return 1;
+}
+
+static int l_game_set_freelook_locked(lua_State *l)
+{
+	if (!Pi::game || !Pi::game->GetWorldView() || !Pi::game->GetWorldView()->shipView)
+		return 0;
+	const bool locked = lua_toboolean(l, 1);
+	Pi::game->GetWorldView()->shipView->SetFreelookLocked(locked);
+	return 0;
+}
+
 static int l_game_get_hyperspace_travelled_percentage(lua_State *l)
 {
 	LuaPush(l, Pi::game->GetHyperspaceArrivalProbability());
@@ -749,6 +767,8 @@ void LuaGame::Register()
 
 		{ "SetWorldCamType", l_game_set_world_cam_type },
 		{ "GetWorldCamType", l_game_get_world_cam_type },
+		{ "IsFreelookLocked", l_game_is_freelook_locked },
+		{ "SetFreelookLocked", l_game_set_freelook_locked },
 		{ "SetSurfaceScanOverlay", l_game_set_surface_scan_overlay },
 
 		{ "GetConfigBool", l_game_get_config<bool> },

@@ -896,6 +896,20 @@ local function displayAlertMarker()
 	end
 end
 
+local function displayFreelookIndicator()
+	if not (Game.GetWorldCamType and Game.GetWorldCamType() == "internal" and Game.IsFreelookLocked) then
+		return
+	end
+	local locked = Game.IsFreelookLocked()
+	local uiPos = ui.pointOnClock(center, reticuleCircleRadius - 16, 6)
+	local icon = locked and icons.freelook_on or icons.freelook_off
+	local col = locked and colors.navigationalElements or colors.reticuleCircleDark
+	local tip = locked
+		and "Freelook: LOCKED (Double-click Middle Mouse to unlock & recenter)"
+		or "Freelook: AUTO-CENTER (Double-click Middle Mouse to lock)"
+	ui.addIcon(uiPos, icon, col, Vector2(18, 18), ui.anchor.center, ui.anchor.center, tip)
+end
+
 
 local reticuleCornerColor = _G.Color(75, 195, 255, 210)
 local reticuleCornerAccent = _G.Color(140, 225, 255, 150)
@@ -966,10 +980,16 @@ local function displayReticule()
 
 	displayReticulePitchHorizonCompass()
 	displayAlertMarker()
+	displayFreelookIndicator()
 
-	if player and (player:GetFlightState() == "UNDOCKING" or (player.IsTakingOff and player:IsTakingOff())) then
+	local flightState = player and player:GetFlightState()
+	local isTakingOff = flightState == "FLYING" and player.IsTakingOff and player:IsTakingOff()
+	if player and (flightState == "UNDOCKING" or isTakingOff) then
 		ui.withFont(pionillium.heading, function()
-			local prompt = "UNDOCK IN PROGRESS — USE CONTROLS OR CLICK TO TAKE OVER"
+			local isStationUndock = (flightState == "UNDOCKING") or (player.IsTakeoffFromStation and player:IsTakeoffFromStation())
+			local prompt = isStationUndock
+				and "UNDOCK IN PROGRESS — USE CONTROLS OR CLICK TO TAKE OVER"
+				or "SURFACE LIFTOFF — USE CONTROLS OR CLICK TO TAKE OVER"
 			local sz = ui.calcTextSize(prompt)
 			local promptPos = Vector2(center.x - (sz.x + 24) / 2, center.y + reticuleCircleRadius * 1.3)
 			ui.setCursorScreenPos(promptPos)

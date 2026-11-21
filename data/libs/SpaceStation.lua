@@ -480,7 +480,7 @@ local function addRandomShipAdvert(station, num)
 		local def = avail[Engine.rand:Integer(1,#avail)]
 		local model = Engine.GetModel(def.modelName)
 		local pattern = model.numPatterns ~= 0 and Engine.rand:Integer(1,model.numPatterns) or nil
-		local label = Ship.MakeRandomLabel()
+		local label = Ship.MakeRandomLabel(def.id, "PLAYER")
 		addShipOnSale(station, {
 			def     = def,
 			skin    = ModelSkin.New():SetRandomColors(Engine.rand):SetDecal(def.manufacturer):SetLabel(label),

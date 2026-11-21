@@ -497,9 +497,11 @@ void PlayerShipController::FlightAssist(const float timeStep, TotalDesiredAction
 
 void PlayerShipController::ApplyTotalAction(const TotalDesiredAction &params)
 {
+	const bool isAutomatedTakeoff = m_ship->IsType(ObjectType::PLAYER) && static_cast<Player *>(m_ship)->IsTakingOff();
+
 	// setting the desired speed has priority over the low-level thrust setting
 	if (params.desireLinVel) {
-		if (params.desiredLinear.LengthSqr() > 0.0)
+		if (params.desiredLinear.LengthSqr() > 0.0 && !isAutomatedTakeoff)
 			m_ship->m_launchLockTimeout = 0.0f;
 		m_ship->AIMatchVel(params.desiredLinear, params.linPower);
 	} else {
@@ -599,6 +601,10 @@ void PlayerShipController::StaticUpdate(const float timeStep)
 		return;
 	}
 
+	if (m_ship->GetFlightState() != Ship::LANDED) {
+		m_surfaceLiftoffHold = 0.0f;
+	}
+
 	if (m_ship->GetFlightState() == Ship::FLYING) {
 
 		if (m_followTarget) {
@@ -676,6 +682,19 @@ void PlayerShipController::StaticUpdate(const float timeStep)
 		// Release mouse-steering capture whenever we leave active flight (docked, landed, docking, hyperspace, etc.)
 		if (m_mouseActive) {
 			ResetMouseCapture();
+		}
+
+		if (m_ship->GetFlightState() == Ship::LANDED &&
+			!Pi::game->IsPaused() && !m_ship->IsDead() && InputBindings.active &&
+			Pi::GetView() == Pi::game->GetWorldView() &&
+			InputBindings.thrustUp->IsActive() && InputBindings.thrustUp->GetValue() > 0.5f) {
+			m_surfaceLiftoffHold += timeStep;
+			if (m_surfaceLiftoffHold >= 0.35f) {
+				m_surfaceLiftoffHold = 0.0f;
+				m_ship->Blastoff();
+			}
+		} else {
+			m_surfaceLiftoffHold = 0.0f;
 		}
 	}
 }

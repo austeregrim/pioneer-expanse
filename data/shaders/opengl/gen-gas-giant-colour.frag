@@ -67,11 +67,12 @@ vec4 HueShift(in vec4 color)
 
 vec4 GetColour(in vec3 p)
 {
-	float n = fbm(p * 3.14159, FBM_OCTAVES, frequency, 0.5, time);
-	// the input texture is a vertical color ramp, uniform in the X axis
-	// Convert the -1 .. 1 vertical spherical coordinate to a 0..1 GL texture coordinate and distort with random noise.
-	vec2 uv = vec2(0.5, ((p.y + 1.0) * 0.5) + (n * 0.075));
-	vec4 color = vec4(texture(rampTexture, uv).xyz, 1.0);
+	float effFreq = clamp(frequency, 0.35, 1.35);
+	vec3 zp = vec3(p.x * 0.72, p.y * 2.35, p.z * 0.72);
+	float n = fbm(zp * 3.14159, FBM_OCTAVES, effFreq, 0.45, time);
+	// Smooth horizontal bands from vertical color ramp, clamped away from polar wrap seam
+	float rampV = clamp(((p.y + 1.0) * 0.5) + (n * 0.042), 0.002, 0.998);
+	vec4 color = vec4(texture(rampTexture, vec2(0.5, rampV)).xyz, 1.0);
 	return color;
 }
 

@@ -526,6 +526,26 @@ static int l_ship_is_taking_off(lua_State *l)
 	return 1;
 }
 
+/* Method: IsTakeoffFromStation
+ *
+ * Check if the current automated vertical liftoff originated from a station pad.
+ *
+ * > fromStation = ship:IsTakeoffFromStation()
+ *
+ * Return:
+ *   fromStation - true if the active liftoff originated from a station pad
+ */
+static int l_ship_is_takeoff_from_station(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	bool fromStation = false;
+	if (s->IsType(ObjectType::PLAYER)) {
+		fromStation = static_cast<Player *>(s)->IsTakeoffFromStation();
+	}
+	lua_pushboolean(l, fromStation);
+	return 1;
+}
+
 /* Method: BlastOff
  *
  * Blast off if landed on a surface.
@@ -2061,6 +2081,7 @@ void LuaObject<Ship>::RegisterClass()
 		{ "Undock", l_ship_undock },
 		{ "TakeoverUndocking", l_ship_takeover_undocking },
 		{ "IsTakingOff", l_ship_is_taking_off },
+		{ "IsTakeoffFromStation", l_ship_is_takeoff_from_station },
 		{ "BlastOff", l_ship_blast_off },
 
 		{ "Explode", l_ship_explode },

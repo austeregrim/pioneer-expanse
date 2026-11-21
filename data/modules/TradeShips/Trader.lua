@@ -11,8 +11,9 @@ local Timer = require 'Timer'
 
 local utils       = require 'utils'
 
-local ShipBuilder = require 'modules.MissionUtils.ShipBuilder'
-local OutfitRules = ShipBuilder.OutfitRules
+local ShipBuilder  = require 'modules.MissionUtils.ShipBuilder'
+local OutfitRules  = ShipBuilder.OutfitRules
+local ShipRegistry = require 'modules.ShipRegistry.ShipRegistry'
 
 local Core = require 'modules.TradeShips.Core'
 
@@ -67,8 +68,11 @@ Trader.addEquip = function (ship)
 	local hullConfig = HullConfig.GetHullConfig(shipId)
 	assert(hullConfig, "Can't find hull config for shipId " .. shipId)
 
+	local existingLabel = ship:GetLabel()
+	local preserveLabel = (existingLabel and existingLabel ~= "" and existingLabel ~= "UNLABELED_SHIP") and existingLabel or "UNLABELED_SHIP"
 	local template = TraderTemplate:clone {
-		randomModifier = randomMod
+		randomModifier = randomMod,
+		label = preserveLabel,
 	}
 
 	local hullThreat = ShipBuilder.GetHullThreat(shipId).total
@@ -292,6 +296,41 @@ Trader.checkDistBetweenStarport = function (ship)
 	return distance >= trader.hyperjumpDist
 end
 
+-- Compute realistic variable turnaround or hangar stow plan based on cargo load,
+-- repairs, pad congestion, and whether this starport is the vessel's home port.
+Trader.computeStationDwellPlan = function(ship, starport, unloadedTons, damageFrac, rec, isInitialSpawn)
+	unloadedTons = unloadedTons or 0
+	damageFrac = damageFrac or 0
+	local cargoSec = math.clamp(45.0 + unloadedTons * 2.5, 45.0, 420.0)
+	local repairSec = (damageFrac > 0.001) and (120.0 + damageFrac * 600.0) or 0.0
+	local prepSec = cargoSec + repairSec
+
+	local stationIdx = starport and starport.path and starport.path.bodyIndex or nil
+	local isHomePort = rec and stationIdx and rec.homeStationBodyIdx == stationIdx
+	local numDocks = (starport and starport.numDocks) or 4
+	local freeDocks = (starport and starport.freeDocks) or numDocks
+	local occupancy = (numDocks > 0) and (1.0 - (freeDocks / numDocks)) or 0.0
+
+	local roll = Engine.rand:Number(1)
+	local hangarThreshold = isHomePort and 0.60 or 0.40
+	if occupancy >= 0.60 then
+		hangarThreshold = math.max(hangarThreshold, 0.70)
+	end
+
+	if roll < hangarThreshold then
+		local isOvernight = (isHomePort and Engine.rand:Number(1) < 0.72) or (Engine.rand:Number(1) < 0.45)
+		local hangarDur = isOvernight and Engine.rand:Number(21600, 50400) or Engine.rand:Number(1800, 10800)
+		local padSec = isInitialSpawn and Engine.rand:Number(25, 110) or (prepSec + Engine.rand:Number(30, 90))
+		return { action = 'hangar', padDuration = padSec, hangarDuration = hangarDur }
+	elseif roll < hangarThreshold + ((1.0 - hangarThreshold) * 0.35) then
+		local padSec = isInitialSpawn and Engine.rand:Number(20, 90) or (prepSec + Engine.rand:Number(60, 180))
+		return { action = 'pad', padDuration = padSec }
+	else
+		local padSec = isInitialSpawn and Engine.rand:Number(90, 420) or (prepSec + Engine.rand:Number(240, 660))
+		return { action = 'pad', padDuration = padSec }
+	end
+end
+
 -- TRADER DEFERRED TASKS
 --
 -- call the passed function in a specified time, checking whether we are still
@@ -356,6 +395,25 @@ trader_task.doUndock = function(ship)
 			Trader.assignTask(ship, Game.time + Engine.rand:Number(8, Core.WAIT_FOR_NEXT_UNDOCK + 4), 'doUndock')
 			return true
 		end
+	end
+end
+
+trader_task.doStowHangar = function(ship)
+	local trader = Core.ships[ship]
+	if not trader or not ship:exists() or ship.flightState ~= 'DOCKED' then return end
+	local port = ship:GetDockedWith()
+	if not port or not port:exists() then return end
+
+	local hangarDur = trader.hangarDuration or Engine.rand:Number(1800, 28800)
+	local okStow = port.StowShipInHangar and port:StowShipInHangar(ship)
+	if okStow then
+		trader.status = 'stowing'
+		if Game.system and port.path then
+			ShipRegistry.MarkStowed(ship:GetLabel(), Game.system.path, port.path.bodyIndex, Game.time + hangarDur)
+		end
+		Core.log:add(ship, 'Lowering into hangar bay at ' .. port.label)
+	else
+		Trader.assignTask(ship, Game.time + Engine.rand:Number(45, 90), 'doUndock')
 	end
 end
 
@@ -424,11 +482,22 @@ Trader.assignTask = function(ship, delay, fn_name)
 	end
 end
 
-Trader.spawnInCloud = function(ship_name, cloud, route, dest_time)
+Trader.spawnInCloud = function(ship_name, cloud, route, dest_time, registryRec)
 	-- choose random local route for choosen ship,
 	-- the hyperjump target depends on this (for multiple system)
-	local ship = Space.SpawnShip(ship_name, 0, 0, {cloud.from, route.from:GetSystemBody().path, dest_time})
-	ship:SetLabel(Ship.MakeRandomLabel())
+	local fromSysKey = cloud and cloud.from and ShipRegistry.SystemKey(cloud.from) or nil
+	local rec = registryRec or (Game.system and ShipRegistry.AcquireShipForSystem(Game.system, nil, ship_name, { fromSystemKey = fromSysKey }))
+	local actualShipId = (rec and rec.shipId) or ship_name
+	local ship = Space.SpawnShip(actualShipId, 0, 0, {cloud.from, route.from:GetSystemBody().path, dest_time})
+	if not ship then
+		if rec then ShipRegistry.ReleaseLive(rec.label) end
+		return nil
+	end
+	if rec then
+		ShipRegistry.ApplyRecordToShip(ship, rec)
+	else
+		ship:SetLabel(Ship.MakeRandomLabel(actualShipId, "TRADER"))
+	end
 	Trader.addEquip(ship)
 	Trader.addHyperdriveFuel(ship)
 	Trader.addCargo(ship, 'import')
@@ -437,9 +506,10 @@ Trader.spawnInCloud = function(ship_name, cloud, route, dest_time)
 		dest_time	= dest_time,
 		dest_path	= Game.system.path,
 		from_path	= cloud.from,
-		ship_name	= ship_name,
+		ship_name	= actualShipId,
 		route = route
 	}
+	return ship
 end
 
 return Trader

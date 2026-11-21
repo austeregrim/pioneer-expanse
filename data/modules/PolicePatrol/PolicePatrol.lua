@@ -17,6 +17,7 @@ local ui = require 'pigui'
 
 local MissionUtils = require 'modules.MissionUtils'
 local ShipBuilder  = require 'modules.MissionUtils.ShipBuilder'
+local ShipRegistry = require 'modules.ShipRegistry.ShipRegistry'
 
 local l = Lang.GetResource("module-policepatrol")
 local l_ui_core = Lang.GetResource("ui-core")
@@ -285,10 +286,6 @@ local function spawnAmbientPatrols(system)
 		if stations and #stations > 0 then
 			local numPatrols = math.min(5, math.max(2, math.floor((1.0 - system.lawlessness) * 3.0 + #stations * 0.5)))
 			local threat = 20.0 + 30.0 * (1.0 - system.lawlessness)
-			local scTemplate = MissionUtils.ShipTemplates.PolicePatrol:clone {
-				shipId = policeId,
-				label = system.faction.policeName
-			}
 			local stars = system:GetStars()
 			local primaryStar = stars and stars[1]
 			for i = 1, numPatrols do
@@ -296,13 +293,23 @@ local function spawnAmbientPatrols(system)
 				local stBody = Space.GetBody(stPath.bodyIndex)
 				local pShip
 				if stBody and primaryStar and primaryStar.body and stBody ~= primaryStar.body then
+					local rec = ShipRegistry.AcquireShipForSystem(system, "POLICE", policeId, { stationBodyIdx = stPath.bodyIndex })
+					local patrolTemplate = MissionUtils.ShipTemplates.PolicePatrol:clone {
+						shipId = policeId,
+						label = rec and rec.label or nil
+					}
 					-- Place patrols along active Supercruise shipping lanes heading toward stations
 					local starRadius = math.max(primaryStar.radius or 7e8, 7e8)
-					pShip = ShipBuilder.MakeShipOrbit(primaryStar.body, scTemplate, threat, starRadius * 3.5, starRadius * 4.5)
+					pShip = ShipBuilder.MakeShipOrbit(primaryStar.body, patrolTemplate, threat, starRadius * 3.5, starRadius * 4.5)
 					if pShip then
+						if rec then
+							ShipRegistry.ApplyRecordToShip(pShip, rec)
+						end
 						local tRatio = 0.15 + 0.70 * ((i - 0.5) / numPatrols)
 						Space.PutShipOnRoute(pShip, stBody, tRatio)
 						pShip:AIFlyTo(stBody)
+					elseif rec then
+						ShipRegistry.ReleaseLive(rec.label)
 					end
 				end
 				if pShip then
@@ -366,8 +373,16 @@ local onEnterSystem = function (player)
 		if not Game.system then return end -- Shut up when the player is already in hyperspace
 
 		for i = 1, n do
-			ship = ShipBuilder.MakeShipNear(player, template, threat, 50, 100) -- "Ship detected nearby"
+			local rec = ShipRegistry.AcquireShipForSystem(system, "POLICE", policeId)
+			local unitTemplate = template:clone {
+				shipId = policeId,
+				label = rec and rec.label or nil
+			}
+			ship = ShipBuilder.MakeShipNear(player, unitTemplate, threat, 50, 100) -- "Ship detected nearby"
 			assert(ship)
+			if rec then
+				ShipRegistry.ApplyRecordToShip(ship, rec)
+			end
 			equipInterdictor(ship)
 
 			table.insert(patrol, ship)

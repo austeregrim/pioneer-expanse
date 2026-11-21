@@ -806,7 +806,7 @@ function ShipBuilder.MakePlan(template, shipConfig, threat)
 		end
 	end
 
-	shipPlan.label = template.label or Ship.MakeRandomLabel()
+	shipPlan.label = template.label or Ship.MakeRandomLabel(shipPlan.shipId)
 
 	return shipPlan
 
@@ -853,7 +853,9 @@ function ShipBuilder.ApplyPlan(ship, shipPlan)
 
 	-- TODO: ammunition / other items inside of instanced equipment
 
-	ship:SetLabel(shipPlan.label)
+	if shipPlan.label and shipPlan.label ~= "UNLABELED_SHIP" then
+		ship:SetLabel(shipPlan.label)
+	end
 
 end
 

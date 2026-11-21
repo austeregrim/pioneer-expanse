@@ -720,7 +720,9 @@ theme.icons = {
 	lights_beacon = 328,
 	lights_forward = 329,
 	lights_landing = 330,
-	-- 331 - 335 : empty
+	freelook_on = 331,
+	freelook_off = 332,
+	-- 333 - 335 : empty
 
 	shipmarket_compare_better = 38,
 	shipmarket_compare_worse = 40,

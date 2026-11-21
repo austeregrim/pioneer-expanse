@@ -1294,11 +1294,11 @@ void Ship::SetFlightState(Ship::FlightState newState)
 		if (m_flightState == DOCKING || m_flightState == DOCKED || m_flightState == UNDOCKING)
 			onUndock.emit();
 
-		const bool wasDockedOrUndocking = (m_flightState == DOCKING || m_flightState == DOCKED || m_flightState == UNDOCKING);
+		const bool wasDockedOrLanded = (m_flightState == DOCKING || m_flightState == DOCKED || m_flightState == UNDOCKING || m_flightState == LANDED);
 		m_dockedWith = nullptr;
 
-		if (wasDockedOrUndocking) {
-			// lock thrusters on for amount of time needed to push us out of station
+		if (wasDockedOrLanded) {
+			// lock thrusters on for amount of time needed to push us out of station / off terrain
 			static const double MASS_LOCK_REFERENCE(40000.0); // based purely on experimentation
 			// limit the time to between 1.5 and 3.5 seconds of thrust, the player can override
 			m_launchLockTimeout = std::min(std::max(1.5, 1.5 * (GetMass() / MASS_LOCK_REFERENCE)), 3.5);
@@ -1307,10 +1307,13 @@ void Ship::SetFlightState(Ship::FlightState newState)
 		}
 	}
 
-	if (newState == DOCKED) {
+	if (newState == DOCKED || newState == LANDED) {
 		m_launchLockTimeout = 0.0;
 		ClearLinThrusterState();
 		ClearAngThrusterState();
+		if (newState == LANDED) {
+			m_dockedWith = nullptr;
+		}
 	}
 
 	m_flightState = newState;
@@ -1386,6 +1389,7 @@ void Ship::Blastoff()
 		SetFlightState(FLYING);
 
 		SetPosition(up * planetRadius - GetAabb().min.y * up);
+		CalcExternalForce();
 		SetThrusterState(1, 1.0); // thrust upwards
 	}
 
@@ -1398,12 +1402,14 @@ void Ship::TestLanded()
 	m_testLanded = false;
 	if (m_launchLockTimeout > 0.0f) return;
 	if (m_wheelState < 1.0f) return;
+	if (IsType(ObjectType::PLAYER) && static_cast<const Player *>(this)->IsTakingOff()) return;
 
 	Frame *f = Frame::GetFrame(GetFrame());
 
 	if (f->GetBody()->IsType(ObjectType::PLANET)) {
 		double speed = GetVelocity().Length();
 		vector3d up = GetPosition().Normalized();
+		if (GetVelocity().Dot(up) > 0.5) return;
 		const double planetRadius = static_cast<Planet *>(f->GetBody())->GetTerrainHeight(up);
 
 		if (speed < MAX_LANDING_SPEED) {

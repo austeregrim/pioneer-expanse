@@ -292,6 +292,62 @@ int SpaceStation::NumShipsDocked() const
 	return numShipsDocked;
 }
 
+int SpaceStation::GetFreeDockingPortCount() const
+{
+	int freePorts = 0;
+	for (Uint32 i = 0; i < m_shipDocking.size(); i++) {
+		if (m_shipDocking[i].ship == nullptr)
+			++freePorts;
+	}
+	return freePorts;
+}
+
+static double GetHangarElevatorDepth(const Ship *ship)
+{
+	if (!ship) return 20.0;
+	const Aabb &aabb = ship->GetAabb();
+	return std::max(14.0, (aabb.max.y - aabb.min.y) + 6.0);
+}
+
+bool SpaceStation::StowShipInHangar(Ship *ship)
+{
+	if (!ship || ship->IsDead() || ship->IsType(ObjectType::PLAYER))
+		return false;
+
+	const int bay = GetMyDockingPort(ship);
+	if (bay < 0 || Uint32(bay) >= m_shipDocking.size())
+		return false;
+
+	shipDocking_t &dt = m_shipDocking[bay];
+	if (dt.stage != DockStage::DOCKED || ship->GetFlightState() != Ship::DOCKED)
+		return false;
+
+	dt.stage = DockStage::HANGAR_STOWING;
+	dt.stagePos = 0.0;
+	dt.fromPos = vector3d::Zero;
+	dt.fromRot = Quaterniond(1.0, 0.0, 0.0, 0.0);
+	return true;
+}
+
+bool SpaceStation::BeginUnstowFromHangar(Ship *ship, const int bay)
+{
+	if (!ship || ship->IsDead() || bay < 0 || Uint32(bay) >= m_shipDocking.size())
+		return false;
+	if (m_shipDocking[bay].ship != nullptr)
+		return false;
+
+	ship->SetDockedWith(this, bay);
+
+	shipDocking_t &dt = m_shipDocking[bay];
+	dt.stage = DockStage::HANGAR_UNSTOWING;
+	dt.stagePos = 0.0;
+	dt.fromPos = vector3d(0.0, -GetHangarElevatorDepth(ship), 0.0);
+	dt.fromRot = Quaterniond(1.0, 0.0, 0.0, 0.0);
+	PositionDockedShip(ship, bay);
+	ship->UpdateInterpTransform(1.0);
+	return true;
+}
+
 int SpaceStation::GetFreeDockingPort(const Ship *s) const
 {
 	assert(s);
@@ -718,6 +774,7 @@ bool SpaceStation::CanLaunch(const Ship *ship) const
 
 	int bay = GetMyDockingPort(ship);
 	if (bay == -1) return false;
+	if (m_shipDocking[bay].stage != DockStage::DOCKED) return false;
 
 	// The player always has priority and is never prevented from launching
 	if (ship->IsType(ObjectType::PLAYER)) {
@@ -1216,6 +1273,44 @@ void SpaceStation::DockingUpdate(const double timeStep)
 		case DockStage::DOCKED:
 			continue;
 
+		case DockStage::HANGAR_STOWING: {
+			const double depth = GetHangarElevatorDepth(dt.ship);
+			dt.stagePos += timeStep / HANGAR_ELEVATOR_DURATION;
+			const double eased = AnimationCurves::InOutSineEasing(Clamp(dt.stagePos, 0.0, 1.0));
+			dt.fromPos = vector3d(0.0, -depth * eased, 0.0);
+			PositionDockedShip(dt.ship, i);
+			if (dt.stagePos >= 1.0) {
+				Ship *stowedShip = dt.ship;
+				dt.ship = nullptr;
+				dt.stagePos = 0.0;
+				dt.fromPos = vector3d::Zero;
+				dt.maxOffset = 0;
+				LockPort(i, false);
+				SwitchToStage(i, DockStage::NONE);
+				LuaEvent::Queue("onShipStowedInHangar", this, stowedShip);
+				if (Pi::game && Pi::game->GetSpace()) {
+					Pi::game->GetSpace()->KillBody(stowedShip);
+				}
+			}
+			continue;
+		}
+
+		case DockStage::HANGAR_UNSTOWING: {
+			const double depth = GetHangarElevatorDepth(dt.ship);
+			dt.stagePos += timeStep / HANGAR_ELEVATOR_DURATION;
+			const double eased = AnimationCurves::InOutSineEasing(Clamp(dt.stagePos, 0.0, 1.0));
+			dt.fromPos = vector3d(0.0, -depth * (1.0 - eased), 0.0);
+			PositionDockedShip(dt.ship, i);
+			if (dt.stagePos >= 1.0) {
+				dt.stagePos = 0.0;
+				dt.fromPos = vector3d::Zero;
+				SwitchToStage(i, DockStage::DOCKED);
+				PositionDockedShip(dt.ship, i);
+				LuaEvent::Queue("onShipUnstowedFromHangar", this, dt.ship);
+			}
+			continue;
+		}
+
 		case DockStage::CLEARANCE_GRANTED: // waiting for collision
 			if (dt.stagePos >= 1.0) {
 				LuaEvent::Queue("onDockingClearanceExpired", this, dt.ship);
@@ -1382,8 +1477,15 @@ void SpaceStation::TimeStepUpdate(const float timeStep)
 		if (dt.stage == DockStage::JUST_DOCK) { // just docked
 			m_navLights->SetColor(i + 1, NavLights::NAVLIGHT_BLUE);
 			m_navLights->SetMask(i + 1, 0xf6); // 11110110
+		} else if (dt.stage == DockStage::HANGAR_STOWING) {
+			m_navLights->SetColor(i + 1, NavLights::NAVLIGHT_BLUE);
+			m_navLights->SetMask(i + 1, 0x55);
+		} else if (dt.stage == DockStage::HANGAR_UNSTOWING) {
+			m_navLights->SetColor(i + 1, NavLights::NAVLIGHT_YELLOW);
+			m_navLights->SetMask(i + 1, 0x55);
 		}
-		if ((dt.ship->GetFlightState() == Ship::DOCKED) && (dt.stage == DockStage::DOCKED)) { //docked
+		if ((dt.ship->GetFlightState() == Ship::DOCKED) &&
+			(dt.stage == DockStage::DOCKED || dt.stage == DockStage::HANGAR_STOWING || dt.stage == DockStage::HANGAR_UNSTOWING)) { //docked or riding pad elevator
 			PositionDockedShip(dt.ship, i);
 		} else if (dt.ship->GetFlightState() == Ship::DOCKING || dt.ship->GetFlightState() == Ship::UNDOCKING) {
 			PositionDockingShip(dt.ship, i);

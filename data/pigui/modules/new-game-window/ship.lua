@@ -139,7 +139,7 @@ ShipLabel.value = ""
 function ShipLabel:draw()
 	Widgets.oneLiner(lui.REGISTRATION_NUMBER, self.layout, function()
 		local txt, changed = Widgets.inputText(self.lock, self:isValid(), "##ShipLabel", self.value, function()
-			return ShipObject.MakeRandomLabel()
+			return ShipObject.MakeRandomLabel(nil, "PLAYER")
 		end)
 		if changed then
 			self.value = txt
@@ -149,13 +149,16 @@ function ShipLabel:draw()
 end
 
 function ShipLabel:fromStartVariant(--[[variant]])
-	self.value = ShipObject.MakeRandomLabel()
+	self.value = ShipObject.MakeRandomLabel(nil, "PLAYER")
 	self.lock = false
 end
 
 function ShipLabel:isValid()
-	-- AB-1234
-	return self.value and string.match(self.value, "^%u%u%-%d%d%d%d$")
+	-- Extended (GR-48291K) or legacy (AB-1234)
+	return self.value and (
+		string.match(self.value, "^%u%u%-%d%d%d%d%d[%u%d]$") ~= nil or
+		string.match(self.value, "^%u%u%-%d%d%d%d$") ~= nil
+	)
 end
 
 ShipLabel.reader = Helpers.versioned {{

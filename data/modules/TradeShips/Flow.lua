@@ -9,8 +9,9 @@ local Space = require 'Space'
 local utils = require 'utils'
 local Commodities = require 'Commodities'
 
-local Core = require 'modules.TradeShips.Core'
-local Trader = require 'modules.TradeShips.Trader'
+local Core         = require 'modules.TradeShips.Core'
+local Trader       = require 'modules.TradeShips.Trader'
+local ShipRegistry = require 'modules.ShipRegistry.ShipRegistry'
 
 local Flow = {}
 -- this module creates all tradeships, and ensures the flow of new ships into the system
@@ -455,6 +456,11 @@ Flow.spawnInitialShips = function()
 	-- generating ships (guarantee docked presence, active Supercruise lane traffic, and arrival clouds)
 	Core.log:add(nil, string.format('spawnInitialShips: %d ports, %d routes, %d clouds', #port_summary, #routes_variants, #cloud_variants))
 
+	-- Ensure persistent regional vessel roster exists for this system
+	if Game.system then
+		ShipRegistry.EnsureSystemRoster(Game.system, Core.params.ship_names, Core.params.ports)
+	end
+
 	-- 1. Docked Ships at Stations (occupy pads while capping per-station and system-wide totals for multi-station hubs like Sol)
 	local dockedVariantsByPort = {}
 	for _, dv in ipairs(docked_variants) do
@@ -469,6 +475,7 @@ Flow.spawnInitialShips = function()
 			break
 		end
 		local portBody = portParam.port
+		local portBodyIdx = portBody.path and portBody.path.bodyIndex or nil
 		local candidates = dockedVariantsByPort[portBody]
 		local ndocks = portParam.ndocks or portBody.numDocks or 0
 		if candidates and #candidates > 0 and ndocks > 1 then
@@ -481,16 +488,29 @@ Flow.spawnInitialShips = function()
 			end
 			for i = 1, targetDocked do
 				local pick = utils.chooseNormalized(candidates)
+				local rec = pick and Game.system and ShipRegistry.AcquireShipForSystem(Game.system, nil, pick.id, { stationBodyIdx = portBodyIdx })
 				local ship = pick and Space.SpawnShipDocked(pick.id, portBody)
 				if ship then
 					totalDockedSpawned = totalDockedSpawned + 1
 					Core.ships[ship] = { ts_error = "OK", status = 'docked', starport = portBody, ship_name = pick.id }
-					ship:SetLabel(Ship.MakeRandomLabel())
+					if rec then
+						ShipRegistry.ApplyRecordToShip(ship, rec)
+					else
+						ship:SetLabel(Ship.MakeRandomLabel(pick.id, "TRADER"))
+					end
 					Trader.addEquip(ship)
 					Trader.addHyperdriveFuel(ship)
 					Trader.addCargo(ship, 'export')
-					local undockDelay = 18 + (portIdx - 1) * 16 + (i - 1) * 45 + Engine.rand:Number(5, 25)
-					Trader.assignTask(ship, Game.time + undockDelay, 'doUndock')
+					local plan = Trader.computeStationDwellPlan(ship, portBody, ship.usedCargo or 0, 0, rec, true)
+					local stagger = (portIdx - 1) * 12 + (i - 1) * 35
+					if plan.action == 'hangar' then
+						Core.ships[ship].hangarDuration = plan.hangarDuration
+						Trader.assignTask(ship, Game.time + plan.padDuration + (portIdx - 1) * 6, 'doStowHangar')
+					else
+						Trader.assignTask(ship, Game.time + plan.padDuration + stagger, 'doUndock')
+					end
+				elseif rec then
+					ShipRegistry.ReleaseLive(rec.label)
 				end
 			end
 		end
@@ -539,6 +559,7 @@ Flow.spawnInitialShips = function()
 					end
 				end
 
+				local rec = Game.system and ShipRegistry.AcquireShipForSystem(Game.system, nil, params.id, { stationBodyIdx = toBody.path and toBody.path.bodyIndex or nil })
 				local ship
 				if useInterStation then
 					local startDist = math.max((fromBody:GetPhysicalRadius() or 1000) + 15000, 20000)
@@ -550,7 +571,11 @@ Flow.spawnInitialShips = function()
 				end
 
 				if ship then
-					ship:SetLabel(Ship.MakeRandomLabel())
+					if rec then
+						ShipRegistry.ApplyRecordToShip(ship, rec)
+					else
+						ship:SetLabel(Ship.MakeRandomLabel(params.id, "TRADER"))
+					end
 					Core.ships[ship] = { ts_error = "OK", status = 'inbound', starport = toBody, ship_name = params.id }
 
 					Trader.addEquip(ship)
@@ -563,6 +588,8 @@ Flow.spawnInitialShips = function()
 					local tRatio = math.clamp(baseFrac + jitter, 0.10, 0.88)
 					Space.PutShipOnRoute(ship, toBody, tRatio)
 					ship:AIDockWith(toBody)
+				elseif rec then
+					ShipRegistry.ReleaseLive(rec.label)
 				end
 			end
 		end
@@ -599,9 +626,14 @@ Flow.spawnInitialShips = function()
 			local hull = minerHulls[Engine.rand:Integer(1, #minerHulls)]
 			local site = miningSites[Engine.rand:Integer(1, #miningSites)]
 			local port = port_summary[Engine.rand:Integer(1, #port_summary)].port
+			local rec = Game.system and ShipRegistry.AcquireShipForSystem(Game.system, "MINER", hull, { stationBodyIdx = port.path and port.path.bodyIndex or nil })
 			local minerShip = Space.SpawnShip(hull, 5, 8)
 			if minerShip then
-				minerShip:SetLabel(Ship.MakeRandomLabel())
+				if rec then
+					ShipRegistry.ApplyRecordToShip(minerShip, rec)
+				else
+					minerShip:SetLabel(Ship.MakeRandomLabel(hull, "MINER"))
+				end
 				Core.ships[minerShip] = {
 					ts_error = "OK",
 					status = 'inbound',
@@ -613,6 +645,8 @@ Flow.spawnInitialShips = function()
 				Space.PutShipOnRoute(minerShip, site, Engine.rand:Number(0.2, 0.8))
 				minerShip:AIFlyTo(site)
 				Trader.assignTask(minerShip, Game.time + Engine.rand:Number(70, 140), 'doReturnFromMining')
+			elseif rec then
+				ShipRegistry.ReleaseLive(rec.label)
 			end
 		end
 	end
@@ -661,8 +695,48 @@ Flow.setPlayerAsTraderInbound = function()
 	ship:AIDockWith(Core.ships[ship].starport)
 end
 
+Flow.processHangars = function()
+	if not Game.system or not Core.params or not Core.params.ports then return end
+	local activeCount = 0
+	for _ in pairs(Core.ships or {}) do activeCount = activeCount + 1 end
+	if activeCount >= Core.MAX_SHIPS then return end
+
+	local ports = Core.params.ports
+	if #ports == 0 then return end
+
+	local launched = 0
+	local startIdx = Engine.rand:Integer(1, #ports)
+	for offset = 0, #ports - 1 do
+		if activeCount >= Core.MAX_SHIPS or launched >= 2 then break end
+		local port = ports[((startIdx + offset - 1) % #ports) + 1]
+		if port and port:exists() and (port.freeDocks or 0) >= 2 and port.path then
+			local readyList = ShipRegistry.GetHangarReadyShips(Game.system, port.path.bodyIndex, Game.time)
+			if #readyList > 0 then
+				local rec = readyList[1]
+				if ShipDef[rec.shipId] then
+					local ship = Space.SpawnShipFromHangar(rec.shipId, port)
+					if ship then
+						ShipRegistry.ApplyRecordToShip(ship, rec)
+						Core.ships[ship] = { ts_error = "OK", status = 'unstowing', starport = port, ship_name = rec.shipId }
+						Trader.addEquip(ship)
+						Trader.addHyperdriveFuel(ship)
+						Trader.addCargo(ship, 'export')
+						ShipRegistry.MarkActive(rec.label, Game.system.path, port.path.bodyIndex)
+						Core.log:add(ship, 'Elevating from hangar bay at ' .. port.label)
+						activeCount = activeCount + 1
+						launched = launched + 1
+					else
+						rec.hangarUntil = Game.time + 120
+					end
+				end
+			end
+		end
+	end
+end
+
 Flow.run = function()
 	if not Core.params or not Core.params.ship_names or #Core.params.ship_names == 0 then return end
+	Flow.processHangars()
 	local activeCount = 0
 	for _ in pairs(Core.ships) do activeCount = activeCount + 1 end
 	if activeCount < Core.MAX_SHIPS then

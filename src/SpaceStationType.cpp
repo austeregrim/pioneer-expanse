@@ -354,6 +354,8 @@ DockStage SpaceStationType::PivotStage(DockStage s) const {
 		case DockStage::LEAVE:
 		case DockStage::APPROACH1:
 		case DockStage::APPROACH2:
+		case DockStage::HANGAR_STOWING:
+		case DockStage::HANGAR_UNSTOWING:
 			return DockStage::NONE;
 		default: return s;
 	}

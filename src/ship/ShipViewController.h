@@ -40,6 +40,10 @@ public:
 			m_internalCameraController->SetOrigFov(fov);
 	}
 
+	bool IsFreelookLocked() const { return m_freelookLocked; }
+	void SetFreelookLocked(bool locked);
+	bool ToggleFreelookLocked();
+
 	sigc::signal<void> onChangeCamType;
 
 private:
@@ -62,6 +66,8 @@ private:
 
 	bool headtracker_input_priority;
 	bool m_mouseActive;
+	bool m_freelookLocked = false;
+	bool m_ignoreMouseLookUntilRelease = false;
 	Uint32 m_lastMiddleClickMs = 0;
 
 	void MouseWheel(bool up);

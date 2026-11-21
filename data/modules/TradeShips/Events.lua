@@ -9,9 +9,10 @@ local ShipDef = require 'ShipDef'
 local utils = require 'utils'
 local CommodityType = require 'CommodityType'
 
-local Core = require 'modules.TradeShips.Core'
-local Flow = require 'modules.TradeShips.Flow'
-local Trader = require 'modules.TradeShips.Trader'
+local Core         = require 'modules.TradeShips.Core'
+local Flow         = require 'modules.TradeShips.Flow'
+local Trader       = require 'modules.TradeShips.Trader'
+local ShipRegistry = require 'modules.ShipRegistry.ShipRegistry'
 
 -- this module contains all events affecting tradeships
 
@@ -101,6 +102,7 @@ local onShipLeaveSystem = function (ship)
 	elseif Core.ships[ship] ~= nil then
 		local system = Core.ships[ship]['dest_path']:GetStarSystem()
 		Core.log:add(ship, 'Left '..Game.system.name..' for '.. system.name)
+		ShipRegistry.MarkInTransit(ship:GetLabel(), Core.ships[ship]['dest_path'])
 		Flow.cleanTradeShipsTable()
 	elseif Core.attackers.check(ship) then
 		for t_ship, trader in pairs(Core.ships) do
@@ -135,6 +137,7 @@ onShipDocked = function (ship, starport)
 	end
 
 	-- 'sell' trade cargo
+	local unloadedTons = ship.usedCargo or 0
 	---@type CargoManager
 	local cargoMgr = ship:GetComponent('CargoManager')
 
@@ -143,7 +146,9 @@ onShipDocked = function (ship, starport)
 		cargoMgr:RemoveCommodity(commodity, info.count)
 	end
 
-	local damage = ShipDef[trader.ship_name].hullMass - ship.hullMassLeft
+	local hullMax = (ShipDef[trader.ship_name] and ShipDef[trader.ship_name].hullMass) or ship.hullMassLeft or 1
+	local damage = hullMax - ship.hullMassLeft
+	local damageFrac = math.max(0.0, damage / math.max(1.0, hullMax))
 	if damage > 0 then
 		ship:SetHullPercent()
 		Trader.addEquip(ship)
@@ -152,12 +157,35 @@ onShipDocked = function (ship, starport)
 	ship:SetFuelPercent()
 
 	if trader.status == 'docked' then
-		-- Real-time station turnaround: 45 to 80 seconds
-		local dwellTime = Engine.rand:Number(45, 80)
-		Trader.assignTask(ship, Game.time + dwellTime, 'doUndock')
+		local rec = ShipRegistry.GetRecord(ship:GetLabel())
+		local plan = Trader.computeStationDwellPlan(ship, starport, unloadedTons, damageFrac, rec, false)
+		if plan.action == 'hangar' then
+			trader.hangarDuration = plan.hangarDuration
+			Trader.assignTask(ship, Game.time + plan.padDuration, 'doStowHangar')
+		else
+			Trader.assignTask(ship, Game.time + plan.padDuration, 'doUndock')
+		end
 	end
 end
 Event.Register("onShipDocked", onShipDocked)
+
+local onShipStowedInHangar = function (station, ship)
+	if not ship or Core.ships == nil or Core.ships[ship] == nil then return end
+	Core.log:add(ship, 'Stowed in hangar bay at ' .. (station and station.label or 'station'))
+	Core.ships[ship] = nil
+end
+Event.Register("onShipStowedInHangar", onShipStowedInHangar)
+
+local onShipUnstowedFromHangar = function (station, ship)
+	if not ship or Core.ships == nil or Core.ships[ship] == nil then return end
+	local trader = Core.ships[ship]
+	trader.status = 'docked'
+	Trader.addHyperdriveFuel(ship)
+	ship:SetFuelPercent()
+	Core.log:add(ship, 'Emerged onto pad from hangar at ' .. (station and station.label or 'station'))
+	Trader.assignTask(ship, Game.time + Engine.rand:Number(30, 75), 'doUndock')
+end
+Event.Register("onShipUnstowedFromHangar", onShipUnstowedFromHangar)
 
 local onShipUndocked = function (ship, starport)
 	if Core.ships[ship] == nil then return end
@@ -390,13 +418,13 @@ end
 Event.Register("onShipCollided", onShipCollided)
 
 local onShipDestroyed = function (ship, attacker)
-	if attacker == nil then return end-- XX
 	if Core.ships[ship] ~= nil then
 		local trader = Core.ships[ship]
-		Core.log:add(ship, 'Destroyed by '..attacker.label..', status:'..trader.status..' starport:'..(trader.starport and trader.starport.label or 'N/A'))
+		local killer = attacker and attacker.label or 'accident/hazard'
+		Core.log:add(ship, 'Destroyed by '..killer..', status:'..trader.status..' starport:'..(trader.starport and trader.starport.label or 'N/A'))
 		Core.ships[ship] = nil
 		-- XXX consider spawning some CargoBodies if killed by a ship
-	elseif Core.attackers.check(ship) then
+	elseif attacker ~= nil and Core.attackers.check(ship) then
 		for t_ship, trader in pairs(Core.ships) do
 			if trader.attacker and trader.attacker.ref == ship then
 				trader.attacker = nil

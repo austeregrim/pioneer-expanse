@@ -13,6 +13,7 @@ local icons = ui.theme.icons
 local lc = require 'Lang'.GetResource("core")
 local lui = require 'Lang'.GetResource("ui-core")
 local gameView = require 'pigui.views.game'
+local ShipRegistry = require 'modules.ShipRegistry.ShipRegistry'
 
 -- cache player each frame
 local player = nil ---@type Player
@@ -70,11 +71,8 @@ local function formatSupercruiseSpeed(speed)
 end
 
 ---@param target Ship
-local function displayTargetScannerFor(target, maxWidth)
-	local playerInSC = player:GetFlightState() == "SUPERCRUISE"
+local function buildTargetScannerRows(target, inSupercruise)
 	local targetInSC = target:GetFlightState() == "SUPERCRUISE"
-	local inSupercruise = playerInSC or targetInSC
-
 	local isWanted = target.IsWanted and target:IsWanted() or false
 	local bounty = (isWanted and target.GetBounty) and target:GetBounty() or 0
 	local wantedText = isWanted
@@ -82,14 +80,55 @@ local function displayTargetScannerFor(target, maxWidth)
 		or "CLEAN"
 	local wantedColor = isWanted and Color(255, 85, 75, 255) or Color(100, 225, 165, 255)
 
+	local rec = ShipRegistry.GetRecord(target:GetLabel())
+	local vesselName = (target.shipName and target.shipName ~= "" and target.shipName ~= target.label) and target.shipName or (rec and rec.shipName)
+
+	local data
 	if inSupercruise then
 		local scSpeed = target.GetSupercruiseSpeed and target:GetSupercruiseSpeed() or 0
-		local data = {
+		data = {
 			{ name = "STATUS", value = wantedText, color = wantedColor },
 			{ name = "VELOCITY", value = targetInSC and formatSupercruiseSpeed(scSpeed) or "SUBLIGHT" },
 			{ name = lui.HUD_CARGO_MASS, value = "SUBLIGHT SCAN ONLY", color = colors.fontDim },
 			{ name = "HULL / SHIELDS", value = "SUBLIGHT SCAN ONLY", color = colors.fontDim },
 		}
+	else
+		local engine = target:GetInstalledHyperdrive()
+		local fsdOffline = target.IsFsdOffline and target:IsFsdOffline() or false
+		data = {
+			{ name = "STATUS", value = wantedText, color = wantedColor },
+			{ name = lui.HYPERDRIVE, value = fsdOffline and "FSD OFFLINE" or (engine and engine:GetName() or lui.NO_DRIVE),
+			  color = fsdOffline and Color(255, 85, 75, 255) or nil },
+			{ name = lui.HUD_MASS, value = formatMass(target.staticMass) },
+			{ name = lui.HUD_CARGO_MASS, value = formatMass(target.usedCargo) },
+		}
+	end
+
+	if rec and rec.commanderName and rec.commanderName ~= "" then
+		table.insert(data, { name = "COMMANDER", value = rec.commanderName })
+	end
+	if vesselName and vesselName ~= "" then
+		table.insert(data, { name = "VESSEL", value = vesselName })
+	end
+	if rec then
+		local homePort = (rec.role == "PIRATE") and "Unregistered"
+			or ((rec.homeStationName and rec.homeSystemName) and string.format("%s (%s)", rec.homeStationName, rec.homeSystemName) or rec.homeSystemName)
+		if homePort and homePort ~= "" then
+			table.insert(data, { name = "HOME PORT", value = homePort, color = (rec.role == "PIRATE") and Color(255, 175, 90, 255) or colors.fontDim })
+		end
+	end
+
+	return data
+end
+
+---@param target Ship
+local function displayTargetScannerFor(target, maxWidth)
+	local playerInSC = player:GetFlightState() == "SUPERCRUISE"
+	local targetInSC = target:GetFlightState() == "SUPERCRUISE"
+	local inSupercruise = playerInSC or targetInSC
+	local data = buildTargetScannerRows(target, inSupercruise)
+
+	if inSupercruise then
 		ui.withFont(font_content, function()
 			drawTable(data, target.label, target:GetShipType())
 		end)
@@ -98,16 +137,6 @@ local function displayTargetScannerFor(target, maxWidth)
 
 	local hull = target:GetHullPercent()
 	local shield = target:GetShieldsPercent() or 0
-	local engine = target:GetInstalledHyperdrive()
-	local fsdOffline = target.IsFsdOffline and target:IsFsdOffline() or false
-
-	local data = {
-		{ name = "STATUS", value = wantedText, color = wantedColor },
-		{ name = lui.HYPERDRIVE, value = fsdOffline and "FSD OFFLINE" or (engine and engine:GetName() or lui.NO_DRIVE),
-		  color = fsdOffline and Color(255, 85, 75, 255) or nil },
-		{ name = lui.HUD_MASS, value = formatMass(target.staticMass) },
-		{ name = lui.HUD_CARGO_MASS, value = formatMass(target.usedCargo) },
-	}
 
 	ui.withFont(font_content, function()
 		drawTable(data, target.label, target:GetShipType())
@@ -143,6 +172,7 @@ local function displayTargetScanner(min, max)
 	local playerInSC = player:GetFlightState() == "SUPERCRUISE"
 	local targetInSC = target:GetFlightState() == "SUPERCRUISE"
 	local inSupercruise = playerInSC or targetInSC
+	local rows = buildTargetScannerRows(target, inSupercruise)
 
 	local textHeight = ui.getTextLineHeightWithSpacing()
 	local headingHeight = textHeight
@@ -150,8 +180,8 @@ local function displayTargetScanner(min, max)
 		headingHeight = ui.getTextLineHeightWithSpacing()
 	end)
 	local height = inSupercruise
-		and (textHeight * 4 + headingHeight + ui.gauge_height * 0.5)
-		or ((ui.gauge_height * 1.4) * 2 + textHeight * 4 + headingHeight + ui.gauge_height * 0.5)
+		and (textHeight * #rows + headingHeight + ui.gauge_height * 0.5)
+		or ((ui.gauge_height * 1.4) * 2 + textHeight * #rows + headingHeight + ui.gauge_height * 0.5)
 
 	local pos, size = ui.rectcut(min, max, height, ui.sides.bottom)
 

@@ -61,7 +61,10 @@ enum class DockStage { // <enum scope='DockStage' name=DockStage public>
 
 	// used not in BayPath, but in Port
 	APPROACH1,
-	APPROACH2
+	APPROACH2,
+
+	HANGAR_STOWING,
+	HANGAR_UNSTOWING
 
 };
 

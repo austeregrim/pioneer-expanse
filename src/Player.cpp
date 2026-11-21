@@ -16,6 +16,7 @@
 #include "SpaceStation.h"
 #include "StringF.h"
 #include "SystemView.h" // for the transfer planner
+#include "TerrainBody.h"
 #include "WorldView.h"
 #include "lua/LuaEvent.h"
 #include "lua/LuaObject.h"
@@ -33,7 +34,8 @@ static Sound::Event s_soundHyperdrive;
 Player::Player(const ShipType::Id &shipId) :
 	Ship(shipId),
 	m_takeoffTimer(0.0f),
-	m_takeoffDuration(4.0f)
+	m_takeoffDuration(4.0f),
+	m_takeoffFromStation(false)
 {
 	SetController(new PlayerShipController());
 	InitCockpit();
@@ -47,7 +49,8 @@ Player::Player(const ShipType::Id &shipId) :
 Player::Player(const Json &jsonObj, Space *space) :
 	Ship(jsonObj, space),
 	m_takeoffTimer(0.0f),
-	m_takeoffDuration(4.0f)
+	m_takeoffDuration(4.0f),
+	m_takeoffFromStation(false)
 {
 	InitCockpit();
 
@@ -396,14 +399,20 @@ void Player::StaticUpdate(const float timeStep)
 		m_cockpit->Update(this, timeStep);
 
 	if (m_takeoffTimer > 0.0f) {
-		m_takeoffTimer -= timeStep;
-		if (m_takeoffTimer <= 0.0f) {
+		if (GetFlightState() != Ship::FLYING) {
 			m_takeoffTimer = 0.0f;
-			auto con = GetPlayerController();
-			if (con && con->GetFlightControlState() == CONTROL_FIXSPEED && con->GetCruiseDirection() == PlayerShipController::CRUISE_UP) {
-				// Pad clearance achieved: transition cleanly to forward manual flight mode with full thruster authority
-				con->SetCruiseDirection(PlayerShipController::CRUISE_FWD);
-				con->SetFlightControlState(CONTROL_MANUAL);
+			m_takeoffFromStation = false;
+		} else {
+			m_takeoffTimer -= timeStep;
+			if (m_takeoffTimer <= 0.0f) {
+				m_takeoffTimer = 0.0f;
+				m_takeoffFromStation = false;
+				auto con = GetPlayerController();
+				if (con && con->GetFlightControlState() == CONTROL_FIXSPEED && con->GetCruiseDirection() == PlayerShipController::CRUISE_UP) {
+					// Pad clearance achieved: transition cleanly to forward manual flight mode with full thruster authority
+					con->SetCruiseDirection(PlayerShipController::CRUISE_FWD);
+					con->SetFlightControlState(CONTROL_MANUAL);
+				}
 			}
 		}
 	}
@@ -414,6 +423,7 @@ bool Player::TakeoverUndocking()
 	bool handled = false;
 	if (m_takeoffTimer > 0.0f) {
 		m_takeoffTimer = 0.0f;
+		m_takeoffFromStation = false;
 		if (PlayerShipController *con = GetPlayerController()) {
 			con->SetCruiseDirection(PlayerShipController::CRUISE_FWD);
 			if (con->GetFlightControlState() != CONTROL_FIXSPEED) {
@@ -465,18 +475,18 @@ vector3d Player::GetManeuverVelocity() const
 void Player::DoFixspeedTakeoff(SpaceStation *from)
 {
 	auto con = GetPlayerController();
-	con->SetCruiseDirection(PlayerShipController::CRUISE_UP);
-	SetFlightState(Ship::FLYING);
-	GetPlayerController()->SetFlightControlState(CONTROL_FIXSPEED);
-	double curSpeed = con->GetCruiseSpeed();
-	const bool isGround = from ? from->IsGroundStation() : false;
-	double wantSpeed = isGround ? 18.0 : 10.0; // m/s - brisk positive liftoff clear of pad
-	con->ChangeCruiseSpeed(wantSpeed - curSpeed);
-	m_takeoffDuration = 4.0f;
-	m_takeoffTimer = m_takeoffDuration;
+	m_takeoffTimer = 0.0f;
+	m_takeoffFromStation = (from != nullptr);
 
-	// special preparations for launch in a rotating orbital
+	const bool isGround = !from || from->IsGroundStation();
+	const double wantSpeed = isGround ? 18.0 : 10.0; // m/s - brisk positive liftoff clear of pad/surface
+	if (con->IsSpeedLimiterActive() && con->GetSpeedLimit() < wantSpeed) {
+		con->SetSpeedLimiterActive(false);
+	}
+
+	// special preparations for launch
 	if (from && !from->IsGroundStation()) {
+		SetFlightState(Ship::FLYING);
 		SetFollowTarget(from);
 		con->SetFollowMode(PlayerShipController::FOLLOW_ORI);
 		auto pPos = GetPositionRelTo(from);
@@ -488,7 +498,37 @@ void Player::DoFixspeedTakeoff(SpaceStation *from)
 		auto radial = GetOrient().VectorY() * 1.5;
 		SetVelocity(from->GetVelocity() + tangent + radial);
 	} else if (from && from->IsGroundStation()) {
-		SetPosition(GetPosition() + GetOrient().VectorY() * 0.2);
-		SetVelocity(from->GetVelocity() + GetOrient().VectorY() * 2.0);
+		SetFlightState(Ship::FLYING);
+		SetPosition(GetPosition() + GetOrient().VectorY() * 0.5);
+		SetVelocity(from->GetVelocity() + GetOrient().VectorY() * 2.5);
+		CalcExternalForce();
+	} else {
+		vector3d up = GetPosition().NormalizedSafe();
+		if (up.LengthSqr() < 0.5) {
+			up = GetOrient().VectorY().NormalizedSafe();
+		}
+		Frame *f = Frame::GetFrame(GetFrame());
+		if (f && f->GetBody() && f->GetBody()->IsType(ObjectType::TERRAINBODY)) {
+			const double terrRadius = static_cast<const TerrainBody *>(f->GetBody())->GetTerrainHeight(up);
+			const double minClearRadius = terrRadius - GetAabb().min.y + 2.0;
+			if (GetPosition().Length() < minClearRadius) {
+				SetPosition(up * minClearRadius);
+			} else {
+				SetPosition(GetPosition() + up * 2.0);
+			}
+		} else {
+			SetPosition(GetPosition() + up * 2.0);
+		}
+		SetVelocity(up * 3.0);
+		SetAngVelocity(vector3d::Zero);
+		SetFlightState(Ship::FLYING);
+		CalcExternalForce();
 	}
+
+	con->SetCruiseDirection(PlayerShipController::CRUISE_UP);
+	con->SetFlightControlState(CONTROL_FIXSPEED);
+	const double curSpeed = con->GetCruiseSpeed();
+	con->ChangeCruiseSpeed(wantSpeed - curSpeed);
+	m_takeoffDuration = 4.0f;
+	m_takeoffTimer = m_takeoffDuration;
 }

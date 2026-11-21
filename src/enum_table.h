@@ -19,6 +19,7 @@ struct EnumTable {
 extern const struct EnumItem ENUM_PhysicsObjectType[];
 extern const struct EnumItem ENUM_AltitudeType[];
 extern const struct EnumItem ENUM_ShipAIError[];
+extern const struct EnumItem ENUM_GeoSphereDebugFlags[];
 extern const struct EnumItem ENUM_ShipFlightState[];
 extern const struct EnumItem ENUM_ShipJumpStatus[];
 extern const struct EnumItem ENUM_ShipAlertStatus[];
@@ -39,6 +40,7 @@ extern const struct EnumItem ENUM_BodySuperType[];
 extern const struct EnumItem ENUM_DetailLevel[];
 extern const struct EnumItem ENUM_PiGuiFaceFlags[];
 extern const struct EnumItem ENUM_ModelDebugFlags[];
+extern const struct EnumItem ENUM_ProjectileType[];
 extern const struct EnumItem ENUM_CruiseDirection[];
 extern const struct EnumItem ENUM_FollowMode[];
 extern const struct EnumItem ENUM_ShipTypeThruster[];

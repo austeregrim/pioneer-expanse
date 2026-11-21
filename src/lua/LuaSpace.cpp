@@ -627,6 +627,50 @@ static int l_space_spawn_ship_docked(lua_State *l)
 }
 
 /*
+ * Function: SpawnShipFromHangar
+ *
+ * Create a ship beneath a free pad at the given <SpaceStation> and elevate it
+ * up out of the station hangar onto the docking pad.
+ *
+ * > ship = Space.SpawnShipFromHangar(type, station)
+ */
+static int l_space_spawn_ship_from_hangar(lua_State *l)
+{
+	if (!Pi::game)
+		luaL_error(l, "Game is not started");
+
+	LUA_DEBUG_START(l);
+
+	const char *type = luaL_checkstring(l, 1);
+	if (!ShipType::Get(type))
+		luaL_error(l, "Unknown ship type '%s'", type);
+
+	SpaceStation *station = LuaObject<SpaceStation>::CheckFromLua(2);
+
+	Ship *ship = new Ship(type);
+	assert(ship);
+
+	int port = station->GetFreeDockingPort(ship);
+	if (port < 0) {
+		delete ship;
+		return 0;
+	}
+
+	ship->SetFrame(station->GetFrame());
+	Pi::game->GetSpace()->AddBody(ship);
+	if (!station->BeginUnstowFromHangar(ship, port)) {
+		Pi::game->GetSpace()->KillBody(ship);
+		return 0;
+	}
+
+	LuaObject<Ship>::PushToLua(ship);
+
+	LUA_DEBUG_END(l, 1);
+
+	return 1;
+}
+
+/*
  * Function: SpawnShipParked
  *
  * Create a ship and place it in one of the given <SpaceStation's> parking spots.
@@ -1275,6 +1319,7 @@ void LuaSpace::Register()
 		{ "SpawnShip", l_space_spawn_ship },
 		{ "SpawnShipNear", l_space_spawn_ship_near },
 		{ "SpawnShipDocked", l_space_spawn_ship_docked },
+		{ "SpawnShipFromHangar", l_space_spawn_ship_from_hangar },
 		{ "SpawnShipParked", l_space_spawn_ship_parked },
 		{ "SpawnShipLanded", l_space_spawn_ship_landed },
 		{ "SpawnShipLandedNear", l_space_spawn_ship_landed_near },

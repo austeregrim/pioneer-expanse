@@ -293,7 +293,101 @@ void GasGiant::OnChangeGasGiantsDetailLevel()
 
 		// reinit the terrain with the new settings
 		(*i)->m_terrain.Reset(Terrain::InstanceTerrain((*i)->GetSystemBody()));
+		(*i)->InitAtmosphereProfile();
 	}
+}
+
+void GasGiant::InitAtmosphereProfile()
+{
+	const std::string colorFracName = GetTerrain()->GetColorFractalName();
+	const SystemBody *parent = GetSystemBody()->GetParent();
+	const bool isSol = (parent && parent->GetName() == "Sol");
+
+	Random rng(GetSystemBody()->GetSeed() + 918273);
+	const float seed = float(rng.Double() * 97.0);
+
+	float archetype = 0.0f;
+	float turbulence = 0.5f;
+	float bandScale = 5.5f;
+	float stormStrength = 0.0f;
+	float stormLat = -0.34f;
+	float stormLon = 0.0f;
+	float stormStyle = 0.0f;
+
+	if (colorFracName == GGUranus) {
+		archetype = 2.0f;
+		if (isSol) {
+			turbulence = 0.14f;
+			bandScale = 3.6f;
+			stormStrength = 0.0f;
+			stormLat = -0.30f;
+			stormLon = 0.0f;
+			stormStyle = 0.5f;
+		} else {
+			turbulence = 0.14f + 0.14f * float(rng.Double());
+			bandScale = 3.4f + 1.4f * float(rng.Double());
+			stormStrength = (rng.Double() < 0.65) ? 0.0f : (0.18f + 0.16f * float(rng.Double()));
+			stormLat = (rng.Double() < 0.5 ? -1.0f : 1.0f) * (0.20f + 0.25f * float(rng.Double()));
+			stormLon = float(rng.Double() * 6.2831853);
+			stormStyle = 0.5f;
+		}
+	} else if (colorFracName == GGNeptune || colorFracName == GGNeptune2) {
+		archetype = 3.0f;
+		if (isSol) {
+			turbulence = 0.34f;
+			bandScale = 4.6f;
+			stormStrength = 0.68f;
+			stormLat = -0.32f;
+			stormLon = 0.85f;
+			stormStyle = 1.0f;
+		} else {
+			turbulence = 0.28f + 0.22f * float(rng.Double());
+			bandScale = 4.0f + 1.8f * float(rng.Double());
+			stormStrength = (rng.Double() < 0.30) ? 0.0f : (0.45f + 0.35f * float(rng.Double()));
+			stormLat = (rng.Double() < 0.5 ? -1.0f : 1.0f) * (0.20f + 0.26f * float(rng.Double()));
+			stormLon = float(rng.Double() * 6.2831853);
+			stormStyle = (rng.Double() < 0.75) ? 1.0f : 0.5f;
+		}
+	} else if (colorFracName == GGSaturn || colorFracName == GGSaturn2) {
+		archetype = 1.0f;
+		if (isSol) {
+			turbulence = 0.28f;
+			bandScale = 6.0f;
+			stormStrength = 0.22f;
+			stormLat = 0.34f;
+			stormLon = 1.40f;
+			stormStyle = 0.5f;
+		} else {
+			turbulence = 0.24f + 0.22f * float(rng.Double());
+			bandScale = 5.2f + 2.0f * float(rng.Double());
+			stormStrength = (rng.Double() < 0.40) ? 0.0f : (0.20f + 0.30f * float(rng.Double()));
+			stormLat = (rng.Double() < 0.5 ? -1.0f : 1.0f) * (0.18f + 0.28f * float(rng.Double()));
+			stormLon = float(rng.Double() * 6.2831853);
+			stormStyle = 0.5f;
+		}
+	} else {
+		archetype = 0.0f;
+		if (isSol) {
+			turbulence = 0.76f;
+			bandScale = 5.6f;
+			stormStrength = 0.95f;
+			stormLat = -0.34f;
+			stormLon = 0.42f;
+			stormStyle = 0.0f;
+		} else {
+			turbulence = 0.55f + 0.32f * float(rng.Double());
+			bandScale = 4.8f + 2.2f * float(rng.Double());
+			stormStrength = 0.55f + 0.45f * float(rng.Double());
+			stormLat = (rng.Double() < 0.5 ? -1.0f : 1.0f) * (0.18f + 0.26f * float(rng.Double()));
+			stormLon = float(rng.Double() * 6.2831853);
+			stormStyle = (rng.Double() < 0.65) ? 0.0f : 0.5f;
+		}
+	}
+
+	m_ggParamsXYZ = vector3f(archetype, seed, turbulence);
+	m_ggBandScale = bandScale;
+	m_ggStormXYZ = vector3f(stormStrength, stormLat, stormLon);
+	m_ggStormStyle = stormStyle;
 }
 
 GasGiant::GasGiant(const SystemBody *body) :
@@ -314,6 +408,8 @@ GasGiant::GasGiant(const SystemBody *body) :
 	const bool bEnableGPUJobs = (Pi::config->Int("EnableGPUJobs") == 1);
 	if (bEnableGPUJobs)
 		m_timeDelay = s_initialGPUDelayTime + (rng.Double() * (s_initialGPUDelayTime * 0.5));
+
+	InitAtmosphereProfile();
 
 	//SetUpMaterials is not called until first Render since light count is zero :)
 
@@ -637,6 +733,10 @@ void GasGiant::Render(Graphics::Renderer *renderer, const matrix4x4d &modelView,
 
 	//Update material parameters
 	SetMaterialParameters(trans, radius, shadows, m_atmosphereParameters);
+	static const size_t s_ggParamsName = "ggParams"_hash;
+	static const size_t s_ggStormParamsName = "ggStormParams"_hash;
+	m_surfaceMaterial->SetPushConstant(s_ggParamsName, m_ggParamsXYZ, m_ggBandScale);
+	m_surfaceMaterial->SetPushConstant(s_ggStormParamsName, m_ggStormXYZ, m_ggStormStyle);
 	if (m_atmosphereParameters.atmosDensity > 0.0) {
 		// make atmosphere sphere slightly bigger than required so
 		// that the edges of the pixel shader atmosphere jizz doesn't

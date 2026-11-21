@@ -46,7 +46,7 @@ local spawnShips = function ()
 		end
 
 		if ship then
-			ship:SetLabel(Ship.MakeRandomLabel())
+			ship:SetLabel(Ship.MakeRandomLabel(shipId, "FREIGHT"))
 		else
 			-- No station had free static slots, stop trying to spawn more.
 			break

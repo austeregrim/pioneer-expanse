@@ -60,7 +60,8 @@ public:
 	virtual int GetManeuverTime() const;
 
 	virtual bool TakeoverUndocking() override;
-	bool IsTakingOff() const { return m_takeoffTimer > 0.0f; }
+	bool IsTakingOff() const { return m_takeoffTimer > 0.0f && GetFlightState() == Ship::FLYING; }
+	bool IsTakeoffFromStation() const { return IsTakingOff() && m_takeoffFromStation; }
 	float GetTakeoffTimeElapsed() const { return m_takeoffDuration - m_takeoffTimer; }
 
 protected:
@@ -77,6 +78,7 @@ private:
 	vector3d m_atmosJerk;
 	float m_takeoffTimer;
 	float m_takeoffDuration;
+	bool m_takeoffFromStation;
 };
 
 #endif /* _PLAYER_H */

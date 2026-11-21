@@ -81,8 +81,11 @@ public:
 	bool GetDockingClearance(Ship *s);
 	int GetDockingPortCount() const { return m_type->NumDockingPorts(); }
 	int GetFreeDockingPort(const Ship *s) const; // returns -1 if none free
+	int GetFreeDockingPortCount() const;
 	int GetMyDockingPort(const Ship *s) const;
 	int NumShipsDocked() const;
+	bool StowShipInHangar(Ship *ship);
+	bool BeginUnstowFromHangar(Ship *ship, const int bay);
 	void TakeoverUndock(Ship *ship);
 
 	const SpaceStationType *GetStationType() const { return m_type; }
@@ -163,6 +166,7 @@ private:
 	Ship *m_corridorShip;
 	double m_lastLaunchTime;
 	static constexpr double MIN_LAUNCH_SEPARATION = 16.0;
+	static constexpr double HANGAR_ELEVATOR_DURATION = 6.5;
 };
 
 #endif /* _SPACESTATION_H */

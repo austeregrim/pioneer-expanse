@@ -59,6 +59,7 @@ public:
 private:
 	void BuildFirstPatches();
 	void GenerateTexture();
+	void InitAtmosphereProfile();
 	bool AddTextureFaceResult(GasGiantJobs::STextureFaceResult *res);
 	bool AddGPUGenResult(GasGiantJobs::SGPUGenResult *res);
 
@@ -84,6 +85,11 @@ private:
 	bool m_hasGpuJobRequest;
 
 	float m_timeDelay;
+
+	vector3f m_ggParamsXYZ{ 0.0f, 0.0f, 0.5f }; // x: archetype (0=Jup,1=Sat,2=Ura,3=Nep), y: seed, z: turbulence
+	float m_ggBandScale = 5.5f;               // w of ggParams: broad layer count
+	vector3f m_ggStormXYZ{ 0.0f, -0.34f, 0.0f }; // x: stormStrength, y: primaryLat, z: primaryLon
+	float m_ggStormStyle = 0.0f;                 // w of ggStormParams: 0=warm GRS, 0.5=pale oval, 1=dark spot
 };
 
 #endif /* _GASGIANT_H */

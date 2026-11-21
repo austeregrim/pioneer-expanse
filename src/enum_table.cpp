@@ -7,6 +7,7 @@
 #include "enum_table.h"
 #include "Body.h"
 #include "DynamicBody.h"
+#include "GeoSphere.h"
 #include "Ship.h"
 #include "ShipAICmd.h"
 #include "ShipType.h"
@@ -18,6 +19,7 @@
 #include "lua/LuaEngine.h"
 #include "pigui/Face.h"
 #include "scenegraph/Model.h"
+#include "ship/GunManager.h"
 #include "ship/PlayerShipController.h"
 #include "ship/Propulsion.h"
 #include "ship/ShipController.h"
@@ -51,6 +53,14 @@ const struct EnumItem ENUM_ShipAIError[] = {
 	{ 0, 0 },
 };
 
+const struct EnumItem ENUM_GeoSphereDebugFlags[] = {
+	{ "NONE", int(GeoSphere::DEBUG_NONE) },
+	{ "SORTGEOPATCHES", int(GeoSphere::DEBUG_SORTGEOPATCHES) },
+	{ "WIREFRAME", int(GeoSphere::DEBUG_WIREFRAME) },
+	{ "FACELABELS", int(GeoSphere::DEBUG_FACELABELS) },
+	{ 0, 0 },
+};
+
 const struct EnumItem ENUM_ShipFlightState[] = {
 	{ "FLYING", int(Ship::FLYING) },
 	{ "DOCKING", int(Ship::DOCKING) },
@@ -72,6 +82,7 @@ const struct EnumItem ENUM_ShipJumpStatus[] = {
 	{ "OUT_OF_RANGE", int(Ship::HYPERJUMP_OUT_OF_RANGE) },
 	{ "INSUFFICIENT_FUEL", int(Ship::HYPERJUMP_INSUFFICIENT_FUEL) },
 	{ "SAFETY_LOCKOUT", int(Ship::HYPERJUMP_SAFETY_LOCKOUT) },
+	{ "OBSCURED", int(Ship::HYPERJUMP_OBSCURED) },
 	{ 0, 0 },
 };
 
@@ -145,6 +156,8 @@ const struct EnumItem ENUM_DockStage[] = {
 	{ "UNDOCK_STAGES_END", int(DockStage::UNDOCK_STAGES_END) },
 	{ "APPROACH1", int(DockStage::APPROACH1) },
 	{ "APPROACH2", int(DockStage::APPROACH2) },
+	{ "HANGAR_STOWING", int(DockStage::HANGAR_STOWING) },
+	{ "HANGAR_UNSTOWING", int(DockStage::HANGAR_UNSTOWING) },
 	{ 0, 0 },
 };
 
@@ -303,6 +316,12 @@ const struct EnumItem ENUM_ModelDebugFlags[] = {
 	{ 0, 0 },
 };
 
+const struct EnumItem ENUM_ProjectileType[] = {
+	{ "BALLISTIC", int(GunManager::PROJECTILE_BALLISTIC) },
+	{ "BEAM", int(GunManager::PROJECTILE_BEAM) },
+	{ 0, 0 },
+};
+
 const struct EnumItem ENUM_CruiseDirection[] = {
 	{ "CRUISE_FWD", int(PlayerShipController::CRUISE_FWD) },
 	{ "CRUISE_UP", int(PlayerShipController::CRUISE_UP) },
@@ -350,6 +369,7 @@ const struct EnumTable ENUM_TABLES[] = {
 	{ "PhysicsObjectType", ENUM_PhysicsObjectType },
 	{ "AltitudeType", ENUM_AltitudeType },
 	{ "ShipAIError", ENUM_ShipAIError },
+	{ "GeoSphereDebugFlags", ENUM_GeoSphereDebugFlags },
 	{ "ShipFlightState", ENUM_ShipFlightState },
 	{ "ShipJumpStatus", ENUM_ShipJumpStatus },
 	{ "ShipAlertStatus", ENUM_ShipAlertStatus },
@@ -370,6 +390,7 @@ const struct EnumTable ENUM_TABLES[] = {
 	{ "DetailLevel", ENUM_DetailLevel },
 	{ "PiGuiFaceFlags", ENUM_PiGuiFaceFlags },
 	{ "ModelDebugFlags", ENUM_ModelDebugFlags },
+	{ "ProjectileType", ENUM_ProjectileType },
 	{ "CruiseDirection", ENUM_CruiseDirection },
 	{ "FollowMode", ENUM_FollowMode },
 	{ "ShipTypeThruster", ENUM_ShipTypeThruster },
@@ -382,6 +403,7 @@ const struct EnumTable ENUM_TABLES_PUBLIC[] = {
 	{ "PhysicsObjectType", ENUM_PhysicsObjectType },
 	{ "AltitudeType", ENUM_AltitudeType },
 	{ "ShipAIError", ENUM_ShipAIError },
+	{ "GeoSphereDebugFlags", ENUM_GeoSphereDebugFlags },
 	{ "ShipFlightState", ENUM_ShipFlightState },
 	{ "ShipJumpStatus", ENUM_ShipJumpStatus },
 	{ "ShipAlertStatus", ENUM_ShipAlertStatus },
@@ -402,6 +424,7 @@ const struct EnumTable ENUM_TABLES_PUBLIC[] = {
 	{ "DetailLevel", ENUM_DetailLevel },
 	{ "PiGuiFaceFlags", ENUM_PiGuiFaceFlags },
 	{ "ModelDebugFlags", ENUM_ModelDebugFlags },
+	{ "ProjectileType", ENUM_ProjectileType },
 	{ "CruiseDirection", ENUM_CruiseDirection },
 	{ "FollowMode", ENUM_FollowMode },
 	{ "ShipTypeThruster", ENUM_ShipTypeThruster },

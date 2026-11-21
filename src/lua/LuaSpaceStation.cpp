@@ -188,6 +188,22 @@ static int l_spacestation_get_launch_wait_time(lua_State *l)
 }
 
 /*
+ * Method: StowShipInHangar
+ *
+ * Lower a currently docked NPC ship on its pad elevator into the station hangar
+ * and free the surface/interior docking bay once stowed.
+ *
+ * > ok = station:StowShipInHangar(ship)
+ */
+static int l_spacestation_stow_ship_in_hangar(lua_State *l)
+{
+	SpaceStation *s = LuaObject<SpaceStation>::CheckFromLua(1);
+	Ship *ship = LuaObject<Ship>::CheckFromLua(2);
+	lua_pushboolean(l, s->StowShipInHangar(ship));
+	return 1;
+}
+
+/*
  * Attribute: numDocks
  *
  * The number of docking ports a spacestation has.
@@ -208,6 +224,18 @@ static int l_spacestation_attr_num_ships_docked(lua_State *l)
 {
 	SpaceStation *s = LuaObject<SpaceStation>::CheckFromLua(1);
 	lua_pushinteger(l, s->NumShipsDocked());
+	return 1;
+}
+
+/*
+ * Attribute: freeDocks
+ *
+ * The number of currently unoccupied docking bays or landing pads
+ */
+static int l_spacestation_attr_free_docks(lua_State *l)
+{
+	SpaceStation *s = LuaObject<SpaceStation>::CheckFromLua(1);
+	lua_pushinteger(l, s->GetFreeDockingPortCount());
 	return 1;
 }
 
@@ -239,6 +267,7 @@ void LuaObject<SpaceStation>::RegisterClass()
 		{ "GetNearbyTraffic", l_spacestation_get_nearby_traffic },
 		{ "CanLaunch", l_spacestation_can_launch },
 		{ "GetLaunchWaitTime", l_spacestation_get_launch_wait_time },
+		{ "StowShipInHangar", l_spacestation_stow_ship_in_hangar },
 
 		{ 0, 0 }
 	};
@@ -247,6 +276,7 @@ void LuaObject<SpaceStation>::RegisterClass()
 		{ "numDocks", l_spacestation_attr_num_docks },
 		{ "isGroundStation", l_spacestation_attr_is_ground_station },
 		{ "numShipsDocked", l_spacestation_attr_num_ships_docked },
+		{ "freeDocks", l_spacestation_attr_free_docks },
 
 		{ 0, 0 }
 	};

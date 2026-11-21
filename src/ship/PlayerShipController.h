@@ -174,6 +174,7 @@ private:
 	FollowMode m_followMode = FOLLOW_POS;
 	CruiseDirection m_cruiseDirection = CRUISE_FWD;
 	float m_undockElapsed = 0.0f;
+	float m_surfaceLiftoffHold = 0.0f;
 
 	ConnectionTicket m_connRotationDampingToggleKey;
 	ConnectionTicket m_fireMissileKey;

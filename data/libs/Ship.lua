@@ -67,12 +67,68 @@ function Ship:UpdateWeaponSlots()
 	end
 end
 
+local SERIAL_SUFFIX_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ"
+local CLASS_PREFIX_MAP = {
+	light_freighter = "CL",
+	light_cargo_shuttle = "CL",
+	medium_freighter = "CM",
+	medium_cargo_shuttle = "CM",
+	heavy_freighter = "CH",
+	heavy_cargo_shuttle = "CH",
+	light_passenger_shuttle = "PL",
+	medium_passenger_shuttle = "PL",
+	light_passenger_transport = "PL",
+	medium_passenger_transport = "PL",
+	heavy_passenger_shuttle = "PH",
+	heavy_passenger_transport = "PH",
+	light_courier = "CR",
+	medium_courier = "CR",
+	heavy_courier = "CR",
+	light_fighter = "SC",
+	medium_fighter = "SC",
+	heavy_fighter = "SC",
+}
+
+local labelAllocator = nil
+
+function Ship.SetLabelAllocator(fn)
+	labelAllocator = fn
+end
+
+function Ship.GetRegistrationPrefix(shipId, role)
+	if role == "PLAYER" or role == "GENERAL" then
+		return "GR"
+	elseif role == "POLICE" or (shipId and string.find(shipId, "_police$")) then
+		return "PD"
+	elseif role == "MINER" or shipId == "dsminer" then
+		return "MN"
+	elseif role == "FREIGHT" then
+		return "CH"
+	elseif role == "PIRATE" then
+		local outlawPool = { "UX", "UX", "UX", "GR", "CR", "CL" }
+		return outlawPool[Engine.rand:Integer(1, #outlawPool)]
+	end
+
+	local def = shipId and ShipDef[shipId]
+	local shipClass = def and def.shipClass
+	if shipClass and CLASS_PREFIX_MAP[shipClass] then
+		return CLASS_PREFIX_MAP[shipClass]
+	end
+	return "GR"
+end
+
 -- class method
-function Ship.MakeRandomLabel ()
-	local letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-	local a = Engine.rand:Integer(1, #letters)
-	local b = Engine.rand:Integer(1, #letters)
-	return string.format("%s%s-%04d", letters:sub(a,a), letters:sub(b,b), Engine.rand:Integer(10000))
+function Ship.MakeRandomLabel (shipId, role)
+	if labelAllocator then
+		local allocated = labelAllocator(shipId, role)
+		if allocated then
+			return allocated
+		end
+	end
+	local prefix = Ship.GetRegistrationPrefix(shipId, role)
+	local num = Engine.rand:Integer(0, 99999)
+	local idx = Engine.rand:Integer(1, #SERIAL_SUFFIX_LETTERS)
+	return string.format("%s-%05d%s", prefix, num, SERIAL_SUFFIX_LETTERS:sub(idx, idx))
 end
 
 -- This is a protected table (accessors only) in which details of each ship's crew

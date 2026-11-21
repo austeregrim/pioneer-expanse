@@ -57,6 +57,18 @@ local ShipAIError = {
 ---@type ShipAIError[]
 Constants.ShipAIError = {}
 
+-- A <Constants.GeoSphereDebugFlags> string
+---@enum (key) GeoSphereDebugFlags
+local GeoSphereDebugFlags = {
+	NONE = 1,
+	SORTGEOPATCHES = 2,
+	WIREFRAME = 3,
+	FACELABELS = 4,
+}
+
+---@type GeoSphereDebugFlags[]
+Constants.GeoSphereDebugFlags = {}
+
 -- A <Constants.ShipFlightState> string
 ---@enum (key) ShipFlightState
 local ShipFlightState = {
@@ -67,6 +79,7 @@ local ShipFlightState = {
 	LANDED = 5,
 	JUMPING = 6,
 	HYPERSPACE = 7,
+	SUPERCRUISE = 8,
 }
 
 ---@type ShipFlightState[]
@@ -112,6 +125,7 @@ local ShipAICmdName = {
 	CMD_KAMIKAZE = 6,
 	CMD_HOLDPOSITION = 7,
 	CMD_FORMATION = 8,
+	CMD_DEPART = 9,
 }
 
 ---@type ShipAICmdName[]
@@ -180,6 +194,8 @@ local DockStage = {
 	UNDOCK_STAGES_END = 25,
 	APPROACH1 = 26,
 	APPROACH2 = 27,
+	HANGAR_STOWING = 28,
+	HANGAR_UNSTOWING = 29,
 }
 
 ---@type DockStage[]
@@ -387,6 +403,16 @@ local ModelDebugFlags = {
 
 ---@type ModelDebugFlags[]
 Constants.ModelDebugFlags = {}
+
+-- A <Constants.ProjectileType> string
+---@enum (key) ProjectileType
+local ProjectileType = {
+	BALLISTIC = 1,
+	BEAM = 2,
+}
+
+---@type ProjectileType[]
+Constants.ProjectileType = {}
 
 -- A <Constants.CruiseDirection> string
 ---@enum (key) CruiseDirection

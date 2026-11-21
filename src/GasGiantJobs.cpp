@@ -155,26 +155,31 @@ namespace GasGiantJobs {
 		m_material->SetTexture("gradTexture"_hash,
 			Graphics::TextureBuilder::Raw("textures/gradTexture.png").GetOrCreateTexture(Pi::renderer, "noise"));
 
+		auto loadRamp = [](const char *path) {
+			return Graphics::TextureBuilder(path, Graphics::LINEAR_CLAMP, false, false, false, false, false)
+				.GetOrCreateTexture(Pi::renderer, "gasgiant");
+		};
+
 		Graphics::Texture *rampTexture = nullptr;
 		// pick the correct colour basis texture for the planet
 		switch (0x0000FFFF & GGQuality) {
 		case GasGiantTexture::GEN_JUPITER_TEXTURE:
-			rampTexture = Graphics::TextureBuilder::Raw("textures/gasgiants/jupiterramp.png").GetOrCreateTexture(Pi::renderer, "gasgiant");
+			rampTexture = loadRamp("textures/gasgiants/jupiterramp.png");
 			break;
 		case GasGiantTexture::GEN_SATURN_TEXTURE:
-			rampTexture = Graphics::TextureBuilder::Raw("textures/gasgiants/saturnramp.png").GetOrCreateTexture(Pi::renderer, "gasgiant");
+			rampTexture = loadRamp("textures/gasgiants/saturnramp.png");
 			break;
 		case GasGiantTexture::GEN_SATURN2_TEXTURE:
-			rampTexture = Graphics::TextureBuilder::Raw("textures/gasgiants/saturn2ramp.png").GetOrCreateTexture(Pi::renderer, "gasgiant");
+			rampTexture = loadRamp("textures/gasgiants/saturn2ramp.png");
 			break;
 		case GasGiantTexture::GEN_NEPTUNE_TEXTURE:
-			rampTexture = Graphics::TextureBuilder::Raw("textures/gasgiants/neptuneramp.png").GetOrCreateTexture(Pi::renderer, "gasgiant");
+			rampTexture = loadRamp("textures/gasgiants/neptuneramp.png");
 			break;
 		case GasGiantTexture::GEN_NEPTUNE2_TEXTURE:
-			rampTexture = Graphics::TextureBuilder::Raw("textures/gasgiants/neptune2ramp.png").GetOrCreateTexture(Pi::renderer, "gasgiant");
+			rampTexture = loadRamp("textures/gasgiants/neptune2ramp.png");
 			break;
 		case GasGiantTexture::GEN_URANUS_TEXTURE:
-			rampTexture = Graphics::TextureBuilder::Raw("textures/gasgiants/uranusramp.png").GetOrCreateTexture(Pi::renderer, "gasgiant");
+			rampTexture = loadRamp("textures/gasgiants/uranusramp.png");
 			break;
 		}
 

@@ -13,6 +13,7 @@ local Serializer = require 'Serializer'
 
 local MissionUtils = require 'modules.MissionUtils'
 local ShipBuilder  = require 'modules.MissionUtils.ShipBuilder'
+local ShipRegistry = require 'modules.ShipRegistry.ShipRegistry'
 
 local Comms = require 'Comms'
 
@@ -212,12 +213,16 @@ local function spawnSystemPirates(player)
 			local hostSb = orbitalHosts[Engine.rand:Integer(1, #orbitalHosts)]:GetSystemBody()
 			local ship
 			local placedOnLane = false
+			local rec = ShipRegistry.AcquireShipForSystem(Game.system, "PIRATE")
+			local pirateTemplate = MissionUtils.ShipTemplates.GenericPirate:clone {
+				label = rec and rec.label or nil
+			}
 			if hasStations and (i % 2 == 0) and primaryStar and primaryStar.body then
 				local stPath = stationPaths[Engine.rand:Integer(1, #stationPaths)]
 				local stBody = Space.GetBody(stPath.bodyIndex)
 				if stBody and stBody ~= primaryStar.body then
 					local starRadius = math.max(primaryStar.radius or 7e8, 7e8)
-					ship = ShipBuilder.MakeShipOrbit(primaryStar.body, MissionUtils.ShipTemplates.GenericPirate, threat, starRadius * 4.0, starRadius * 8.0)
+					ship = ShipBuilder.MakeShipOrbit(primaryStar.body, pirateTemplate, threat, starRadius * 4.0, starRadius * 8.0)
 					if ship then
 						Space.PutShipOnRoute(ship, stBody, Engine.rand:Number(0.15, 0.80))
 						ship:AIFlyTo(stBody)
@@ -227,9 +232,12 @@ local function spawnSystemPirates(player)
 			end
 			if not ship and hostSb and hostSb.body then
 				local radius = math.max(hostSb.radius or hostSb.body:GetPhysicalRadius() or 6000000, 10000)
-				ship = ShipBuilder.MakeShipOrbit(hostSb.body, MissionUtils.ShipTemplates.GenericPirate, threat, radius * 1.2, radius * 3.5)
+				ship = ShipBuilder.MakeShipOrbit(hostSb.body, pirateTemplate, threat, radius * 1.2, radius * 3.5)
 			end
 			if ship then
+				if rec then
+					ShipRegistry.ApplyRecordToShip(ship, rec)
+				end
 				ship:SetWanted(true, math.floor(1500 + threat * 150))
 				local hasInterdictor = equipInterdictor(ship, threat)
 				pirates[ship] = {
@@ -242,6 +250,8 @@ local function spawnSystemPirates(player)
 				if not placedOnLane then
 					pirates[ship].planet = assignSupercruisePatrol(ship, pirates[ship].planet)
 				end
+			elseif rec then
+				ShipRegistry.ReleaseLive(rec.label)
 			end
 		end
 	end
@@ -284,13 +294,22 @@ local onShipDestroyed = function (ship)
 		local planet = planets[Engine.rand:Integer(1, #planets)]:GetSystemBody()
 		local star = planet and planet.nearestJumpable
 		if not star or not star.body then return end
-		local newPirate = ShipBuilder.MakeShipOrbit(star.body, MissionUtils.ShipTemplates.GenericPirate, threat, star.radius * 1.2, star.radius * 3.5)
+		local rec = ShipRegistry.AcquireShipForSystem(Game.system, "PIRATE")
+		local pirateTemplate = MissionUtils.ShipTemplates.GenericPirate:clone {
+			label = rec and rec.label or nil
+		}
+		local newPirate = ShipBuilder.MakeShipOrbit(star.body, pirateTemplate, threat, star.radius * 1.2, star.radius * 3.5)
 		if newPirate then
+			if rec then
+				ShipRegistry.ApplyRecordToShip(newPirate, rec)
+			end
 			newPirate:SetWanted(true, math.floor(1500 + threat * 150))
 			local hasInterdictor = equipInterdictor(newPirate, threat)
 
 			pirates[newPirate] = { status = 'ORBIT', planet = planet.body, hasInterdictor = hasInterdictor, warned = false, target = nil }
 			assignSupercruisePatrol(newPirate, planet.body)
+		elseif rec then
+			ShipRegistry.ReleaseLive(rec.label)
 		end
 	end
 end
