@@ -222,6 +222,25 @@ void SpaceStationType::OnSetupComplete()
 	numDockingPorts = m_bayPaths.size();
 
 	assert(!m_bayPaths.empty());
+
+	for (auto &kv : m_bayPaths) {
+		const Uint32 bayNum = kv.first;
+		BayPath &bayPath = kv.second;
+		const vector3f bayPos = bayPath.m_docking.at(DockStage::DOCKED).GetTranslate();
+		float minNeighborDist = 1.0e6f;
+		for (const auto &otherKv : m_bayPaths) {
+			if (otherKv.first == bayNum)
+				continue;
+			const vector3f otherPos = otherKv.second.m_docking.at(DockStage::DOCKED).GetTranslate();
+			const float d = (bayPos - otherPos).Length();
+			if (d < minNeighborDist)
+				minNeighborDist = d;
+		}
+		const SPort *pPort = FindPortByBay(int(bayNum) - 1);
+		const float portHalf = pPort ? (float(pPort->maxShipSize) * 0.48f) : 24.0f;
+		const float neighborHalf = (m_bayPaths.size() > 1) ? (minNeighborDist * 0.43f) : 36.0f;
+		bayPath.maxHalfExtent = Clamp(std::min(portHalf, neighborHalf), 7.5f, 36.0f);
+	}
 }
 
 const SpaceStationType::SPort *SpaceStationType::FindPortByBay(const int zeroBaseBayID) const
@@ -368,4 +387,12 @@ const char *SpaceStationType::DockStageName(DockStage s) const {
 matrix4x4f SpaceStationType::GetStageTransform(int bay, DockStage stage) const
 {
 	return m_bayPaths.at(bay + 1).m_docking.at(stage);
+}
+
+float SpaceStationType::GetBayMaxHalfExtent(int zeroBaseBayID) const
+{
+	const auto it = m_bayPaths.find(Uint32(zeroBaseBayID + 1));
+	if (it != m_bayPaths.end())
+		return it->second.maxHalfExtent;
+	return 16.0f;
 }

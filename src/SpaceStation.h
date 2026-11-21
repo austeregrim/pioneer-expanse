@@ -7,6 +7,7 @@
 #include "ModelBody.h"
 #include "Quaternion.h"
 #include "SpaceStationType.h"
+#include "graphics/Material.h"
 
 #define MAX_DOCKING_PORTS 240 //256-(0x10), 0x10 is used because the collision surfaces use it as an identifying flag
 #define DOCKING_CLEARANCE_TIMEOUT (20.0 * 60.0)  // (20 min approach clearance window)
@@ -137,6 +138,9 @@ private:
 		vector3d fromPos; // in station model coords
 		Quaterniond fromRot;
 		double maxOffset;
+		float hangarHalfX = 12.0f;
+		float hangarHalfZ = 14.0f;
+		float hangarDepth = 18.0f;
 	};
 	typedef std::vector<shipDocking_t>::const_iterator constShipDockingIter;
 	typedef std::vector<shipDocking_t>::iterator shipDockingIter;
@@ -148,6 +152,8 @@ private:
 
 	void SwitchToStage(Uint32 bay, DockStage stage);
 	matrix4x4d GetBayTransform(Uint32 bay) const;
+	void ComputeHangarBayGeometry(int bay, const Ship *ship, float &outHalfX, float &outHalfZ, float &outDepth) const;
+	void RenderHangarBays(Graphics::Renderer *r, const vector3d &viewCoords, const matrix4x4d &viewTransform);
 
 	void InitStation();
 	const SpaceStationType *m_type;
@@ -161,12 +167,14 @@ private:
 	double m_doorAnimationState;
 
 	std::unique_ptr<NavLights> m_navLights;
+	RefCountedPtr<Graphics::Material> m_hangarSolidMat;
+	RefCountedPtr<Graphics::Material> m_hangarGlowMat;
 
 	// Station Air Traffic Control (ATC) clearance tracker
 	Ship *m_corridorShip;
 	double m_lastLaunchTime;
 	static constexpr double MIN_LAUNCH_SEPARATION = 16.0;
-	static constexpr double HANGAR_ELEVATOR_DURATION = 6.5;
+	static constexpr double HANGAR_ELEVATOR_DURATION = 9.5;
 };
 
 #endif /* _SPACESTATION_H */

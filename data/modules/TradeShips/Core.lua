@@ -11,7 +11,7 @@ local Core = {
 
 	MAX_ROUTE_FLOW = 48.0, -- flow to the most popular station in the system, ships/hour (Supercruise real-time)
 	MAX_BUSY = 0.55, -- maximum station load
-	MAX_SHIPS = 42, -- ~ maximum ships in open space (Supercruise real-time traffic balance)
+	MAX_SHIPS = 76, -- ~ maximum active trade ships across populated hubs (Supercruise real-time traffic balance)
 	MIN_STATION_DOCKING_TIME = 0.08, -- hours, minimum average time of the ship's stay at the station (~5 min baseline)
 
 	WAIT_FOR_NEXT_UNDOCK = 12, -- seconds to wait between ATC launch retries

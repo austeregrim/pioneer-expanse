@@ -41,6 +41,7 @@ local hasIllegalGoods = function (cargo)
 end
 
 local patrol = {}
+local patrolState = {}
 local showMercy = true
 local piracy = false
 local target = nil
@@ -57,58 +58,109 @@ local function equipInterdictor(ship)
 	end
 end
 
-local function assignSupercruiseRoute(ship)
-	if not Game.system then return end
-	local candidates = {}
-	local stations = Game.system:GetStationPaths()
-	if stations then
-		for _, path in ipairs(stations) do
-			local body = Space.GetBody(path.bodyIndex)
-			if body and ship:DistanceTo(body) > 500000 then
-				table.insert(candidates, body)
+local function getPatrolHubCandidates(ship, currentPort)
+	local orbitalHubs = {}
+	local surfacePorts = {}
+	local allStations = Game.system and Game.system:GetStationPaths() or {}
+	local nearestPlayerPort = (Game.player and Game.player:exists()) and Game.player:FindNearestTo("SPACESTATION") or nil
+	local playerParentIdx = nil
+	if nearestPlayerPort and nearestPlayerPort:exists() then
+		local psb = nearestPlayerPort:GetSystemBody()
+		playerParentIdx = psb and psb.parent and psb.parent.index or nil
+	end
+
+	for _, path in ipairs(allStations) do
+		local body = Space.GetBody(path.bodyIndex)
+		if body and body:exists() and body ~= currentPort then
+			local entry = {
+				body = body,
+				ndocks = body.numDocks or 4,
+				isOrbital = (body.type == "STARPORT_ORBITAL"),
+				nearPlayerHub = false,
+			}
+			local sb = body:GetSystemBody()
+			if playerParentIdx and sb and sb.parent and sb.parent.index == playerParentIdx then
+				entry.nearPlayerHub = true
+			end
+			if entry.isOrbital then
+				table.insert(orbitalHubs, entry)
+			else
+				table.insert(surfacePorts, entry)
 			end
 		end
 	end
-	-- Prioritize patrolling along active station-to-station and star-to-station transport lanes
+
+	local pool = (#orbitalHubs > 0) and orbitalHubs or surfacePorts
+	table.sort(pool, function(a, b)
+		if a.nearPlayerHub ~= b.nearPlayerHub then return a.nearPlayerHub end
+		return a.ndocks > b.ndocks
+	end)
+	return pool
+end
+
+local function assignSupercruiseRoute(ship)
+	if not Game.system or not ship or not ship:exists() then return end
+	local st = patrolState[ship] or { mode = 'lane', lastPort = nil }
+	patrolState[ship] = st
+
+	local hubs = getPatrolHubCandidates(ship, st.lastPort)
 	local stars = Game.system:GetStars()
 	local primaryStar = stars and stars[1] and stars[1].body
-	if primaryStar and ship:DistanceTo(primaryStar) > 5.0e9 then
-		table.insert(candidates, primaryStar)
+
+	-- 30% chance when arriving near an orbital hub with open pads: dock for brief patrol shift resupply
+	if st.mode == 'lane' and st.lastPort == nil and Engine.rand:Number(1) < 0.30 then
+		for _, h in ipairs(hubs) do
+			if h.isOrbital and (h.body.freeDocks or 0) >= 3 and ship:DistanceTo(h.body) < 3.0e9 then
+				st.mode = 'docking'
+				st.lastPort = h.body
+				ship:AIDockWith(h.body)
+				return
+			end
+		end
 	end
-	if #candidates == 0 then
-		local bodies = Game.system:GetBodyPaths()
-		if bodies then
-			for _, path in ipairs(bodies) do
-				local sb = path:GetSystemBody()
-				if sb and sb.body and (sb.superType == 'ROCKY_PLANET' or sb.superType == 'GAS_GIANT') then
-					if ship:DistanceTo(sb.body) > 500000 then
-						table.insert(candidates, sb.body)
-					end
+
+	st.mode = 'lane'
+	-- Bias 70% toward top busy/local hubs, 20% toward star-to-hub corridor, 10% wider patrol
+	if #hubs > 0 then
+		if primaryStar and ship:DistanceTo(primaryStar) > 6.0e9 and Engine.rand:Number(1) < 0.22 then
+			st.lastPort = primaryStar
+			ship:AIFlyTo(primaryStar)
+			return
+		end
+		local topCount = math.min(#hubs, math.max(2, math.ceil(#hubs * 0.45)))
+		local chosen = hubs[Engine.rand:Integer(1, topCount)]
+		if chosen and chosen.body and ship:DistanceTo(chosen.body) > 500000 then
+			st.lastPort = chosen.body
+			ship:AIFlyTo(chosen.body)
+			return
+		end
+		for _, h in ipairs(hubs) do
+			if h.body and ship:DistanceTo(h.body) > 500000 then
+				st.lastPort = h.body
+				ship:AIFlyTo(h.body)
+				return
+			end
+		end
+	end
+
+	local bodies = Game.system:GetBodyPaths()
+	local planetCandidates = {}
+	if bodies then
+		for _, path in ipairs(bodies) do
+			local sb = path:GetSystemBody()
+			if sb and sb.body and (sb.superType == 'ROCKY_PLANET' or sb.superType == 'GAS_GIANT') then
+				if ship:DistanceTo(sb.body) > 500000 then
+					table.insert(planetCandidates, sb.body)
 				end
 			end
 		end
 	end
-	if #candidates > 0 then
-		ship:AIFlyTo(candidates[Engine.rand:Integer(1, #candidates)])
+	if #planetCandidates > 0 then
+		ship:AIFlyTo(planetCandidates[Engine.rand:Integer(1, #planetCandidates)])
 		return
 	end
-	if stations and #stations > 0 then
-		for _ = 1, #stations do
-			local body = Space.GetBody(stations[Engine.rand:Integer(1, #stations)].bodyIndex)
-			if body and ship:DistanceTo(body) > 25000 then
-				ship:AIFlyTo(body)
-				return
-			end
-		end
-	end
-	if bodies and #bodies > 0 then
-		for _ = 1, #bodies do
-			local body = Space.GetBody(bodies[Engine.rand:Integer(1, #bodies)].bodyIndex)
-			if body and ship:DistanceTo(body) > 25000 then
-				ship:AIFlyTo(body)
-				return
-			end
-		end
+	if primaryStar and ship:DistanceTo(primaryStar) > 5.0e8 then
+		ship:AIFlyTo(primaryStar)
 	end
 end
 
@@ -176,12 +228,73 @@ local function startPatrolHunterTimer()
 			piracy = false
 		end
 		for i = 1, #patrol do
-			if patrol[i]:GetCurrentAICommand() == "CMD_NONE" then
-				assignSupercruiseRoute(patrol[i])
+			local p = patrol[i]
+			if p:exists() and p:GetFlightState() ~= "DOCKED" and p:GetCurrentAICommand() == "CMD_NONE" then
+				local st = patrolState[p]
+				if st and st.mode == 'docking' and st.lastPort and st.lastPort:exists() and (st.lastPort.freeDocks or 0) >= 3 then
+					p:AIDockWith(st.lastPort)
+				else
+					-- Periodically dock at an orbital hub for patrol shift turnaround when completing a lane leg
+					if st and st.lastPort and st.lastPort.type == "STARPORT_ORBITAL" and (st.lastPort.freeDocks or 0) >= 3 and Engine.rand:Number(1) < 0.30 then
+						st.mode = 'docking'
+						p:AIDockWith(st.lastPort)
+					else
+						assignSupercruiseRoute(p)
+					end
+				end
 			end
 		end
 		return false
 	end)
+end
+
+local function schedulePatrolUndock(ship, station, delaySec)
+	Timer:CallAt(Game.time + delaySec, function ()
+		if not Game.system or not ship or not ship:exists() then return end
+		if ship:GetFlightState() ~= "DOCKED" then return end
+		if target then return end
+		local port = ship:GetDockedWith() or station
+		if port and port:exists() then
+			if not port:CanLaunch(ship) or not ship:Undock() then
+				schedulePatrolUndock(ship, port, Engine.rand:Number(8, 16))
+				return
+			end
+			patrolState[ship] = patrolState[ship] or { mode = 'departing', lastPort = port }
+			patrolState[ship].mode = 'departing'
+			patrolState[ship].lastPort = port
+			ship:AIDepart(port)
+		end
+	end)
+end
+
+local onAICompleted = function (ship, ai_error)
+	if not ship or not ship:exists() or not patrolState[ship] then return end
+	local st = patrolState[ship]
+	if st.mode == 'departing' then
+		st.mode = 'lane'
+		assignSupercruiseRoute(ship)
+	elseif st.mode == 'docking' and ai_error ~= 'NONE' then
+		st.mode = 'lane'
+		assignSupercruiseRoute(ship)
+	elseif not target and ship:GetFlightState() ~= "DOCKED" then
+		if st.lastPort and st.lastPort:exists() and st.lastPort.type == "STARPORT_ORBITAL"
+			and (st.lastPort.freeDocks or 0) >= 3 and ship:DistanceTo(st.lastPort) < 500000 and Engine.rand:Number(1) < 0.32 then
+			st.mode = 'docking'
+			ship:AIDockWith(st.lastPort)
+		else
+			st.mode = 'lane'
+			assignSupercruiseRoute(ship)
+		end
+	end
+end
+
+local onShipUndocked = function (ship, station)
+	if not ship or not patrolState[ship] then return end
+	if ship:GetCurrentAICommand() ~= "CMD_KILL" then
+		patrolState[ship].mode = 'departing'
+		patrolState[ship].lastPort = station
+		ship:AIDepart(station)
+	end
 end
 
 local onShipDestroyed = function (ship, attacker)
@@ -190,9 +303,10 @@ local onShipDestroyed = function (ship, attacker)
 	if ship == target then
 		target = nil
 	else
-		for i = 1, #patrol do
+		for i = #patrol, 1, -1 do
 			if patrol[i] == ship then
 				table.remove(patrol, i)
+				patrolState[ship] = nil
 				if attacker:isa("Ship") and attacker:IsPlayer() then
 					showMercy = false
 				end
@@ -284,29 +398,35 @@ local function spawnAmbientPatrols(system)
 	if system.lawlessness < 0.75 and system.population > 0 then
 		local stations = system:GetStationPaths()
 		if stations and #stations > 0 then
-			local numPatrols = math.min(5, math.max(2, math.floor((1.0 - system.lawlessness) * 3.0 + #stations * 0.5)))
+			local desiredPatrols = math.min(7, math.max(2, math.floor((1.0 - system.lawlessness) * 3.5 + #stations * 0.25)))
+			local needed = math.max(0, desiredPatrols - #patrol)
+			if needed == 0 then return end
+
+			local hubs = getPatrolHubCandidates(Game.player, nil)
 			local threat = 20.0 + 30.0 * (1.0 - system.lawlessness)
 			local stars = system:GetStars()
 			local primaryStar = stars and stars[1]
-			for i = 1, numPatrols do
-				local stPath = stations[((i - 1) % #stations) + 1]
-				local stBody = Space.GetBody(stPath.bodyIndex)
+			for i = 1, needed do
+				local hubEntry = (#hubs > 0) and hubs[((i - 1) % #hubs) + 1] or nil
+				local stBody = hubEntry and hubEntry.body or Space.GetBody(stations[((i - 1) % #stations) + 1].bodyIndex)
+				local stBodyIdx = stBody and stBody.path and stBody.path.bodyIndex or nil
 				local pShip
 				if stBody and primaryStar and primaryStar.body and stBody ~= primaryStar.body then
-					local rec = ShipRegistry.AcquireShipForSystem(system, "POLICE", policeId, { stationBodyIdx = stPath.bodyIndex })
+					local rec = ShipRegistry.AcquireShipForSystem(system, "POLICE", policeId, { stationBodyIdx = stBodyIdx })
 					local patrolTemplate = MissionUtils.ShipTemplates.PolicePatrol:clone {
 						shipId = policeId,
 						label = rec and rec.label or nil
 					}
-					-- Place patrols along active Supercruise shipping lanes heading toward stations
+					-- Place patrols along active Supercruise shipping lanes heading toward major orbital hubs
 					local starRadius = math.max(primaryStar.radius or 7e8, 7e8)
 					pShip = ShipBuilder.MakeShipOrbit(primaryStar.body, patrolTemplate, threat, starRadius * 3.5, starRadius * 4.5)
 					if pShip then
 						if rec then
 							ShipRegistry.ApplyRecordToShip(pShip, rec)
 						end
-						local tRatio = 0.15 + 0.70 * ((i - 0.5) / numPatrols)
+						local tRatio = 0.15 + 0.70 * ((i - 0.5) / needed)
 						Space.PutShipOnRoute(pShip, stBody, tRatio)
+						patrolState[pShip] = { mode = 'lane', lastPort = stBody }
 						pShip:AIFlyTo(stBody)
 					elseif rec then
 						ShipRegistry.ReleaseLive(rec.label)
@@ -461,14 +581,25 @@ end
 
 local onLeaveSystem = function (ship)
 	patrol = {}
+	patrolState = {}
 	showMercy = true
 	piracy = false
 	target = nil
 	patrolTimerActive = false
 end
 
-local onShipDocked = function (player)
-	if not player:IsPlayer() then return end
+local onShipDocked = function (ship, station)
+	if not ship or not ship:exists() then return end
+	if not ship:IsPlayer() then
+		if patrolState[ship] then
+			patrolState[ship].mode = 'docked'
+			patrolState[ship].lastPort = station
+			ship:SetFuelPercent()
+			ship:SetHullPercent()
+			schedulePatrolUndock(ship, station, Engine.rand:Number(75, 180))
+		end
+		return
+	end
 	local crimes, fine = PlayerState.GetCrimeOutstanding()
 	if fine > 0 then
 		Comms.ImportantMessage("[" .. string.upper(Game.system.faction.policeName) .. " - " ..
@@ -481,13 +612,30 @@ local loaded_data
 local onGameStart = function ()
 	local wasLoaded = loaded_data ~= nil
 	if loaded_data then
-		patrol = loaded_data.patrol
+		patrol = loaded_data.patrol or {}
+		patrolState = loaded_data.patrolState or {}
 		showMercy = loaded_data.showMercy
 		piracy = loaded_data.piracy
 		target = loaded_data.target
 		loaded_data = nil
 	end
-	if not wasLoaded and #patrol == 0 and Game.system then
+	for k, _ in pairs(patrolState) do
+		if type(k) ~= 'userdata' or not k:exists() then
+			patrolState[k] = nil
+		end
+	end
+	for i = #patrol, 1, -1 do
+		local p = patrol[i]
+		if type(p) ~= 'userdata' or not p:exists() then
+			table.remove(patrol, i)
+		else
+			patrolState[p] = patrolState[p] or { mode = 'lane', lastPort = nil }
+			if p:GetFlightState() == "DOCKED" then
+				schedulePatrolUndock(p, p:GetDockedWith(), Engine.rand:Number(25, 90))
+			end
+		end
+	end
+	if Game.system and ((not wasLoaded and #patrol == 0) or (wasLoaded and #patrol < 2)) then
 		spawnAmbientPatrols(Game.system)
 	end
 	if #patrol > 0 then
@@ -497,6 +645,7 @@ end
 
 local onGameEnd = function ()
 	patrol = {}
+	patrolState = {}
 	showMercy = true
 	piracy = false
 	target = nil
@@ -504,7 +653,7 @@ local onGameEnd = function ()
 end
 
 local serialize = function ()
-	return { patrol = patrol, showMercy = showMercy, piracy = piracy, target = target }
+	return { patrol = patrol, patrolState = patrolState, showMercy = showMercy, piracy = piracy, target = target }
 end
 
 local unserialize = function (data)
@@ -514,6 +663,8 @@ end
 Event.Register("onEnterSystem", onEnterSystem)
 Event.Register("onLeaveSystem", onLeaveSystem)
 Event.Register("onShipDocked", onShipDocked)
+Event.Register("onShipUndocked", onShipUndocked)
+Event.Register("onAICompleted", onAICompleted)
 Event.Register("onShipDestroyed", onShipDestroyed)
 Event.Register("onShipHit", onShipHit)
 Event.Register("onShipInterdicted", onShipInterdicted)

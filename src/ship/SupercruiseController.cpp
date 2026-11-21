@@ -1194,8 +1194,18 @@ void SupercruiseController::ComputeAISteering(const vector3d &targetPosRelToShip
 			if (exclR <= 0.0)
 				continue;
 
-			// Keep a tighter buffer when approaching the target body itself vs an intervening body
-			const double margin = (b == targetBody) ? (exclR * 1.12 + 25000.0) : (exclR * 1.40 + 100000.0);
+			bool targetOnOrNearBody = (b == targetBody);
+			if (!targetOnOrNearBody && targetBody) {
+				const double targetDistFromB = targetBody->GetPositionRelTo(b).Length();
+				if (targetDistFromB <= exclR * 1.65 + SAFE_DISENGAGE_DIST) {
+					targetOnOrNearBody = true;
+				}
+			}
+
+			// Keep a tighter buffer when approaching the target body (or a station on/orbiting it) vs an intervening body
+			const double margin = (b == targetBody)
+				? (exclR * 1.03 + 20000.0)
+				: (targetOnOrNearBody ? (exclR + 15000.0) : (exclR * 1.35 + 80000.0));
 			const vector3d toBody = b->GetPositionRelTo(m_ship);
 			const double bodyDist = toBody.Length();
 			if (bodyDist < 1.0)
@@ -1207,6 +1217,23 @@ void SupercruiseController::ComputeAISteering(const vector3d &targetPosRelToShip
 				const vector3d tangent = (desiredDir - radialOut * desiredDir.Dot(radialOut)).NormalizedSafe();
 				desiredDir = (tangent.LengthSqr() > 0.1) ? (radialOut * 0.65 + tangent * 0.75).NormalizedSafe() : radialOut;
 				bestAvoidDist = std::min(bestAvoidDist, bodyDist);
+				continue;
+			}
+
+			// Occlusion behind a host planet is already handled in branch 1 (GetTargetObscuredBy),
+			// so do not deflect away from a surface or low-orbit target unless the path actually pierces the exclusion zone.
+			if (targetOnOrNearBody && b != targetBody && bodyDist >= margin) {
+				const double proj = toBody.Dot(desiredDir);
+				if (proj > 0.0 && proj < dist) {
+					const vector3d closestOffset = desiredDir * proj - toBody;
+					const double perpDist = closestOffset.Length();
+					const double innerSafe = exclR + 12000.0;
+					if (perpDist < innerSafe) {
+						vector3d escapeDir = (perpDist > 1.0) ? (closestOffset / perpDist) : MathUtil::OrthogonalDirection(toBody).Normalized();
+						desiredDir = (toBody + escapeDir * innerSafe).NormalizedSafe();
+						bestAvoidDist = bodyDist;
+					}
+				}
 				continue;
 			}
 

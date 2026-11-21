@@ -22,14 +22,7 @@ local onGameStart = function ()
 			Flow.spawnInitialShips()
 			Flow.run()
 		else -- deserialization
-			-- check if any trade ships were waiting on a timer
-			-- restart
-			for ship, trader in pairs(Core.ships) do
-				if trader.delay and trader.fnc and trader.delay > Game.time then
-					Core.log:add(ship, "Resume " .. trader.fnc)
-					Trader.assignTask(ship, trader.delay, trader.fnc)
-				end
-			end
+			Flow.reconcileTrafficOnLoad()
 			Flow.run()
 		end
 	else
@@ -270,6 +263,10 @@ local onAICompleted = function (ship, ai_error)
 			trader.status = 'outbound'
 			ship:AIFlyTo(farBody)
 			Trader.assignTask(ship, Game.time + Engine.rand:Number(30, 55), 'hyperjumpAtDistance')
+		end
+	elseif trader.status == 'outbound' then
+		if ai_error == 'NONE' then
+			Trader.assignTask(ship, Game.time + 2, 'hyperjumpAtDistance')
 		end
 	elseif trader.status == 'orbit' then
 		if ai_error == 'NONE' then

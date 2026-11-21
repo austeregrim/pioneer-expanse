@@ -11,6 +11,7 @@
 #include "Player.h"
 #include "Ship.h"
 #include "Space.h"
+#include "ship/SupercruiseController.h"
 #include "graphics/Material.h"
 #include "graphics/RenderState.h"
 #include "graphics/Renderer.h"
@@ -154,6 +155,11 @@ void HyperspaceCloud::TimeStepUpdate(const float timeStep)
 			Pi::player->SetCombatTarget(m_ship, Pi::player->GetFollowTarget() == this);
 
 		m_ship->EnterSystem();
+		if (!m_ship->IsType(ObjectType::PLAYER)) {
+			if (SupercruiseController *sc = m_ship->GetSupercruise()) {
+				sc->EnterSupercruiseImmediate(SupercruiseController::MIN_SPEED);
+			}
+		}
 
 		m_ship = nullptr;
 		SetLabel(Lang::HYPERSPACE_ARRIVAL_CLOUD_REMNANT);

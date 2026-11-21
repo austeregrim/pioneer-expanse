@@ -74,6 +74,7 @@ public:
 	struct BayPath {
 		TMapBayIDMat m_docking;
 		TMapBayIDMat m_leaving;
+		float maxHalfExtent = 16.0f;
 	};
 	typedef std::map<Uint32, BayPath> BayPathMap;
 
@@ -153,6 +154,7 @@ public:
 	bool GetShipApproachWaypoints(const unsigned int port, DockStage stage, positionOrient_t &outPosOrient) const;
 
 	matrix4x4f GetStageTransform(int bay, DockStage stage) const;
+	float GetBayMaxHalfExtent(int zeroBaseBayID) const;
 
 	const std::string &ModelName() const { return modelName; }
 	float AngVel() const { return angVel; }

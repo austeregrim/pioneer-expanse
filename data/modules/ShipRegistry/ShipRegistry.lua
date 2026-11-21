@@ -381,7 +381,7 @@ function ShipRegistry.EnsureSystemRoster(system, acceptableShipIds, ports)
 	end
 
 	s.systemRosters[sysKey] = s.systemRosters[sysKey] or {}
-	local targetCount = math.clamp(8 + #ports * 2 + math.floor(math.min(pop, 20) * 0.5), 14, 36)
+	local targetCount = math.clamp(12 + #ports * 3 + math.floor(math.min(pop, 20) * 1.0), 18, 96)
 	local living = countLivingForSystem(sysKey)
 
 	-- Allow regional attrition recovery only gradually or when roster is significantly depleted
@@ -413,7 +413,16 @@ function ShipRegistry.EnsureSystemRoster(system, acceptableShipIds, ports)
 		if stBodyIdx then
 			rec.status = (i % 2 == 0) and "HANGAR" or "ACTIVE"
 			if rec.status == "HANGAR" then
-				rec.hangarUntil = (Game.time or 0) + Engine.rand:Number(180, 28800)
+				local tierRoll = Engine.rand:Number(1)
+				local delay
+				if tierRoll < 0.35 then
+					delay = Engine.rand:Number(45, 360)
+				elseif tierRoll < 0.70 then
+					delay = Engine.rand:Number(360, 2400)
+				else
+					delay = Engine.rand:Number(2400, 28800)
+				end
+				rec.hangarUntil = (Game.time or 0) + delay
 			end
 		end
 	end

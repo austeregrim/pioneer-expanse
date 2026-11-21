@@ -24,7 +24,9 @@
 #include "Space.h"
 #include "SpaceStationType.h"
 #include "StringF.h"
+#include "graphics/RenderState.h"
 #include "graphics/Renderer.h"
+#include "graphics/VertexArray.h"
 #include "lua/LuaEvent.h"
 #include "scenegraph/Animation.h"
 #include "scenegraph/CollisionGeometry.h"
@@ -176,6 +178,7 @@ void SpaceStation::PostLoadFixup(Space *space)
 		const Aabb &bbox = sd.ship->GetAabb();
 		const float bboxRad = vector2f(float(bbox.max.x), float(bbox.max.z)).Length();
 		sd.maxOffset = calculate_max_offset_squared(pPort->maxShipSize, bboxRad);
+		ComputeHangarBayGeometry(int(i), sd.ship, sd.hangarHalfX, sd.hangarHalfZ, sd.hangarDepth);
 	}
 }
 
@@ -309,6 +312,23 @@ static double GetHangarElevatorDepth(const Ship *ship)
 	return std::max(14.0, (aabb.max.y - aabb.min.y) + 6.0);
 }
 
+void SpaceStation::ComputeHangarBayGeometry(int bay, const Ship *ship, float &outHalfX, float &outHalfZ, float &outDepth) const
+{
+	const float maxBayHalf = m_type ? std::max(7.5f, m_type->GetBayMaxHalfExtent(bay) - 2.0f) : 14.0f;
+	if (!ship) {
+		outHalfX = Clamp(11.0f, 6.5f, maxBayHalf);
+		outHalfZ = Clamp(13.0f, 7.5f, maxBayHalf);
+		outDepth = 18.0f;
+		return;
+	}
+	const Aabb &aabb = ship->GetAabb();
+	const float shipHalfX = std::max(std::fabs(float(aabb.min.x)), std::fabs(float(aabb.max.x)));
+	const float shipHalfZ = std::max(std::fabs(float(aabb.min.z)), std::fabs(float(aabb.max.z)));
+	outHalfX = Clamp(shipHalfX + 2.2f, 6.5f, maxBayHalf);
+	outHalfZ = Clamp(shipHalfZ + 2.5f, 7.5f, maxBayHalf);
+	outDepth = float(GetHangarElevatorDepth(ship));
+}
+
 bool SpaceStation::StowShipInHangar(Ship *ship)
 {
 	if (!ship || ship->IsDead() || ship->IsType(ObjectType::PLAYER))
@@ -326,6 +346,7 @@ bool SpaceStation::StowShipInHangar(Ship *ship)
 	dt.stagePos = 0.0;
 	dt.fromPos = vector3d::Zero;
 	dt.fromRot = Quaterniond(1.0, 0.0, 0.0, 0.0);
+	ComputeHangarBayGeometry(bay, ship, dt.hangarHalfX, dt.hangarHalfZ, dt.hangarDepth);
 	return true;
 }
 
@@ -341,7 +362,8 @@ bool SpaceStation::BeginUnstowFromHangar(Ship *ship, const int bay)
 	shipDocking_t &dt = m_shipDocking[bay];
 	dt.stage = DockStage::HANGAR_UNSTOWING;
 	dt.stagePos = 0.0;
-	dt.fromPos = vector3d(0.0, -GetHangarElevatorDepth(ship), 0.0);
+	ComputeHangarBayGeometry(bay, ship, dt.hangarHalfX, dt.hangarHalfZ, dt.hangarDepth);
+	dt.fromPos = vector3d(0.0, -double(dt.hangarDepth), 0.0);
 	dt.fromRot = Quaterniond(1.0, 0.0, 0.0, 0.0);
 	PositionDockedShip(ship, bay);
 	ship->UpdateInterpTransform(1.0);
@@ -1274,10 +1296,21 @@ void SpaceStation::DockingUpdate(const double timeStep)
 			continue;
 
 		case DockStage::HANGAR_STOWING: {
-			const double depth = GetHangarElevatorDepth(dt.ship);
+			const double depth = (dt.hangarDepth > 1.0f) ? double(dt.hangarDepth) : GetHangarElevatorDepth(dt.ship);
 			dt.stagePos += timeStep / HANGAR_ELEVATOR_DURATION;
-			const double eased = AnimationCurves::InOutSineEasing(Clamp(dt.stagePos, 0.0, 1.0));
-			dt.fromPos = vector3d(0.0, -depth * eased, 0.0);
+			const double t = Clamp(dt.stagePos, 0.0, 1.0);
+			const double seatedLift = 0.16;
+			double elevY;
+			if (t < 0.14) {
+				elevY = seatedLift * AnimationCurves::InOutSineEasing(t / 0.14);
+			} else if (t < 0.72) {
+				const double u = (t - 0.14) / 0.58;
+				const double eased = AnimationCurves::InOutSineEasing(u);
+				elevY = seatedLift - (depth + seatedLift) * eased;
+			} else {
+				elevY = -depth;
+			}
+			dt.fromPos = vector3d(0.0, elevY, 0.0);
 			PositionDockedShip(dt.ship, i);
 			if (dt.stagePos >= 1.0) {
 				Ship *stowedShip = dt.ship;
@@ -1296,10 +1329,22 @@ void SpaceStation::DockingUpdate(const double timeStep)
 		}
 
 		case DockStage::HANGAR_UNSTOWING: {
-			const double depth = GetHangarElevatorDepth(dt.ship);
+			const double depth = (dt.hangarDepth > 1.0f) ? double(dt.hangarDepth) : GetHangarElevatorDepth(dt.ship);
 			dt.stagePos += timeStep / HANGAR_ELEVATOR_DURATION;
-			const double eased = AnimationCurves::InOutSineEasing(Clamp(dt.stagePos, 0.0, 1.0));
-			dt.fromPos = vector3d(0.0, -depth * (1.0 - eased), 0.0);
+			const double t = Clamp(dt.stagePos, 0.0, 1.0);
+			const double seatedLift = 0.16;
+			double elevY;
+			if (t < 0.30) {
+				elevY = -depth;
+			} else if (t < 0.88) {
+				const double u = (t - 0.30) / 0.58;
+				const double eased = AnimationCurves::InOutSineEasing(u);
+				elevY = -depth + (depth + seatedLift) * eased;
+			} else {
+				const double u = (t - 0.88) / 0.12;
+				elevY = seatedLift * (1.0 - AnimationCurves::InOutSineEasing(u));
+			}
+			dt.fromPos = vector3d(0.0, elevY, 0.0);
 			PositionDockedShip(dt.ship, i);
 			if (dt.stagePos >= 1.0) {
 				dt.stagePos = 0.0;
@@ -1637,6 +1682,7 @@ void SpaceStation::Render(Graphics::Renderer *r, const Camera *camera, const vec
 	if (!b->IsType(ObjectType::PLANET)) {
 		// orbital spaceport -- don't make city turds or change lighting based on atmosphere
 		RenderModel(r, camera, viewCoords, viewTransform);
+		RenderHangarBays(r, viewCoords, viewTransform);
 		m_navLights->Render(r);
 		r->GetStats().AddToStatCount(Graphics::Stats::STAT_SPACESTATIONS, 1);
 	} else {
@@ -1654,9 +1700,321 @@ void SpaceStation::Render(Graphics::Renderer *r, const Camera *camera, const vec
 		m_adjacentCity->Render(r, camera->GetContext(), this, viewCoords, viewTransform);
 
 		RenderModel(r, camera, viewCoords, viewTransform);
+		RenderHangarBays(r, viewCoords, viewTransform);
 		m_navLights->Render(r);
 
 		r->GetStats().AddToStatCount(Graphics::Stats::STAT_GROUNDSTATIONS, 1);
+	}
+}
+
+namespace {
+	void AppendBayQuad(Graphics::VertexArray &va,
+		const vector3f &p0, const vector3f &p1, const vector3f &p2, const vector3f &p3,
+		const Color &c0, const Color &c1, const Color &c2, const Color &c3)
+	{
+		va.Add(p0, c0);
+		va.Add(p1, c1);
+		va.Add(p2, c2);
+		va.Add(p0, c0);
+		va.Add(p2, c2);
+		va.Add(p3, c3);
+	}
+
+	void AppendBayQuadFlat(Graphics::VertexArray &va,
+		const vector3f &p0, const vector3f &p1, const vector3f &p2, const vector3f &p3,
+		const Color &c)
+	{
+		AppendBayQuad(va, p0, p1, p2, p3, c, c, c, c);
+	}
+
+	void AppendBayBox(Graphics::VertexArray &va,
+		float x0, float x1, float y0, float y1, float z0, float z1,
+		const Color &topCol, const Color &sideXCol, const Color &sideZCol)
+	{
+		// Top (+Y)
+		AppendBayQuadFlat(va,
+			vector3f(x0, y1, z0), vector3f(x1, y1, z0),
+			vector3f(x1, y1, z1), vector3f(x0, y1, z1), topCol);
+		// Front (+Z) & Back (-Z)
+		AppendBayQuadFlat(va,
+			vector3f(x0, y0, z1), vector3f(x1, y0, z1),
+			vector3f(x1, y1, z1), vector3f(x0, y1, z1), sideZCol);
+		AppendBayQuadFlat(va,
+			vector3f(x1, y0, z0), vector3f(x0, y0, z0),
+			vector3f(x0, y1, z0), vector3f(x1, y1, z0), sideZCol);
+		// Left (-X) & Right (+X)
+		AppendBayQuadFlat(va,
+			vector3f(x0, y0, z0), vector3f(x0, y0, z1),
+			vector3f(x0, y1, z1), vector3f(x0, y1, z0), sideXCol);
+		AppendBayQuadFlat(va,
+			vector3f(x1, y0, z1), vector3f(x1, y0, z0),
+			vector3f(x1, y1, z0), vector3f(x1, y1, z1), sideXCol);
+	}
+} // namespace
+
+void SpaceStation::RenderHangarBays(Graphics::Renderer *r, const vector3d &viewCoords, const matrix4x4d &viewTransform)
+{
+	if (!r || !m_type || m_shipDocking.empty())
+		return;
+	if (viewCoords.LengthSqr() > 4000.0 * 4000.0)
+		return;
+
+	bool hasActiveBay = false;
+	for (Uint32 i = 0; i < m_shipDocking.size(); ++i) {
+		const shipDocking_t &dt = m_shipDocking[i];
+		if (dt.ship && (dt.stage == DockStage::HANGAR_STOWING || dt.stage == DockStage::HANGAR_UNSTOWING)) {
+			hasActiveBay = true;
+			break;
+		}
+	}
+	if (!hasActiveBay)
+		return;
+
+	if (!m_hangarSolidMat.Valid()) {
+		Graphics::MaterialDescriptor desc;
+		Graphics::RenderStateDesc rsd;
+		rsd.blendMode = Graphics::BLEND_SOLID;
+		rsd.cullMode = Graphics::CULL_NONE;
+		rsd.primitiveType = Graphics::TRIANGLES;
+		rsd.depthTest = true;
+		rsd.depthWrite = true;
+		const auto vfmt = Graphics::VertexFormatDesc::FromAttribSet(Graphics::ATTRIB_POSITION | Graphics::ATTRIB_DIFFUSE);
+		m_hangarSolidMat.Reset(r->CreateMaterial("vtxColor", desc, rsd, vfmt));
+	}
+	if (!m_hangarGlowMat.Valid()) {
+		Graphics::MaterialDescriptor desc;
+		Graphics::RenderStateDesc rsd;
+		rsd.blendMode = Graphics::BLEND_ADDITIVE;
+		rsd.cullMode = Graphics::CULL_NONE;
+		rsd.primitiveType = Graphics::TRIANGLES;
+		rsd.depthTest = true;
+		rsd.depthWrite = false;
+		const auto vfmt = Graphics::VertexFormatDesc::FromAttribSet(Graphics::ATTRIB_POSITION | Graphics::ATTRIB_DIFFUSE);
+		m_hangarGlowMat.Reset(r->CreateMaterial("vtxColor", desc, rsd, vfmt));
+	}
+
+	const double now = Pi::game ? Pi::game->GetTime() : 0.0;
+	const float pulse = 0.45f + 0.55f * float(0.5 + 0.5 * std::sin(now * 8.5));
+	const matrix4x4f stationView = matrix4x4f(viewTransform * GetInterpMatrix());
+
+	Graphics::VertexArray solidVerts(Graphics::ATTRIB_POSITION | Graphics::ATTRIB_DIFFUSE);
+	Graphics::VertexArray glowVerts(Graphics::ATTRIB_POSITION | Graphics::ATTRIB_DIFFUSE);
+
+	for (Uint32 i = 0; i < m_shipDocking.size(); ++i) {
+		const shipDocking_t &dt = m_shipDocking[i];
+		if (!dt.ship)
+			continue;
+		if (dt.stage != DockStage::HANGAR_STOWING && dt.stage != DockStage::HANGAR_UNSTOWING)
+			continue;
+
+		const float t = float(Clamp(dt.stagePos, 0.0, 1.0));
+		const float halfX = (dt.hangarHalfX > 1.0f) ? dt.hangarHalfX : 11.0f;
+		const float halfZ = (dt.hangarHalfZ > 1.0f) ? dt.hangarHalfZ : 13.0f;
+		const float rimW = 1.15f;
+
+		float collarDeploy = 1.0f;
+		float openFrac = 1.0f;
+		float clampScale = 1.0f;
+		bool lockReady = false;
+
+		if (dt.stage == DockStage::HANGAR_STOWING) {
+			if (t < 0.14f) {
+				collarDeploy = float(AnimationCurves::InOutSineEasing(t / 0.14f));
+				openFrac = 1.0f;
+			} else if (t < 0.72f) {
+				collarDeploy = 1.0f;
+				openFrac = 1.0f;
+			} else if (t < 0.94f) {
+				collarDeploy = 1.0f;
+				openFrac = 1.0f - float(AnimationCurves::InOutSineEasing((t - 0.72f) / 0.22f));
+			} else {
+				collarDeploy = 1.0f - float(AnimationCurves::InOutSineEasing((t - 0.94f) / 0.06f));
+				openFrac = 0.0f;
+			}
+		} else {
+			if (t < 0.08f) {
+				collarDeploy = float(AnimationCurves::InOutSineEasing(t / 0.08f));
+				openFrac = 0.0f;
+			} else if (t < 0.30f) {
+				collarDeploy = 1.0f;
+				openFrac = float(AnimationCurves::InOutSineEasing((t - 0.08f) / 0.22f));
+			} else if (t < 0.88f) {
+				collarDeploy = 1.0f;
+				openFrac = 1.0f;
+			} else {
+				const float u = float(AnimationCurves::InOutSineEasing((t - 0.88f) / 0.12f));
+				collarDeploy = 1.0f - u;
+				clampScale = 1.0f - u;
+				openFrac = 1.0f;
+				lockReady = true;
+			}
+		}
+
+		solidVerts.Clear();
+		glowVerts.Clear();
+
+		// 1. Dark illuminated hangar shaft aperture when blast doors are open
+		if (openFrac > 0.02f) {
+			const float shaftY = 0.06f;
+			const float innerX = std::max(2.0f, halfX - 1.15f);
+			const float innerZ = std::max(2.0f, halfZ - 1.15f);
+			const Color deepCore(5, 7, 11, 255);
+			const Color innerRim(36, 20, 10, 255);
+			const Color outerRim(155, 82, 22, 255);
+
+			AppendBayQuadFlat(solidVerts,
+				vector3f(-innerX, shaftY, -innerZ), vector3f(innerX, shaftY, -innerZ),
+				vector3f(innerX, shaftY, innerZ), vector3f(-innerX, shaftY, innerZ), deepCore);
+			// 4 mitered warm-lit shaft perimeter strips
+			AppendBayQuad(solidVerts,
+				vector3f(-halfX, shaftY, -halfZ), vector3f(halfX, shaftY, -halfZ),
+				vector3f(innerX, shaftY, -innerZ), vector3f(-innerX, shaftY, -innerZ),
+				outerRim, outerRim, innerRim, innerRim);
+			AppendBayQuad(solidVerts,
+				vector3f(innerX, shaftY, innerZ), vector3f(-innerX, shaftY, innerZ),
+				vector3f(-halfX, shaftY, halfZ), vector3f(halfX, shaftY, halfZ),
+				innerRim, innerRim, outerRim, outerRim);
+			AppendBayQuad(solidVerts,
+				vector3f(-halfX, shaftY, -halfZ), vector3f(-innerX, shaftY, -innerZ),
+				vector3f(-innerX, shaftY, innerZ), vector3f(-halfX, shaftY, halfZ),
+				outerRim, innerRim, innerRim, outerRim);
+			AppendBayQuad(solidVerts,
+				vector3f(innerX, shaftY, -innerZ), vector3f(halfX, shaftY, -halfZ),
+				vector3f(halfX, shaftY, halfZ), vector3f(innerX, shaftY, innerZ),
+				innerRim, outerRim, outerRim, innerRim);
+		}
+
+		// 2. Beveled 3D armored collar & side door-pocket housings
+		const float collarH = 0.30f * collarDeploy;
+		if (collarH > 0.015f) {
+			const Color collarTop(88, 96, 108, 255);
+			const Color collarSideX(58, 64, 74, 255);
+			const Color collarSideZ(66, 73, 84, 255);
+			const float oX = halfX + rimW;
+			const float oZ = halfZ + rimW;
+
+			// North / South collar rails
+			AppendBayBox(solidVerts, -oX, oX, 0.0f, collarH, halfZ, oZ, collarTop, collarSideX, collarSideZ);
+			AppendBayBox(solidVerts, -oX, oX, 0.0f, collarH, -oZ, -halfZ, collarTop, collarSideX, collarSideZ);
+			// West / East shutter-pocket housings (slightly thicker/taller)
+			const float pocketH = 0.38f * collarDeploy;
+			const Color pocketTop(74, 82, 94, 255);
+			AppendBayBox(solidVerts, -oX - 0.45f, -halfX, 0.0f, pocketH, -halfZ, halfZ, pocketTop, collarSideX, collarSideZ);
+			AppendBayBox(solidVerts, halfX, oX + 0.45f, 0.0f, pocketH, -halfZ, halfZ, pocketTop, collarSideX, collarSideZ);
+		}
+
+		// 3. Twin retracting segmented armored blast doors
+		const float doorTopY = 0.27f * std::max(0.25f, collarDeploy);
+		const float doorBotY = 0.11f;
+		const float gapHalfX = halfX * openFrac;
+		const float leafWidth = halfX - gapHalfX;
+		if (leafWidth > 0.08f && doorTopY > doorBotY) {
+			const Color leafTop(66, 74, 86, 255);
+			const Color leafSideX(44, 50, 58, 255);
+			const Color leafSideZ(54, 61, 70, 255);
+			const Color ribCol(34, 39, 46, 255);
+			const Color hazardYellow(222, 165, 22, 255);
+			const Color hazardDark(22, 24, 28, 255);
+
+			// Left door leaf [-halfX .. -gapHalfX] & Right door leaf [+gapHalfX .. +halfX]
+			AppendBayBox(solidVerts, -halfX, -gapHalfX, doorBotY, doorTopY, -halfZ, halfZ, leafTop, leafSideX, leafSideZ);
+			AppendBayBox(solidVerts, gapHalfX, halfX, doorBotY, doorTopY, -halfZ, halfZ, leafTop, leafSideX, leafSideZ);
+
+			// Transverse structural rib strips across each leaf
+			const int numRibs = 4;
+			for (int k = 1; k < numRibs; ++k) {
+				const float rz = -halfZ + (2.0f * halfZ) * (float(k) / float(numRibs));
+				AppendBayBox(solidVerts, -halfX + 0.2f, -gapHalfX - 0.1f, doorTopY, doorTopY + 0.03f, rz - 0.14f, rz + 0.14f, ribCol, ribCol, ribCol);
+				AppendBayBox(solidVerts, gapHalfX + 0.1f, halfX - 0.2f, doorTopY, doorTopY + 0.03f, rz - 0.14f, rz + 0.14f, ribCol, ribCol, ribCol);
+			}
+
+			// Caution stripe segments along both meeting inner edges
+			const float stripeW = std::min(0.65f, leafWidth * 0.45f);
+			if (stripeW > 0.06f) {
+				const int numStripes = 10;
+				for (int sIdx = 0; sIdx < numStripes; ++sIdx) {
+					const float sz0 = -halfZ + (2.0f * halfZ) * (float(sIdx) / float(numStripes));
+					const float sz1 = -halfZ + (2.0f * halfZ) * (float(sIdx + 1) / float(numStripes));
+					const Color sc = (sIdx % 2 == 0) ? hazardYellow : hazardDark;
+					AppendBayBox(solidVerts, -gapHalfX - stripeW, -gapHalfX, doorTopY + 0.005f, doorTopY + 0.025f, sz0, sz1, sc, sc, sc);
+					AppendBayBox(solidVerts, gapHalfX, gapHalfX + stripeW, doorTopY + 0.005f, doorTopY + 0.025f, sz0, sz1, sc, sc, sc);
+				}
+			}
+		}
+
+		// 4. Moving elevator platform deck & 4 corner hydraulic cradle clamps
+		const float platTopY = float(dt.fromPos.y) - 0.02f;
+		if (platTopY > -0.35f) {
+			const float platX = std::max(4.5f, halfX - 0.55f);
+			const float platZ = std::max(5.5f, halfZ - 0.55f);
+			const Color deckTop(82, 88, 96, 255);
+			const Color deckSideX(52, 56, 62, 255);
+			const Color deckSideZ(60, 65, 72, 255);
+			AppendBayBox(solidVerts, -platX, platX, platTopY - 0.12f, platTopY, -platZ, platZ, deckTop, deckSideX, deckSideZ);
+
+			const float clampH = 0.42f * clampScale;
+			if (clampH > 0.03f) {
+				const Color clampTop(195, 145, 28, 255);
+				const Color clampSide(120, 92, 24, 255);
+				const float cw = 0.75f;
+				const float cx[2] = { -platX + 0.4f, platX - 0.4f - cw };
+				const float cz[2] = { -platZ + 0.4f, platZ - 0.4f - cw };
+				for (int xi = 0; xi < 2; ++xi) {
+					for (int zi = 0; zi < 2; ++zi) {
+						AppendBayBox(solidVerts, cx[xi], cx[xi] + cw, platTopY, platTopY + clampH, cz[zi], cz[zi] + cw, clampTop, clampSide, clampSide);
+					}
+				}
+			}
+		}
+
+		// 5. Additive flashing amber / lock-green warning strips & corner beacons
+		const Color glowCol = lockReady
+			? Color(45, 230, 155, Uint8(165.0f + 50.0f * pulse))
+			: Color(255, 165, 32, Uint8(105.0f + 135.0f * pulse));
+
+		if (collarDeploy > 0.05f) {
+			const float gY = 0.32f * collarDeploy + 0.02f;
+			const float cR = 0.55f;
+			const float oX = halfX + rimW * 0.55f;
+			const float oZ = halfZ + rimW * 0.55f;
+			const float sx[2] = { -oX, oX };
+			const float sz[2] = { -oZ, oZ };
+			for (int xi = 0; xi < 2; ++xi) {
+				for (int zi = 0; zi < 2; ++zi) {
+					AppendBayQuadFlat(glowVerts,
+						vector3f(sx[xi] - cR, gY, sz[zi] - cR), vector3f(sx[xi] + cR, gY, sz[zi] - cR),
+						vector3f(sx[xi] + cR, gY, sz[zi] + cR), vector3f(sx[xi] - cR, gY, sz[zi] + cR), glowCol);
+				}
+			}
+		}
+		if (openFrac > 0.05f) {
+			const float stripY = 0.085f;
+			const float stripW = 0.22f;
+			// Longitudinal illuminated shaft edge strips
+			AppendBayQuadFlat(glowVerts,
+				vector3f(-halfX, stripY, -halfZ), vector3f(-halfX + stripW, stripY, -halfZ),
+				vector3f(-halfX + stripW, stripY, halfZ), vector3f(-halfX, stripY, halfZ), glowCol);
+			AppendBayQuadFlat(glowVerts,
+				vector3f(halfX - stripW, stripY, -halfZ), vector3f(halfX, stripY, -halfZ),
+				vector3f(halfX, stripY, halfZ), vector3f(halfX - stripW, stripY, halfZ), glowCol);
+		}
+		if (leafWidth > 0.15f && doorTopY > doorBotY) {
+			const float leadY = doorTopY + 0.035f;
+			const float lw = std::min(0.18f, leafWidth * 0.25f);
+			AppendBayQuadFlat(glowVerts,
+				vector3f(-gapHalfX - lw, leadY, -halfZ + 0.3f), vector3f(-gapHalfX, leadY, -halfZ + 0.3f),
+				vector3f(-gapHalfX, leadY, halfZ - 0.3f), vector3f(-gapHalfX - lw, leadY, halfZ - 0.3f), glowCol);
+			AppendBayQuadFlat(glowVerts,
+				vector3f(gapHalfX, leadY, -halfZ + 0.3f), vector3f(gapHalfX + lw, leadY, -halfZ + 0.3f),
+				vector3f(gapHalfX + lw, leadY, halfZ - 0.3f), vector3f(gapHalfX, leadY, halfZ - 0.3f), glowCol);
+		}
+
+		const matrix4x4f bayMat = stationView * m_type->GetStageTransform(int(i), DockStage::DOCKED);
+		Graphics::Renderer::MatrixTicket mt(r, bayMat);
+		if (!solidVerts.IsEmpty())
+			r->DrawBuffer(&solidVerts, m_hangarSolidMat.Get());
+		if (!glowVerts.IsEmpty())
+			r->DrawBuffer(&glowVerts, m_hangarGlowMat.Get());
 	}
 }
 

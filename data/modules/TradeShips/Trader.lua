@@ -313,20 +313,22 @@ Trader.computeStationDwellPlan = function(ship, starport, unloadedTons, damageFr
 
 	local roll = Engine.rand:Number(1)
 	local hangarThreshold = isHomePort and 0.60 or 0.40
-	if occupancy >= 0.60 then
+	if isInitialSpawn and occupancy < 0.50 then
+		hangarThreshold = isHomePort and 0.42 or 0.30
+	elseif occupancy >= 0.60 then
 		hangarThreshold = math.max(hangarThreshold, 0.70)
 	end
 
 	if roll < hangarThreshold then
-		local isOvernight = (isHomePort and Engine.rand:Number(1) < 0.72) or (Engine.rand:Number(1) < 0.45)
-		local hangarDur = isOvernight and Engine.rand:Number(21600, 50400) or Engine.rand:Number(1800, 10800)
-		local padSec = isInitialSpawn and Engine.rand:Number(25, 110) or (prepSec + Engine.rand:Number(30, 90))
+		local isLongLayover = (isHomePort and Engine.rand:Number(1) < 0.45) or (Engine.rand:Number(1) < 0.25)
+		local hangarDur = isLongLayover and Engine.rand:Number(3600, 28800) or Engine.rand:Number(600, 2400)
+		local padSec = isInitialSpawn and Engine.rand:Number(45, 145) or (prepSec + Engine.rand:Number(30, 90))
 		return { action = 'hangar', padDuration = padSec, hangarDuration = hangarDur }
 	elseif roll < hangarThreshold + ((1.0 - hangarThreshold) * 0.35) then
-		local padSec = isInitialSpawn and Engine.rand:Number(20, 90) or (prepSec + Engine.rand:Number(60, 180))
+		local padSec = isInitialSpawn and Engine.rand:Number(55, 160) or (prepSec + Engine.rand:Number(60, 180))
 		return { action = 'pad', padDuration = padSec }
 	else
-		local padSec = isInitialSpawn and Engine.rand:Number(90, 420) or (prepSec + Engine.rand:Number(240, 660))
+		local padSec = isInitialSpawn and Engine.rand:Number(120, 320) or (prepSec + Engine.rand:Number(240, 660))
 		return { action = 'pad', padDuration = padSec }
 	end
 end
@@ -355,23 +357,35 @@ trader_task.hyperjumpAtDistance = function(ship)
 	if not trader then return end
 	if not ship:exists() or ship.flightState == 'HYPERSPACE' then return end
 	if trader.status == "outbound" and trader.ts_error ~= "HIT" then
-		-- if trader is not under attack and started to leave station
+		local drive = ship:GetInstalledHyperdrive()
+		if drive and (drive.storedFuel or 0) <= 0 then
+			Trader.addHyperdriveFuel(ship)
+		end
+		if trader.hyperjumpDist == nil then
+			trader.hyperjumpDist = Engine.rand:Number(1.5e9, 1.0e10)
+		end
 		if trader.starport ~= nil and trader.starport:exists() then
-			-- Ensure hyperdrive has fuel before attempting jump
-			local drive = ship:GetInstalledHyperdrive()
-			if drive and (drive.storedFuel or 0) <= 0 then
-				Trader.addHyperdriveFuel(ship)
-			end
-			-- if trader has not started to hyperjump, cruise out along the outbound Supercruise lane (5-35 ls) first
-			if trader.hyperjumpDist == nil then
-				trader.hyperjumpDist = Engine.rand:Number(1.5e9, 1.0e10)
-			end
 			if Trader.checkDistBetweenStarport(ship) then
-				-- if distance is large enough attempt to hyperjump
 				local status = Trader.getSystemAndJump(ship)
 				if status ~= 'OK' then
 					ship:CancelAI()
 					ship:AIDockWith(trader.starport)
+					trader['status'] = 'inbound'
+					trader.ts_error = 'cnt_jump_aicomp'
+				end
+				trader.hyperjumpDist = nil
+			else
+				Trader.assignTask(ship, Game.time + 10, 'hyperjumpAtDistance')
+			end
+		else
+			local nearestPort = ship:FindNearestTo("SPACESTATION")
+			local dist = nearestPort and ship:DistanceTo(nearestPort) or 1.0e11
+			if dist >= 1.5e9 then
+				local status = Trader.getSystemAndJump(ship)
+				if status ~= 'OK' and nearestPort and nearestPort:exists() then
+					trader.starport = nearestPort
+					ship:CancelAI()
+					ship:AIDockWith(nearestPort)
 					trader['status'] = 'inbound'
 					trader.ts_error = 'cnt_jump_aicomp'
 				end

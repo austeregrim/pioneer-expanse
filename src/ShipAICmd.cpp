@@ -1137,7 +1137,7 @@ bool AICmdFlyTo::TimeStepUpdate()
 						}
 					} else if (sc->IsSafeDisengageReady()) {
 						sc->SafeDisengage();
-						return false;
+						return (m_target && m_target->IsType(ObjectType::SPACESTATION));
 					}
 				}
 
