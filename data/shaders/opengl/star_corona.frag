@@ -12,32 +12,46 @@ uniform float uTime;
 
 out vec4 frag_color;
 
-float hash21(vec2 p)
+float hash31(vec3 p)
 {
-	p = fract(p * vec2(123.34, 456.21));
-	p += dot(p, p + 45.32);
-	return fract(p.x * p.y);
+	p = fract(p * 0.1031);
+	p += dot(p, p.yzx + 33.33);
+	return fract((p.x + p.y) * p.z);
 }
 
-float noise2D(vec2 p)
+float noise3D(vec3 p)
 {
-	vec2 i = floor(p);
-	vec2 f = fract(p);
+	vec3 i = floor(p);
+	vec3 f = fract(p);
 	f = f * f * (3.0 - 2.0 * f);
-	float a = hash21(i);
-	float b = hash21(i + vec2(1.0, 0.0));
-	float c = hash21(i + vec2(0.0, 1.0));
-	float d = hash21(i + vec2(1.0, 1.0));
-	return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+
+	float n000 = hash31(i + vec3(0.0, 0.0, 0.0));
+	float n100 = hash31(i + vec3(1.0, 0.0, 0.0));
+	float n010 = hash31(i + vec3(0.0, 1.0, 0.0));
+	float n110 = hash31(i + vec3(1.0, 1.0, 0.0));
+	float n001 = hash31(i + vec3(0.0, 0.0, 1.0));
+	float n101 = hash31(i + vec3(1.0, 0.0, 1.0));
+	float n011 = hash31(i + vec3(0.0, 1.0, 1.0));
+	float n111 = hash31(i + vec3(1.0, 1.0, 1.0));
+
+	float nx00 = mix(n000, n100, f.x);
+	float nx10 = mix(n010, n110, f.x);
+	float nx01 = mix(n001, n101, f.x);
+	float nx11 = mix(n011, n111, f.x);
+
+	float nxy0 = mix(nx00, nx10, f.y);
+	float nxy1 = mix(nx01, nx11, f.y);
+
+	return mix(nxy0, nxy1, f.z);
 }
 
-float fbm2D(vec2 p)
+float fbm3D(vec3 p)
 {
 	float sum = 0.0;
 	float amp = 0.5;
 	for (int i = 0; i < 4; ++i) {
-		sum += amp * noise2D(p);
-		p = p * 2.05 + vec2(9.2, 4.7);
+		sum += amp * noise3D(p);
+		p = p * 2.03 + vec3(9.2, 4.7, 6.1);
 		amp *= 0.5;
 	}
 	return sum;
@@ -54,9 +68,10 @@ void main(void)
 	if (edgeMask <= 0.001)
 		discard;
 
-	// Use periodic direction vector so noise never has an atan seam
+	// Use periodic direction vector on a fixed-radius cylinder in 3D noise space:
+	// never scale dir by time or radial height, so angular plume frequency stays strictly constant
 	vec2 dir = p / max(r, 0.0001);
-	float t = uTime * 0.14;
+	float t = mod(uTime * 0.14, 512.0);
 
 	vec3 baseCol = clamp(starColor.rgb, vec3(0.12), vec3(1.0));
 	vec3 hotCol = mix(baseCol, vec3(1.0, 0.96, 0.85), 0.65);
@@ -66,13 +81,13 @@ void main(void)
 	float h = max(0.0, r - 0.97);
 
 	// 1. Tight boiling chromosphere atmosphere hugging the star's limb
-	float chromoNoise = fbm2D(dir * 6.5 + vec2(t * 0.7, -t * 0.5));
+	float chromoNoise = fbm3D(vec3(dir * 5.2, t * 0.55));
 	float chromosphere = exp(-h * (13.5 - 3.5 * chromoNoise)) * smoothstep(0.88, 1.0, r);
 
-	// 2. Animated radial coronal streamers / plasma plumes
-	float streamerNoise = fbm2D(dir * 4.2 + vec2(-t * 0.35, t * 0.25) - dir * (h * 1.4 - t * 0.45));
-	float finePlumes = fbm2D(dir * 10.5 - dir * (h * 2.6 - t * 0.85) + vec2(3.1, t * 0.3));
-	float plumeMask = smoothstep(0.32, 0.78, streamerNoise * 0.68 + finePlumes * 0.32);
+	// 2. Animated radial coronal streamers / plasma plumes (outward advection along orthogonal Z axis)
+	float streamerNoise = fbm3D(vec3(dir * 2.3, h * 1.25 - t * 0.38));
+	float finePlumes = fbm3D(vec3(dir * 4.6 + vec2(3.1, -1.7), h * 2.10 - t * 0.65));
+	float plumeMask = smoothstep(0.34, 0.78, streamerNoise * 0.72 + finePlumes * 0.28);
 	float streamers = exp(-h * 3.1) * plumeMask * smoothstep(0.92, 1.03, r);
 
 	// 3. Eruptive solar prominence arches & flares licking off active longitudes
@@ -89,7 +104,7 @@ void main(void)
 			float archDist = abs(h - archHeight);
 			float loopThickness = 0.018 + 0.014 * finePlumes;
 			float loopGlow = exp(-(archDist * archDist) / (loopThickness * loopThickness));
-			float wisp = 0.55 + 0.45 * fbm2D(dir * 14.0 + vec2(t * 1.1, fi * 5.0));
+			float wisp = 0.55 + 0.45 * fbm3D(vec3(dir * 6.0, t * 0.8 + fi * 5.0));
 			archField += loopGlow * wisp * smoothstep(1.15, 0.65, abs(u)) * smoothstep(0.96, 1.01, r);
 		}
 	}

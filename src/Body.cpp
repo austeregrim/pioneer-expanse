@@ -333,7 +333,8 @@ void Body::UpdateFrame()
 	if (!(m_flags & FLAG_CAN_MOVE_FRAME)) return;
 
 	const bool inSupercruise = IsType(ObjectType::SHIP) &&
-		(static_cast<const Ship *>(this)->GetFlightState() == Ship::SUPERCRUISE);
+		(static_cast<const Ship *>(this)->GetFlightState() == Ship::SUPERCRUISE ||
+		 static_cast<const Ship *>(this)->GetFlightState() == Ship::JUMPING);
 
 	const Frame *frame = Frame::GetFrame(m_frame);
 

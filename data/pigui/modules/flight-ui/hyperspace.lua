@@ -68,7 +68,7 @@ local function displayHyperspaceTargetIndicator(player)
 		return
 	end
 
-	local targetPath = player:GetHyperspaceTarget()
+	local targetPath = (player:IsHyperspaceActive() and player:GetHyperspaceDestination()) or player:GetHyperspaceTarget()
 	if not targetPath or Game.system.path:IsSameSystem(targetPath) then
 		return
 	end

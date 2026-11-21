@@ -317,6 +317,22 @@ void ShipViewController::Update()
 		Pi::input->SetCapturingMouse(false);
 	}
 
+	// In internal cockpit view, the 2D HUD center reticle is fixed at the viewport center.
+	// When middle-mouse freelook and headlook are released (or during hyperjump alignment/surge),
+	// return internal camera rotation angles to (0, 0) so the cockpit camera, skybox, and HUD alignment
+	// markers always match the ship's true forward vector (-Z).
+	if (!IsExteriorView() && m_internalCameraController) {
+		if (Pi::player && Pi::player->IsHyperspaceJumpSurging()) {
+			if (m_internalCameraController->GetMode() != InternalCameraController::MODE_FRONT)
+				m_internalCameraController->SetMode(InternalCameraController::MODE_FRONT);
+			m_internalCameraController->SetSmoothingEnabled(false);
+			m_internalCameraController->SetRotationAngles({ 0.0f, 0.0f, 0.0f });
+		} else if (!mouse_down && !headtracker_input_priority) {
+			m_internalCameraController->SetSmoothingEnabled(true);
+			m_internalCameraController->SetRotationAngles({ 0.0f, 0.0f, 0.0f });
+		}
+	}
+
 	m_activeCameraController->Update();
 }
 

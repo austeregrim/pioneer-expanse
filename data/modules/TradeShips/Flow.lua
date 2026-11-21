@@ -455,21 +455,27 @@ Flow.spawnInitialShips = function()
 	-- generating ships (guarantee docked presence, active Supercruise lane traffic, and arrival clouds)
 	Core.log:add(nil, string.format('spawnInitialShips: %d ports, %d routes, %d clouds', #port_summary, #routes_variants, #cloud_variants))
 
-	-- 1. Docked Ships at Every Station (occupy 30-55% of docks while leaving at least 1-2 pads free)
+	-- 1. Docked Ships at Stations (occupy pads while capping per-station and system-wide totals for multi-station hubs like Sol)
 	local dockedVariantsByPort = {}
 	for _, dv in ipairs(docked_variants) do
 		dockedVariantsByPort[dv.port] = dockedVariantsByPort[dv.port] or {}
 		table.insert(dockedVariantsByPort[dv.port], dv)
 	end
-	for _, portParam in ipairs(port_summary) do
+	local totalDockedSpawned = 0
+	local maxSystemDocked = 24
+	local perPortCap = (#port_summary >= 10) and 1 or ((#port_summary >= 5) and 2 or 3)
+	for portIdx, portParam in ipairs(port_summary) do
+		if totalDockedSpawned >= maxSystemDocked then
+			break
+		end
 		local portBody = portParam.port
 		local candidates = dockedVariantsByPort[portBody]
 		local ndocks = portParam.ndocks or portBody.numDocks or 0
 		if candidates and #candidates > 0 and ndocks > 1 then
 			utils.normWeights(candidates)
 			local minLeaveFree = (ndocks >= 4) and 2 or 1
-			local maxAllowed = math.max(1, ndocks - minLeaveFree)
-			local targetDocked = math.clamp(math.ceil(ndocks * 0.40), 2, maxAllowed)
+			local maxAllowed = math.max(1, math.min(ndocks - minLeaveFree, perPortCap, maxSystemDocked - totalDockedSpawned))
+			local targetDocked = math.clamp(math.ceil(ndocks * 0.25), 1, maxAllowed)
 			if ndocks <= 2 then
 				targetDocked = 1
 			end
@@ -477,12 +483,13 @@ Flow.spawnInitialShips = function()
 				local pick = utils.chooseNormalized(candidates)
 				local ship = pick and Space.SpawnShipDocked(pick.id, portBody)
 				if ship then
+					totalDockedSpawned = totalDockedSpawned + 1
 					Core.ships[ship] = { ts_error = "OK", status = 'docked', starport = portBody, ship_name = pick.id }
 					ship:SetLabel(Ship.MakeRandomLabel())
 					Trader.addEquip(ship)
 					Trader.addHyperdriveFuel(ship)
 					Trader.addCargo(ship, 'export')
-					local undockDelay = 18 + (i - 1) * 35 + Engine.rand:Number(5, 20)
+					local undockDelay = 18 + (portIdx - 1) * 16 + (i - 1) * 45 + Engine.rand:Number(5, 25)
 					Trader.assignTask(ship, Game.time + undockDelay, 'doUndock')
 				end
 			end
@@ -506,7 +513,7 @@ Flow.spawnInitialShips = function()
 			end
 		end
 
-		local targetInbound = math.clamp(#port_summary * 4 + 6, 12, 24)
+		local targetInbound = math.clamp(#port_summary * 2 + 4, 8, 16)
 		for idx = 1, targetInbound do
 			local params = utils.chooseNormalized(routes_variants)
 			local hj_route = params and hyper_routes[params.id] and utils.chooseEqual(hyper_routes[params.id])

@@ -791,8 +791,10 @@ void WorldView::DrawStarLensFlare()
 		const double maxR = std::max(r, tb->GetMaxFeatureRadius());
 		const vector3d p = tb->GetInterpPositionRelTo(camFrameId);
 		const double dist = p.Length();
-		if (dist > 1.0)
-			occluders.push_back({ p, dist, r, maxR, tb->GetInterpOrientRelTo(camFrameId), tb });
+		if (dist > 1.0) {
+			const bool checkTerrain = (maxR > r + 1.0) && (dist < maxR * 6.0 || (maxR - r) > (dist - r) * 0.0005);
+			occluders.push_back({ p, dist, r, maxR, checkTerrain ? tb->GetInterpOrientRelTo(camFrameId) : matrix3x3d::Identity, checkTerrain ? tb : nullptr });
+		}
 	}
 
 	const double fovRad = DEG2RAD(std::max(10.0f, m_cameraContext->GetFovAng()));
@@ -965,11 +967,13 @@ void WorldView::DrawSupercruiseShips()
 		const double maxR = std::max(r, tb->GetMaxFeatureRadius());
 		const vector3d p = tb->GetInterpPositionRelTo(camFrameId);
 		const double dist = p.Length();
-		if (dist > 1.0)
-			occluders.push_back({ p, dist, r, maxR, tb->GetInterpOrientRelTo(camFrameId), tb });
+		if (dist > 1.0) {
+			const bool checkTerrain = (maxR > r + 1.0) && (dist < maxR * 6.0 || (maxR - r) > (dist - r) * 0.0005);
+			occluders.push_back({ p, dist, r, maxR, checkTerrain ? tb->GetInterpOrientRelTo(camFrameId) : matrix3x3d::Identity, checkTerrain ? tb : nullptr });
+		}
 	}
 
-	auto isOccluded = [&](const vector3d &targetCamPos, double targetDist) -> bool {
+	auto isOccluded = [&](const vector3d &targetCamPos, double targetDist, bool checkTerrainRidges = true) -> bool {
 		if (targetDist <= 1.0)
 			return false;
 		const vector3d dir = targetCamPos / targetDist;
@@ -980,15 +984,20 @@ void WorldView::DrawSupercruiseShips()
 				if (perpSq < occ.radius * occ.radius)
 					return true;
 			}
-			if (occ.terrainBody) {
-				const matrix3x3d camToBody = occ.orientToCam.Transpose();
-				const vector3d camPosP = camToBody * (-occ.pos);
-				const vector3d dirP = (camToBody * dir).NormalizedSafe();
-				const float terrVis = WeatherSystem::ComputeTerrainRayVisibility(
-					camPosP, dirP, targetDist, occ.radius, occ.maxRadius, 0.0005,
-					[tb = occ.terrainBody](const vector3d &u) { return tb->GetTerrainHeight(u); });
-				if (terrVis <= 0.15f)
-					return true;
+			if (checkTerrainRidges && occ.terrainBody && proj > -occ.maxRadius) {
+				const double tClosest = Clamp(proj, 0.0, targetDist);
+				const double minDistSq = (occ.pos - dir * tClosest).LengthSqr();
+				const double outerR = occ.maxRadius + 50.0;
+				if (minDistSq <= outerR * outerR) {
+					const matrix3x3d camToBody = occ.orientToCam.Transpose();
+					const vector3d camPosP = camToBody * (-occ.pos);
+					const vector3d dirP = (camToBody * dir).NormalizedSafe();
+					const float terrVis = WeatherSystem::ComputeTerrainRayVisibility(
+						camPosP, dirP, targetDist, occ.radius, occ.maxRadius, 0.0005,
+						[tb = occ.terrainBody](const vector3d &u) { return tb->GetTerrainHeight(u); });
+					if (terrVis <= 0.15f)
+						return true;
+				}
 			}
 		}
 		return false;
@@ -1153,7 +1162,7 @@ void WorldView::DrawSupercruiseShips()
 					camPt = prevCam + (camPt - prevCam) * t;
 				}
 				const double camPtDist = camPt.Length();
-				if (isOccluded(camPt, camPtDist))
+				if (isOccluded(camPt, camPtDist, false))
 					break;
 				const vector3d sPt = projectToScreenSpace(camPt, m_cameraContext, false);
 				const float sx = float(sPt.x);
@@ -1288,8 +1297,9 @@ bool WorldView::IsBodyOccludedByTerrainOrStation(const Body *targetBody) const
 				return true;
 		}
 
-		// Quick broadphase against maxRadius before sampling terrain height
-		if (proj > -maxR) {
+		// Quick broadphase against maxRadius before sampling terrain height (only when camera is close enough for terrain relief to matter)
+		const bool checkTerrain = (maxR > r + 1.0) && (occDist < maxR * 6.0 || (maxR - r) > (occDist - r) * 0.0005);
+		if (checkTerrain && proj > -maxR) {
 			const double tClosest = Clamp(proj, 0.0, targetDist);
 			const double minDistSq = (occPos - dir * tClosest).LengthSqr();
 			const double outerR = maxR + 50.0;

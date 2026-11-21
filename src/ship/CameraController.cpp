@@ -186,8 +186,10 @@ void InternalCameraController::LoadFromJson(const Json &jsonObj)
 		Json internalCameraObj = jsonObj["internal"];
 		SetMode(internalCameraObj.value<Mode>("mode", MODE_FRONT));
 
-		m_rotX = m_rotToX = internalCameraObj.value("rotX", 0.0f);
-		m_rotY = m_rotToY = internalCameraObj.value("rotY", 0.0f);
+		// Always start with zero freelook offset so the front cockpit camera and HUD center reticle
+		// match the ship's true forward axis (-Z) and hyperjump alignment vector.
+		m_rotX = m_rotToX = 0.0f;
+		m_rotY = m_rotToY = 0.0f;
 	} catch (Json::type_error &) {
 		throw SavedGameCorruptException();
 	}
@@ -247,6 +249,9 @@ void ExternalCameraController::Update()
 
 	// This lerping factor feels nice and scales non-linearly with larger (and slower-turning) ships
 	float lerp_factor = (2.5 + GetShip()->GetClipRadius() * 0.05) * Pi::GetFrameTime();
+	if (ship->IsHyperspaceJumpSurging()) {
+		lerp_factor = std::min(1.0f, float(Pi::GetFrameTime() * 18.0));
+	}
 	// Smooth the ship orientation by lerping toward the current (frame-invariant) orientation
 	Quaternionf frame_quat = Quaternionf::FromMatrix3x3(Frame::GetFrame(GetShip()->GetFrame())->GetOrientRelTo(Pi::game->GetSpace()->GetRootFrame()));
 	m_smoothed_ship_orient = Quaternionf::Slerp(m_smoothed_ship_orient, frame_quat * Quaternionf::FromMatrix3x3(shipOrient), lerp_factor).Normalized();

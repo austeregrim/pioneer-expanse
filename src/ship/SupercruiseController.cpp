@@ -10,10 +10,12 @@
 #include "Pi.h"
 #include "Planet.h"
 #include "Player.h"
+#include "SectorView.h"
 #include "Ship.h"
 #include "ShipType.h"
 #include "Space.h"
 #include "SpaceStation.h"
+#include "galaxy/StarSystem.h"
 #include "galaxy/SystemBody.h"
 #include "lua/LuaEvent.h"
 #include "sound/Sound.h"
@@ -351,7 +353,19 @@ void SupercruiseController::SetAssistActive(bool active, bool dockOnArrival)
 		return;
 	}
 
-	if (active && !GetActiveTarget()) {
+	bool hasHyperspaceAlignTarget = false;
+	if (m_ship) {
+		if (m_ship->IsHyperspaceActive()) {
+			hasHyperspaceAlignTarget = true;
+		} else if (m_ship->IsType(ObjectType::PLAYER) && Pi::game && Pi::game->GetSectorView() && Pi::game->GetSpace() && Pi::game->GetSpace()->GetStarSystem()) {
+			const SystemPath hTarget = Pi::game->GetSectorView()->GetHyperspaceTarget();
+			if (hTarget.HasValidSystem() && !hTarget.IsSameSystem(Pi::game->GetSpace()->GetStarSystem()->GetPath())) {
+				hasHyperspaceAlignTarget = true;
+			}
+		}
+	}
+
+	if (active && !GetActiveTarget() && !hasHyperspaceAlignTarget) {
 		ShowStatusMessage("SUPERCRUISE ASSIST: NO NAVIGATION TARGET SELECTED", 4.0f);
 		m_assistActive = false;
 		m_dockOnArrival = false;
@@ -1285,10 +1299,14 @@ void SupercruiseController::UpdateEnvironmentAndTarget(float timeStep, Body **ou
 			continue;
 
 		const double r = std::max(sb->GetRadius(), 1000.0);
+		const double maxExclR = GetExclusionZoneRadius(b);
 		const vector3d posInBodyFrame = m_ship->GetPositionRelTo(b);
 		const double dist = posInBodyFrame.Length();
-		const vector3d unitDirInBody = (dist > 1.0) ? (posInBodyFrame / dist) : vector3d(0.0, 1.0, 0.0);
-		const double exclR = GetExclusionZoneRadiusAtDir(b, unitDirInBody);
+		double exclR = maxExclR;
+		if (maxExclR > 0.0 && dist <= maxExclR * 3.0 + 250000.0 && sb->GetSuperType() == SystemBody::SUPERTYPE_ROCKY_PLANET) {
+			const vector3d unitDirInBody = (dist > 1.0) ? (posInBodyFrame / dist) : vector3d(0.0, 1.0, 0.0);
+			exclR = GetExclusionZoneRadiusAtDir(b, unitDirInBody);
+		}
 
 		const vector3d bodyPos = b->GetPositionRelTo(m_ship->GetFrame());
 		const vector3d toBody = bodyPos - m_ship->GetPosition();
@@ -1436,9 +1454,13 @@ void SupercruiseController::UpdateEnvironmentAndTarget(float timeStep, Body **ou
 
 	if (GetActiveTargetPosRelToShip(relToTarget)) {
 		m_targetDistance = relToTarget.Length();
-		const double targetExclR = (activeTarget && activeTarget->IsType(ObjectType::TERRAINBODY))
-			? GetExclusionZoneRadiusAtDir(activeTarget, m_ship->GetPositionRelTo(activeTarget).NormalizedSafe())
-			: 0.0;
+		double targetExclR = 0.0;
+		if (activeTarget && activeTarget->IsType(ObjectType::TERRAINBODY)) {
+			const double maxTargetExclR = GetExclusionZoneRadius(activeTarget);
+			targetExclR = (m_targetDistance <= maxTargetExclR * 3.0 + 250000.0)
+				? GetExclusionZoneRadiusAtDir(activeTarget, m_ship->GetPositionRelTo(activeTarget).NormalizedSafe())
+				: maxTargetExclR;
+		}
 		const double effectiveDist = std::max(0.0, m_targetDistance - targetExclR);
 		m_targetETA = (m_speed > 1.0) ? (effectiveDist / m_speed) : 0.0;
 
@@ -1459,7 +1481,12 @@ void SupercruiseController::UpdateEnvironmentAndTarget(float timeStep, Body **ou
 		m_targetETA = 0.0;
 		m_safeDisengageReady = false;
 		m_slowDownWarning = (m_gravityStrain > 0.25) && (m_speed > m_maxEnvSpeed * 1.08);
-		if (m_assistActive) {
+		bool keepAssistForHyperspace = m_ship && m_ship->IsHyperspaceActive();
+		if (!keepAssistForHyperspace && m_ship && m_ship->IsType(ObjectType::PLAYER) && Pi::game && Pi::game->GetSectorView() && Pi::game->GetSpace() && Pi::game->GetSpace()->GetStarSystem()) {
+			const SystemPath hTarget = Pi::game->GetSectorView()->GetHyperspaceTarget();
+			keepAssistForHyperspace = hTarget.HasValidSystem() && !hTarget.IsSameSystem(Pi::game->GetSpace()->GetStarSystem()->GetPath());
+		}
+		if (m_assistActive && !keepAssistForHyperspace) {
 			SetAssistActive(false, false);
 		}
 	}
@@ -1569,9 +1596,13 @@ void SupercruiseController::StaticUpdate(float timeStep)
 	// The 6-Second Rule: when approaching a stationary/sublight target, regulate the speed envelope
 	// along v = d / 6.0 so ETA holds steady at 0:06 all the way down to Safe Disengage.
 	if (hasTarget && !targetIsSCShip && m_targetDistance < 500.0 * LIGHT_SPEED) {
-		const double targetExclR = (activeTarget && activeTarget->IsType(ObjectType::TERRAINBODY))
-			? GetExclusionZoneRadiusAtDir(activeTarget, m_ship->GetPositionRelTo(activeTarget).NormalizedSafe())
-			: 0.0;
+		double targetExclR = 0.0;
+		if (activeTarget && activeTarget->IsType(ObjectType::TERRAINBODY)) {
+			const double maxTargetExclR = GetExclusionZoneRadius(activeTarget);
+			targetExclR = (m_targetDistance <= maxTargetExclR * 3.0 + 250000.0)
+				? GetExclusionZoneRadiusAtDir(activeTarget, m_ship->GetPositionRelTo(activeTarget).NormalizedSafe())
+				: maxTargetExclR;
+		}
 		const double effectiveDist = std::max(0.0, m_targetDistance - targetExclR);
 
 		const Body *blocker = GetTargetObscuredBy(targetRel, activeTarget);
@@ -1685,12 +1716,42 @@ void SupercruiseController::TimeStepUpdate(float timeStep, const vector3d &desir
 		Clamp(desiredAngInput.z, -1.0, 1.0) * baseRollRate * speedFactor * blueZoneMult);
 
 	// If Supercruise Assist is active and player is not overriding pitch/yaw, steer toward target
+	// (Prioritize the active hyperjump target vector whenever a hyperjump is charging/waiting for alignment,
+	// or when no in-system nav target is selected and a cross-system hyperspace target is set).
 	if (m_assistActive && std::fabs(desiredAngInput.x) < 0.05 && std::fabs(desiredAngInput.y) < 0.05) {
 		vector3d targetRel;
-		if (GetActiveTargetPosRelToShip(targetRel)) {
+		Body *steerTargetBody = GetActiveTarget();
+		bool hasSteerVector = false;
+
+		if (m_ship->IsHyperspaceActive()) {
+			vector3d hyperDirInFrame;
+			if (m_ship->GetHyperspaceTargetDirection(m_ship->GetHyperspaceDest(), hyperDirInFrame) && hyperDirInFrame.LengthSqr() > 0.5) {
+				targetRel = hyperDirInFrame * (100.0 * LIGHT_SPEED);
+				steerTargetBody = nullptr;
+				hasSteerVector = true;
+			}
+		}
+
+		if (!hasSteerVector && GetActiveTargetPosRelToShip(targetRel)) {
+			hasSteerVector = true;
+		}
+
+		if (!hasSteerVector && m_ship->IsType(ObjectType::PLAYER) && Pi::game && Pi::game->GetSectorView() && Pi::game->GetSpace() && Pi::game->GetSpace()->GetStarSystem()) {
+			const SystemPath hTarget = Pi::game->GetSectorView()->GetHyperspaceTarget();
+			if (hTarget.HasValidSystem() && !hTarget.IsSameSystem(Pi::game->GetSpace()->GetStarSystem()->GetPath())) {
+				vector3d hyperDirInFrame;
+				if (m_ship->GetHyperspaceTargetDirection(hTarget, hyperDirInFrame) && hyperDirInFrame.LengthSqr() > 0.5) {
+					targetRel = hyperDirInFrame * (100.0 * LIGHT_SPEED);
+					steerTargetBody = nullptr;
+					hasSteerVector = true;
+				}
+			}
+		}
+
+		if (hasSteerVector) {
 			vector3d aiAng;
 			double aiThrottle;
-			ComputeAISteering(targetRel, GetActiveTarget(), aiAng, aiThrottle);
+			ComputeAISteering(targetRel, steerTargetBody, aiAng, aiThrottle);
 
 			angCmd.x = aiAng.x * basePitchRate * blueZoneMult;
 			angCmd.y = aiAng.y * baseYawRate * blueZoneMult;

@@ -1182,7 +1182,7 @@ bool Ship::GetHyperspaceTargetDirection(const SystemPath &dest, vector3d &outDir
 		return true;
 	}
 
-	outDirInShipFrame = (rootFrame->GetInterpOrientRelTo(GetFrame()) * dirRoot).NormalizedSafe();
+	outDirInShipFrame = (rootFrame->GetOrientRelTo(GetFrame()) * dirRoot).NormalizedSafe();
 	return true;
 }
 
@@ -1948,6 +1948,7 @@ void Ship::StaticUpdate(const float timeStep)
 				const double frac = (surgeProgress > 0.75f) ? 1.0 : Clamp(1.0 - std::exp(-10.0 * double(timeStep)), 0.0, 1.0);
 				const matrix3x3d rot = matrix3x3d::Rotate(angle * frac, axis / axisLen);
 				SetOrient((rot * GetOrient()).Normalized());
+				m_interpOrient = GetOrient();
 			}
 		}
 
@@ -2003,6 +2004,7 @@ void Ship::StaticUpdate(const float timeStep)
 						m_hyperspace.waitingForAlign = false;
 						m_hyperspace.jumpSurgeTimer = 0.0f;
 						m_hyperspace.jumpSurgeDuration = HYPERJUMP_SURGE_DURATION;
+						SetAngVelocity(vector3d::Zero);
 						SetFlightState(JUMPING);
 					}
 				}

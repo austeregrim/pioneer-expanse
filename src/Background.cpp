@@ -483,7 +483,7 @@ namespace Background {
 			const int32_t visibleRadius = std::min<int32_t>(BG_STAR_RADIUS_MAX, maxBall * Sector::SIZE);
 
 			vector3f sourcePos = Sector::SIZE * vector3f(systemPath->sectorX, systemPath->sectorY, systemPath->sectorZ);
-			if (systemPath->IsSystemPath()) {
+			if (systemPath->HasValidSystem()) {
 				RefCountedPtr<const Sector> homeSec = galaxy->GetGenerator()->Generate<Sector, SectorCache>(galaxy, *systemPath, nullptr);
 				if (homeSec && systemPath->systemIndex < homeSec->m_systems.size()) {
 					sourcePos = homeSec->m_systems[systemPath->systemIndex].GetFullPosition();
