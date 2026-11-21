@@ -55,15 +55,29 @@ local function equipInterdictor(ship, threat)
 end
 
 local function assignSupercruisePatrol(ship, currentBody)
-	local candidates = {}
+	local stationCandidates = {}
+	local bodyCandidates = {}
+	if Game.system then
+		local stPaths = Game.system:GetStationPaths()
+		if stPaths then
+			for _, sp in ipairs(stPaths) do
+				local body = Space.GetBody(sp.bodyIndex)
+				if body and body ~= currentBody and ship:DistanceTo(body) > 1000000 then
+					table.insert(stationCandidates, body)
+				end
+			end
+		end
+	end
 	for _, path in ipairs(planets) do
 		local body = Space.GetBody(path.bodyIndex)
 		if body and body ~= currentBody and ship:DistanceTo(body) > 1000000 then
-			table.insert(candidates, body)
+			table.insert(bodyCandidates, body)
 		end
 	end
-	if #candidates > 0 then
-		local dest = candidates[Engine.rand:Integer(1, #candidates)]
+	-- Prefer stalking active station shipping lanes where trade traffic concentrates
+	local pool = (#stationCandidates > 0 and Engine.rand:Number(1) < 0.75) and stationCandidates or (#bodyCandidates > 0 and bodyCandidates or stationCandidates)
+	if #pool > 0 then
+		local dest = pool[Engine.rand:Integer(1, #pool)]
 		ship:AIFlyTo(dest)
 		return dest
 	end
@@ -212,7 +226,7 @@ local function spawnSystemPirates(player)
 				end
 			end
 			if not ship and hostSb and hostSb.body then
-				local radius = math.max(hostSb.radius or hostSb.body:GetPhysRadius() or 6000000, 10000)
+				local radius = math.max(hostSb.radius or hostSb.body:GetPhysicalRadius() or 6000000, 10000)
 				ship = ShipBuilder.MakeShipOrbit(hostSb.body, MissionUtils.ShipTemplates.GenericPirate, threat, radius * 1.2, radius * 3.5)
 			end
 			if ship then

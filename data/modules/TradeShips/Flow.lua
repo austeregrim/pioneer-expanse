@@ -480,32 +480,82 @@ Flow.spawnInitialShips = function()
 					Core.ships[ship] = { ts_error = "OK", status = 'docked', starport = portBody, ship_name = pick.id }
 					ship:SetLabel(Ship.MakeRandomLabel())
 					Trader.addEquip(ship)
-					local undockDelay = 60 + (i - 1) * 75 + Engine.rand:Number(10, 35)
+					Trader.addHyperdriveFuel(ship)
+					Trader.addCargo(ship, 'export')
+					local undockDelay = 18 + (i - 1) * 35 + Engine.rand:Number(5, 20)
 					Trader.assignTask(ship, Game.time + undockDelay, 'doUndock')
 				end
 			end
 		end
 	end
 
-	-- 2. Active Supercruise Ships Along Shipping Lanes
+	-- 2. Active Supercruise Ships Along Shipping Lanes (Star->Station & Station<->Station Transport Corridors)
 	if #routes_variants > 0 then
-		local targetInbound = math.clamp(#port_summary * 3 + 4, 8, 18)
-		for _ = 1, targetInbound do
+		local interStationCorridors = {}
+		if #port_summary >= 2 then
+			for i = 1, #port_summary do
+				for j = 1, #port_summary do
+					if i ~= j then
+						local pA = port_summary[i].port
+						local pB = port_summary[j].port
+						if pA and pB and pA:DistanceTo(pB) > 300000 then
+							table.insert(interStationCorridors, { from = pA, to = pB })
+						end
+					end
+				end
+			end
+		end
+
+		local targetInbound = math.clamp(#port_summary * 4 + 6, 12, 24)
+		for idx = 1, targetInbound do
 			local params = utils.chooseNormalized(routes_variants)
 			local hj_route = params and hyper_routes[params.id] and utils.chooseEqual(hyper_routes[params.id])
 
 			if params and hj_route then
-				local ship = Space.SpawnShip(params.id, 9, 11, {hj_route.from, params.from:GetSystemBody().path, 0.0})
+				local fromBody = params.from
+				local toBody = params.to
+				local useInterStation = (#interStationCorridors > 0) and (idx % 2 == 0)
+				if useInterStation then
+					local corr = interStationCorridors[((idx - 1) % #interStationCorridors) + 1]
+					local canLand = false
+					for _, r in ipairs(local_routes[params.id] or {}) do
+						if r.to == corr.to then
+							canLand = true
+							break
+						end
+					end
+					if canLand then
+						fromBody = corr.from
+						toBody = corr.to
+					else
+						useInterStation = false
+					end
+				end
+
+				local ship
+				if useInterStation then
+					local startDist = math.max((fromBody:GetPhysicalRadius() or 1000) + 15000, 20000)
+					ship = Space.SpawnShipOrbit(params.id, fromBody, startDist, startDist * 1.2)
+				else
+					local starBody = fromBody
+					local starRad = math.max((starBody:GetSystemBody() and starBody:GetSystemBody().radius) or 7e8, 7e8)
+					ship = Space.SpawnShipOrbit(params.id, starBody, starRad * 3.5, starRad * 4.2)
+				end
+
 				if ship then
 					ship:SetLabel(Ship.MakeRandomLabel())
-					Core.ships[ship] = { ts_error = "OK", status = 'inbound', starport = params.to, ship_name = params.id }
+					Core.ships[ship] = { ts_error = "OK", status = 'inbound', starport = toBody, ship_name = params.id }
 
 					Trader.addEquip(ship)
 					Trader.addHyperdriveFuel(ship, hj_route.fuel)
 					Trader.addCargo(ship, 'import')
 
-					Space.PutShipOnRoute(ship, params.to, Engine.rand:Number(0.15, 0.85))
-					ship:AIDockWith(params.to)
+					-- Stratify t_ratio evenly across [0.12, 0.88] so traffic forms continuous streams along the transport lanes
+					local baseFrac = 0.12 + 0.76 * ((idx - 0.5) / targetInbound)
+					local jitter = Engine.rand:Number(-0.04, 0.04)
+					local tRatio = math.clamp(baseFrac + jitter, 0.10, 0.88)
+					Space.PutShipOnRoute(ship, toBody, tRatio)
+					ship:AIDockWith(toBody)
 				end
 			end
 		end

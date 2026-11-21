@@ -174,6 +174,13 @@ function HyperdriveType:GetMaxFuel()
 	return self.fuel_resv_size
 end
 
+-- Function: GetFuel
+--
+-- Return the current fuel stored in the drive's internal reservoir, in tons.
+function HyperdriveType:GetFuel()
+	return self.storedFuel or 0.0
+end
+
 -- Function: CheckJump
 --
 -- Checks the viability of a potential jump from are source SystemPath to a destination SystemPath.

@@ -2598,19 +2598,28 @@ static int l_pigui_get_projected_bodies_grouped(lua_State *l)
 	filtered.reserve(Pi::game->GetSpace()->GetNumBodies());
 
 	const bool playerInSC = (Pi::player->GetFlightState() == Ship::SUPERCRUISE);
+	const Body *nav_target = Pi::game->GetPlayer()->GetNavTarget();
+	const Body *combat_target = Pi::game->GetPlayer()->GetCombatTarget();
+	const Body *follow_target = Pi::game->GetPlayer()->GetFollowTarget();
+	const WorldView *wv = Pi::game->GetWorldView();
 
 	for (Body *body : Pi::game->GetSpace()->GetBodies()) {
 		if (body == Pi::game->GetPlayer()) continue;
 		if (body->GetType() == ObjectType::PROJECTILE) continue;
+		const bool isExplicitTarget = (body == nav_target || body == combat_target || body == follow_target);
 		if (body->GetType() == ObjectType::SHIP) {
 			const bool targetInSC = (static_cast<const Ship *>(body)->GetFlightState() == Ship::SUPERCRUISE);
 			if (targetInSC && !playerInSC) continue;
 			if (!targetInSC && body->GetPositionRelTo(Pi::player).Length() > ship_max_distance) continue;
+			if (!isExplicitTarget && wv && wv->IsBodyOccludedByTerrainOrStation(body)) continue;
 		} else if (body->GetType() == ObjectType::HYPERSPACECLOUD) {
 			const bool isLowWake = static_cast<const HyperspaceCloud *>(body)->IsLowWake();
 			if (!(playerInSC && isLowWake) && body->GetPositionRelTo(Pi::player).Length() > ship_max_distance) continue;
-		} else if (body->GetType() == ObjectType::CARGOBODY &&
-			body->GetPositionRelTo(Pi::player).Length() > ship_max_distance) continue;
+			if (!isExplicitTarget && wv && wv->IsBodyOccludedByTerrainOrStation(body)) continue;
+		} else if (body->GetType() == ObjectType::CARGOBODY) {
+			if (body->GetPositionRelTo(Pi::player).Length() > ship_max_distance) continue;
+			if (!isExplicitTarget && wv && wv->IsBodyOccludedByTerrainOrStation(body)) continue;
+		}
 		const PiGui::TScreenSpace res = lua_world_space_to_screen_space(body); // defined in LuaPiGui.cpp
 		if (!res._onScreen) continue;
 		filtered.emplace_back(res);
@@ -2636,9 +2645,6 @@ static int l_pigui_get_projected_bodies_grouped(lua_State *l)
 	};
 	std::vector<GroupInfo> groups;
 	groups.reserve(filtered.size());
-	const Body *nav_target = Pi::game->GetPlayer()->GetNavTarget();
-	const Body *combat_target = Pi::game->GetPlayer()->GetCombatTarget();
-	const Body *follow_target = Pi::game->GetPlayer()->GetFollowTarget();
 
 	for (PiGui::TScreenSpace &obj : filtered) {
 		bool inserted = false;

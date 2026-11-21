@@ -929,10 +929,14 @@ void WorldView::DrawSupercruiseShips()
 	const float winH = float(m_renderer->GetWindowHeight());
 	const double zClip = -1.0;
 
-	// Collect celestial and station occluders in camera space
+	// Collect celestial (with 3D procedural terrain height) and station occluders in camera space
 	struct Occluder {
 		vector3d pos;
-		double radiusSq;
+		double dist;
+		double radius;
+		double maxRadius;
+		matrix3x3d orientToCam;
+		const TerrainBody *terrainBody;
 	};
 	std::vector<Occluder> occluders;
 	for (Body *b : m_game->GetSpace()->GetBodies()) {
@@ -941,26 +945,28 @@ void WorldView::DrawSupercruiseShips()
 
 		if (b->IsType(ObjectType::SPACESTATION)) {
 			const vector3d p = b->GetInterpPositionRelTo(camFrameId);
-			const double distSq = p.LengthSqr();
+			const double dist = p.Length();
 			const SpaceStation *st = static_cast<const SpaceStation *>(b);
-			if (!st->IsGroundStation() && distSq < b->GetClipRadius() * b->GetClipRadius())
+			if (!st->IsGroundStation() && dist < b->GetClipRadius())
 				return; // Camera is inside orbital station superstructure; hide external Supercruise wakes
 			const double r = std::max(b->GetPhysRadius(), 450.0);
-			if (distSq > r * r)
-				occluders.push_back({ p, r * r });
+			if (dist > r)
+				occluders.push_back({ p, dist, r, r, matrix3x3d::Identity, nullptr });
 			continue;
 		}
 
 		if (!b->IsType(ObjectType::TERRAINBODY))
 			continue;
-		const SystemBody *sb = b->GetSystemBody();
-		const double r = sb ? sb->GetRadius() : b->GetPhysRadius();
+		const TerrainBody *tb = static_cast<const TerrainBody *>(b);
+		const SystemBody *sb = tb->GetSystemBody();
+		const double r = sb ? sb->GetRadius() : tb->GetPhysRadius();
 		if (r <= 0.0)
 			continue;
-		const vector3d p = b->GetInterpPositionRelTo(camFrameId);
-		if (p.LengthSqr() <= r * r)
-			continue;
-		occluders.push_back({ p, r * r });
+		const double maxR = std::max(r, tb->GetMaxFeatureRadius());
+		const vector3d p = tb->GetInterpPositionRelTo(camFrameId);
+		const double dist = p.Length();
+		if (dist > 1.0)
+			occluders.push_back({ p, dist, r, maxR, tb->GetInterpOrientRelTo(camFrameId), tb });
 	}
 
 	auto isOccluded = [&](const vector3d &targetCamPos, double targetDist) -> bool {
@@ -969,11 +975,21 @@ void WorldView::DrawSupercruiseShips()
 		const vector3d dir = targetCamPos / targetDist;
 		for (const Occluder &occ : occluders) {
 			const double proj = occ.pos.Dot(dir);
-			if (proj <= 0.0 || proj >= targetDist)
-				continue;
-			const double perpSq = occ.pos.LengthSqr() - proj * proj;
-			if (perpSq < occ.radiusSq)
-				return true;
+			if (occ.dist > occ.radius && proj > 0.0 && proj < targetDist) {
+				const double perpSq = occ.pos.LengthSqr() - proj * proj;
+				if (perpSq < occ.radius * occ.radius)
+					return true;
+			}
+			if (occ.terrainBody) {
+				const matrix3x3d camToBody = occ.orientToCam.Transpose();
+				const vector3d camPosP = camToBody * (-occ.pos);
+				const vector3d dirP = (camToBody * dir).NormalizedSafe();
+				const float terrVis = WeatherSystem::ComputeTerrainRayVisibility(
+					camPosP, dirP, targetDist, occ.radius, occ.maxRadius, 0.0005,
+					[tb = occ.terrainBody](const vector3d &u) { return tb->GetTerrainHeight(u); });
+				if (terrVis <= 0.15f)
+					return true;
+			}
 		}
 		return false;
 	};
@@ -990,6 +1006,25 @@ void WorldView::DrawSupercruiseShips()
 		const vector3f p1(cx + halfSize, cy - halfSize, 0.0f);
 		const vector3f p2(cx + halfSize, cy + halfSize, 0.0f);
 		const vector3f p3(cx - halfSize, cy + halfSize, 0.0f);
+		glowVerts.Add(p0, col, vector2f(0.0f, 0.0f));
+		glowVerts.Add(p1, col, vector2f(1.0f, 0.0f));
+		glowVerts.Add(p2, col, vector2f(1.0f, 1.0f));
+		glowVerts.Add(p0, col, vector2f(0.0f, 0.0f));
+		glowVerts.Add(p2, col, vector2f(1.0f, 1.0f));
+		glowVerts.Add(p3, col, vector2f(0.0f, 1.0f));
+	};
+
+	auto addOrientedGlowQuad = [&](float cx, float cy, float dirX, float dirY, float halfLen, float halfWidth, const Color &col) {
+		const float perpX = -dirY;
+		const float perpY = dirX;
+		const float lx = dirX * halfLen;
+		const float ly = dirY * halfLen;
+		const float wx = perpX * halfWidth;
+		const float wy = perpY * halfWidth;
+		const vector3f p0(cx - lx - wx, cy - ly - wy, 0.0f);
+		const vector3f p1(cx + lx - wx, cy + ly - wy, 0.0f);
+		const vector3f p2(cx + lx + wx, cy + ly + wy, 0.0f);
+		const vector3f p3(cx - lx + wx, cy - ly + wy, 0.0f);
 		glowVerts.Add(p0, col, vector2f(0.0f, 0.0f));
 		glowVerts.Add(p1, col, vector2f(1.0f, 0.0f));
 		glowVerts.Add(p2, col, vector2f(1.0f, 1.0f));
@@ -1035,7 +1070,7 @@ void WorldView::DrawSupercruiseShips()
 			continue;
 
 		const double dist = shipCamPos.Length();
-		if (dist < 250.0 || isOccluded(shipCamPos, dist))
+		if (dist < 10.0 || isOccluded(shipCamPos, dist))
 			continue;
 
 		const vector3d screenHead = projectToScreenSpace(shipCamPos, m_cameraContext, false);
@@ -1050,38 +1085,59 @@ void WorldView::DrawSupercruiseShips()
 			std::log10(SupercruiseController::MAX_SPEED / SupercruiseController::MIN_SPEED),
 			0.0, 1.0);
 
-		const float visAlpha = inAtmosphere ? (bgVis * 0.78f) : Clamp(0.25f + 0.75f * bgVis, 0.25f, 1.0f);
-		const float outerHalf = inAtmosphere ? float(2.4 + 1.4 * speedLog) : float(5.5 + 4.5 * speedLog);
-		const float coreHalf = inAtmosphere ? float(1.2 + 0.8 * speedLog) : float(2.3 + 1.7 * speedLog);
+		const double distLs = dist / SupercruiseController::LIGHT_SPEED;
+		const float proxScale = float(Clamp(1.35 - 0.35 * std::log10(1.0 + distLs * 0.2), 0.75, 1.35));
+		const float visAlpha = inAtmosphere ? (bgVis * 0.85f) : Clamp(0.45f + 0.55f * bgVis, 0.45f, 1.0f);
+		const float glareScale = (inAtmosphere ? 0.65f : 1.0f) * proxScale;
+
+		const float outerHaloHalf = (9.5f + 6.5f * float(speedLog)) * glareScale;
+		const float midHaloHalf = (4.2f + 2.8f * float(speedLog)) * glareScale;
+		const float pinpointInnerHalf = inAtmosphere ? 1.55f : 2.1f;
+		const float pinpointSharpHalf = inAtmosphere ? 0.95f : 1.2f;
 		const float cx = float(screenHead.x);
 		const float cy = float(screenHead.y);
 
-		// Subtle relativistic Doppler shift based on radial direction of travel relative to camera:
-		// pure white laterally, subtle cool-white blueshift approaching, warm amber-reddish shift receding.
+		// Relativistic Doppler shift based on whether the NPC is heading toward or away from the player:
+		// pure white laterally, clear cool-blue shift when approaching, warm red/amber shift when receding.
 		const vector3d shipFwdCam = (-ship->GetInterpOrientRelTo(camFrameId).VectorZ()).NormalizedSafe();
 		const vector3d toCamDir = (-shipCamPos).NormalizedSafe();
 		const float radialDot = float(Clamp(shipFwdCam.Dot(toCamDir), -1.0, 1.0));
-		const float doppler = 0.38f * float(speedLog) * radialDot;
+		const float speedWeight = 0.72f + 0.28f * float(speedLog);
+		const float doppler = Clamp(radialDot * speedWeight, -1.0f, 1.0f);
 
 		auto makeDopplerColor = [&](Uint8 alpha) -> Color {
 			const Uint8 scaledA = Uint8(Clamp(int(float(alpha) * visAlpha), 0, 255));
 			if (doppler >= 0.0f) {
-				// Blueshift (approaching): crisp cool-white
-				const Uint8 r = Uint8(Clamp(int(255.0f - 65.0f * doppler), 160, 255));
-				const Uint8 g = Uint8(Clamp(int(252.0f - 18.0f * doppler), 200, 255));
+				// Blueshift (heading toward player): shift slightly toward crisp celestial blue
+				const Uint8 r = Uint8(Clamp(int(245.0f - 135.0f * doppler), 100, 255));
+				const Uint8 g = Uint8(Clamp(int(248.0f - 72.0f * doppler), 165, 255));
 				return Color(r, g, 255, scaledA);
 			} else {
-				// Redshift (receding): warm amber-white
-				const float red = -doppler;
-				const Uint8 g = Uint8(Clamp(int(250.0f - 95.0f * red), 120, 255));
-				const Uint8 b = Uint8(Clamp(int(242.0f - 155.0f * red), 75, 255));
+				// Redshift (heading away from player): shift slightly toward warm crimson-red
+				const float redShift = -doppler;
+				const Uint8 g = Uint8(Clamp(int(245.0f - 135.0f * redShift), 100, 255));
+				const Uint8 b = Uint8(Clamp(int(240.0f - 155.0f * redShift), 75, 255));
 				return Color(255, g, b, scaledA);
 			}
 		};
 
-		// Short, subtle luminous wake along recent trajectory (in atmosphere: thin shooting-star streak)
+		auto makeDopplerCoreColor = [&](Uint8 alpha) -> Color {
+			const Uint8 scaledA = Uint8(Clamp(int(float(alpha) * visAlpha), 0, 255));
+			if (doppler >= 0.0f) {
+				const Uint8 r = Uint8(Clamp(int(255.0f - 65.0f * doppler), 185, 255));
+				const Uint8 g = Uint8(Clamp(int(254.0f - 30.0f * doppler), 220, 255));
+				return Color(r, g, 255, scaledA);
+			} else {
+				const float redShift = -doppler;
+				const Uint8 g = Uint8(Clamp(int(252.0f - 65.0f * redShift), 180, 255));
+				const Uint8 b = Uint8(Clamp(int(248.0f - 80.0f * redShift), 160, 255));
+				return Color(255, g, b, scaledA);
+			}
+		};
+
+		// Sleek, razor-thin directional velocity wake along recent trajectory (occluded by terrain)
 		if (sc && rootFrame && !sc->GetTrailPositions().empty()) {
-			const float maxTrailPix = inAtmosphere ? float(10.0 + 14.0 * speedLog) : float(8.0 + 10.0 * speedLog);
+			const float maxTrailPix = inAtmosphere ? float(10.0 + 12.0 * speedLog) : float(9.0 + 11.0 * speedLog);
 			float accumPix = 0.0f;
 			float prevX = cx;
 			float prevY = cy;
@@ -1096,6 +1152,9 @@ void WorldView::DrawSupercruiseShips()
 					const double t = Clamp((zClip - prevCam.z) / denom, 0.0, 1.0);
 					camPt = prevCam + (camPt - prevCam) * t;
 				}
+				const double camPtDist = camPt.Length();
+				if (isOccluded(camPt, camPtDist))
+					break;
 				const vector3d sPt = projectToScreenSpace(camPt, m_cameraContext, false);
 				const float sx = float(sPt.x);
 				const float sy = float(sPt.y);
@@ -1109,18 +1168,16 @@ void WorldView::DrawSupercruiseShips()
 					if (remain <= 0.0f)
 						break;
 					const float useLen = std::min(segLen, remain);
-					const int steps = std::max(1, int(std::ceil(useLen / 2.2f)));
+					const int steps = std::max(1, int(std::ceil(useLen / 1.8f)));
 					for (int k = 1; k <= steps; ++k) {
 						const float frac = (float(k) / float(steps)) * (useLen / segLen);
 						const float px = prevX + dx * frac;
 						const float py = prevY + dy * frac;
 						const float d = accumPix + useLen * (float(k) / float(steps));
 						const float norm = Clamp(d / maxTrailPix, 0.0f, 1.0f);
-						const float fade = std::pow(1.0f - norm, inAtmosphere ? 1.6f : 2.0f);
-						const float puffRadius = inAtmosphere
-							? float(0.75 + 0.45 * speedLog) * (1.0f - 0.72f * norm)
-							: (coreHalf * 0.90f) * (1.0f - 0.65f * norm);
-						const Uint8 baseAlpha = Uint8(Clamp(int((inAtmosphere ? 115.0f : 95.0f) * fade), 0, 255));
+						const float fade = std::pow(1.0f - norm, 2.0f);
+						const float puffRadius = (1.15f + 0.35f * float(speedLog)) * (1.0f - 0.72f * norm);
+						const Uint8 baseAlpha = Uint8(Clamp(int(105.0f * fade), 0, 255));
 						if (baseAlpha > 2) {
 							addGlowQuad(px, py, puffRadius, makeDopplerColor(baseAlpha));
 						}
@@ -1135,13 +1192,121 @@ void WorldView::DrawSupercruiseShips()
 			}
 		}
 
-		addGlowQuad(cx, cy, outerHalf, makeDopplerColor(inAtmosphere ? 135 : 175));
-		addGlowQuad(cx, cy, coreHalf, Color(255, 254, 250, Uint8(Clamp(int(255.0f * visAlpha), 0, 255))));
+		// 1. Soft Doppler-shifted outer glare halo & inner corona
+		addGlowQuad(cx, cy, outerHaloHalf, makeDopplerColor(inAtmosphere ? 65 : 85));
+		addGlowQuad(cx, cy, midHaloHalf, makeDopplerColor(inAtmosphere ? 130 : 165));
+
+		// 2. Optical diffraction glare spikes (anamorphic horizontal streak + vertical & diagonal starburst rays)
+		const float horizGlareLen = (17.0f + 13.0f * float(speedLog)) * glareScale;
+		const float vertGlareLen = (10.5f + 8.0f * float(speedLog)) * glareScale;
+		const float diagGlareLen = (7.0f + 5.5f * float(speedLog)) * glareScale;
+		addOrientedGlowQuad(cx, cy, 1.0f, 0.0f, horizGlareLen, 1.35f, makeDopplerColor(inAtmosphere ? 115 : 155));
+		addOrientedGlowQuad(cx, cy, 1.0f, 0.0f, horizGlareLen * 0.48f, 0.85f, makeDopplerCoreColor(inAtmosphere ? 150 : 195));
+		addOrientedGlowQuad(cx, cy, 0.0f, 1.0f, vertGlareLen, 1.10f, makeDopplerColor(inAtmosphere ? 95 : 130));
+		addOrientedGlowQuad(cx, cy, 0.70710678f, 0.70710678f, diagGlareLen, 0.90f, makeDopplerColor(inAtmosphere ? 65 : 95));
+		addOrientedGlowQuad(cx, cy, 0.70710678f, -0.70710678f, diagGlareLen, 0.90f, makeDopplerColor(inAtmosphere ? 65 : 95));
+
+		// 3. Razor-sharp pinpoint core
+		addGlowQuad(cx, cy, pinpointInnerHalf, makeDopplerCoreColor(240));
+		addGlowQuad(cx, cy, pinpointSharpHalf, makeDopplerCoreColor(255));
 	}
 
 	if (!glowVerts.IsEmpty()) {
 		m_renderer->DrawBuffer(&glowVerts, m_scGlowMat.get());
 	}
+}
+
+bool WorldView::IsBodyOccludedByTerrainOrStation(const Body *targetBody) const
+{
+	if (!targetBody || !m_game || !m_game->GetSpace() || !m_cameraContext)
+		return false;
+
+	const FrameId tempCamFrame = m_cameraContext->GetTempFrame();
+	const FrameId parentCamFrame = m_cameraContext->GetCameraFrame();
+	if (!tempCamFrame.valid() && !parentCamFrame.valid())
+		return false;
+
+	auto toCamPos = [&](const Body *b) -> vector3d {
+		if (tempCamFrame.valid())
+			return b->GetInterpPositionRelTo(tempCamFrame);
+		return (b->GetInterpPositionRelTo(parentCamFrame) - m_cameraContext->GetCameraPos()) * m_cameraContext->GetCameraOrient();
+	};
+
+	auto toCamOrient = [&](const Body *b) -> matrix3x3d {
+		if (tempCamFrame.valid())
+			return b->GetInterpOrientRelTo(tempCamFrame);
+		return m_cameraContext->GetCameraOrient().Transpose() * b->GetInterpOrientRelTo(parentCamFrame);
+	};
+
+	const vector3d targetCamPos = toCamPos(targetBody);
+	if (targetCamPos.z > -1.0)
+		return false;
+	const double targetDist = targetCamPos.Length();
+	if (targetDist <= 10.0)
+		return false;
+	const vector3d dir = targetCamPos / targetDist;
+
+	for (Body *b : m_game->GetSpace()->GetBodies()) {
+		if (!b || b == targetBody || b == Pi::player)
+			continue;
+
+		if (b->IsType(ObjectType::SPACESTATION)) {
+			const vector3d occPos = toCamPos(b);
+			const double occDist = occPos.Length();
+			const SpaceStation *st = static_cast<const SpaceStation *>(b);
+			if (!st->IsGroundStation() && occDist < b->GetClipRadius())
+				return true;
+			const double r = std::max(b->GetPhysRadius(), 450.0);
+			if (occDist > r) {
+				const double proj = occPos.Dot(dir);
+				if (proj > 0.0 && proj < targetDist) {
+					const double perpSq = occPos.LengthSqr() - proj * proj;
+					if (perpSq < r * r)
+						return true;
+				}
+			}
+			continue;
+		}
+
+		if (!b->IsType(ObjectType::TERRAINBODY))
+			continue;
+		const TerrainBody *tb = static_cast<const TerrainBody *>(b);
+		const SystemBody *sb = tb->GetSystemBody();
+		const double r = sb ? sb->GetRadius() : tb->GetPhysRadius();
+		if (r <= 0.0)
+			continue;
+		const double maxR = std::max(r, tb->GetMaxFeatureRadius());
+		const vector3d occPos = toCamPos(b);
+		const double occDist = occPos.Length();
+		if (occDist <= 1.0)
+			continue;
+
+		const double proj = occPos.Dot(dir);
+		if (occDist > r && proj > 0.0 && proj < targetDist) {
+			const double perpSq = occPos.LengthSqr() - proj * proj;
+			if (perpSq < r * r)
+				return true;
+		}
+
+		// Quick broadphase against maxRadius before sampling terrain height
+		if (proj > -maxR) {
+			const double tClosest = Clamp(proj, 0.0, targetDist);
+			const double minDistSq = (occPos - dir * tClosest).LengthSqr();
+			const double outerR = maxR + 50.0;
+			if (minDistSq <= outerR * outerR) {
+				const matrix3x3d camToBody = toCamOrient(tb).Transpose();
+				const vector3d camPosP = camToBody * (-occPos);
+				const vector3d dirP = (camToBody * dir).NormalizedSafe();
+				const float terrVis = WeatherSystem::ComputeTerrainRayVisibility(
+					camPosP, dirP, targetDist, r, maxR, 0.0005,
+					[tb](const vector3d &u) { return tb->GetTerrainHeight(u); });
+				if (terrVis <= 0.15f)
+					return true;
+			}
+		}
+	}
+
+	return false;
 }
 
 void WorldView::DrawSupercruiseOverlays()

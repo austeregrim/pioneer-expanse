@@ -149,6 +149,7 @@ public:
 
 	// Compute exclusion zone radius (in meters) from body center
 	static double GetExclusionZoneRadius(const Body *body);
+	static double GetExclusionZoneRadiusAtDir(const Body *body, const vector3d &unitDirInBodyFrame);
 
 	// Planetary occlusion queries & great-circle bypass routing
 	const Body *GetTargetObscuredBy(const vector3d &targetPosRelToShip, const Body *targetBody) const;
@@ -161,6 +162,7 @@ private:
 	void UpdateInterdiction(float timeStep);
 	static void DropPairFromInterdiction(Ship *attacker, Ship *target, bool submitted);
 	void ClearStaleSupercruiseTarget();
+	void EnsureShipAboveTerrainAndSyncFrame();
 	void DropIntoRing(Planet *planet, const std::string &reason);
 	Body *GetActiveTarget() const;
 	bool GetActiveTargetPosRelToShip(vector3d &outPosRelToShip) const;

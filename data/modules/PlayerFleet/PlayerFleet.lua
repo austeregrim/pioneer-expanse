@@ -1844,7 +1844,7 @@ updateFleetTransit = function(entry)
 		else
 			-- Celestial body target (e.g. Ringed Planet for Auto-Mine or orbital Scout target)
 			local dist = live:DistanceTo(destBody)
-			local arriveRadius = math.max(85000, (destBody.physRadius or 1e6) * 2.8)
+			local arriveRadius = math.max(85000, (destBody:GetPhysicalRadius() or 1e6) * 2.8)
 			if dist <= arriveRadius then
 				pcall(function() live:AIEnterLowOrbit(destBody) end)
 				entry.locationPath = t.destPath

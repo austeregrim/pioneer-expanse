@@ -68,13 +68,21 @@ local function assignSupercruiseRoute(ship)
 			end
 		end
 	end
-	local bodies = Game.system:GetBodyPaths()
-	if bodies then
-		for _, path in ipairs(bodies) do
-			local sb = path:GetSystemBody()
-			if sb and sb.body and (sb.superType == 'ROCKY_PLANET' or sb.superType == 'GAS_GIANT') then
-				if ship:DistanceTo(sb.body) > 500000 then
-					table.insert(candidates, sb.body)
+	-- Prioritize patrolling along active station-to-station and star-to-station transport lanes
+	local stars = Game.system:GetStars()
+	local primaryStar = stars and stars[1] and stars[1].body
+	if primaryStar and ship:DistanceTo(primaryStar) > 5.0e9 then
+		table.insert(candidates, primaryStar)
+	end
+	if #candidates == 0 then
+		local bodies = Game.system:GetBodyPaths()
+		if bodies then
+			for _, path in ipairs(bodies) do
+				local sb = path:GetSystemBody()
+				if sb and sb.body and (sb.superType == 'ROCKY_PLANET' or sb.superType == 'GAS_GIANT') then
+					if ship:DistanceTo(sb.body) > 500000 then
+						table.insert(candidates, sb.body)
+					end
 				end
 			end
 		end
@@ -152,7 +160,8 @@ local function startPatrolHunterTimer()
 		-- Supercruise patrol scan for WANTED criminals (NPC pirates or wanted player)
 		local allShips = Space.GetBodies("Ship")
 		for _, enemy in ipairs(allShips) do
-			if enemy ~= patrol[1] and enemy.shipId ~= policeId and enemy.IsWanted and enemy:IsWanted() then
+			local fs = enemy:GetFlightState()
+			if enemy ~= patrol[1] and enemy.shipId ~= policeId and enemy.IsWanted and enemy:IsWanted() and (fs == "SUPERCRUISE" or fs == "FLYING") then
 				if patrol[1]:DistanceTo(enemy) < 3.0e10 then
 					piracy = true
 					attackShip(enemy)
@@ -286,32 +295,14 @@ local function spawnAmbientPatrols(system)
 				local stPath = stations[((i - 1) % #stations) + 1]
 				local stBody = Space.GetBody(stPath.bodyIndex)
 				local pShip
-				if stBody and (i % 2 == 0) and primaryStar and primaryStar.body and stBody ~= primaryStar.body then
-					-- Place half along active Supercruise lanes heading toward stations
+				if stBody and primaryStar and primaryStar.body and stBody ~= primaryStar.body then
+					-- Place patrols along active Supercruise shipping lanes heading toward stations
 					local starRadius = math.max(primaryStar.radius or 7e8, 7e8)
-					pShip = ShipBuilder.MakeShipOrbit(primaryStar.body, scTemplate, threat, starRadius * 4.0, starRadius * 8.0)
+					pShip = ShipBuilder.MakeShipOrbit(primaryStar.body, scTemplate, threat, starRadius * 3.5, starRadius * 4.5)
 					if pShip then
-						Space.PutShipOnRoute(pShip, stBody, Engine.rand:Number(0.15, 0.80))
+						local tRatio = 0.15 + 0.70 * ((i - 0.5) / numPatrols)
+						Space.PutShipOnRoute(pShip, stBody, tRatio)
 						pShip:AIFlyTo(stBody)
-					end
-				else
-					local spawnHost = stBody
-					local nearDist, farDist = 12000.0, 25000.0
-					if stBody and stBody.type == "STARPORT_SURFACE" then
-						local parentSb = stBody:GetSystemBody() and stBody:GetSystemBody().parent
-						if parentSb and parentSb.body then
-							spawnHost = parentSb.body
-							nearDist = parentSb.radius * 1.2
-							farDist = parentSb.radius * 2.5
-						else
-							spawnHost = nil
-						end
-					end
-					if spawnHost then
-						pShip = ShipBuilder.MakeShipOrbit(spawnHost, scTemplate, threat, nearDist, farDist)
-						if pShip then
-							assignSupercruiseRoute(pShip)
-						end
 					end
 				end
 				if pShip then

@@ -172,6 +172,11 @@ void Camera::Update()
 		if (b->GetFlags() & Body::FLAG_DRAW_EXCLUDE)
 			continue;
 
+		// Non-player ships in Supercruise render exclusively as sharp points of light with glare in WorldView::DrawSupercruiseShips
+		if (b != Pi::player && b->IsType(ObjectType::SHIP) &&
+			static_cast<const Ship *>(b)->GetFlightState() == Ship::SUPERCRUISE)
+			continue;
+
 		// determine position and transform for draw
 		//		Frame::GetFrameTransform(b->GetFrame(), camFrame, attrs.viewTransform);		// doesn't use interp coords, so breaks in some cases
 		Frame *f = Frame::GetFrame(b->GetFrame());

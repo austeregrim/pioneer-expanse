@@ -243,6 +243,83 @@ static int l_space_put_ship_on_route(lua_State *l)
 	Ship *ship = LuaObject<Ship>::CheckFromLua(1);
 	const Body *targetbody = LuaObject<Body>::CheckFromLua(2);
 	const double t_ratio = LuaPull<double>(l, 3);
+
+	if (!ship->IsType(ObjectType::PLAYER) && ship->GetSupercruise() && Pi::game && Pi::game->GetSpace()) {
+		const FrameId rootId = Pi::game->GetSpace()->GetRootFrame();
+		const vector3d startPosRoot = ship->GetPositionRelTo(rootId);
+		const vector3d endPosRoot = targetbody->GetPositionRelTo(rootId);
+		const vector3d laneVec = endPosRoot - startPosRoot;
+		const double laneLen = laneVec.Length();
+
+		if (laneLen > 250000.0) {
+			const double frac = Clamp(t_ratio, 0.08, 0.92);
+			const vector3d laneDir = laneVec / laneLen;
+			vector3d posRoot = startPosRoot + laneVec * frac;
+
+			// Coherent transport corridor spread: narrow tube along the lane so traffic forms visible shipping lanes
+			const double endTaper = std::sin(frac * M_PI);
+			const double corridorRadius = Clamp(laneLen * 0.0015, 25000.0, 220000.0) * (0.25 + 0.75 * endTaper);
+			vector3d ortho = MathUtil::OrthogonalDirection(laneDir).NormalizedSafe();
+			if (ortho.LengthSqr() > 0.1) {
+				ortho = matrix3x3d::Rotate(Pi::rng.Double(0.0, 2.0 * M_PI), laneDir) * ortho;
+				posRoot += ortho * Pi::rng.Double(0.15 * corridorRadius, corridorRadius);
+			}
+
+			// Ensure transport lane point clears all stellar and planetary exclusion zones tangentially
+			for (Body *b : Pi::game->GetSpace()->GetBodies()) {
+				if (!b || !b->IsType(ObjectType::TERRAINBODY))
+					continue;
+				const double exclR = SupercruiseController::GetExclusionZoneRadius(b);
+				if (exclR <= 0.0)
+					continue;
+				const vector3d bPos = b->GetPositionRelTo(rootId);
+				const vector3d fromBody = posRoot - bPos;
+				const double safeR = std::max(exclR * 1.35, exclR + 75000.0);
+				if (fromBody.LengthSqr() < safeR * safeR) {
+					vector3d pushDir = (fromBody - laneDir * fromBody.Dot(laneDir)).NormalizedSafe();
+					if (pushDir.LengthSqr() < 0.1)
+						pushDir = MathUtil::OrthogonalDirection(laneDir).NormalizedSafe();
+					posRoot = bPos + pushDir * safeR;
+				}
+			}
+
+			ship->SwitchToFrame(rootId);
+			ship->SetPosition(posRoot);
+			ship->UpdateFrame();
+
+			const vector3d toDest = targetbody->GetPositionRelTo(ship->GetFrame()) - ship->GetPosition();
+			const double remDist = toDest.Length();
+			vector3d steerDir = toDest.NormalizedSafe();
+			if (const Body *blocker = ship->GetSupercruise()->GetTargetObscuredBy(toDest, targetbody)) {
+				const double exclR = SupercruiseController::GetExclusionZoneRadius(blocker);
+				const double clearR = std::max(exclR * 1.15, exclR + 60000.0);
+				const vector3d toBlocker = blocker->GetPositionRelTo(ship);
+				const vector3d uBS = (-toBlocker).NormalizedSafe();
+				const vector3d uBT = (toDest - toBlocker).NormalizedSafe();
+				vector3d tang = (uBT - uBS * uBT.Dot(uBS)).NormalizedSafe();
+				if (tang.LengthSqr() < 0.1)
+					tang = MathUtil::OrthogonalDirection(uBS).NormalizedSafe();
+				steerDir = (toBlocker + tang * clearR).NormalizedSafe();
+			}
+
+			if (steerDir.LengthSqr() > 0.1) {
+				const vector3d zAxis = -steerDir;
+				const vector3d up(0.0, 1.0, 0.0);
+				vector3d xAxis = up.Cross(zAxis).NormalizedSafe();
+				if (xAxis.LengthSqr() < 0.01)
+					xAxis = MathUtil::OrthogonalDirection(zAxis).Normalized();
+				const vector3d yAxis = zAxis.Cross(xAxis).Normalized();
+				ship->SetOrient(matrix3x3d::FromVectors(xAxis, yAxis, zAxis));
+			}
+
+			ship->SetFuel(1.0);
+			const double initSpeed = Clamp(remDist / 8.0, SupercruiseController::MIN_SPEED, 12.0 * SupercruiseController::LIGHT_SPEED);
+			ship->GetSupercruise()->EnterSupercruiseImmediate(initSpeed);
+			LUA_DEBUG_END(l, 0);
+			return 0;
+		}
+	}
+
 	const ShipType *st = ship->GetShipType();
 	const shipstats_t ss = ship->GetStats();
 	const vector3d startPosRoot = ship->GetPositionRelTo(Pi::game->GetSpace()->GetRootFrame());

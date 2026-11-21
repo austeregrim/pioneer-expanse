@@ -869,6 +869,7 @@ void LuaObject<Body>::RegisterClass()
 		{ "GetPositionRelTo", l_body_get_position_rel_to },
 		{ "GetAltitudeRelTo", l_body_get_altitude_rel_to },
 		{ "GetPhysicalRadius", l_body_get_phys_radius },
+		{ "GetPhysRadius", l_body_get_phys_radius },
 		{ "GetAtmosphericState", l_body_get_atmospheric_state },
 		{ "GetWeatherState", l_body_get_weather_state },
 		{ "GetLabel", l_body_get_label },
@@ -899,6 +900,7 @@ void LuaObject<Body>::RegisterClass()
 		{ "frameBody", l_body_attr_frame_body },
 		{ "frameLabel", l_body_attr_frame_label },
 		{ "frameRotating", l_body_attr_frame_rotating },
+		{ "physRadius", l_body_get_phys_radius },
 		{ 0, 0 }
 	};
 

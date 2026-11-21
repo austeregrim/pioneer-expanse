@@ -404,6 +404,14 @@ bool AICmdKill::TimeStepUpdate()
 	}
 
 	if (!m_target || m_target->IsDead()) return true;
+	if (m_target->GetFlightState() == Ship::DOCKED ||
+		m_target->GetFlightState() == Ship::DOCKING ||
+		m_target->GetFlightState() == Ship::UNDOCKING ||
+		m_target->GetFlightState() == Ship::LANDED ||
+		m_target->GetFlightState() == Ship::HYPERSPACE) {
+		m_guns->SetAllGroupsFiring(false);
+		return true;
+	}
 
 	const vector3d targpos = m_target->GetPositionRelTo(m_dBody);
 	double dist = targpos.LengthSqr();
@@ -1002,8 +1010,7 @@ AICmdFlyTo::AICmdFlyTo(DynamicBody *dBody, Body *target) :
 	}
 
 	const bool useSurfaceVicinity =
-		(target->IsType(ObjectType::SPACESTATION) && static_cast<SpaceStation *>(target)->IsGroundStation())
-		|| (target->IsType(ObjectType::SHIP) && static_cast<Ship *>(target)->IsOnSurface());
+		(target->IsType(ObjectType::SHIP) && static_cast<Ship *>(target)->IsOnSurface());
 
 	if (useSurfaceVicinity) {
 		m_posoff = target->GetPosition() + VICINITY_MIN * target->GetOrient().VectorY();
@@ -1122,10 +1129,10 @@ bool AICmdFlyTo::TimeStepUpdate()
 					if (m_target && m_target->IsType(ObjectType::TERRAINBODY)) {
 						const double safeDist = std::max(SupercruiseController::SAFE_DISENGAGE_DIST,
 							SupercruiseController::GetExclusionZoneRadius(m_target) + SupercruiseController::SAFE_DISENGAGE_DIST);
-						if (rawDist <= safeDist && sc->GetSpeed() <= SupercruiseController::SAFE_DISENGAGE_SPEED) {
+						if ((rawDist <= safeDist && sc->GetSpeed() <= SupercruiseController::SAFE_DISENGAGE_SPEED) || sc->IsSafeDisengageReady()) {
 							if (!sc->GetTargetObscuredBy(rawRel, m_target)) {
-								sc->NormalDrop();
-								return false;
+								sc->SafeDisengage();
+								return true;
 							}
 						}
 					} else if (sc->IsSafeDisengageReady()) {
@@ -1141,7 +1148,6 @@ bool AICmdFlyTo::TimeStepUpdate()
 					pursuitThrottle = sc->IsSubmittingToInterdiction() ? 0.0 : 0.85;
 				} else if (targetIsSupercruisingShip) {
 					Ship *targetShip = static_cast<Ship *>(m_target);
-					SupercruiseController *targetSc = targetShip->GetSupercruise();
 					if (sc->HasFSDInterdictor() && sc->CanInterdict(targetShip)) {
 						sc->StartInterdiction(targetShip);
 						return false;
@@ -1151,37 +1157,17 @@ bool AICmdFlyTo::TimeStepUpdate()
 					const vector3d dirToTarget = rawRel.NormalizedSafe();
 					// Positive when pursuer is behind target chasing in the same direction
 					const double behindDot = targetFwd.Dot(dirToTarget);
-					const double targetSpeed = targetSc ? targetSc->GetSpeed() : SupercruiseController::MIN_SPEED;
-					const double envMax = std::max(1.0, sc->GetMaxEnvSpeed());
-
 					const double rearOffset = std::min(rawDist * 0.35, 1.2 * SupercruiseController::LIGHT_SPEED);
 					if (behindDot > 0.45) {
-						// Behind target: aim straight at target (with slight rear slot bias if > 4 ls away) and match+close speed
 						if (rawDist > 4.0 * SupercruiseController::LIGHT_SPEED)
 							steerRel = rawRel - targetFwd * (0.8 * SupercruiseController::LIGHT_SPEED);
 						else
 							steerRel = rawRel;
-
-						if (rawDist > 12.0 * SupercruiseController::LIGHT_SPEED) {
-							pursuitThrottle = 1.0;
-						} else {
-							const double closingBoost = Clamp(rawDist * 0.22, 0.25 * SupercruiseController::LIGHT_SPEED, 3.0 * SupercruiseController::LIGHT_SPEED);
-							const double desiredSpeed = targetSpeed + closingBoost;
-							pursuitThrottle = Clamp(desiredSpeed / envMax, 0.25, 1.0);
-						}
-
-						if (rawDist < 60.0 * SupercruiseController::LIGHT_SPEED && sc->GetSpeed() < targetSpeed * 1.35 + 150000.0) {
-							pursuitThrottle = 1.0;
-							const double boostSpeed = std::min(SupercruiseController::MAX_SPEED, std::max(sc->GetSpeed(), targetSpeed * 1.25 + 250000.0));
-							sc->SetSpeed(boostSpeed);
-						}
+						pursuitThrottle = 0.75;
 					} else {
-						// In front of or abeam target: aim behind their tail scaled to current separation so close pursuers don't invert
+						// In front of or abeam target: aim behind their tail and use blue-zone regulated pursuit speed
 						steerRel = rawRel - targetFwd * rearOffset;
 						pursuitThrottle = 0.75;
-						if (rawDist < 60.0 * SupercruiseController::LIGHT_SPEED && rawDist > 2.0 * SupercruiseController::LIGHT_SPEED && sc->GetSpeed() < targetSpeed) {
-							sc->SetSpeed(std::min(SupercruiseController::MAX_SPEED, targetSpeed * 1.05));
-						}
 					}
 				}
 
@@ -1194,14 +1180,18 @@ bool AICmdFlyTo::TimeStepUpdate()
 					const double safeDist = std::max(SupercruiseController::SAFE_DISENGAGE_DIST,
 						SupercruiseController::GetExclusionZoneRadius(m_target) + SupercruiseController::SAFE_DISENGAGE_DIST);
 					if (rawDist <= safeDist * 1.5 && sc->GetSpeed() > SupercruiseController::SAFE_DISENGAGE_SPEED * 0.9)
-						throttle = 0.15;
+						throttle = 0.50;
 				}
 				sc->SetThrottle(throttle);
 				sc->TimeStepUpdate(float(timestep), angInput);
 				return false;
 			}
 
-			if (ship->GetFlightState() == Ship::FLYING && rawDist > SupercruiseController::SUBLIGHT_AUTOPILOT_MAX_DIST) {
+			const double targetExclR = (m_target && m_target->IsType(ObjectType::TERRAINBODY))
+				? SupercruiseController::GetExclusionZoneRadius(m_target)
+				: 0.0;
+			const double effectiveRawDist = std::max(0.0, rawDist - targetExclR);
+			if (ship->GetFlightState() == Ship::FLYING && effectiveRawDist > SupercruiseController::SUBLIGHT_AUTOPILOT_MAX_DIST) {
 				if (m_target) {
 					if (sc->GetTarget() != m_target)
 						sc->SetTarget(m_target);
@@ -1319,7 +1309,11 @@ bool AICmdFlyTo::TimeStepUpdate()
 	vector3d targpos, targvel;
 	if (m_target) {
 		targpos = m_target->GetPositionRelTo(m_dBody->GetFrame());
-		targpos -= (targpos - m_dBody->GetPosition()).NormalizedSafe() * m_dist;
+		if (m_target->IsType(ObjectType::SPACESTATION) && static_cast<const SpaceStation *>(m_target)->IsGroundStation()) {
+			targpos += m_target->GetOrientRelTo(m_dBody->GetFrame()).VectorY() * m_dist;
+		} else {
+			targpos -= (targpos - m_dBody->GetPosition()).NormalizedSafe() * m_dist;
+		}
 		targvel = m_target->GetVelocityRelTo(m_dBody->GetFrame());
 	} else {
 		targpos = GetPosInFrame(m_dBody->GetFrame(), m_targframeId, m_posoff);

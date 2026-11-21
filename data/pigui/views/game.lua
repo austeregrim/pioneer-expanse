@@ -123,13 +123,15 @@ local function displayOnScreenObjects()
 		local mp = ui.getMousePos()
 		local isHovered = (mp - mainCoords):length() < click_radius
 		local isTargeted = group.hasNavTarget or (combatTarget == mainBody)
-		local isFarSCShip = mainBody:IsShip() and mainBody:GetFlightState() == "SUPERCRUISE" and
-			not isTargeted and not isHovered and (mainBody:DistanceTo(player) > scLabelRange)
+		local isSCShip = mainBody:IsShip() and mainBody:GetFlightState() == "SUPERCRUISE"
+		local isFarSCShip = isSCShip and not isTargeted and not isHovered and (mainBody:DistanceTo(player) > scLabelRange)
 
-		local iconColor = isFarSCShip and colors.frame:opacity(0.35) or colors.frame
-		ui.addIcon(mainCoords, getBodyIcon(mainBody, true), iconColor, iconsize, ui.anchor.center, ui.anchor.center)
+		-- Let Supercruise ships shine as sharp points of light with glare; only draw the HUD bracket icon over them when targeted or hovered
+		if not isSCShip or isTargeted or isHovered then
+			ui.addIcon(mainCoords, getBodyIcon(mainBody, true), colors.frame, iconsize, ui.anchor.center, ui.anchor.center)
+		end
 
-		if should_show_label and not isFarSCShip then
+		if should_show_label and (not isSCShip or isTargeted or isHovered) then
 			local label = mainBody:GetLabel()
 			if group.multiple then
 				label = label .. " (" .. #group.bodies .. ")"

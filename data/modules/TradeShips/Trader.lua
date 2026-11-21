@@ -314,12 +314,18 @@ trader_task.hyperjumpAtDistance = function(ship)
 	-- the player may have left the system
 	local trader = Core.ships[ship]
 	if not trader then return end
+	if not ship:exists() or ship.flightState == 'HYPERSPACE' then return end
 	if trader.status == "outbound" and trader.ts_error ~= "HIT" then
 		-- if trader is not under attack and started to leave station
-		if trader.starport ~= nil then
-			-- if trader has not started to hyperjump
+		if trader.starport ~= nil and trader.starport:exists() then
+			-- Ensure hyperdrive has fuel before attempting jump
+			local drive = ship:GetInstalledHyperdrive()
+			if drive and (drive.storedFuel or 0) <= 0 then
+				Trader.addHyperdriveFuel(ship)
+			end
+			-- if trader has not started to hyperjump, cruise out along the outbound Supercruise lane (5-35 ls) first
 			if trader.hyperjumpDist == nil then
-				trader.hyperjumpDist = Engine.rand:Integer(500000, 1500000)
+				trader.hyperjumpDist = Engine.rand:Number(1.5e9, 1.0e10)
 			end
 			if Trader.checkDistBetweenStarport(ship) then
 				-- if distance is large enough attempt to hyperjump

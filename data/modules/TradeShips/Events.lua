@@ -162,8 +162,11 @@ Event.Register("onShipDocked", onShipDocked)
 local onShipUndocked = function (ship, starport)
 	if Core.ships[ship] == nil then return end
 	local trader = Core.ships[ship]
-	local Engine = require 'Engine'
-	local Space = require 'Space'
+
+	-- Ensure departing ship has full hyperdrive fuel and export cargo before leaving station
+	Trader.addHyperdriveFuel(ship)
+	ship:SetFuelPercent()
+	Trader.addCargo(ship, 'export')
 
 	-- Set departure status and engage station departure corridor autopilot
 	trader['status'] = 'departing'
@@ -180,26 +183,38 @@ local onShipUndocked = function (ship, starport)
 		end
 	end
 
-	-- 30% of eligible vessels run in-system ring/asteroid extraction, 70% interstellar exports
+	-- 1. Mining extraction runs for dedicated mining hulls or 20% of vessels in systems with ring/asteroid sites
 	local isMinerHull = (trader.ship_name == 'dsminer' or trader.ship_name == 'kanara')
-	if #miningSites > 0 and (isMinerHull or Engine.rand:Number(1) < 0.30) then
+	if #miningSites > 0 and (isMinerHull or Engine.rand:Number(1) < 0.20) then
 		local site = miningSites[Engine.rand:Integer(1, #miningSites)]
 		trader.assignment = { type = 'mining', site = site, refinery = starport }
 		return
 	end
 
-	-- Outbound interstellar export
-	local farBodies = {}
-	if Game.system then
-		for _, path in ipairs(Game.system:GetBodyPaths()) do
-			local sb = path:GetSystemBody()
-			if sb and sb.body and sb.body ~= starport and ship:DistanceTo(sb.body) > 5e7 then
-				table.insert(farBodies, sb.body)
+	-- 2. In-system inter-station transport lanes (55% of departing traders in multi-station systems)
+	local otherPorts = {}
+	if Core.params and Core.params.ports then
+		for _, port in ipairs(Core.params.ports) do
+			if port ~= starport and port:exists() and ship:DistanceTo(port) > 300000 and Trader.isStarportAcceptableForShip(port, ship) then
+				table.insert(otherPorts, port)
 			end
 		end
 	end
-	local farBody = (#farBodies > 0 and farBodies[Engine.rand:Integer(1, #farBodies)])
+	if #otherPorts > 0 and Engine.rand:Number(1) < 0.55 then
+		local destPort = otherPorts[Engine.rand:Integer(1, #otherPorts)]
+		trader.assignment = { type = 'interstation', to = destPort }
+		return
+	end
+
+	-- 3. Outbound interstellar export along primary star / outer transport corridor
+	local primaryStar = (Game.system and Game.system:GetStars() and Game.system:GetStars()[1] and Game.system:GetStars()[1].body)
 		or trader.starport:GetSystemBody().system:GetStars()[1].body
+	local farBody = primaryStar
+	if not farBody or ship:DistanceTo(farBody) < 5e7 then
+		if otherPorts[1] then
+			farBody = otherPorts[1]
+		end
+	end
 
 	trader.assignment = { type = 'export', farBody = farBody }
 end
@@ -213,27 +228,38 @@ local onAICompleted = function (ship, ai_error)
 	end
 	if trader.status == 'departing' then
 		-- Vessel has safely cleared the airlock/mail slot and APPROACH1 in open space!
-		if trader.assignment and trader.assignment.type == 'mining' then
+		if trader.assignment and trader.assignment.type == 'mining' and trader.assignment.site and trader.assignment.site:exists() then
 			trader.status = 'inbound'
 			ship:AIFlyTo(trader.assignment.site)
 			Trader.assignTask(ship, Game.time + Engine.rand:Number(90, 150), 'doReturnFromMining')
+		elseif trader.assignment and trader.assignment.type == 'interstation' and trader.assignment.to and trader.assignment.to:exists() then
+			trader.status = 'inbound'
+			trader.starport = trader.assignment.to
+			ship:AIDockWith(trader.assignment.to)
 		else
 			local farBody = (trader.assignment and trader.assignment.farBody)
 				or trader.starport:GetSystemBody().system:GetStars()[1].body
 			trader.status = 'outbound'
 			ship:AIFlyTo(farBody)
-			Trader.assignTask(ship, Game.time + Engine.rand:Number(25, 45), 'hyperjumpAtDistance')
+			Trader.assignTask(ship, Game.time + Engine.rand:Number(30, 55), 'hyperjumpAtDistance')
 		end
 	elseif trader.status == 'orbit' then
 		if ai_error == 'NONE' then
-			trader.ts_error = "wait_6h"
-			Trader.assignTask(ship, Game.time + 21600, 'doRedock')
+			trader.ts_error = "wait_redock"
+			Trader.assignTask(ship, Game.time + Engine.rand:Number(45, 75), 'doRedock')
 		end
 		-- XXX if ORBIT_IMPOSSIBLE asteroid? get parent of parent and attempt orbit?
 	elseif trader.status == 'inbound' then
 		if ai_error == 'REFUSED_PERM' then
-			Trader.doOrbit(ship)
-			trader.ts_error = "refused_perm"
+			local altPort = Trader.getNearestStarport(ship, trader.starport)
+			if altPort and altPort ~= trader.starport then
+				trader.starport = altPort
+				ship:AIDockWith(altPort)
+			else
+				Trader.doOrbit(ship)
+				trader.ts_error = "refused_perm"
+				Trader.assignTask(ship, Game.time + Engine.rand:Number(45, 75), 'doRedock')
+			end
 		end
 	end
 end

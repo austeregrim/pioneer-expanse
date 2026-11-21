@@ -61,6 +61,8 @@ public:
 
 	bool ShouldShowLabels() { return m_labelsOn; }
 
+	bool IsBodyOccludedByTerrainOrStation(const Body *targetBody) const;
+
 	void SetSurfaceScanOverlay(const Body *body, bool active, float coverage, const std::string &grid);
 
 protected:

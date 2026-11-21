@@ -166,6 +166,7 @@ void DynamicBody::SetMass(double mass)
 void DynamicBody::SetFrame(FrameId fId)
 {
 	ModelBody::SetFrame(fId);
+	m_oldPos = GetPosition();
 	// external forces will be wrong after frame transition
 	m_externalForce = m_gravityForce = m_atmosForce = vector3d(0.0);
 }

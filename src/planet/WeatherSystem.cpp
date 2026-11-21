@@ -464,6 +464,22 @@ float WeatherSystem::ComputeTerrainRayVisibility(
 	if (disc <= 0.0)
 		return 1.0f;
 
+	// Immediate tangency check at closest point of approach along the ray segment [0, starDist]:
+	// If the ray passes inside the planet sphere or below the terrain height at its closest point to the planet center,
+	// it is guaranteed to be occluded by the planet/terrain.
+	const double sClosest = Clamp(-bDot, 0.0, starDist);
+	if (sClosest > 5.0) {
+		const vector3d ptClosest = camPosP + starDirP * sClosest;
+		const double rClosest = ptClosest.Length();
+		if (rClosest <= baseRadius * 0.985)
+			return 0.0f;
+		if (rClosest <= outerR) {
+			const double surfClosest = sampleHeight(ptClosest / rClosest);
+			if (rClosest <= surfClosest)
+				return 0.0f;
+		}
+	}
+
 	const double sqrtDisc = std::sqrt(disc);
 	const double sEnter = std::max(0.0, -bDot - sqrtDisc);
 	const double sExit = std::min(starDist, -bDot + sqrtDisc);
@@ -475,9 +491,33 @@ float WeatherSystem::ComputeTerrainRayVisibility(
 	const double softEdge = std::max(angStar, 0.0008);
 	const double earlyHideThresh = 0.0010 - softEdge;
 
+	// Dedicated near-field terrain check when the camera is near the surface (sEnter < 150 km):
+	// ensures local hills, crater rims, and mountain ridges within 15 m .. 150 km are never stepped over
+	// even when sExit spans thousands of kilometers through the planet chord.
+	double minAngClear = 1.0e9;
+	if (sEnter < 150000.0) {
+		const double nearEnd = std::min(sExit, sStart + 150000.0);
+		const double nearSpan = nearEnd - sStart;
+		if (nearSpan > 5.0) {
+			constexpr int kNearSamples = 24;
+			for (int k = 1; k <= kNearSamples; ++k) {
+				const double u = double(k) / double(kNearSamples);
+				const double s = sStart + nearSpan * (u * u);
+				const vector3d pt = camPosP + starDirP * s;
+				const double ptLen = pt.Length();
+				if (ptLen <= 1e-6)
+					return 0.0f;
+				const double surfR = sampleHeight(pt / ptLen);
+				const double angClear = std::atan2(ptLen - surfR, s);
+				minAngClear = std::min(minAngClear, angClear);
+				if (angClear <= earlyHideThresh)
+					return 0.0f;
+			}
+		}
+	}
+
 	constexpr int kSamples = 36;
 	const bool insideShell = (sEnter <= 1.0);
-	double minAngClear = 1.0e9;
 	int minIdx = -1;
 	double sPrev = sStart;
 	double sBest = sStart;

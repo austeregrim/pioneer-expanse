@@ -1279,23 +1279,54 @@ static void CollideWithTerrain(Body *body, float timeStep)
 		return;
 
 	Frame *f = Frame::GetFrame(body->GetFrame());
-	if (!f || !f->GetBody() || f->GetId() != f->GetBody()->GetFrame())
-		return;
-	if (!f->GetBody()->IsType(ObjectType::TERRAINBODY))
+	if (!f || !f->GetBody() || !f->GetBody()->IsType(ObjectType::TERRAINBODY))
 		return;
 	TerrainBody *terrain = static_cast<TerrainBody *>(f->GetBody());
+	if (f->GetId() != terrain->GetFrame()) {
+		// If inside the planet's physical/terrain envelope while still in the parent orbital frame,
+		// switch into the planet's rotating frame so terrain collision is evaluated accurately.
+		const Frame *rotFrame = Frame::GetFrame(terrain->GetFrame());
+		if (!rotFrame)
+			return;
+		const vector3d posInRot = body->GetPositionRelTo(terrain->GetFrame());
+		if (posInRot.Length() >= std::max(rotFrame->GetRadius(), terrain->GetMaxFeatureRadius() * 2.0))
+			return;
+		body->SwitchToFrame(terrain->GetFrame());
+		f = Frame::GetFrame(body->GetFrame());
+		if (!f || f->GetId() != terrain->GetFrame())
+			return;
+	}
 
 	const Aabb &aabb = dynBody->GetAabb();
-	double altitude = body->GetPosition().Length() + aabb.min.y;
+	const vector3d pos = body->GetPosition();
+	const double dist = pos.Length();
+	const double altitude = dist + aabb.min.y;
 	if (altitude >= (terrain->GetMaxFeatureRadius() * 2.0))
 		return;
 
-	double terrHeight = terrain->GetTerrainHeight(body->GetPosition().Normalized());
+	const vector3d normal = (dist > 1e-6) ? (pos / dist) : vector3d(0.0, 1.0, 0.0);
+	const double terrHeight = terrain->GetTerrainHeight(normal);
 	if (altitude >= terrHeight)
 		return;
 
-	CollisionContact c(body->GetPosition(), body->GetPosition().Normalized(), terrHeight - altitude, timeStep, static_cast<void *>(body), static_cast<void *>(f->GetBody()));
+	CollisionContact c(pos, normal, terrHeight - altitude, timeStep, static_cast<void *>(body), static_cast<void *>(f->GetBody()));
 	hitCallback(&c);
+
+	// Hard position clamp so dynamic bodies can never sink or remain below terrain
+	if (!body->IsDead()) {
+		const vector3d curPos = body->GetPosition();
+		const double curDist = curPos.Length();
+		const vector3d curNorm = (curDist > 1e-6) ? (curPos / curDist) : normal;
+		const double minRadius = terrain->GetTerrainHeight(curNorm) - aabb.min.y;
+		if (curDist < minRadius) {
+			body->SetPosition(curNorm * minRadius);
+			const vector3d vel = body->GetVelocity();
+			const double radVel = vel.Dot(curNorm);
+			if (radVel < 0.0) {
+				body->SetVelocity(vel - curNorm * radVel);
+			}
+		}
+	}
 }
 
 void Space::TimeStep(float step)
@@ -1307,16 +1338,16 @@ void Space::TimeStep(float step)
 
 	m_bodyIndexValid = m_sbodyIndexValid = false;
 
+	// update frames of reference
+	for (Body *b : m_bodies)
+		b->UpdateFrame();
+
 	Frame::CollideFrames(&hitCallback);
 
 	for (size_t i = 0; i < m_bodies.size(); ++i) {
 		auto b = m_bodies[i];
 		CollideWithTerrain(b, step);
 	}
-
-	// update frames of reference
-	for (Body *b : m_bodies)
-		b->UpdateFrame();
 
 	// AI acts here, then move all bodies and frames
 	// NOTE: The AI can add bodies here so we can't use an iterator
@@ -1336,6 +1367,14 @@ void Space::TimeStep(float step)
 	for (size_t i = 0; i < m_bodies.size(); ++i) {
 		auto b = m_bodies[i];
 		b->TimeStepUpdate(step);
+	}
+
+	for (Body *b : m_bodies)
+		b->UpdateFrame();
+
+	for (size_t i = 0; i < m_bodies.size(); ++i) {
+		auto b = m_bodies[i];
+		CollideWithTerrain(b, step);
 	}
 
 	LuaEvent::Emit();

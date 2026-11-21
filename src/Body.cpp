@@ -360,20 +360,29 @@ void Body::UpdateFrame()
 	if (fellOut && !inSupercruise)
 		return;
 
-	// entering into frames
-	for (FrameId kid : frame->GetChildren()) {
-		Frame *kid_frame = Frame::GetFrame(kid);
-		if (inSupercruise) {
-			if (kid_frame->IsRotFrame())
+	// entering into frames (loop to descend multiple nested frame levels in a single step)
+	while (frame) {
+		bool enteredChild = false;
+		for (FrameId kid : frame->GetChildren()) {
+			Frame *kid_frame = Frame::GetFrame(kid);
+			if (!kid_frame)
 				continue;
-			if (kid_frame->GetBody() && kid_frame->GetBody()->IsType(ObjectType::SPACESTATION))
-				continue;
+			if (inSupercruise) {
+				if (kid_frame->IsRotFrame())
+					continue;
+				if (kid_frame->GetBody() && kid_frame->GetBody()->IsType(ObjectType::SPACESTATION))
+					continue;
+			}
+			const vector3d pos = GetPositionRelTo(kid);
+			if (pos.Length() >= kid_frame->GetRadius()) continue;
+			SwitchToFrame(kid);
+			Log::Verbose("{} enters frame{}\n", GetLabel(), frame->GetLabel());
+			frame = Frame::GetFrame(m_frame);
+			enteredChild = true;
+			break;
 		}
-		const vector3d pos = GetPositionRelTo(kid);
-		if (pos.Length() >= kid_frame->GetRadius()) continue;
-		SwitchToFrame(kid);
-		Log::Verbose("{} enters frame{}\n", GetLabel(), frame->GetLabel());
-		break;
+		if (!enteredChild)
+			break;
 	}
 }
 
