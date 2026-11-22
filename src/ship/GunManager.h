@@ -95,6 +95,8 @@ public:
 		uint8_t lastBarrel = 0;	 // the last barrel used to fire (for multi-barrel weapons)
 		float temperature = 0;	 // current gun temperature
 		double nextFireTime = 0; // time at which the gun will be ready to fire again
+		float health = 1.0f;	 // component integrity [0..1]
+		bool disabled = false;	 // true when weapon mount is destroyed/offline (0% integrity)
 		// TODO: integrate this with a whole-ship cooling system
 		// Currently uses GunManager::m_coolingBoost
 		// float coolerOverclock = 1.0; // any boost to gun coolers from ship equipment
@@ -125,6 +127,8 @@ public:
 		bool firing;						// Is the group currently firing
 		bool fireWithoutTargeting;			// Can the group fire without a target/target not in gimbal range?
 		ConnectionTicket onTargetDestroyed;	// Unlock the target once it's been destroyed
+		vector3d targetLocalOffset = vector3d::Zero; // Targeted subsystem offset in target-local coordinates
+		bool hasTargetOffset = false;
 	};
 
 	GunManager() = default;
@@ -162,11 +166,19 @@ public:
 	const WeaponState *GetWeaponState(uint32_t numWeapon) const { return m_weapons.size() > numWeapon ? &m_weapons[numWeapon] : nullptr; }
 	uint32_t GetWeaponIndexForHardpoint(const StringName &hardpoint) const;
 
+	const std::map<StringName, WeaponMount> &GetWeaponMounts() const { return m_mounts; }
+	bool GetMountLocalPosition(const StringName &hardpoint, vector3d &outPos) const;
+	void SetWeaponHealth(const StringName &hardpoint, float health);
+	void SetWeaponDisabled(const StringName &hardpoint, bool disabled);
+	bool IsWeaponDisabled(const StringName &hardpoint) const;
+
 	// ==========================================
 
 	// For AI/NPC ship usage, combines all weapons into a single group
 	void SetupDefaultGroups();
 	void SetTrackingTarget(const Body *target) { return SetGroupTarget(0, target); }
+	void SetTrackingTargetOffset(const vector3d &localOffset);
+	void ClearTrackingTargetOffset();
 	void SetAllGroupsFiring(bool firing = false);
 
 	// For player weapon management
@@ -181,6 +193,8 @@ public:
 
 	const Body *GetGroupTarget(uint32_t group);
 	void SetGroupTarget(uint32_t group, const Body *target);
+	void SetGroupTargetOffset(uint32_t group, const vector3d &localOffset);
+	void ClearGroupTargetOffset(uint32_t group);
 	void SetGroupFiring(uint32_t group, bool firing);
 	// Sets whether the group will authorize individual weapons to fire without a target within the gimbal arc of the weapon
 	void SetGroupFireWithoutTargeting(uint32_t group, bool enabled);

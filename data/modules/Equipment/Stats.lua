@@ -19,14 +19,20 @@ local EquipType = EquipTypes.EquipType
 
 ---@alias EquipType.UI.Stats { [1]:string, [2]:ui.Icon, [3]:any, [4]:(fun(v: any):string), [5]:boolean? }
 
-local format_integrity = function(v) return string.format("%d%%", v * 100) end
+local format_integrity = function(v)
+	local val = v or 1
+	if val <= 0.001 then
+		return "0% (OFFLINE)"
+	end
+	return string.format("%d%%", math.floor(val * 100 + 0.5))
+end
 local format_mass = function(v) return ui.Format.Mass(v * 1000, 1) end
 local format_power = function(v) return string.format("%.1f KW", v) end
 local format_multiplier = function(v) return string.format("%.1fx", v) end
 
 ---@return EquipType.UI.Stats[]
 function EquipType:GetDetailedStats()
-	local equipHealth = 1
+	local equipHealth = rawget(self, "integrity") or 1
 	local powerDraw = 0
 
 	-- If this is a hyperdrive the mass should not include the fuel tank, because fuel reservoir
@@ -54,7 +60,7 @@ function EquipType:GetItemCardStats()
 		{ icons.square, ui.Format.Volume(self.volume) },
 		{ icons.hull, format_mass(self.mass) },
 		{ icons.ecm, format_power(0) },
-		{ icons.repairs, format_integrity(1) }
+		{ icons.repairs, format_integrity(rawget(self, "integrity") or 1) }
 	}
 end
 
@@ -132,7 +138,7 @@ function MissileType:GetItemCardStats()
 		-- TODO: need a better icon for "explosive"
 		{ icons.galaxy_map, ui.Format.Mass(self.missile_stats.warheadSize, 0) },
 		{ icons.hull, format_mass(self.mass) },
-		{ icons.repairs, format_integrity(1) }
+		{ icons.repairs, format_integrity(rawget(self, "integrity") or 1) }
 	}
 end
 
@@ -195,7 +201,7 @@ function CabinType:GetItemCardStats()
 		{ icons.personal, "{}/{}" % { self:GetNumPassengers(), self:GetMaxPassengers() } },
 		{ icons.hull, format_mass(self.mass) },
 		{ icons.ecm, format_power(0) },
-		{ icons.repairs, format_integrity(1) }
+		{ icons.repairs, format_integrity(rawget(self, "integrity") or 1) }
 	}
 end
 
@@ -233,7 +239,7 @@ function CargoHoldType:GetItemCardStats()
 		{ icons.cargo_crate, "{}" % { self.capabilities.cargo } },
 		{ icons.hull, format_mass(self.mass) },
 		{ icons.ecm, format_power(0) },
-		{ icons.repairs, format_integrity(1) }
+		{ icons.repairs, format_integrity(rawget(self, "integrity") or 1) }
 	}
 end
 

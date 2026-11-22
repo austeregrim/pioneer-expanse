@@ -314,7 +314,11 @@ void Missile::Explode()
 			targetRadius, dist, areaSphere, crossSectionTarget, ratioArea, mjReceivedEnergy, kgDamage);
 		*/
 
-		body->OnDamage(m_owner, kgDamage, dummy);
+		CollisionContact blastContact;
+		const vector3d toExplosion = (GetPosition() - body->GetPosition()).NormalizedSafe();
+		blastContact.pos = body->GetPosition() + toExplosion * std::min(dist, targetRadius);
+		blastContact.normal = toExplosion;
+		body->OnDamage(m_owner, kgDamage, blastContact);
 		if (body->IsType(ObjectType::SHIP))
 			LuaEvent::Queue("onShipHit", dynamic_cast<Ship *>(body), m_owner);
 	}

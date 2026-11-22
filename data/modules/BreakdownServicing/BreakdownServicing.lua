@@ -71,6 +71,17 @@ local service_history = {
 	jumpcount = 0, -- Number of jumps made after the service_period
 }
 
+local BreakdownServicing = {}
+function BreakdownServicing.NotifyDriveServiced(companyName)
+	service_history.lastdate = Game.time
+	service_history.jumpcount = 0
+	if companyName then
+		service_history.company = companyName
+	elseif not service_history.company then
+		service_history.company = "Starport Drydock Maintenance"
+	end
+end
+
 local lastServiceMessage = function (hyperdrive)
 	-- Fill in the blanks tokens on the {lasttime} string from service_history
 	local message
@@ -160,6 +171,13 @@ local onChat = function (form, ref, option)
 			service_history.service_period = ad.strength * oneyear
 			service_history.company = ad.title
 			service_history.jumpcount = 0
+			if hyperdrive then
+				hyperdrive.integrity = (ad.strength > 0) and 1.0 or math.max(rawget(hyperdrive, "integrity") or 1.0, 0.90)
+				local okCI, ComponentIntegrity = pcall(require, 'modules.ComponentIntegrity.ComponentIntegrity')
+				if okCI and ComponentIntegrity and ComponentIntegrity.SyncShipSubsystems then
+					ComponentIntegrity.SyncShipSubsystems(Game.player)
+				end
+			end
 		end
 	end
 end
@@ -321,3 +339,5 @@ Event.Register("onShipTypeChanged", onShipTypeChanged)
 Event.Register("onEnterSystem", onEnterSystem)
 
 Serializer:Register("BreakdownServicing", serialize, unserialize)
+
+return BreakdownServicing

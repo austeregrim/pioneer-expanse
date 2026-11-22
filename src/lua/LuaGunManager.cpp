@@ -66,6 +66,9 @@ void LuaObject<GunManager>::RegisterClass()
 		.AddFunction("SetGroupTarget", &GunManager::SetGroupTarget)
 		.AddFunction("SetGroupFiring", &GunManager::SetGroupFiring)
 		.AddFunction("SetGroupFireWithoutTargeting", &GunManager::SetGroupFireWithoutTargeting)
+		.AddFunction("SetWeaponHealth", &GunManager::SetWeaponHealth)
+		.AddFunction("SetWeaponDisabled", &GunManager::SetWeaponDisabled)
+		.AddFunction("IsWeaponDisabled", &GunManager::IsWeaponDisabled)
 		.AddFunction("IsFiring", &GunManager::IsFiring)
 		.AddFunction("IsGroupFiring", &GunManager::IsGroupFiring);
 	metaType.StopRecording();

@@ -138,6 +138,7 @@ private:
 
 	Indicator m_combatTargetIndicator;
 	Indicator m_targetLeadIndicator;
+	Indicator m_subsystemIndicator;
 
 	std::unique_ptr<Graphics::Material> m_indicatorMat;
 	Graphics::Drawables::Lines m_indicator;

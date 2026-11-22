@@ -124,7 +124,7 @@ void Propulsion::SetAccelerationCapMult(double p, const float lin_AccelerationCa
 
 void Propulsion::SetAngThrusterState(const vector3d &levels)
 {
-	if (m_thrusterFuel <= 0.f) {
+	if (m_disabled || m_thrusterFuel <= 0.f) {
 		m_angThrusters = vector3d(0.0);
 	} else {
 		m_angThrusters.x = Clamp(levels.x, -1.0, 1.0);
@@ -135,6 +135,8 @@ void Propulsion::SetAngThrusterState(const vector3d &levels)
 
 double Propulsion::ClampLinThrusterState(int axis, double level) const
 {
+	if (m_disabled)
+		return 0.0;
 	level = Clamp(level, -1.0, 1.0);
 	Thruster thruster;
 
@@ -151,20 +153,22 @@ double Propulsion::ClampLinThrusterState(int axis, double level) const
 
 vector3d Propulsion::ClampLinThrusterState(const vector3d &levels) const
 {
+	if (m_disabled)
+		return vector3d::Zero;
 	vector3d clamped = levels;
 	Thruster thruster;
 
 	thruster = (clamped.x > 0) ? THRUSTER_RIGHT : THRUSTER_LEFT;
 	clamped.x = Clamp(clamped.x, -1.0, 1.0);
-	clamped.x *= GetThrust(thruster) / m_linThrust[thruster];
+	clamped.x = (m_linThrust[thruster] > 0.0) ? (clamped.x * GetThrust(thruster) / m_linThrust[thruster]) : 0.0;
 
 	thruster = (clamped.y > 0) ? THRUSTER_UP : THRUSTER_DOWN;
 	clamped.y = Clamp(clamped.y, -1.0, 1.0);
-	clamped.y *= GetThrust(thruster) / m_linThrust[thruster];
+	clamped.y = (m_linThrust[thruster] > 0.0) ? (clamped.y * GetThrust(thruster) / m_linThrust[thruster]) : 0.0;
 
 	thruster = (clamped.z > 0) ? THRUSTER_REVERSE : THRUSTER_FORWARD;
 	clamped.z = Clamp(clamped.z, -1.0, 1.0);
-	clamped.z *= GetThrust(thruster) / m_linThrust[thruster];
+	clamped.z = (m_linThrust[thruster] > 0.0) ? (clamped.z * GetThrust(thruster) / m_linThrust[thruster]) : 0.0;
 
 	return clamped;
 }
@@ -173,7 +177,7 @@ void Propulsion::SetLinThrusterState(int axis, double level)
 {
 	if (AICurrentlyTurning())
 		return;
-	if (m_thrusterFuel <= 0.f) level = 0.0;
+	if (m_disabled || m_thrusterFuel <= 0.f) level = 0.0;
 	m_linThrusters[axis] = ClampLinThrusterState(axis, level);
 }
 
@@ -181,7 +185,7 @@ void Propulsion::SetLinThrusterState(const vector3d &levels)
 {
 	if (AICurrentlyTurning())
 		return;
-	if (m_thrusterFuel <= 0.f) {
+	if (m_disabled || m_thrusterFuel <= 0.f) {
 		m_linThrusters = vector3d(0.0);
 	} else {
 		m_linThrusters = ClampLinThrusterState(levels);
@@ -356,6 +360,10 @@ bool Propulsion::AIMatchVel(const vector3d &vel, const vector3d &powerLimit)
 // returns true if this can be done in a single timestep
 bool Propulsion::AIChangeVelBy(const vector3d &diffvel, const vector3d &powerLimit)
 {
+	if (m_disabled) {
+		ClearLinThrusterState();
+		return false;
+	}
 	if (AICurrentlyTurning())
 		return false;
 
@@ -366,9 +374,9 @@ bool Propulsion::AIChangeVelBy(const vector3d &diffvel, const vector3d &powerLim
 	vector3d maxThrust = GetThrust(diffvel2);
 	vector3d maxFrameAccel = maxThrust * (Pi::game->GetTimeStep() / m_dBody->GetMass());
 	vector3d thrust(
-		Clamp(diffvel2.x / maxFrameAccel.x, -powerLimit.x, powerLimit.x),
-		Clamp(diffvel2.y / maxFrameAccel.y, -powerLimit.y, powerLimit.y),
-		Clamp(diffvel2.z / maxFrameAccel.z, -powerLimit.z, powerLimit.z));
+		(maxFrameAccel.x > 1e-9) ? Clamp(diffvel2.x / maxFrameAccel.x, -powerLimit.x, powerLimit.x) : 0.0,
+		(maxFrameAccel.y > 1e-9) ? Clamp(diffvel2.y / maxFrameAccel.y, -powerLimit.y, powerLimit.y) : 0.0,
+		(maxFrameAccel.z > 1e-9) ? Clamp(diffvel2.z / maxFrameAccel.z, -powerLimit.z, powerLimit.z) : 0.0);
 	SetLinThrusterState(thrust); // use clamping
 	if (thrust.x * thrust.x > 1.0 || thrust.y * thrust.y > 1.0 || thrust.z * thrust.z > 1.0) return false;
 	return true;
@@ -399,6 +407,10 @@ vector3d Propulsion::AIChangeVelDir(const vector3d &reqdiffvel)
 void Propulsion::AIMatchAngVelObjSpace(const vector3d &angvel, const vector3d &powerLimit, bool ignoreZeroValues)
 {
 	double maxAccel = m_angThrust / m_dBody->GetAngularInertia();
+	if (m_disabled || maxAccel <= 1e-9) {
+		ClearAngThrusterState();
+		return;
+	}
 	double invFrameAccel = 1.0 / maxAccel / Pi::game->GetTimeStep();
 
 	vector3d currAngVel = m_dBody->GetAngVelocity() * m_dBody->GetOrient();
@@ -422,6 +434,10 @@ double Propulsion::AIFaceUpdir(const vector3d &updir, double av)
 {
 	double maxAccel = m_angThrust / m_dBody->GetAngularInertia(); // should probably be in stats anyway
 	double frameAccel = maxAccel * Pi::game->GetTimeStep();
+	if (m_disabled || frameAccel <= 1e-9) {
+		ClearAngThrusterState();
+		return 0.0;
+	}
 
 	vector3d uphead = updir * m_dBody->GetOrient(); // create desired object-space updir
 	if (uphead.z > 0.99999) return 0;				// bail out if facing updir
@@ -459,6 +475,10 @@ double Propulsion::AIFaceUpdir(const vector3d &updir, double av)
 double Propulsion::AIFaceDirection(const vector3d &dir, double av)
 {
 	double maxAccel = m_angThrust / m_dBody->GetAngularInertia(); // should probably be in stats anyway
+	if (m_disabled || maxAccel <= 1e-9) {
+		ClearAngThrusterState();
+		return 0.0;
+	}
 
 	vector3d head = (dir * m_dBody->GetOrient()).Normalized(); // create desired object-space heading
 	vector3d dav(0.0, 0.0, 0.0);							   // desired angular velocity

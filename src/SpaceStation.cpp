@@ -736,9 +736,9 @@ bool SpaceStation::IsCorridorOccupied(const Ship *excludeShip) const
 				const bool otherIsDeparting = (other->GetAICommand() && other->GetAICommand()->GetType() == AICommand::CMD_DEPART);
 				const bool otherIsDocking = (other->GetAICommand() && other->GetAICommand()->GetType() == AICommand::CMD_DOCK);
 
-				// Right of way for ships leaving: any departing ship inside the station or within 1650m on the exit path
+				// Right of way for ships leaving: any departing ship inside the station or within 1100m on the exit path
 				// blocks inbound ships from leaving their APPROACH1 holding queue
-				if (otherIsDeparting && otherAxialDist < 1650.0 && otherLateralDist < 130.0) {
+				if (otherIsDeparting && otherAxialDist < 1100.0 && otherLateralDist < 130.0) {
 					return true;
 				}
 
@@ -749,8 +749,8 @@ bool SpaceStation::IsCorridorOccupied(const Ship *excludeShip) const
 
 				if (!excludeIsDeparting && otherIsDocking) {
 					// Strict 1-at-a-time inbound corridor queue:
-					// If another inbound ship is already traversing the corridor inside 1350m, wait at APPROACH1
-					if (otherAxialDist < 1350.0 && otherAxialDist > -200.0 && otherLateralDist < 130.0) {
+					// If another inbound ship is already traversing the corridor inside 850m, wait at APPROACH1
+					if (otherAxialDist < 850.0 && otherAxialDist > -200.0 && otherLateralDist < 130.0) {
 						return true;
 					}
 

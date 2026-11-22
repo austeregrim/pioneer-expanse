@@ -38,6 +38,15 @@ public:
 	// Bonus:
 	void SetThrustPowerMult(double p, const float lin_Thrust[], const float ang_Thrust);
 	void SetAccelerationCapMult(double p, const float lin_AccelerationCap[]);
+	void SetDisabled(bool disabled)
+	{
+		m_disabled = disabled;
+		if (m_disabled) {
+			ClearLinThrusterState();
+			ClearAngThrusterState();
+		}
+	}
+	bool IsDisabled() const { return m_disabled; }
 
 	// Thrust and thruster functions
 	// Everything's capped unless specified otherwise.
@@ -133,6 +142,7 @@ private:
 	bool m_aiPitchActive;
 	bool m_aiYawActive;
 	bool m_aiRollActive;
+	bool m_disabled = false;
 	bool AICurrentlyTurning() const { return m_aiSequentialThrusters && (m_aiPitchActive || m_aiYawActive || m_aiRollActive); }
 
 	// Thrust and thrusters

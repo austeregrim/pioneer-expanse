@@ -19,6 +19,7 @@
 #include "ship/GunManager.h"
 #include "ship/ShipController.h"
 #include "ship/SupercruiseController.h"
+#include "sound/Sound.h"
 #include "Sensors.h"
 
 #include <algorithm>
@@ -143,6 +144,10 @@ REGISTER_INPUT_BINDING(PlayerShipController)
 	auto weaponsGroup = controlsPage->GetBindingGroup("Weapons");
 	input->AddActionBinding("BindTargetObject", weaponsGroup, Action({ SDLK_y }));
 	input->AddActionBinding("BindCycleHostiles", weaponsGroup, Action({ SDLK_t }));
+	input->AddActionBinding("BindCycleTargetsNext", weaponsGroup, Action({ SDLK_g }));
+	input->AddActionBinding("BindCycleTargetsPrev", weaponsGroup, Action({ SDLK_h }));
+	input->AddActionBinding("BindCycleSubsystemsNext", weaponsGroup, Action({ SDLK_RIGHTBRACKET }, { SDLK_z }));
+	input->AddActionBinding("BindCycleSubsystemsPrev", weaponsGroup, Action({ SDLK_LEFTBRACKET }));
 	input->AddActionBinding("BindPrimaryFire", weaponsGroup, Action({ SDLK_SPACE }));
 	input->AddActionBinding("BindSecondaryFire", weaponsGroup, Action({ SDLK_m }));
 
@@ -163,7 +168,7 @@ REGISTER_INPUT_BINDING(PlayerShipController)
 	input->AddAxisBinding("BindSpeedControl", speedGroup, Axis({}, { SDLK_RETURN }, { SDLK_RSHIFT }));
 	input->AddActionBinding("BindToggleCruise", speedGroup, Action({ SDLK_v }));
 	input->AddActionBinding("BindToggleSpeedLimiter", speedGroup, Action({ SDLK_l, SDLK_RALT }));
-	input->AddActionBinding("BindToggleSupercruise", speedGroup, Action({ SDLK_j }, { SDLK_F6 }));
+	input->AddActionBinding("BindToggleSupercruise", speedGroup, Action({ SDLK_j }));
 
 	auto landingGroup = controlsPage->GetBindingGroup("LandingControl");
 	input->AddActionBinding("BindToggleLandingGear", landingGroup, Action({ SDLK_n }));
@@ -219,6 +224,18 @@ PlayerShipController::PlayerShipController() :
 	m_cycleHostiles = InputBindings.cycleHostiles->onPressed.connect (
 		sigc::mem_fun(this, &PlayerShipController::CycleHostiles));
 
+	m_cycleTargetsNext = InputBindings.cycleTargetsNext->onPressed.connect(
+		[this]() { this->CycleTargets(1); });
+
+	m_cycleTargetsPrev = InputBindings.cycleTargetsPrev->onPressed.connect(
+		[this]() { this->CycleTargets(-1); });
+
+	m_cycleSubsystemsNext = InputBindings.cycleSubsystemsNext->onPressed.connect(
+		[this]() { this->CycleSubsystems(1); });
+
+	m_cycleSubsystemsPrev = InputBindings.cycleSubsystemsPrev->onPressed.connect(
+		[this]() { this->CycleSubsystems(-1); });
+
 	m_toggleLandingGear = InputBindings.toggleLandingGear->onPressed.connect(
 		sigc::mem_fun(this, &PlayerShipController::OnToggleLandingGear));
 }
@@ -227,6 +244,10 @@ void PlayerShipController::InputBinding::RegisterBindings()
 {
 	targetObject = AddAction("BindTargetObject");
 	cycleHostiles = AddAction("BindCycleHostiles");
+	cycleTargetsNext = AddAction("BindCycleTargetsNext");
+	cycleTargetsPrev = AddAction("BindCycleTargetsPrev");
+	cycleSubsystemsNext = AddAction("BindCycleSubsystemsNext");
+	cycleSubsystemsPrev = AddAction("BindCycleSubsystemsPrev");
 	primaryFire = AddAction("BindPrimaryFire");
 	secondaryFire = AddAction("BindSecondaryFire");
 
@@ -487,9 +508,9 @@ void PlayerShipController::FlightAssist(const float timeStep, TotalDesiredAction
 	vector3d maxThrust = m_ship->GetPropulsion()->GetThrust(dvDir); // Newtons, positive only
 	// correction can only be in a greater value
 	vector3d comp = vector3d(
-		std::min(extf.x / maxThrust.x * Util::sign(dvDir.x), 0.0),
-		std::min(extf.y / maxThrust.y * Util::sign(dvDir.y), 0.0),
-		std::min(extf.z / maxThrust.z * Util::sign(dvDir.z), 0.0)); // fraction of thrust
+		(maxThrust.x > 1e-9) ? std::min(extf.x / maxThrust.x * Util::sign(dvDir.x), 0.0) : 0.0,
+		(maxThrust.y > 1e-9) ? std::min(extf.y / maxThrust.y * Util::sign(dvDir.y), 0.0) : 0.0,
+		(maxThrust.z > 1e-9) ? std::min(extf.z / maxThrust.z * Util::sign(dvDir.z), 0.0) : 0.0); // fraction of thrust
 	power.x = Clamp(power.x - comp.x, 0.0, 1.0);
 	power.y = Clamp(power.y - comp.y, 0.0, 1.0);
 	power.z = Clamp(power.z - comp.z, 0.0, 1.0);
@@ -579,6 +600,26 @@ void PlayerShipController::StaticUpdate(const float timeStep)
 		}
 	} else {
 		m_undockElapsed = 0.0f;
+	}
+
+	// Keep GunManager lead offset synchronized with targeted subsystem
+	if (auto *gunManager = m_ship->GetComponent<GunManager>()) {
+		if (!m_targetSubsystemId.empty()) {
+			const Ship *targetShip = (m_combatTarget && m_combatTarget->IsType(ObjectType::SHIP))
+				? static_cast<const Ship *>(m_combatTarget)
+				: nullptr;
+			const Subsystems::SubsystemNode *sub = (targetShip && targetShip->GetFlightState() != Ship::SUPERCRUISE && HasSubsystemTargetingComputer())
+				? targetShip->FindSubsystem(m_targetSubsystemId)
+				: nullptr;
+			if (sub) {
+				gunManager->SetTrackingTargetOffset(sub->localPos);
+			} else {
+				m_targetSubsystemId.clear();
+				gunManager->ClearTrackingTargetOffset();
+			}
+		} else {
+			gunManager->ClearTrackingTargetOffset();
+		}
 	}
 
 	if (m_ship->GetFlightState() == Ship::SUPERCRUISE) {
@@ -1123,8 +1164,120 @@ void PlayerShipController::SelectTarget()
 
 void PlayerShipController::CycleHostiles()
 {
-	Body* newTarget = Pi::player->GetSensors()->ChooseTarget(Sensors::CYCLE_HOSTILE, GetCombatTarget());
+	if (!InputBindings.active || !Pi::game || Pi::game->IsPaused() ||
+		(Pi::GetView() != Pi::game->GetWorldView() && Pi::GetView() != Pi::game->GetSystemView()))
+		return;
+	Body *newTarget = Pi::player->GetSensors()->ChooseTarget(Sensors::CYCLE_HOSTILE, GetCombatTarget());
 	SetCombatTarget(newTarget);
+}
+
+void PlayerShipController::CycleTargets(int direction)
+{
+	if (!InputBindings.active || !Pi::game || Pi::game->IsPaused() ||
+		(Pi::GetView() != Pi::game->GetWorldView() && Pi::GetView() != Pi::game->GetSystemView()))
+		return;
+	const Sensors::TargetingCriteria crit = (direction < 0) ? Sensors::CYCLE_ALL_PREV : Sensors::CYCLE_ALL_NEXT;
+	Body *newTarget = Pi::player->GetSensors()->ChooseTarget(crit, GetCombatTarget());
+	SetCombatTarget(newTarget);
+}
+
+bool PlayerShipController::HasSubsystemTargetingComputer() const
+{
+	if (!m_ship)
+		return false;
+	const int cap = m_ship->Properties().Get("subsystem_targeting_cap");
+	return cap > 0 && !m_ship->AreSensorsDisabled();
+}
+
+void PlayerShipController::SetTargetSubsystemId(const std::string &id)
+{
+	auto *gunManager = m_ship ? m_ship->GetComponent<GunManager>() : nullptr;
+	if (id.empty() || !HasSubsystemTargetingComputer() || !m_combatTarget || !m_combatTarget->IsType(ObjectType::SHIP)) {
+		m_targetSubsystemId.clear();
+		if (gunManager)
+			gunManager->ClearTrackingTargetOffset();
+		return;
+	}
+
+	Ship *targetShip = static_cast<Ship *>(m_combatTarget);
+	targetShip->EnsureDefaultSubsystems();
+	const Subsystems::SubsystemNode *sub = targetShip->FindSubsystem(id);
+	if (!sub) {
+		m_targetSubsystemId.clear();
+		if (gunManager)
+			gunManager->ClearTrackingTargetOffset();
+		return;
+	}
+
+	m_targetSubsystemId = sub->id;
+	if (gunManager)
+		gunManager->SetTrackingTargetOffset(sub->localPos);
+}
+
+bool PlayerShipController::GetTargetSubsystemWorldRelPos(vector3d &outRelPos) const
+{
+	if (m_targetSubsystemId.empty() || !m_ship || !m_combatTarget || !m_combatTarget->IsType(ObjectType::SHIP))
+		return false;
+	const Ship *targetShip = static_cast<const Ship *>(m_combatTarget);
+	if (targetShip->GetFlightState() == Ship::SUPERCRUISE)
+		return false;
+	const Subsystems::SubsystemNode *sub = targetShip->FindSubsystem(m_targetSubsystemId);
+	if (!sub)
+		return false;
+
+	const matrix3x3d targOrient = targetShip->GetOrientRelTo(m_ship->GetFrame());
+	outRelPos = targetShip->GetPositionRelTo(m_ship) + (targOrient * sub->localPos);
+	return true;
+}
+
+void PlayerShipController::CycleSubsystems(int direction)
+{
+	if (!InputBindings.active || !Pi::game || Pi::game->IsPaused() || !m_ship)
+		return;
+	if (Pi::GetView() != Pi::game->GetWorldView())
+		return;
+	if (!m_combatTarget || !m_combatTarget->IsType(ObjectType::SHIP))
+		return;
+
+	Ship *targetShip = static_cast<Ship *>(m_combatTarget);
+	if (targetShip->GetFlightState() == Ship::SUPERCRUISE)
+		return;
+
+	if (!HasSubsystemTargetingComputer()) {
+		if (SupercruiseController *sc = m_ship->GetSupercruise()) {
+			if (m_ship->AreSensorsDisabled())
+				sc->ShowStatusMessage("SENSORS OFFLINE — SUBSYSTEM TARGETING UNAVAILABLE", 3.5f);
+			else
+				sc->ShowStatusMessage("SUBSYSTEM TARGETING REQUIRES TARGETING COMPUTER", 3.5f);
+		}
+		Sound::BodyMakeNoise(m_ship, "notify_beep", 0.6f);
+		return;
+	}
+
+	targetShip->EnsureDefaultSubsystems();
+	const auto &nodes = targetShip->GetSubsystems();
+	if (nodes.empty())
+		return;
+
+	// Cycle order: "" (Center Mass) followed by each installed subsystem node
+	std::vector<std::string> cycleIds;
+	cycleIds.reserve(nodes.size() + 1);
+	cycleIds.emplace_back("");
+	for (const auto &node : nodes) {
+		cycleIds.push_back(node.id);
+	}
+
+	size_t curIdx = 0;
+	for (size_t i = 0; i < cycleIds.size(); ++i) {
+		if (cycleIds[i] == m_targetSubsystemId) {
+			curIdx = i;
+			break;
+		}
+	}
+
+	const int step = (direction < 0) ? -1 : 1;
+	const size_t nextIdx = size_t((int(curIdx) + step + int(cycleIds.size())) % int(cycleIds.size()));
+	SetTargetSubsystemId(cycleIds[nextIdx]);
 }
 
 void PlayerShipController::ToggleCruise()
@@ -1185,8 +1338,16 @@ void PlayerShipController::SetCombatTarget(Body *const target, bool setFollowTo)
 	if (setFollowTo)
 		SetFollowTarget(target);
 
+	const bool changed = (m_combatTarget != target);
 	m_combatTarget = target;
-	m_ship->GetComponent<GunManager>()->SetTrackingTarget(target);
+	if (changed || !target)
+		m_targetSubsystemId.clear();
+
+	if (auto *gunManager = m_ship->GetComponent<GunManager>()) {
+		gunManager->SetTrackingTarget(target);
+		if (changed || !target)
+			gunManager->ClearTrackingTargetOffset();
+	}
 	onChangeTarget.emit(target);
 }
 

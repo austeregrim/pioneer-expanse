@@ -59,7 +59,7 @@ local function button_hyperspace()
 		if blocker then
 			tooltip = tooltip .. " — OBSCURED BY " .. blocker:GetLabel()
 		end
-		if ui.mainMenuButton(icon, tooltip) or ui.isKeyReleased(ui.keys.f7)  then
+		if ui.mainMenuButton(icon, tooltip) or (ui.noModifierHeld() and ui.isKeyReleased(ui.keys.f7))  then
 			if player:IsHyperspaceActive() then
 				player:AbortHyperjump()
 			else

@@ -43,6 +43,12 @@ public:
 	void ToggleSupercruise();
 	void SelectTarget();
 	void CycleHostiles();
+	void CycleTargets(int direction);
+	void CycleSubsystems(int direction);
+	bool HasSubsystemTargetingComputer() const;
+	const std::string &GetTargetSubsystemId() const { return m_targetSubsystemId; }
+	void SetTargetSubsystemId(const std::string &id);
+	bool GetTargetSubsystemWorldRelPos(vector3d &outRelPos) const;
 
 	//targeting
 	//XXX AI should utilize one or more of these
@@ -95,6 +101,10 @@ private:
 		// Weapons
 		Action *targetObject;
 		Action *cycleHostiles;
+		Action *cycleTargetsNext;
+		Action *cycleTargetsPrev;
+		Action *cycleSubsystemsNext;
+		Action *cycleSubsystemsPrev;
 		Action *primaryFire;
 		Action *secondaryFire;
 
@@ -183,5 +193,10 @@ private:
 	ConnectionTicket m_toggleSupercruise;
 	ConnectionTicket m_selectTarget;
 	ConnectionTicket m_cycleHostiles;
+	ConnectionTicket m_cycleTargetsNext;
+	ConnectionTicket m_cycleTargetsPrev;
+	ConnectionTicket m_cycleSubsystemsNext;
+	ConnectionTicket m_cycleSubsystemsPrev;
 	ConnectionTicket m_toggleLandingGear;
+	std::string m_targetSubsystemId;
 };

@@ -55,6 +55,22 @@
     "description": "Descriptive name for the CycleHostiles action.",
     "message": "Cycle Hostiles"
   },
+  "BIND_CYCLE_SUBSYSTEMS_NEXT": {
+    "description": "Descriptive name for the CycleSubsystemsNext action.",
+    "message": "Cycle Next Subsystem"
+  },
+  "BIND_CYCLE_SUBSYSTEMS_PREV": {
+    "description": "Descriptive name for the CycleSubsystemsPrev action.",
+    "message": "Cycle Previous Subsystem"
+  },
+  "BIND_CYCLE_TARGETS_NEXT": {
+    "description": "Descriptive name for the CycleTargetsNext action.",
+    "message": "Cycle Next Target"
+  },
+  "BIND_CYCLE_TARGETS_PREV": {
+    "description": "Descriptive name for the CycleTargetsPrev action.",
+    "message": "Cycle Previous Target"
+  },
   "BIND_DECREASE_TIME_ACCELERATION": {
     "description": "Descriptive name for the DecreaseTimeAcceleration action.",
     "message": "Decrease Time Acceleration"

@@ -317,8 +317,6 @@ double SupercruiseController::GetShipMassLockFactor() const
 
 void SupercruiseController::SetFsdOffline(bool offline)
 {
-	if (m_ship && m_ship->IsType(ObjectType::PLAYER))
-		return; // Players can always re-engage Supercruise once cooldown completes
 	m_fsdOffline = offline;
 	if (m_fsdOffline && m_charging)
 		AbortCharge("FSD OFFLINE");
@@ -332,9 +330,15 @@ SupercruiseController::Status SupercruiseController::GetStatus(std::string *outR
 	if (IsActive())
 		return SC_ACTIVE;
 
-	if (m_fsdOffline) {
+	if (m_fsdOffline || m_ship->IsHyperdriveOffline()) {
 		if (outReason)
 			*outReason = "FRAMESHIFT DRIVE OFFLINE";
+		return SC_FSD_OFFLINE;
+	}
+
+	if (m_ship->GetPropulsion() && m_ship->GetPropulsion()->IsDisabled()) {
+		if (outReason)
+			*outReason = "PROPULSION OFFLINE — CANNOT ENGAGE FSD";
 		return SC_FSD_OFFLINE;
 	}
 

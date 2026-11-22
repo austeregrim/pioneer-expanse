@@ -380,7 +380,109 @@ local function drawShipRepair()
 			ui.separator()
 			ui.spacing()
 
-			-- SECTION 2: PROPELLANT & HYPERDRIVE FUEL SERVICING
+			-- SECTION 2: COMPONENT & SUBSYSTEM MAINTENANCE
+			ui.withFont(orbiteer.medlarge, function()
+				ui.textColored(colors.uiPrimaryLight, "COMPONENT & SUBSYSTEM MAINTENANCE")
+			end)
+			ui.spacing()
+
+			local okCI, ComponentIntegrity = pcall(require, 'modules.ComponentIntegrity.ComponentIntegrity')
+			local damagedMods = (okCI and ComponentIntegrity and ComponentIntegrity.GetDamagedModules)
+				and ComponentIntegrity.GetDamagedModules(Game.player)
+				or {}
+
+			ui.withFont(pionillium.body, function()
+				if #damagedMods == 0 then
+					ui.textColored(colors.fontDim, "All ship components operating at nominal integrity (100%).")
+				else
+					local totalModCost = 0
+					for _, mod in ipairs(damagedMods) do
+						totalModCost = totalModCost + mod.cost
+					end
+					if ui.button("REPAIR ALL COMPONENTS (" .. Format.Money(totalModCost) .. ")", Vector2(310 * rescaleVector.x, 30 * rescaleVector.y)) then
+						if PlayerState.GetMoney() >= totalModCost then
+							PlayerState.AddMoney(-totalModCost)
+							local equipSet = Game.player:GetComponent("EquipSet")
+							local servicedHD = false
+							for _, mod in ipairs(damagedMods) do
+								mod.equip.integrity = 1.0
+								if mod.category == "hyperdrive" then servicedHD = true end
+								if equipSet then equipSet:NotifyListeners("modify", mod.equip) end
+							end
+							ComponentIntegrity.SyncShipSubsystems(Game.player)
+							ui.playSfx("Repairing_Ship")
+							if servicedHD then
+								local okBS, BreakdownServicing = pcall(require, 'modules.BreakdownServicing.BreakdownServicing')
+								if okBS and BreakdownServicing and BreakdownServicing.NotifyDriveServiced then
+									BreakdownServicing.NotifyDriveServiced()
+								end
+							end
+							local okFlightLog, FlightLog = pcall(require, 'modules.FlightLog.FlightLog')
+							if okFlightLog and FlightLog and FlightLog.RecordTransaction then
+								FlightLog.RecordTransaction({
+									category = "MAINTENANCE",
+									title = string.format("Component Overhaul (%s)", Format.Money(-totalModCost)),
+									amount = -totalModCost,
+									details = {
+										{ "Service Type", "Full Component & Subsystem Overhaul" },
+										{ "Modules Serviced", tostring(#damagedMods) },
+										{ "Total Fee", Format.Money(totalModCost) },
+									},
+									note = string.format("Restored %d worn/damaged components to 100%% integrity.", #damagedMods)
+								})
+							end
+						else
+							popupMsg = l.YOU_DONT_HAVE_ENOUGH_MONEY_FOR_THAT_OPTION
+							popup:open()
+						end
+					end
+					ui.spacing()
+
+					if ui.beginTable("ComponentRepairsTbl", 3) then
+						ui.tableSetupColumn("Component", { "WidthStretch" })
+						ui.tableSetupColumn("Integrity", { "WidthFixed" }, 110 * rescaleVector.x)
+						ui.tableSetupColumn("Action", { "WidthFixed" }, 140 * rescaleVector.x)
+						for idx, mod in ipairs(damagedMods) do
+							ui.tableNextRow()
+							ui.tableNextColumn()
+							ui.text(mod.name)
+							ui.tableNextColumn()
+							local pct = math.floor(mod.integrity * 100 + 0.5)
+							local statusCol = mod.disabled and Color(255, 75, 65, 255)
+								or (mod.integrity < 0.75 and Color(255, 190, 50, 255) or colors.white)
+							local statusText = mod.disabled and "0% OFFLINE" or string.format("%d%%", pct)
+							ui.textColored(statusCol, statusText)
+							ui.tableNextColumn()
+							if ui.button("REPAIR " .. Format.Money(mod.cost) .. "##repair_mod_" .. idx, Vector2(132 * rescaleVector.x, 24 * rescaleVector.y)) then
+								if PlayerState.GetMoney() >= mod.cost then
+									PlayerState.AddMoney(-mod.cost)
+									mod.equip.integrity = 1.0
+									local equipSet = Game.player:GetComponent("EquipSet")
+									if equipSet then equipSet:NotifyListeners("modify", mod.equip) end
+									ComponentIntegrity.SyncShipSubsystems(Game.player)
+									ui.playSfx("Repairing_Ship")
+									if mod.category == "hyperdrive" then
+										local okBS, BreakdownServicing = pcall(require, 'modules.BreakdownServicing.BreakdownServicing')
+										if okBS and BreakdownServicing and BreakdownServicing.NotifyDriveServiced then
+											BreakdownServicing.NotifyDriveServiced()
+										end
+									end
+								else
+									popupMsg = l.YOU_DONT_HAVE_ENOUGH_MONEY_FOR_THAT_OPTION
+									popup:open()
+								end
+							end
+						end
+						ui.endTable()
+					end
+				end
+			end)
+
+			ui.spacing()
+			ui.separator()
+			ui.spacing()
+
+			-- SECTION 3: PROPELLANT & HYPERDRIVE FUEL SERVICING
 			ui.withFont(orbiteer.medlarge, function()
 				ui.textColored(colors.uiPrimaryLight, "PROPELLANT & HYPERDRIVE FUEL SERVICING")
 			end)
@@ -464,11 +566,11 @@ local function drawShipRepair()
 						icons.hyperspace, true, colors.gaugeEquipmentMarket, '',
 						fuelGaugeWidth, fuelGaugeHeight, pionillium.body)
 				else
-					ui.textColored(colors.uiSecondary, "—")
+					ui.textColored(colors.fontDim, "—")
 					ui.nextColumn()
-					ui.textColored(colors.uiSecondary, "No Drive")
+					ui.textColored(colors.fontDim, "No Drive")
 					ui.nextColumn()
-					ui.textColored(colors.uiSecondary, "Hyperspace drive not installed on this vessel.")
+					ui.textColored(colors.fontDim, "Hyperspace drive not installed on this vessel.")
 				end
 
 				ui.columns(1, '', false)

@@ -18,6 +18,23 @@
 
 #include "profiler/Profiler.h"
 
+static SpaceStation *FindContainingOrbitalStation(const Ship *ship)
+{
+	if (!ship || ship->IsType(ObjectType::PLAYER) || ship->GetFlightState() != Ship::FLYING)
+		return nullptr;
+	if (!Pi::game || !Pi::game->GetSpace())
+		return nullptr;
+	const Space::BodyNearList nearby = Pi::game->GetSpace()->GetBodiesMaybeNear(ship, 1200.0);
+	for (Body *b : nearby) {
+		if (!b || !b->IsType(ObjectType::SPACESTATION))
+			continue;
+		SpaceStation *st = static_cast<SpaceStation *>(b);
+		if (st->IsInsideStation(ship))
+			return st;
+	}
+	return nullptr;
+}
+
 // returns true if command is complete
 bool Ship::AITimeStep(float timeStep)
 {
@@ -29,22 +46,14 @@ bool Ship::AITimeStep(float timeStep)
 
 	// Any NPC ship that finds itself inside an orbital space station without docking orders
 	// should immediately exit by recentering on the station axis and exiting through the airlock.
-	if (!IsType(ObjectType::PLAYER) && m_flightState == FLYING && Pi::game && Pi::game->GetSpace()) {
-		const Space::BodyNearList nearby = Pi::game->GetSpace()->GetBodiesMaybeNear(this, 1200.0);
-		for (Body *b : nearby) {
-			if (!b || !b->IsType(ObjectType::SPACESTATION)) continue;
-			SpaceStation *st = static_cast<SpaceStation *>(b);
-			if (st->IsInsideStation(this)) {
-				int bay = st->GetMyDockingPort(this);
-				bool hasDockingClearance = (bay != -1 && m_curAICmd && m_curAICmd->GetType() == AICommand::CMD_DOCK);
-				bool isDeparting = (m_curAICmd && m_curAICmd->GetType() == AICommand::CMD_DEPART);
+	if (SpaceStation *st = FindContainingOrbitalStation(this)) {
+		int bay = st->GetMyDockingPort(this);
+		bool hasDockingClearance = (bay != -1 && m_curAICmd && m_curAICmd->GetType() == AICommand::CMD_DOCK);
+		bool isDeparting = (m_curAICmd && m_curAICmd->GetType() == AICommand::CMD_DEPART);
 
-				if (!hasDockingClearance && !isDeparting) {
-					AIDepart(st);
-					return false;
-				}
-				break;
-			}
+		if (!hasDockingClearance && !isDeparting) {
+			AIDepart(st);
+			return false;
 		}
 	}
 
@@ -143,12 +152,22 @@ void Ship::AIGetStatusText(char *str)
 
 void Ship::AIKamikaze(Body *target)
 {
+	if (SpaceStation *st = FindContainingOrbitalStation(this)) {
+		if (!(m_curAICmd && m_curAICmd->GetType() == AICommand::CMD_DEPART))
+			AIDepart(st);
+		return;
+	}
 	AIClearInstructions();
 	m_curAICmd = new AICmdKamikaze(this, target);
 }
 
 void Ship::AIKill(Ship *target)
 {
+	if (SpaceStation *st = FindContainingOrbitalStation(this)) {
+		if (!(m_curAICmd && m_curAICmd->GetType() == AICommand::CMD_DEPART))
+			AIDepart(st);
+		return;
+	}
 	AIClearInstructions();
 	SetFuelReserve((GetFuel() < 0.5) ? GetFuel() / 2 : 0.25);
 
@@ -173,6 +192,11 @@ void Ship::AIJourney(SystemBodyPath &dest)
 
 void Ship::AIFlyTo(Body *target)
 {
+	if (SpaceStation *st = FindContainingOrbitalStation(this)) {
+		if (!(m_curAICmd && m_curAICmd->GetType() == AICommand::CMD_DEPART))
+			AIDepart(st);
+		return;
+	}
 	AIClearInstructions();
 	if (!target) return;
 
@@ -200,19 +224,6 @@ void Ship::AIFlyTo(Body *target)
 
 	SetFuelReserve((GetFuel() < 0.5) ? GetFuel() / 2 : 0.25);
 
-	// An NPC inside an orbital station cannot fly directly to outside targets; it must depart through the airlock first
-	if (!IsType(ObjectType::PLAYER) && Pi::game && Pi::game->GetSpace()) {
-		const Space::BodyNearList nearby = Pi::game->GetSpace()->GetBodiesMaybeNear(this, 1200.0);
-		for (Body *b : nearby) {
-			if (!b || !b->IsType(ObjectType::SPACESTATION)) continue;
-			SpaceStation *st = static_cast<SpaceStation *>(b);
-			if (st->IsInsideStation(this)) {
-				AIDepart(st);
-				return;
-			}
-		}
-	}
-
 	if (target->IsType(ObjectType::SHIP)) {
 		Ship *targetShip = static_cast<Ship *>(target);
 		if (targetShip->IsOnSurface())
@@ -227,6 +238,14 @@ void Ship::AIFlyTo(Body *target)
 
 void Ship::AIDock(SpaceStation *target)
 {
+	if (SpaceStation *st = FindContainingOrbitalStation(this)) {
+		const bool hasClearanceHere = (st == target && st->GetMyDockingPort(this) != -1);
+		if (!hasClearanceHere) {
+			if (!(m_curAICmd && m_curAICmd->GetType() == AICommand::CMD_DEPART))
+				AIDepart(st);
+			return;
+		}
+	}
 	AIClearInstructions();
 	if (!target) return;
 
@@ -270,6 +289,11 @@ void Ship::AIDepart(SpaceStation *target)
 
 void Ship::AIOrbit(Body *target, double alt)
 {
+	if (SpaceStation *st = FindContainingOrbitalStation(this)) {
+		if (!(m_curAICmd && m_curAICmd->GetType() == AICommand::CMD_DEPART))
+			AIDepart(st);
+		return;
+	}
 	AIClearInstructions();
 	if (!target) return;
 

@@ -7,6 +7,7 @@ local EquipSet  = require 'EquipSet'
 local Lang      = require 'Lang'
 local utils     = require 'utils'
 local PlayerState = require 'PlayerState'
+local StationProfiles = require 'StationProfiles'
 
 local ui = require 'pigui'
 
@@ -264,9 +265,13 @@ end
 
 -- Cost of the equipment item if buying
 function Outfitter:getBuyPrice(e)
-	-- If the item instance has a specific price, use that instead of the station price
-	-- TODO: the station should instead have a price modifier that adjusts the price of an equipment item
-	return rawget(e, "price") or self.station:GetEquipmentPrice(e:GetPrototype())
+	local proto = e:GetPrototype()
+	local rawPrice = rawget(e, "price")
+	local stationPrice = self.station:GetEquipmentPrice(proto)
+	if rawPrice and proto.price and proto.price > 0 then
+		return math.max(1, math.floor(rawPrice * (stationPrice / proto.price) + 0.5))
+	end
+	return rawPrice or stationPrice
 end
 
 -- Money gained from equipment item if selling
@@ -639,6 +644,17 @@ function Outfitter:render()
 				ui.text(self.replaceEquip and l.REPLACE_EQUIPMENT or l.AVAILABLE_FOR_PURCHASE)
 			end)
 
+			local profile = self.station and (self.station.GetStationProfile and self.station:GetStationProfile() or StationProfiles.Classify(self.station))
+			if profile then
+				ui.withFont(pionillium.details, function()
+					local tlLabel = (self.station.techLevel == 11) and "MILITARY (TL 11)" or string.format("TL %d", self.station.techLevel or 1)
+					ui.textColored(colors.uiPrimaryLight or colors.font, string.format("%s  //  %s", profile.shortLabel, tlLabel))
+					if ui.isItemHovered() then
+						ui.setTooltip(string.format("%s\n\nOutfitting Focus: %s\nPricing: %s", profile.label, profile.equipFocus, profile.priceHint))
+					end
+				end)
+			end
+
 			ui.withFont(pionillium.details, function()
 				self:drawSortRow()
 			end)
@@ -663,17 +679,24 @@ function Outfitter:render()
 		end
 
 		ui.child("##EquipmentList", Vector2(0, -buttonLineHeight), function()
-			for _, data in ipairs(self.equipmentList) do
-				local clicked = self:drawEquipmentItem(data, data == self.selectedEquip)
+			if #self.equipmentList == 0 then
+				ui.spacing()
+				ui.withStyleColors({ Text = colors.fontDim }, function()
+					ui.textWrapped(StationProfiles.GetRecommendedPurposeForSlot(self.filterSlot))
+				end)
+			else
+				for _, data in ipairs(self.equipmentList) do
+					local clicked = self:drawEquipmentItem(data, data == self.selectedEquip)
 
-				if clicked then
-					self:message("onSelectItem", data)
-				end
+					if clicked then
+						self:message("onSelectItem", data)
+					end
 
-				local doubleClicked = clicked and ui.isMouseDoubleClicked(0)
+					local doubleClicked = clicked and ui.isMouseDoubleClicked(0)
 
-				if doubleClicked and data.available then
-					self:message("onBuyItem", data.equip)
+					if doubleClicked and data.available then
+						self:message("onBuyItem", data.equip)
+					end
 				end
 			end
 		end)

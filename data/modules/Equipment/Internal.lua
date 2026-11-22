@@ -72,6 +72,14 @@ Equipment.Register("misc.interdiction_nullifier", EquipType.New {
 	icon_name="equip_shield_generator"
 })
 
+Equipment.Register("misc.subsystem_targeting_computer", EquipType.New {
+	l10n_key="SUBSYSTEM_TARGETING_COMPUTER",
+	price=8500, purchasable=true, tech_level=6,
+	slot={ type="computer", size=1 },
+	mass=0.4, volume=0.8, capabilities={ subsystem_targeting=1 },
+	icon_name="equip_scanner"
+})
+
 --===============================================
 -- Sensors
 --===============================================

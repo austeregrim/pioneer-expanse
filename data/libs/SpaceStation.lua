@@ -20,6 +20,8 @@ local Serializer  = require 'Serializer'
 local Equipment   = require 'Equipment'
 local Lang        = require 'Lang'
 local HullConfig  = require 'HullConfig'
+local StationProfiles = require 'StationProfiles'
+local ShipDealerships = require 'ShipDealerships'
 
 local ShipBuilder = require 'modules.MissionUtils.ShipBuilder'
 local ShipTemplates = require 'modules.MissionUtils.ShipTemplates'
@@ -41,6 +43,7 @@ function SpaceStation.GetTechLevel(systemBody)
 	end
 	-- cap the techlevel lower end based on the planets population
 	techLevel = math.max(techLevel, math.min(math.floor(systemBody.parent.population * 0.5), 11))
+	techLevel = math.max(techLevel, StationProfiles.GetMinTechLevel(systemBody))
 	return techLevel;
 end
 
@@ -61,12 +64,7 @@ local marketCache = {}
 
 local ensureStationData
 
-local function techLevelDiff(equip, station)
-	if equip == 'MILITARY' then equip = 11 end
-	if station == 'MILITARY' then station = 11 end
-
-	return station - equip
-end
+local equipmentPrice = {}
 
 -- create a transient entry for this station's equipment stock
 ---@param station SpaceStation
@@ -75,28 +73,45 @@ local function createEquipmentStock (station)
 	if equipmentStock[station] then error("Attempt to create station equipment stock twice!") end
 
 	local stock = {}
+	local prices = {}
+	local profile = StationProfiles.Classify(station)
 
 	for id, e in pairs(Equipment.new) do
-		-- Stations stock everything at least three tech levels below them,
-		-- with an increasing chance of being out-of-stock as the item's tech
-		-- approaches that of the station
-		local tlDelta = techLevelDiff(e.tech_level, station.techLevel)
-
-		if tlDelta >= 0 then
-			stock[id] = math.max(0, Engine.rand:Integer(-30, 100) + tlDelta * 10)
-
-			if e.lawlessness and Game.system.lawlessness < e.lawlessness then
-				stock[id] = nil -- not even advertised here
+		local eval = StationProfiles.EvaluateEquipment(station, e, profile)
+		if eval.allowed then
+			if eval.minStock > 0 then
+				stock[id] = math.max(eval.minStock, Engine.rand:Integer(eval.minStock, eval.maxStock))
+			else
+				stock[id] = math.max(0, Engine.rand:Integer(-8, eval.maxStock))
 			end
-
-			if e.min_security and Game.system.lawlessness >= (1 - e.min_security) then
-				stock[id] = nil -- not even advertised here
+			if eval.priceMod and eval.priceMod ~= 1.0 then
+				prices[id] = math.max(1, math.floor((e.price or 0) * eval.priceMod + 0.5))
 			end
 		end
-
 	end
 
 	equipmentStock[station] = stock
+	equipmentPrice[station] = prices
+end
+
+local function restockEquipment (station)
+	if not equipmentStock[station] then return end
+	local stock = equipmentStock[station]
+	local profile = StationProfiles.Classify(station)
+
+	for id, e in pairs(Equipment.new) do
+		local eval = StationProfiles.EvaluateEquipment(station, e, profile)
+		if eval.allowed then
+			local cur = stock[id]
+			if cur == nil then
+				stock[id] = (eval.minStock > 0) and eval.minStock or 0
+			elseif cur < eval.minStock then
+				stock[id] = cur + Engine.rand:Integer(1, math.max(2, eval.minStock - cur))
+			elseif cur < eval.maxStock and Engine.rand:Number() < 0.12 then
+				stock[id] = cur + Engine.rand:Integer(1, 3)
+			end
+		end
+	end
 end
 
 -- Create a transient entry for this station's commodity stocks and seed it with
@@ -108,8 +123,6 @@ local function createCommodityStock (station)
 end
 
 -- ============================================================================
-
-local equipmentPrice = {}
 
 --
 -- Method: GetEquipmentPrice
@@ -128,6 +141,7 @@ local equipmentPrice = {}
 --
 function SpaceStation:GetEquipmentPrice (e)
 	assert(self:exists())
+	ensureStationData(self)
 
 	if equipmentPrice[self] then
 		return equipmentPrice[self][e.id] or e.price
@@ -151,6 +165,7 @@ end
 --
 function SpaceStation:SetEquipmentPrice (e, price)
 	assert(self:exists())
+	ensureStationData(self)
 	if not equipmentPrice[self] then equipmentPrice[self] = {} end
 	equipmentPrice[self][e.id] = price
 end
@@ -172,6 +187,7 @@ end
 --
 function SpaceStation:GetEquipmentStock (e)
 	assert(self:exists())
+	ensureStationData(self)
 	return equipmentStock[self] and equipmentStock[self][e.id]
 end
 
@@ -368,10 +384,37 @@ end
 
 local shipsOnSale = {}
 
+function SpaceStation:GetDealership ()
+	assert(self:exists())
+	return ShipDealerships.GetDealership(self)
+end
+
+function SpaceStation:GetStationProfile ()
+	assert(self:exists())
+	return StationProfiles.Classify(self)
+end
+
 function SpaceStation:GetShipsOnSale ()
 	assert(self:exists())
+	ensureStationData(self)
 	if not shipsOnSale[self] then shipsOnSale[self] = {} end
 	return shipsOnSale[self]
+end
+
+local function normalizeShipEntry(entry)
+	return {
+		def          = entry.def,
+		skin         = entry.skin,
+		pattern      = entry.pattern,
+		label        = entry.label,
+		condition    = entry.condition or "USED",
+		sellerType   = entry.sellerType or (entry.condition == "NEW" and "DEALERSHIP" or "INDEPENDENT_USED"),
+		hullPercent  = entry.hullPercent or (entry.condition == "NEW" and 100 or 90),
+		flightHours  = entry.flightHours or 0,
+		hullPriceMod = entry.hullPriceMod or 1.0,
+		provenance   = entry.provenance,
+		equipList    = entry.equipList,
+	}
 end
 
 local function addShipOnSale (station, entry)
@@ -384,12 +427,7 @@ function SpaceStation:AddShipOnSale (entry)
 	assert(entry.def)
 	assert(entry.skin)
 	assert(entry.label)
-	addShipOnSale(self, {
-		def     = entry.def,
-		skin    = entry.skin,
-		pattern = entry.pattern,
-		label   = entry.label
-	})
+	addShipOnSale(self, normalizeShipEntry(entry))
 	Event.Queue("onShipMarketUpdate", self, shipsOnSale[self])
 end
 
@@ -428,91 +466,71 @@ function SpaceStation:ReplaceShipOnSale (old, new)
 	if num <= 0 then
 		self:AddShipOnSale(new)
 	else
-		shipsOnSale[self][num] = {
-			def     = new.def,
-			skin    = new.skin,
-			pattern = new.pattern,
-			label   = new.label,
-		}
+		shipsOnSale[self][num] = normalizeShipEntry(new)
 	end
 	Event.Queue("onShipMarketUpdate", self, shipsOnSale[self])
 end
 
-local isPlayerShip = function (def) return def.tag == "SHIP" and def.basePrice > 0 end
-
-local groundShips = utils.build_array(utils.filter(function (k,def)
-	return isPlayerShip(def)
-		and utils.contains_if(HullConfig.GetHullConfig(def.id).slots, function(s) return s.type:match("^hull") end)
-end, pairs(ShipDef)))
-
-local spaceShips  = utils.build_array(utils.filter(function (k,def) return isPlayerShip(def) end, pairs(ShipDef)))
-
-
--- Dynamics of ship adverts in ShipMarket --
---------------------------------------------
--- N(t) = Number of ads, lambda = decay constant:
---    d/dt N(t) = prod - lambda * N
--- and equilibrium:
---    dN/dt = 0 = prod - lambda * N_equil
--- and solution (if prod=0), with N_0 initial number:
---    N(t) = N_0 * exp(-lambda * t)
--- with tau = half life, i.e. N(tau) = 0.5*N_0 we get:
---    0.5*N_0 = N_0*exp(-lambda * tau)
--- else, with production:
---   N(t) = prod/lambda - N_0*exp(-lambda * t)
--- We want to have N_0 = N_equil, since ShipMarket should spawn in equilibrium
-
--- Average number of ship for sale for station
-local function N_equilibrium(station)
-	local pop = station.path:GetSystemBody().parent.population -- E.g. Earth=7, Mars=0.3
-	local pop_bonus = 9 * math.log(pop*0.45 + 1)       -- something that gives resonable result
-	if station.type == "STARPORT_SURFACE" then
-		pop_bonus = pop_bonus * 1.5
-	end
-
-	return 2 + pop_bonus
-end
-
--- add num random ships for sale to station ShipMarket
-local function addRandomShipAdvert(station, num)
-	for i=1,num do
-		local avail = station.type == "STARPORT_SURFACE" and groundShips or spaceShips
-		local def = avail[Engine.rand:Integer(1,#avail)]
-		local model = Engine.GetModel(def.modelName)
-		local pattern = model.numPatterns ~= 0 and Engine.rand:Integer(1,model.numPatterns) or nil
-		local label = Ship.MakeRandomLabel(def.id, "PLAYER")
-		addShipOnSale(station, {
-			def     = def,
-			skin    = ModelSkin.New():SetRandomColors(Engine.rand):SetDecal(def.manufacturer):SetLabel(label),
-			pattern = pattern,
-			label   = label,
-		})
-	end
-end
-
+-- Dynamics of dealership lots & ship turnover --
+-------------------------------------------------
 local function updateShipsOnSale (station)
 	if not shipsOnSale[station] then shipsOnSale[station] = {} end
-	local shipsOnSale = shipsOnSale[station]
+	local list = shipsOnSale[station]
+	local dealership = ShipDealerships.GetDealership(station)
 
-	local tau = 7*24                              -- half life of a ship advert in hours
-	local lambda = 0.693147 / tau                 -- removal probability= ln(2) / tau
-	local prod = N_equilibrium(station) * lambda  -- creation probability
+	if dealership.kind == "NONE" then
+		if #list > 0 then
+			shipsOnSale[station] = {}
+			Event.Queue("onShipMarketUpdate", station, shipsOnSale[station])
+		end
+		return
+	end
 
-	-- remove with decay rate lambda. Call ONCE/hour for each ship advert in station
-	for ref,ad in pairs(shipsOnSale) do
-		if Engine.rand:Number(0,1) < lambda then  -- remove one random ship (sold)
-			removeShipOnSale(station, Engine.rand:Integer(1,#shipsOnSale))
+	local newCount, usedCount = 0, 0
+	for _, ad in ipairs(list) do
+		if ad.condition == "USED" then
+			usedCount = usedCount + 1
+		else
+			newCount = newCount + 1
 		end
 	end
 
-	-- spawn a new ship adverts, call for each station
-	if Engine.rand:Number(0,1) <= prod then
-		addRandomShipAdvert(station, 1)
+	local tau = 7 * 24 -- half life of a ship listing in hours
+	local lambda = 0.693147 / tau
+
+	-- Iterate backwards safely while respecting minimum dealership showroom/lot floors
+	for i = #list, 1, -1 do
+		local ad = list[i]
+		local isUsed = (ad.condition == "USED")
+		local canRemove = false
+		if dealership.kind == "FRANCHISE" then
+			canRemove = isUsed and (usedCount > 2) or ((not isUsed) and (newCount > 2))
+		else
+			canRemove = (#list > 4)
+		end
+
+		if canRemove and Engine.rand:Number(0, 1) < lambda then
+			table.remove(list, i)
+			if isUsed then
+				usedCount = usedCount - 1
+			else
+				newCount = newCount - 1
+			end
+		end
 	end
 
-	if prod > 1 then print("Warning: ShipMarket not in equilibrium") end
+	local targetCount = (dealership.kind == "FRANCHISE") and 7 or 7
+	if #list < targetCount or (#list < 10 and Engine.rand:Number(0, 1) < 0.08) then
+		local needMin = (dealership.kind == "FRANCHISE") and (newCount < 2 or usedCount < 2) or (#list < 4)
+		if needMin or Engine.rand:Number(0, 1) < 0.15 then
+			local replacement = ShipDealerships.ReplenishListing(station, list)
+			if replacement then
+				addShipOnSale(station, normalizeShipEntry(replacement))
+			end
+		end
+	end
 
-	Event.Queue("onShipMarketUpdate", station, shipsOnSale)
+	Event.Queue("onShipMarketUpdate", station, list)
 end
 
 
@@ -801,6 +819,7 @@ local function updateSystem ()
 		Economy.UpdateStationMarket(assert(station:GetSystemBody()), station:GetCommodityMarket())
 
 		if visited[station] then
+			restockEquipment(station)
 			updateShipsOnSale(station)
 			updateAdverts(station)
 		end
@@ -815,18 +834,20 @@ local function createStationData (station)
 	createEquipmentStock(station)
 	createCommodityStock(station)
 
-	local shipAdsToSpawn = Engine.rand:Poisson(N_equilibrium(station))
-	addRandomShipAdvert(station, shipAdsToSpawn)
+	shipsOnSale[station] = ShipDealerships.GenerateInitialInventory(station)
 
 	Event.Queue("onCreateBB", station)
 end
 
 ensureStationData = function (station)
 	if not visited[station] or not equipmentStock[station] then
-		logWarning("Creating station data for station " .. station.label .. " before onPlayerDocked event is processed for that station")
-		logVerbose(debug.dumpstack(2))
+		logVerbose("Lazy-creating station data for station " .. station.label)
 
-		createStationData(station)
+		if visited[station] and not equipmentStock[station] then
+			createEquipmentStock(station)
+		else
+			createStationData(station)
+		end
 	end
 end
 
@@ -877,28 +898,51 @@ end)
 
 Event.Register("onGameStart", function ()
 	if (loaded_data) then
-		equipmentStock = loaded_data.equipmentStock
+		equipmentStock = loaded_data.equipmentStock or {}
 		equipmentPrice = loaded_data.equipmentPrice or {} -- handle missing in old saves
 		commodityPrice = utils.automagic(loaded_data.commodityPrice)
 
 		visited = loaded_data.visited or {}
-		police = loaded_data.police
+		police = loaded_data.police or {}
 
 		for station,_ in pairs(visited) do
-			createCommodityStock(station)
+			if station:exists() then
+				createCommodityStock(station)
+			end
 		end
 
-		for station,list in pairs(loaded_data.shipsOnSale) do
+		for station,list in pairs(loaded_data.shipsOnSale or {}) do
 			shipsOnSale[station] = {}
-			for i,entry in pairs(loaded_data.shipsOnSale[station]) do
+			for i,entry in pairs(list) do
 				local def = ShipDef[entry.id]
 				if (def) then
-					shipsOnSale[station][i] = {
-						def     = def,
-						skin    = entry.skin,
-						pattern = entry.pattern,
-						label   = entry.label,
-					}
+					shipsOnSale[station][i] = normalizeShipEntry({
+						def          = def,
+						skin         = entry.skin,
+						pattern      = entry.pattern,
+						label        = entry.label,
+						condition    = entry.condition,
+						sellerType   = entry.sellerType,
+						hullPercent  = entry.hullPercent,
+						flightHours  = entry.flightHours,
+						hullPriceMod = entry.hullPriceMod,
+						provenance   = entry.provenance,
+						equipList    = entry.equipList,
+					})
+				end
+			end
+		end
+
+		local loadedVersion = loaded_data.marketVersion or 1
+		if loadedVersion < 2 then
+			for station,_ in pairs(visited) do
+				if station:exists() then
+					equipmentStock[station] = nil
+					equipmentPrice[station] = nil
+					createEquipmentStock(station)
+					if not shipsOnSale[station] or #shipsOnSale[station] == 0 then
+						shipsOnSale[station] = ShipDealerships.GenerateInitialInventory(station)
+					end
 				end
 			end
 		end
@@ -927,6 +971,12 @@ Event.Register("onPlayerDocked", function (ship, station)
 		createStationData(station)
 	else
 		Economy.UpdateStationMarket(assert(station:GetSystemBody()), station:GetCommodityMarket())
+	end
+end, true)
+
+Event.Register("onPlayerRescued", function (_, station)
+	if station and station:exists() and station:isa("SpaceStation") then
+		ensureStationData(station)
 	end
 end, true)
 
@@ -962,6 +1012,7 @@ end)
 Serializer:Register("SpaceStation",
 	function ()
 		local data = {
+			marketVersion = 2,
 			equipmentStock = equipmentStock,
 			equipmentPrice = equipmentPrice,
 			commodityPrice = commodityPrice,
@@ -972,12 +1023,19 @@ Serializer:Register("SpaceStation",
 
 		for station,list in pairs(shipsOnSale) do
 			data.shipsOnSale[station] = {}
-			for i,entry in pairs(shipsOnSale[station]) do
+			for i,entry in pairs(list) do
 				data.shipsOnSale[station][i] = {
-					id      = entry.def.id,
-					skin    = entry.skin,
-					pattern = entry.pattern,
-					label   = entry.label,
+					id           = entry.def.id,
+					skin         = entry.skin,
+					pattern      = entry.pattern,
+					label        = entry.label,
+					condition    = entry.condition,
+					sellerType   = entry.sellerType,
+					hullPercent  = entry.hullPercent,
+					flightHours  = entry.flightHours,
+					hullPriceMod = entry.hullPriceMod,
+					provenance   = entry.provenance,
+					equipList    = entry.equipList,
 				}
 			end
 		end

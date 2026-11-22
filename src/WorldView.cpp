@@ -34,6 +34,7 @@
 #include "SpaceStation.h"
 #include "galaxy/SystemBody.h"
 #include "ship/GunManager.h"
+#include "ship/PlayerShipController.h"
 #include "ship/ShipViewController.h"
 #include "ship/SupercruiseController.h"
 #include "sound/Sound.h"
@@ -414,20 +415,24 @@ void WorldView::UpdateProjectedObjects()
 
 		UpdateIndicator(m_combatTargetIndicator, targScreenPos);
 
-		// calculate firing solution and relative velocity along our z axis
-		int laser = -1;
-		if (shipView->GetCamType() == ShipViewController::CAM_INTERNAL) {
-			switch (shipView->m_internalCameraController->GetMode()) {
-			case InternalCameraController::MODE_FRONT: laser = 0; break;
-			case InternalCameraController::MODE_REAR: laser = 1; break;
-			default: break;
-			}
+		// Update subsystem target diamond when Targeting Computer has a subsystem locked
+		PlayerShipController *psc = Pi::player->GetPlayerController();
+		const std::string &subId = psc ? psc->GetTargetSubsystemId() : std::string();
+		const Subsystems::SubsystemNode *subNode = (enemy->IsType(ObjectType::SHIP) && enemy->GetFlightState() != Ship::SUPERCRUISE && !subId.empty())
+			? enemy->FindSubsystem(subId)
+			: nullptr;
+		if (subNode) {
+			const matrix3x3d targToCam = enemy->GetOrientRelTo(cam_frame->GetId());
+			UpdateIndicator(m_subsystemIndicator, targScreenPos + (targToCam * subNode->localPos));
+		} else {
+			HideIndicator(m_subsystemIndicator);
 		}
 
-		GunManager *gunManager = Pi::player->GetComponent<GunManager>();
-		if (laser >= 0 && laser < gunManager->GetWeaponGroups().size()) {
-			const auto &group = gunManager->GetWeaponGroups()[laser];
+		// calculate firing solution and relative velocity along our z axis
+		const int laser = GetActiveWeapon();
 
+		GunManager *gunManager = Pi::player->GetComponent<GunManager>();
+		if (laser >= 0 && size_t(laser) < gunManager->GetWeaponGroups().size()) {
 			if (gunManager->GetGroupTarget(laser)) {
 				UpdateIndicator(m_targetLeadIndicator, cam_rot * gunManager->GetGroupLeadPos(laser));
 				if ((m_targetLeadIndicator.side != INDICATOR_ONSCREEN) || (m_combatTargetIndicator.side != INDICATOR_ONSCREEN))
@@ -441,6 +446,7 @@ void WorldView::UpdateProjectedObjects()
 	} else {
 		HideIndicator(m_combatTargetIndicator);
 		HideIndicator(m_targetLeadIndicator);
+		HideIndicator(m_subsystemIndicator);
 	}
 }
 
@@ -536,16 +542,19 @@ void WorldView::DrawCombatTargetIndicator(const Indicator &target, const Indicat
 	if (target.side == INDICATOR_HIDDEN) return;
 
 	if (target.side == INDICATOR_ONSCREEN) {
+		const bool hasSub = (m_subsystemIndicator.side == INDICATOR_ONSCREEN);
 		const float x1 = target.pos.x, y1 = target.pos.y;
+		const float ax = hasSub ? m_subsystemIndicator.pos.x : x1;
+		const float ay = hasSub ? m_subsystemIndicator.pos.y : y1;
 		const float x2 = lead.pos.x, y2 = lead.pos.y;
 
-		float xd = x2 - x1, yd = y2 - y1;
+		float xd = x2 - ax, yd = y2 - ay;
 		if (lead.side != INDICATOR_ONSCREEN) {
 			xd = 1.0f;
 			yd = 0.0f;
 		} else {
 			float len = xd * xd + yd * yd;
-			if (len < 1e-6) {
+			if (len < 1e-6f) {
 				xd = 1.0f;
 				yd = 0.0f;
 			} else {
@@ -555,32 +564,52 @@ void WorldView::DrawCombatTargetIndicator(const Indicator &target, const Indicat
 			}
 		}
 
-		const vector3f vts[] = {
-			// target crosshairs
-			vector3f(x1 + 10 * xd, y1 + 10 * yd, 0.0f),
-			vector3f(x1 + 20 * xd, y1 + 20 * yd, 0.0f),
-			vector3f(x1 - 10 * xd, y1 - 10 * yd, 0.0f),
-			vector3f(x1 - 20 * xd, y1 - 20 * yd, 0.0f),
-			vector3f(x1 - 10 * yd, y1 + 10 * xd, 0.0f),
-			vector3f(x1 - 20 * yd, y1 + 20 * xd, 0.0f),
-			vector3f(x1 + 10 * yd, y1 - 10 * xd, 0.0f),
-			vector3f(x1 + 20 * yd, y1 - 20 * xd, 0.0f),
+		const Color subCol(255, 195, 50, 235);
+		const Color leadCol = hasSub ? subCol : c;
 
-			// lead crosshairs
-			vector3f(x2 - 10 * xd, y2 - 10 * yd, 0.0f),
-			vector3f(x2 + 10 * xd, y2 + 10 * yd, 0.0f),
-			vector3f(x2 - 10 * yd, y2 + 10 * xd, 0.0f),
-			vector3f(x2 + 10 * yd, y2 - 10 * xd, 0.0f),
+		std::vector<vector3f> vts;
+		std::vector<Color> cols;
+		vts.reserve(24);
+		cols.reserve(24);
 
-			// line between crosshairs
-			vector3f(x1 + 20 * xd, y1 + 20 * yd, 0.0f),
-			vector3f(x2 - 10 * xd, y2 - 10 * yd, 0.0f)
+		auto pushSeg = [&](const vector3f &a, const vector3f &b, const Color &col) {
+			vts.push_back(a);
+			vts.push_back(b);
+			cols.push_back(col);
+			cols.push_back(col);
 		};
-		if (lead.side == INDICATOR_ONSCREEN) {
-			m_indicator.SetData(14, vts, c);
-		} else {
-			m_indicator.SetData(8, vts, c);
+
+		// Target hull crosshairs (always red)
+		pushSeg(vector3f(x1 + 10 * xd, y1 + 10 * yd, 0.0f), vector3f(x1 + 20 * xd, y1 + 20 * yd, 0.0f), c);
+		pushSeg(vector3f(x1 - 10 * xd, y1 - 10 * yd, 0.0f), vector3f(x1 - 20 * xd, y1 - 20 * yd, 0.0f), c);
+		pushSeg(vector3f(x1 - 10 * yd, y1 + 10 * xd, 0.0f), vector3f(x1 - 20 * yd, y1 + 20 * xd, 0.0f), c);
+		pushSeg(vector3f(x1 + 10 * yd, y1 - 10 * xd, 0.0f), vector3f(x1 + 20 * yd, y1 - 20 * xd, 0.0f), c);
+
+		// Targeted subsystem amber diamond
+		if (hasSub) {
+			const float d = 11.0f;
+			const vector3f top(ax, ay - d, 0.0f);
+			const vector3f right(ax + d, ay, 0.0f);
+			const vector3f bottom(ax, ay + d, 0.0f);
+			const vector3f left(ax - d, ay, 0.0f);
+			pushSeg(top, right, subCol);
+			pushSeg(right, bottom, subCol);
+			pushSeg(bottom, left, subCol);
+			pushSeg(left, top, subCol);
 		}
+
+		// Lead crosshairs + line from active aim anchor (hull or subsystem diamond)
+		if (lead.side == INDICATOR_ONSCREEN) {
+			pushSeg(vector3f(x2 - 10 * xd, y2 - 10 * yd, 0.0f), vector3f(x2 + 10 * xd, y2 + 10 * yd, 0.0f), leadCol);
+			pushSeg(vector3f(x2 - 10 * yd, y2 + 10 * xd, 0.0f), vector3f(x2 + 10 * yd, y2 - 10 * xd, 0.0f), leadCol);
+			const float gap = hasSub ? 13.0f : 20.0f;
+			const float totalDist = sqrt((x2 - ax) * (x2 - ax) + (y2 - ay) * (y2 - ay));
+			if (totalDist > gap + 12.0f) {
+				pushSeg(vector3f(ax + gap * xd, ay + gap * yd, 0.0f), vector3f(x2 - 10 * xd, y2 - 10 * yd, 0.0f), leadCol);
+			}
+		}
+
+		m_indicator.SetData(Uint32(vts.size()), vts.data(), cols.data());
 		m_indicator.Draw(m_renderer, m_indicatorMat.get());
 	} else {
 		DrawEdgeMarker(target, c);

@@ -30,7 +30,9 @@ public:
 
 	enum TargetingCriteria {
 		TARGET_NEAREST_HOSTILE,
-		CYCLE_HOSTILE
+		CYCLE_HOSTILE,
+		CYCLE_ALL_NEXT,
+		CYCLE_ALL_PREV
 	};
 
 	struct RadarContact {

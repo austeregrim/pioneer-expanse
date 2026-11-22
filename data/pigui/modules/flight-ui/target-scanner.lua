@@ -118,6 +118,22 @@ local function buildTargetScannerRows(target, inSupercruise)
 		end
 	end
 
+	if not inSupercruise and target.GetSubsystemHealthSummary then
+		local tH = target:GetSubsystemHealthSummary()
+		if tH <= 0.001 then
+			table.insert(data, { name = "PROPULSION", value = "DISABLED (DRIFTING)", color = Color(255, 85, 75, 255) })
+		end
+	end
+
+	local sub = (not inSupercruise and target == player:GetCombatTarget() and player.GetTargetSubsystem) and player:GetTargetSubsystem() or nil
+	if sub then
+		local pct = math.floor((sub.integrity or 1.0) * 100 + 0.5)
+		local valText = sub.disabled and "OFFLINE (0%)" or string.format("%s %d%%", string.upper(sub.name or sub.id), pct)
+		local subCol = sub.disabled and Color(255, 85, 75, 255)
+			or ((sub.integrity or 1.0) < 0.75 and Color(255, 195, 50, 255) or Color(100, 225, 165, 255))
+		table.insert(data, { name = "SUBSYSTEM [ ] ]", value = valText, color = subCol })
+	end
+
 	return data
 end
 
@@ -158,11 +174,12 @@ end
 
 local function displayTargetScanner(min, max)
 	local scanner_level = (player["target_scanner_level_cap"] or 0)
-	if scanner_level == 0 then return end
+	local hasSubTarget = (player.HasSubsystemTargeting and player:HasSubsystemTargeting() and player:GetTargetSubsystem() ~= nil)
+	if scanner_level == 0 and not hasSubTarget then return end
 
 	-- what is the difference between target_scanner and advanced_target_scanner?
 	local target = player:GetNavTarget()
-	if not target or not target:IsShip() then
+	if (scanner_level == 0 and hasSubTarget) or not target or not target:IsShip() then
 		target = player:GetCombatTarget()
 	end
 	if not target or not target:IsShip() then

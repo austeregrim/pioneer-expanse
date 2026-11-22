@@ -1928,8 +1928,103 @@ static int l_ship_get_ship_mass_lock_factor(lua_State *l)
 static int l_ship_is_fsd_offline(lua_State *l)
 {
 	Ship *s = LuaObject<Ship>::CheckFromLua(1);
-	lua_pushboolean(l, s->GetSupercruise() && s->GetSupercruise()->IsFsdOffline());
+	lua_pushboolean(l, s->IsHyperdriveOffline() || (s->GetSupercruise() && s->GetSupercruise()->IsFsdOffline()));
 	return 1;
+}
+
+static int l_ship_set_fsd_offline(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	bool offline = lua_toboolean(l, 2);
+	if (s->GetSupercruise())
+		s->GetSupercruise()->SetFsdOffline(offline);
+	return 0;
+}
+
+static int l_ship_get_subsystems(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	s->EnsureDefaultSubsystems();
+	const auto &nodes = s->GetSubsystems();
+	lua_createtable(l, int(nodes.size()), 0);
+	for (size_t i = 0; i < nodes.size(); ++i) {
+		const auto &node = nodes[i];
+		lua_createtable(l, 0, 8);
+		LuaPush(l, node.id);
+		lua_setfield(l, -2, "id");
+		LuaPush(l, node.name);
+		lua_setfield(l, -2, "name");
+		LuaPush(l, node.slotId);
+		lua_setfield(l, -2, "slotId");
+		LuaPush(l, node.category);
+		lua_setfield(l, -2, "category");
+		LuaPush(l, double(node.integrity));
+		lua_setfield(l, -2, "integrity");
+		LuaPush(l, node.disabled);
+		lua_setfield(l, -2, "disabled");
+		LuaPush(l, node.localPos);
+		lua_setfield(l, -2, "localPos");
+		LuaPush(l, double(node.radius));
+		lua_setfield(l, -2, "radius");
+		lua_rawseti(l, -2, int(i + 1));
+	}
+	return 1;
+}
+
+static int l_ship_sync_subsystems(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	luaL_checktype(l, 2, LUA_TTABLE);
+	LuaTable arr(l, 2);
+	std::vector<Subsystems::SubsystemNode> nodes;
+	std::vector<std::string> tags;
+
+	const size_t n = lua_rawlen(l, 2);
+	nodes.reserve(n);
+	tags.reserve(n);
+	for (size_t i = 1; i <= n; ++i) {
+		lua_rawgeti(l, 2, int(i));
+		if (lua_istable(l, -1)) {
+			LuaTable row(l, -1);
+			Subsystems::SubsystemNode node;
+			node.id = row.Get<std::string>("id", std::string());
+			node.name = row.Get<std::string>("name", node.id);
+			node.slotId = row.Get<std::string>("slotId", std::string());
+			node.category = row.Get<std::string>("category", std::string("utility"));
+			node.integrity = Clamp(float(row.Get<double>("integrity", 1.0)), 0.0f, 1.0f);
+			node.disabled = (node.integrity <= 0.001f);
+			std::string tag = row.Get<std::string>("tag", std::string());
+			if (!node.id.empty()) {
+				nodes.push_back(std::move(node));
+				tags.push_back(std::move(tag));
+			}
+		}
+		lua_pop(l, 1);
+	}
+
+	s->SetSubsystems(std::move(nodes), tags);
+	return 0;
+}
+
+static int l_ship_set_subsystem_health_summary(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	float thrusterH = float(luaL_optnumber(l, 2, 1.0));
+	float hyperdriveH = float(luaL_optnumber(l, 3, 1.0));
+	float shieldH = float(luaL_optnumber(l, 4, 1.0));
+	float sensorH = float(luaL_optnumber(l, 5, 1.0));
+	s->SetSubsystemHealthSummary(thrusterH, hyperdriveH, shieldH, sensorH);
+	return 0;
+}
+
+static int l_ship_get_subsystem_health_summary(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushnumber(l, double(s->GetThrusterHealth()));
+	lua_pushnumber(l, double(s->GetHyperdriveHealth()));
+	lua_pushnumber(l, double(s->GetShieldHealth()));
+	lua_pushnumber(l, double(s->GetSensorHealth()));
+	return 4;
 }
 
 static bool resolve_hyperspace_dest(lua_State *l, Ship *s, SystemPath &outDest)
@@ -2193,6 +2288,11 @@ void LuaObject<Ship>::RegisterClass()
 		{ "GetInterdictionPeer", l_ship_get_interdiction_peer },
 		{ "GetShipMassLockFactor", l_ship_get_ship_mass_lock_factor },
 		{ "IsFsdOffline", l_ship_is_fsd_offline },
+		{ "SetFsdOffline", l_ship_set_fsd_offline },
+		{ "GetSubsystems", l_ship_get_subsystems },
+		{ "SyncSubsystems", l_ship_sync_subsystems },
+		{ "SetSubsystemHealthSummary", l_ship_set_subsystem_health_summary },
+		{ "GetSubsystemHealthSummary", l_ship_get_subsystem_health_summary },
 
 		{ 0, 0 }
 	};

@@ -16,6 +16,7 @@ local PlayerState= require 'PlayerState'
 local Passengers = require 'Passengers'
 local PlayerFleet = require 'modules.PlayerFleet.PlayerFleet'
 local Insurance = require 'modules.Insurance.Insurance'
+local ShipDealerships = require 'ShipDealerships'
 
 local ui = require 'pigui'
 
@@ -23,6 +24,7 @@ local utils = require 'utils'
 
 local pionillium = ui.fonts.pionillium
 local orbiteer = ui.fonts.orbiteer
+local colors = ui.theme.colors
 local l = Lang.GetResource("ui-core")
 local ls = Lang.GetResource("ships")
 local Vector2 = _G.Vector2
@@ -32,18 +34,23 @@ local commsChildFlags = ui.ChildFlags { 'AlwaysUseWindowPadding', 'Borders' }
 local vZero = Vector2(0,0)
 local widgetSizes = ui.rescaleUI({
 	iconSize = Vector2(34, 34),
+	dealerIconSize = Vector2(40, 40),
 	buyButton = Vector2(88, 32),
 	confirmButtonSize = Vector2(320, 40),
 	itemSpacing = Vector2(10, 4),
+	headerHeight = 68,
 }, Vector2(1920, 1080))
 widgetSizes.iconSpacer = (widgetSizes.buyButton - widgetSizes.iconSize)/2
 
 local shipMarket
----@type table<table, { price: integer, equip: { [1]: string, [2]: EquipType }[] }
+---@type table<table, table>
 local advertDataCache = {}
 local icons = {}
 local manufacturerIcons = {}
 local selectedItem
+local dealership
+local filterMode = "ALL"
+local counts = { total = 0, newCount = 0, usedCount = 0 }
 
 local shipSellPriceReduction = 0.65
 local equipSellPriceReduction = 0.8
@@ -76,43 +83,7 @@ local shipClassString = {
 }
 
 local function makeAdvertDataCacheEntry(shipOnSale)
-	local def = shipOnSale.def ---@type ShipDef
-	local config = assert(HullConfig.GetHullConfig(def.id))
-
-	-- TODO: some sort of condition-based discount or an alteration to the
-	-- price for purchasing directly from a manufacturer's station?
-	local shipPrice = def.basePrice
-
-	local equip = {}
-
-	for _, slot in pairs(config.slots) do
-
-		if slot.default then
-			local defaultEquip = Equipment.Get(slot.default)
-
-			-- Have to go through all of this to get an accurate cost for the ship...
-			-- TODO: consider adding a "cost function" to EquipType which moves
-			-- responsibility for computing accurate cost into the domain of the code
-			-- that knows how the equipment will be specialized for the ship?
-			if defaultEquip then
-				local inst = defaultEquip:Instance()
-
-				if inst.SpecializeForShip then
-					inst:SpecializeForShip(config)
-				end
-
-				if slot.count then
-					inst:SetCount(slot.count)
-				end
-
-				table.insert(equip, { slot.id, inst })
-				shipPrice = shipPrice + inst.price
-			end
-		end
-
-	end
-
-	return { price = shipPrice, equip = equip }
+	return ShipDealerships.ComputeListingOffer(shipOnSale)
 end
 
 local function refreshModelSpinner()
@@ -122,31 +93,105 @@ local function refreshModelSpinner()
 	modelSpinner:setModel(cachedShip, selectedItem.skin, cachedPattern)
 end
 
+local function applyFilter()
+	local station = Game.player:GetDockedWith()
+	local rawList = station and station:GetShipsOnSale() or {}
+
+	local sorted = {}
+	counts.total = 0
+	counts.newCount = 0
+	counts.usedCount = 0
+
+	for _, sos in ipairs(rawList) do
+		if not advertDataCache[sos] then
+			advertDataCache[sos] = makeAdvertDataCacheEntry(sos)
+		end
+		table.insert(sorted, sos)
+		counts.total = counts.total + 1
+		if sos.condition == "USED" then
+			counts.usedCount = counts.usedCount + 1
+		else
+			counts.newCount = counts.newCount + 1
+		end
+	end
+
+	table.sort(sorted, function(a, b)
+		local aUsed = (a.condition == "USED")
+		local bUsed = (b.condition == "USED")
+		if aUsed ~= bUsed then
+			return not aUsed
+		end
+		local pa = advertDataCache[a] and advertDataCache[a].price or 0
+		local pb = advertDataCache[b] and advertDataCache[b].price or 0
+		if pa ~= pb then
+			return pa < pb
+		end
+		local na = ls[a.def.i18n_key] or a.def.name or ""
+		local nb = ls[b.def.i18n_key] or b.def.name or ""
+		if na ~= nb then
+			return na < nb
+		end
+		return (a.label or "") < (b.label or "")
+	end)
+
+	local filtered = {}
+	for _, sos in ipairs(sorted) do
+		local isUsed = (sos.condition == "USED")
+		if filterMode == "ALL"
+			or (filterMode == "NEW" and not isUsed)
+			or (filterMode == "USED" and isUsed)
+		then
+			table.insert(filtered, sos)
+		end
+	end
+
+	shipMarket.items = filtered
+
+	local foundSelected = false
+	if selectedItem then
+		for _, sos in ipairs(filtered) do
+			if sos == selectedItem then
+				foundSelected = true
+				break
+			end
+		end
+	end
+
+	if not foundSelected then
+		selectedItem = filtered[1]
+		shipMarket.selectedItem = selectedItem
+		refreshModelSpinner()
+	end
+end
+
 local function refreshShipMarket()
-	widgetSizes.rowVerticalSpacing = Vector2(0, math.max(0, (widgetSizes.iconSize.y + widgetSizes.itemSpacing.y - pionillium.body.size)/2))
+	widgetSizes.rowVerticalSpacing = Vector2(0, math.max(0, (widgetSizes.iconSize.y + widgetSizes.itemSpacing.y - pionillium.body.size * 1.9) / 2))
 
 	local station = Game.player:GetDockedWith()
 	if station then
-		shipMarket.items = station:GetShipsOnSale()
-
-		advertDataCache = utils.map_table(shipMarket.items, function(_, sos)
-			return sos, makeAdvertDataCacheEntry(sos)
-		end)
+		dealership = station.GetDealership and station:GetDealership() or ShipDealerships.GetDealership(station)
+		local rawList = station:GetShipsOnSale()
+		advertDataCache = {}
+		for _, sos in ipairs(rawList) do
+			advertDataCache[sos] = makeAdvertDataCacheEntry(sos)
+		end
 	else
+		dealership = nil
 		shipMarket.items = {}
 		advertDataCache = {}
 	end
 
 	selectedItem = nil
 	shipMarket.selectedItem = nil
+	applyFilter()
 end
 
-local function manufacturerIcon (manufacturer)
+local function manufacturerIcon (manufacturer, sz)
 	if(manufacturer ~= "unknown" and manufacturer ~= nil) then
 		if manufacturerIcons[manufacturer] == nil then
 			manufacturerIcons[manufacturer] = PiImage.New("icons/manufacturer/".. manufacturer ..".png")
 		end
-		manufacturerIcons[manufacturer]:Draw(widgetSizes.iconSize)
+		manufacturerIcons[manufacturer]:Draw(sz or widgetSizes.iconSize)
 	end
 end
 
@@ -204,28 +249,27 @@ local function buyShip (mkt, sos)
 
 	PlayerState.AddMoney(-cost)
 
+	local condLabel = (sos.condition == "USED") and "Pre-Owned" or "Factory New"
 	local okFlightLog, FlightLog = pcall(require, 'modules.FlightLog.FlightLog')
 	if okFlightLog and FlightLog and FlightLog.RecordTransaction then
 		FlightLog.RecordTransaction({
 			category = "SHIP",
-			title = string.format("Vessel Acquisition: %s (%s)", def.name, Format.Money(-cost)),
+			title = string.format("Vessel Acquisition (%s): %s (%s)", condLabel, def.name, Format.Money(-cost)),
 			amount = -cost,
 			details = {
 				{ "Vessel Model", def.name },
+				{ "Condition", condLabel },
+				{ "Seller", dealership and dealership.name or "Starport Yard" },
 				{ "Vessel Registration", sos.label or "Unnamed" },
 				{ "Trade-in Deducted", Format.Money(tradeIn or 0) },
 				{ "Net Cost Paid", Format.Money(cost) },
 			},
-			note = string.format("Acquired %s (%s) from shipyard.", def.name, sos.label or "Unnamed")
+			note = string.format("Acquired %s %s (%s) from %s.", condLabel, def.name, sos.label or "Unnamed", dealership and dealership.name or "shipyard")
 		})
 	end
 
-	station:ReplaceShipOnSale(sos, {
-		def     = ShipDef[player.shipId],
-		skin    = player:GetSkin(),
-		pattern = player.model.pattern,
-		label   = player.label,
-	})
+	local tradeInListing = ShipDealerships.BuildTradeInListing(player)
+	station:ReplaceShipOnSale(sos, tradeInListing)
 
 	player:SetShipType(def.id)
 	Insurance.SetPlayerShipSubsidized(false)
@@ -233,38 +277,8 @@ local function buyShip (mkt, sos)
 	if sos.pattern then player.model:SetPattern(sos.pattern) end
 	player:SetLabel(sos.label)
 
-	-- TODO: ship ads should support an explicit list of (pre-owned) equipment as well as / instead of factory-default items
-	-- At current we just build a list from the HullConfig's default items
-
-	local equipSet = player:GetComponent('EquipSet')
-
-	-- Install pre-built list of default equipment into ship
-	for _, pair in ipairs(shipData.equip) do
-		local handle = assert(equipSet:GetSlotHandle(pair[1]))
-
-		if equipSet:CanInstallInSlot(handle, pair[2]) then
-			equipSet:Install(pair[2], handle)
-		else
-			logWarning("Default equipment item {} for ship slot {}.{} is not compatible with slot." % { handle.default, player.shipId, handle.id })
-		end
-	end
-
-	-- FIXME: fallback pass. Hyperdrives should be specified as a default item on the hyperdrive slot
-	-- Once all hyperdrives are specified as default, this pass should be removed
-	if def.hyperdriveClass > 0 and not player:GetInstalledHyperdrive() then
-		local slot = player:GetComponent('EquipSet'):GetAllSlotsOfType('hyperdrive')[1]
-
-		-- Install the best-fitting non-military hyperdrive we can
-		local hyperdrive = utils.best_score(Equipment.new, function(_, equip)
-			return EquipSet.CompatibleWithSlot(equip, slot) and equip.slot.type:match("%.civilian")
-				and equip.capabilities.hyperclass or nil
-		end)
-
-		player:GetComponent('EquipSet'):Install(hyperdrive:Instance(), slot)
-	end
-
-	player:SetFuelPercent(100)
-	refreshShipMarket();
+	ShipDealerships.InstallListingEquipment(player, shipData, sos)
+	refreshShipMarket()
 
 	mkt.popup.msg = l.THANKS_AND_REMEMBER_TO_BUY_FUEL
 	mkt.popup:open()
@@ -337,7 +351,6 @@ function FormatAndCompareShips:compare_and_draw_column(desc, a, b, fmt_a, fmt_b)
 end
 
 function FormatAndCompareShips:draw_hyperdrive_cell(desc)
-
 	local function fmt( v )
 		return v > 0 and v < 8 and
 			Equipment.new["hyperspace.hyperdrive_" .. v]:GetName() or l.NONE
@@ -420,14 +433,11 @@ function FormatAndCompareShips:draw_berths_slot_cell(desc)
 end
 
 function FormatAndCompareShips:draw_yes_no_equip_slot_cell(desc, key)
-
 	local function fmt( v ) return v==1 and l.YES or l.NO end
-
 	self:compare_and_draw_column( desc, getNumSlotsCompatibleWithType(self.def, key), getNumSlotsCompatibleWithType(self.b.def, key), fmt )
 end
 
 function FormatAndCompareShips:draw_atmos_pressure_limit_cell(desc)
-
 	local a_shield = getBestSlotSizeOfType(self.def, "hull.atmo_shield")
 	local b_shield = getBestSlotSizeOfType(self.b.def, "hull.atmo_shield")
 
@@ -446,16 +456,9 @@ function FormatAndCompareShips:draw_atmos_pressure_limit_cell(desc)
 		return atmoSlot
 	end
 
-	local function fmt_a( v )
-		return fmt( self.def, a_shield )
-	end
+	local function fmt_a( v ) return fmt( self.def, a_shield ) end
+	local function fmt_b( v ) return fmt( self.b.def, b_shield ) end
 
-	local function fmt_b( v )
-		return fmt( self.b.def, b_shield )
-	end
-
-	-- multiply the values by 1000 and then add on if there is capacity for atmo_shielding so that the compare takes that into account
-	-- however, note the formatting ignores the passed in value and therefore displays correctly.
 	self:compare_and_draw_column( desc, self.def.atmosphericPressureLimit*1000+a_shield, self.b.def.atmosphericPressureLimit*1000+b_shield, fmt_a, fmt_b )
 end
 
@@ -467,85 +470,220 @@ function FormatAndCompareShips:Constructor(def, b)
 	self.b = b
 end
 
+local function drawDealershipHeader()
+	if not dealership then return end
+
+	ui.child("DealershipHeader", Vector2(0, widgetSizes.headerHeight), nil, commsChildFlags, function()
+		if dealership.kind == "FRANCHISE" and dealership.manufacturerId then
+			manufacturerIcon(dealership.manufacturerId, widgetSizes.dealerIconSize)
+		else
+			ui.icon(ui.theme.icons.ship, widgetSizes.dealerIconSize, colors.alertYellow)
+		end
+
+		ui.sameLine(0, widgetSizes.itemSpacing.x)
+
+		ui.group(function()
+			ui.withFont(orbiteer.heading, function()
+				local titleColor = (dealership.kind == "INDEPENDENT_USED") and colors.alertYellow or colors.uiPrimaryLight
+				ui.textColored(titleColor, dealership.name)
+			end)
+			ui.withFont(pionillium.details, function()
+				ui.textColored(colors.fontDim, dealership.subtitle)
+			end)
+		end)
+
+		local filterDefs = {
+			{ id = "ALL",  label = string.format("All (%d)", counts.total) },
+			{ id = "NEW",  label = string.format("New Factory (%d)", counts.newCount) },
+			{ id = "USED", label = string.format("Pre-Owned (%d)", counts.usedCount) },
+		}
+
+		local btnSpacing = 6
+		local btnPadX = ui.theme.styles.ButtonPadding.x * 2
+		local totalBtnW = 0
+		ui.withFont(pionillium.body, function()
+			for i, f in ipairs(filterDefs) do
+				totalBtnW = totalBtnW + ui.calcTextSize(f.label).x + btnPadX
+				if i > 1 then totalBtnW = totalBtnW + btnSpacing end
+			end
+		end)
+
+		local availW = ui.getContentRegion().x
+		local curX = ui.getCursorPos().x
+		local targetX = math.max(curX, availW - totalBtnW)
+		ui.sameLine(targetX)
+
+		ui.withFont(pionillium.body, function()
+			for i, f in ipairs(filterDefs) do
+				if i > 1 then ui.sameLine(nil, btnSpacing) end
+				local active = (filterMode == f.id)
+				local style = active and ui.theme.buttonColors.selected or ui.theme.buttonColors.default
+				if ui.button(f.label .. "##shipFilter_" .. f.id, Vector2(0, 0), style) then
+					if filterMode ~= f.id then
+						filterMode = f.id
+						applyFilter()
+					end
+				end
+			end
+		end)
+	end)
+end
+
+local function drawPreinstalledEquipment(shipData, isUsed)
+	if not shipData or not shipData.equip or #shipData.equip == 0 then return end
+
+	ui.spacing()
+	ui.withFont(orbiteer.body, function()
+		ui.textColored(colors.uiPrimaryLight, string.format("PRE-INSTALLED EQUIPMENT (%d MODULES)", #shipData.equip))
+	end)
+	ui.separator()
+
+	for _, pair in ipairs(shipData.equip) do
+		local slotId, inst, isAftermarket = pair[1], pair[2], pair[3]
+		local name = inst:GetName()
+		local integPct = math.floor(((rawget(inst, "integrity") or 1) * 100) + 0.5)
+		local slotTag = slotId and ("[" .. slotId .. "]") or "[LOOSE]"
+		local badge = isAftermarket and "[AFTERMARKET]" or "[STOCK]"
+		local col = isAftermarket and (colors.econProfit or colors.compareBetter) or colors.font
+
+		ui.withFont(pionillium.details, function()
+			ui.textColored(col, string.format("• %s  %s", badge, name))
+			ui.sameLine()
+			if isUsed then
+				ui.textColored(colors.fontDim, string.format("%s  (%d%% cond.)", slotTag, integPct))
+			else
+				ui.textColored(colors.fontDim, slotTag)
+			end
+		end)
+	end
+end
 
 local tradeMenu = function()
-	if(selectedItem) then
-		ui.withStyleVars({ ItemSpacing = shipMarket.style.itemSpacing}, function()
-			ui.child("TradeMenu", Vector2(0,0), nil, commsChildFlags, function()
-				local colHeadingWidth = ui.getContentRegion().x - widgetSizes.buyButton.x
-				local def = selectedItem.def
-
-				ui.columns(2, "shipMarketInfo")
-				ui.setColumnWidth(0, colHeadingWidth)
-
-				ui.withFont(orbiteer.title, function()
-					ui.text(ls[selectedItem.def.i18n_key])
+	if not selectedItem then
+		ui.withStyleVars({ ItemSpacing = shipMarket.style.itemSpacing }, function()
+			ui.child("TradeMenuEmpty", Vector2(0, 0), nil, commsChildFlags, function()
+				ui.withFont(orbiteer.heading, function()
+					ui.textColored(colors.fontDim, "NO VESSELS MATCH CURRENT FILTER")
 				end)
-				ui.withFont(orbiteer.body, function()
-					ui.text(shipClassString[selectedItem.def.shipClass])
+				ui.spacing()
+				ui.withFont(pionillium.body, function()
+					if dealership and dealership.kind == "INDEPENDENT_USED" and filterMode == "NEW" then
+						ui.textWrapped("This independent brokerage deals exclusively in pre-owned and aftermarket-refitted spacecraft. Switch the filter to Pre-Owned or All to inspect available inventory.")
+					else
+						ui.textWrapped("No vessels are currently displayed under this category filter.")
+					end
 				end)
-
-				local cost = advertDataCache[selectedItem].price
-
-				ui.withFont(pionillium.heading, function()
-					ui.text(l.PRICE..": "..Format.Money(cost, false))
-					ui.sameLine()
-					ui.text(l.AFTER_TRADE_IN..": "..Format.Money(cost - tradeInValue(Game.player), false))
-				end)
-				if Insurance.IsPlayerShipSubsidized() then
-					ui.withFont(pionillium.body, function()
-						ui.textColored(ui.theme.colors.fontDim, "(Charter-Subsidized Starter: 0 Cr hull trade-in)")
-					end)
+				ui.spacing()
+				if filterMode ~= "ALL" then
+					if ui.button("SHOW ALL LISTINGS##resetShipFilter", Vector2(220, 34)) then
+						filterMode = "ALL"
+						applyFilter()
+					end
 				end
+			end)
+		end)
+		return
+	end
 
-				ui.nextColumn()
-				ui.dummy(widgetSizes.iconSpacer)
+	ui.withStyleVars({ ItemSpacing = shipMarket.style.itemSpacing }, function()
+		ui.child("TradeMenu", Vector2(0,0), nil, commsChildFlags, function()
+			local colHeadingWidth = ui.getContentRegion().x - widgetSizes.buyButton.x
+			local def = selectedItem.def
+			local isUsed = (selectedItem.condition == "USED")
+			local offer = advertDataCache[selectedItem]
+			local mfrInfo = ShipDealerships.Manufacturers[def.manufacturer]
+			local mfrName = mfrInfo and mfrInfo.name or string.upper(def.manufacturer or "Unknown")
+
+			ui.columns(2, "shipMarketInfo")
+			ui.setColumnWidth(0, colHeadingWidth)
+
+			ui.withFont(orbiteer.title, function()
+				ui.text(ls[def.i18n_key])
+			end)
+			ui.withFont(orbiteer.body, function()
+				local condText = isUsed and "PRE-OWNED" or "FACTORY NEW"
+				local condCol = isUsed and colors.alertYellow or (colors.econProfit or colors.compareBetter)
+				ui.textColored(condCol, condText)
 				ui.sameLine()
-				manufacturerIcon(selectedItem.def.manufacturer)
-				local shipBought = false
-				local shipStoredAndBought = false
-				local shipBoughtToHangar = false
-				ui.withFont(pionillium.body, function()
-					shipBought = ui.button(l.BUY_SHIP, widgetSizes.buyButton)
-				end)
-				ui.columns(1, "")
+				ui.textColored(colors.fontDim, string.format("•  %s  •  %s  •  Reg: %s", shipClassString[def.shipClass] or "", mfrName, selectedItem.label or ""))
+			end)
 
-				ui.withFont(pionillium.body, function()
-					local actBtnW = math.floor((ui.getContentRegion().x - 8) / 2)
-					shipStoredAndBought = ui.button("Buy & Store Current (" .. Format.Money(cost, false) .. ")", Vector2(actBtnW, 32))
-					ui.sameLine(nil, 8)
-					shipBoughtToHangar = ui.button("Buy into Hangar (" .. Format.Money(cost, false) .. ")", Vector2(actBtnW, 32))
-				end)
-
-				if shipBought then
-					buyShip(shipMarket, selectedItem)
-					return
-				elseif shipStoredAndBought then
-					local ok, msg = PlayerFleet.StorePlayerShipAndBuy(selectedItem, advertDataCache[selectedItem])
-					if ok then refreshShipMarket() end
-					shipMarket.popup.msg = msg
-					shipMarket.popup:open()
-					return
-				elseif shipBoughtToHangar then
-					local ok, msg = PlayerFleet.BuyShipToHangar(selectedItem, advertDataCache[selectedItem])
-					if ok then refreshShipMarket() end
-					shipMarket.popup.msg = msg
-					shipMarket.popup:open()
-					return
+			ui.withFont(pionillium.details, function()
+				if isUsed then
+					ui.textColored(colors.fontDim, string.format("Provenance: %s  |  Hull Integrity: %d%%  |  Flight Log: %s hrs",
+						selectedItem.provenance or "Pre-Owned Vessel",
+						selectedItem.hullPercent or 90,
+						ui.Format.Number(selectedItem.flightHours or 0, 0)))
+				else
+					ui.textColored(colors.fontDim, string.format("Provenance: %s  |  Hull Integrity: 100%% (Full Manufacturer Warranty)",
+						selectedItem.provenance or "Factory Direct Delivery"))
 				end
+			end)
 
-				local spinnerWidth = ui.getContentRegion().x
-				modelSpinner:setSize(Vector2(spinnerWidth, spinnerWidth / 2.5))
-				modelSpinner:draw()
+			local cost = offer.price
 
-				local currentShip = FormatAndCompareShips.New( ShipDef[Game.player.shipId], nil )
-				local shipFormatAndCompare = FormatAndCompareShips.New( def, currentShip )
+			ui.withFont(pionillium.heading, function()
+				ui.text(l.PRICE..": "..Format.Money(cost, false))
+				ui.sameLine()
+				ui.text(l.AFTER_TRADE_IN..": "..Format.Money(cost - tradeInValue(Game.player), false))
+				if isUsed and offer.savings and offer.savings > 0 then
+					ui.sameLine()
+					ui.textColored(colors.econProfit or colors.compareBetter, string.format("(Save %s vs MSRP)", Format.Money(offer.savings, false)))
+				end
+			end)
+			if Insurance.IsPlayerShipSubsidized() then
+				ui.withFont(pionillium.body, function()
+					ui.textColored(colors.fontDim, "(Charter-Subsidized Starter: 0 Cr hull trade-in)")
+				end)
+			end
 
-				ui.child("ShipSpecs", Vector2(0, 0), function()
-					ui.withStyleVars({ CellPadding = Vector2(3,4) }, function()
+			ui.nextColumn()
+			ui.dummy(widgetSizes.iconSpacer)
+			ui.sameLine()
+			manufacturerIcon(def.manufacturer)
+			local shipBought = false
+			local shipStoredAndBought = false
+			local shipBoughtToHangar = false
+			ui.withFont(pionillium.body, function()
+				shipBought = ui.button(l.BUY_SHIP, widgetSizes.buyButton)
+			end)
+			ui.columns(1, "")
 
-						if not shipFormatAndCompare:beginTable() then return end
+			ui.withFont(pionillium.body, function()
+				local actBtnW = math.floor((ui.getContentRegion().x - 8) / 2)
+				shipStoredAndBought = ui.button("Buy & Store Current (" .. Format.Money(cost, false) .. ")", Vector2(actBtnW, 32))
+				ui.sameLine(nil, 8)
+				shipBoughtToHangar = ui.button("Buy into Hangar (" .. Format.Money(cost, false) .. ")", Vector2(actBtnW, 32))
+			end)
 
+			if shipBought then
+				buyShip(shipMarket, selectedItem)
+				return
+			elseif shipStoredAndBought then
+				local ok, msg = PlayerFleet.StorePlayerShipAndBuy(selectedItem, offer)
+				if ok then refreshShipMarket() end
+				shipMarket.popup.msg = msg
+				shipMarket.popup:open()
+				return
+			elseif shipBoughtToHangar then
+				local ok, msg = PlayerFleet.BuyShipToHangar(selectedItem, offer)
+				if ok then refreshShipMarket() end
+				shipMarket.popup.msg = msg
+				shipMarket.popup:open()
+				return
+			end
+
+			local spinnerWidth = ui.getContentRegion().x
+			modelSpinner:setSize(Vector2(spinnerWidth, spinnerWidth / 2.8))
+			modelSpinner:draw()
+
+			local currentShip = FormatAndCompareShips.New( ShipDef[Game.player.shipId], nil )
+			local shipFormatAndCompare = FormatAndCompareShips.New( def, currentShip )
+
+			ui.child("ShipSpecs", Vector2(0, 0), function()
+				ui.withStyleVars({ CellPadding = Vector2(3,4) }, function()
+
+					if shipFormatAndCompare:beginTable() then
 						shipFormatAndCompare:draw_hyperdrive_cell( l.HYPERDRIVE_FITTED )
 						shipFormatAndCompare:draw_tonnage_cell( l.WEIGHT_EMPTY, "hullMass" )
 						shipFormatAndCompare:draw_accel_cell( l.FORWARD_ACCEL_EMPTY, "FORWARD", "emptyMass" )
@@ -564,25 +702,27 @@ local tradeMenu = function()
 						shipFormatAndCompare:draw_equip_slot_cell( l.SCOOP_MOUNTS, "scoop" )
 
 						ui.endTable()
+					end
 
-					end)
+					drawPreinstalledEquipment(offer, isUsed)
 				end)
-
 			end)
+
 		end)
-	end
+	end)
 end
 
 shipMarket = Table.New("shipMarketWidget", false, {
 	borders = true,
 	columnCount = 4,
+	iterator = ipairs,
 	initTable = function(self)
 		local scrollPad = 16
 		local availableW = self.style.size.x - scrollPad
 		local col0W = widgetSizes.iconSize.x + widgetSizes.itemSpacing.x
 		local remainingW = availableW - col0W - 1
-		local col1W = math.floor(remainingW * 0.40)
-		local col2W = math.floor(remainingW * 0.35)
+		local col1W = math.floor(remainingW * 0.44)
+		local col2W = math.floor(remainingW * 0.34)
 		local col3W = remainingW - col1W - col2W
 		ui.setColumnWidth(0, col0W)
 		ui.setColumnWidth(1, col1W)
@@ -617,14 +757,29 @@ shipMarket = Table.New("shipMarketWidget", false, {
 			advertDataCache[item] = makeAdvertDataCacheEntry(item)
 		end
 
+		local isUsed = (item.condition == "USED")
+		local offer = advertDataCache[item]
+		local mfr = ShipDealerships.Manufacturers[item.def.manufacturer]
+		local mfrTag = mfr and mfr.shortName or string.upper(item.def.manufacturer or "")
+
 		icons[item.def.shipClass]:Draw(widgetSizes.iconSize)
 		ui.nextColumn()
 		ui.withStyleVars({ItemSpacing = vZero}, function()
-			ui.dummy(widgetSizes.rowVerticalSpacing)
 			ui.text(ls[item.def.i18n_key])
+			ui.withFont(pionillium.details, function()
+				local badge = isUsed and "[USED]" or "[NEW]"
+				local badgeCol = isUsed and colors.alertYellow or (colors.econProfit or colors.compareBetter)
+				ui.textColored(badgeCol, badge)
+				ui.sameLine(nil, 6)
+				if isUsed then
+					ui.textColored(colors.fontDim, string.format("%s • %d%% • %d mods", mfrTag, item.hullPercent or 90, #(offer.aftermarketItems or {})))
+				else
+					ui.textColored(colors.fontDim, string.format("%s • Factory", mfrTag))
+				end
+			end)
 			ui.nextColumn()
 			ui.dummy(widgetSizes.rowVerticalSpacing)
-			ui.text(Format.Money(advertDataCache[item].price, false))
+			ui.text(Format.Money(offer.price, false))
 			ui.nextColumn()
 			ui.dummy(widgetSizes.rowVerticalSpacing)
 			ui.text(item.def.cargo.." cu")
@@ -636,9 +791,6 @@ shipMarket = Table.New("shipMarketWidget", false, {
 		shipMarket.selectedItem = e
 		refreshModelSpinner()
 	end,
-	sortingFunction = function(s1,s2)
-		return ls[s1.def.i18n_key] < ls[s2.def.i18n_key]
-	end
 })
 
 StationView:registerView({
@@ -648,6 +800,7 @@ StationView:registerView({
 	securityMode = "encryption",
 	showView = true,
 	draw = function()
+		drawDealershipHeader()
 		local region = ui.getContentRegion()
 		local leftWidth = math.floor(region.x * 0.45)
 		shipMarket.style.size = Vector2(leftWidth, region.y)
@@ -660,6 +813,7 @@ StationView:registerView({
 		tradeMenu()
 	end,
 	refresh = function()
+		filterMode = "ALL"
 		refreshShipMarket()
 		shipMarket.scrollReset = true
 	end,

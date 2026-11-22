@@ -319,6 +319,11 @@ Ship::Ship(const Json &jsonObj, Space *space) :
 		m_bounty = shipObj.value("bounty", 0.0);
 		Properties().Set("wanted", m_wanted);
 		Properties().Set("bounty", m_bounty);
+		m_thrusterHealth = Clamp(shipObj.value("thruster_health", 1.0f), 0.0f, 1.0f);
+		m_hyperdriveHealth = Clamp(shipObj.value("hyperdrive_health", 1.0f), 0.0f, 1.0f);
+		m_shieldHealth = Clamp(shipObj.value("shield_health", 1.0f), 0.0f, 1.0f);
+		m_sensorHealth = Clamp(shipObj.value("sensor_health", 1.0f), 0.0f, 1.0f);
+		UpdateEquipStats();
 	} catch (Json::type_error &) {
 		throw SavedGameCorruptException();
 	}
@@ -449,6 +454,10 @@ void Ship::SaveToJson(Json &jsonObj, Space *space)
 	shipObj["name"] = m_shipName;
 	shipObj["wanted"] = m_wanted;
 	shipObj["bounty"] = m_bounty;
+	shipObj["thruster_health"] = m_thrusterHealth;
+	shipObj["hyperdrive_health"] = m_hyperdriveHealth;
+	shipObj["shield_health"] = m_shieldHealth;
+	shipObj["sensor_health"] = m_sensorHealth;
 
 	jsonObj["ship"] = shipObj; // Add ship object to supplied object.
 }
@@ -459,6 +468,100 @@ void Ship::SetWanted(bool wanted, double bounty)
 	m_bounty = wanted ? std::max(0.0, bounty) : 0.0;
 	Properties().Set("wanted", m_wanted);
 	Properties().Set("bounty", m_bounty);
+}
+
+const Subsystems::SubsystemNode *Ship::FindSubsystem(const std::string &id) const
+{
+	if (id.empty())
+		return nullptr;
+	for (const auto &node : m_subsystems) {
+		if (node.id == id)
+			return &node;
+	}
+	return nullptr;
+}
+
+void Ship::EnsureDefaultSubsystems()
+{
+	if (!m_subsystems.empty())
+		return;
+
+	const Aabb &aabb = GetAabb();
+	auto addNode = [&](const std::string &id, const std::string &name, const std::string &slotId, const std::string &category, float integrity, const vector3d *overridePos) {
+		Subsystems::SubsystemNode node;
+		node.id = id;
+		node.name = name;
+		node.slotId = slotId;
+		node.category = category;
+		Subsystems::ComputeDefaultZoneForCategory(category, aabb, node.localPos, node.radius);
+		if (overridePos)
+			node.localPos = *overridePos;
+		node.integrity = Clamp(integrity, 0.0f, 1.0f);
+		node.disabled = (node.integrity <= 0.001f);
+		m_subsystems.push_back(std::move(node));
+	};
+
+	addNode("thrusters", "Thrusters", "", "thrusters", m_thrusterHealth, nullptr);
+	addNode("hyperdrive", "Hyperdrive", "", "hyperdrive", m_hyperdriveHealth, nullptr);
+	if (m_stats.shield_mass > 0.0f || Properties().Get("shield_cap").get_integer() > 0) {
+		addNode("shields", "Shield Generator", "", "shields", m_shieldHealth, nullptr);
+	}
+	addNode("sensors", "Sensors", "", "sensors", m_sensorHealth, nullptr);
+
+	if (m_gunManager) {
+		for (const auto &ws : m_gunManager->GetWeapons()) {
+			if (!ws.mount)
+				continue;
+			const std::string slotStr = ws.mount->id.c_str();
+			vector3d mountPos;
+			const bool hasPos = m_gunManager->GetMountLocalPosition(ws.mount->id, mountPos);
+			addNode("weapon:" + slotStr, "Weapon (" + slotStr + ")", slotStr, "weapon", ws.health, hasPos ? &mountPos : nullptr);
+		}
+	}
+}
+
+void Ship::SetSubsystems(std::vector<Subsystems::SubsystemNode> &&nodes, const std::vector<std::string> &tags)
+{
+	const Aabb &aabb = GetAabb();
+	SceneGraph::Model *model = GetModel();
+
+	for (size_t i = 0; i < nodes.size(); ++i) {
+		auto &node = nodes[i];
+		Subsystems::ComputeDefaultZoneForCategory(node.category, aabb, node.localPos, node.radius);
+		bool resolved = false;
+		if (model && i < tags.size() && !tags[i].empty()) {
+			if (const SceneGraph::Tag *t = model->FindTagByName(tags[i])) {
+				node.localPos = vector3d(t->GetGlobalTransform().GetTranslate());
+				resolved = true;
+			}
+		}
+		if (!resolved && node.category == "weapon" && m_gunManager && !node.slotId.empty()) {
+			vector3d mountPos;
+			if (m_gunManager->GetMountLocalPosition(StringName(node.slotId), mountPos)) {
+				node.localPos = mountPos;
+			}
+		}
+		node.integrity = Clamp(node.integrity, 0.0f, 1.0f);
+		node.disabled = (node.integrity <= 0.001f);
+	}
+
+	m_subsystems = std::move(nodes);
+}
+
+void Ship::SetSubsystemHealthSummary(float thrusterHealth, float hyperdriveHealth, float shieldHealth, float sensorHealth)
+{
+	m_thrusterHealth = Clamp(thrusterHealth, 0.0f, 1.0f);
+	m_hyperdriveHealth = Clamp(hyperdriveHealth, 0.0f, 1.0f);
+	m_shieldHealth = Clamp(shieldHealth, 0.0f, 1.0f);
+	m_sensorHealth = Clamp(sensorHealth, 0.0f, 1.0f);
+
+	if (m_supercruise) {
+		m_supercruise->SetFsdOffline(m_hyperdriveHealth <= 0.001f);
+		if (m_hyperdriveHealth <= 0.001f && IsHyperspaceActive())
+			AbortHyperjump();
+	}
+
+	UpdateEquipStats();
 }
 
 void Ship::InitMaterials()
@@ -723,6 +826,45 @@ bool Ship::OnDamage(Body *attacker, float kgDamage, const CollisionContact &cont
 		const vector3d localPos = invmtx * contactData.pos;
 		m_shields->AddHit(localPos);
 
+		if (dam > 0.0f) {
+			EnsureDefaultSubsystems();
+			const Subsystems::HitResult subHit = Subsystems::ResolveHit(m_subsystems, localPos);
+			if (subHit.index >= 0 && size_t(subHit.index) < m_subsystems.size()) {
+				Subsystems::SubsystemNode &sub = m_subsystems[subHit.index];
+				const float subDam = Subsystems::CalcSubsystemDamage(dam, float(m_type->hullMass), subHit.proximityFactor);
+				const bool wasDisabled = sub.disabled;
+				sub.integrity = Clamp(sub.integrity - subDam, 0.0f, 1.0f);
+				sub.disabled = (sub.integrity <= 0.001f);
+
+				// Localize kinetic/energy absorption into the struck subsystem so focused fire disables before hull fails
+				dam *= 0.70f;
+
+				if (sub.category == "thrusters") {
+					m_thrusterHealth = sub.integrity;
+					UpdateEquipStats();
+				} else if (sub.category == "shields") {
+					m_shieldHealth = sub.integrity;
+					UpdateEquipStats();
+				} else if (sub.category == "sensors") {
+					m_sensorHealth = sub.integrity;
+				} else if (sub.category == "hyperdrive") {
+					m_hyperdriveHealth = sub.integrity;
+					if (sub.disabled) {
+						if (m_supercruise)
+							m_supercruise->SetFsdOffline(true);
+						if (IsHyperspaceActive())
+							AbortHyperjump();
+					}
+				} else if (sub.category == "weapon" && m_gunManager && !sub.slotId.empty()) {
+					m_gunManager->SetWeaponHealth(StringName(sub.slotId), sub.integrity);
+				}
+
+				if (subDam > 0.0f) {
+					LuaEvent::Queue("onShipSubsystemHit", this, attacker, sub.id, sub.slotId, double(sub.integrity), sub.disabled && !wasDisabled);
+				}
+			}
+		}
+
 		m_stats.hull_mass_left -= dam;
 		Properties().Set("hullMassLeft", m_stats.hull_mass_left);
 		Properties().Set("hullPercent", 100.0f * (m_stats.hull_mass_left / float(m_type->hullMass)));
@@ -968,6 +1110,18 @@ void Ship::Explode()
 void Ship::Revive()
 {
 	Body::Revive();
+	m_thrusterHealth = 1.0f;
+	m_hyperdriveHealth = 1.0f;
+	m_shieldHealth = 1.0f;
+	m_sensorHealth = 1.0f;
+	for (auto &sub : m_subsystems) {
+		sub.integrity = 1.0f;
+		sub.disabled = false;
+		if (sub.category == "weapon" && m_gunManager && !sub.slotId.empty()) {
+			m_gunManager->SetWeaponHealth(StringName(sub.slotId), 1.0f);
+		}
+	}
+	UpdateEquipStats();
 	m_stats.hull_mass_left = float(m_type->hullMass);
 	m_stats.shield_mass_left = m_stats.shield_mass;
 	Properties().Set("hullMassLeft", m_stats.hull_mass_left);
@@ -1074,14 +1228,19 @@ void Ship::UpdateEquipStats()
 	p.Set("staticMass", m_stats.static_mass);
 
 	float shield_cap = p.Get("shield_cap");
-	m_stats.shield_mass = TONS_HULL_PER_SHIELD * shield_cap;
+	const float shieldEff = Subsystems::CalcPerformanceMultiplier(m_shieldHealth);
+	m_stats.shield_mass = TONS_HULL_PER_SHIELD * shield_cap * shieldEff;
+	m_stats.shield_mass_left = std::min(m_stats.shield_mass_left, m_stats.shield_mass);
 	p.Set("shieldMass", m_stats.shield_mass);
+	p.Set("shieldMassLeft", m_stats.shield_mass_left);
 
 	UpdateFuelStats();
 
 	unsigned int thruster_power_cap = p.Get("thruster_power_cap");
-	const double power_mul = m_type->thrusterUpgrades[Clamp(thruster_power_cap, 0U, 3U)];
+	const double thrusterEff = double(Subsystems::CalcPerformanceMultiplier(m_thrusterHealth));
+	const double power_mul = m_type->thrusterUpgrades[Clamp(thruster_power_cap, 0U, 3U)] * thrusterEff;
 	m_propulsion->SetThrustPowerMult(power_mul, m_type->linThrust, m_type->angThrust);
+	m_propulsion->SetDisabled(thrusterEff <= 0.001);
 
 	m_stats.hyperspace_range = m_stats.hyperspace_range_max = 0;
 	p.Set("hyperspaceRange", m_stats.hyperspace_range);
@@ -1127,6 +1286,9 @@ Ship::HyperjumpStatus Ship::CheckHyperjumpCapability() const
 {
 	if (GetFlightState() == HYPERSPACE)
 		return HYPERJUMP_DRIVE_ACTIVE;
+
+	if (IsHyperdriveOffline() || (m_supercruise && m_supercruise->IsFsdOffline()) || AreThrustersDisabled())
+		return HYPERJUMP_SAFETY_LOCKOUT;
 
 	if (GetFlightState() != FLYING && GetFlightState() != JUMPING && GetFlightState() != SUPERCRUISE)
 		return HYPERJUMP_SAFETY_LOCKOUT;
@@ -1901,10 +2063,10 @@ void Ship::StaticUpdate(const float timeStep)
 	}
 
 	if (m_stats.shield_mass_left < m_stats.shield_mass) {
-		// 250 second recharge
-		float recharge_rate = 0.004f;
+		// 250 second recharge, scaled by shield generator integrity
+		float recharge_rate = 0.004f * Subsystems::CalcPerformanceMultiplier(m_shieldHealth);
 		float booster = Properties().Get("shield_energy_booster_cap");
-		recharge_rate *= booster ? booster : 1.0;
+		recharge_rate *= booster ? booster : 1.0f;
 		m_stats.shield_mass_left = Clamp(m_stats.shield_mass_left + m_stats.shield_mass * recharge_rate * timeStep, 0.0f, m_stats.shield_mass);
 		Properties().Set("shieldMassLeft", m_stats.shield_mass_left);
 	}

@@ -17,6 +17,7 @@
 
 #include "graphics/Material.h"
 #include "ship/Propulsion.h"
+#include "ship/Subsystems.h"
 
 namespace SceneGraph {
 	class MatrixTransform;
@@ -298,6 +299,21 @@ public:
 	double GetLandingPosOffset() const { return m_landingMinOffset; }
 
 	Propulsion *GetPropulsion() { return m_propulsion; }
+	const Propulsion *GetPropulsion() const { return m_propulsion; }
+
+	// Component Integrity & Subsystem Hit-Zones
+	const std::vector<Subsystems::SubsystemNode> &GetSubsystems() const { return m_subsystems; }
+	const Subsystems::SubsystemNode *FindSubsystem(const std::string &id) const;
+	void EnsureDefaultSubsystems();
+	void SetSubsystems(std::vector<Subsystems::SubsystemNode> &&nodes, const std::vector<std::string> &tags = {});
+	void SetSubsystemHealthSummary(float thrusterHealth, float hyperdriveHealth, float shieldHealth, float sensorHealth);
+	float GetThrusterHealth() const { return m_thrusterHealth; }
+	float GetHyperdriveHealth() const { return m_hyperdriveHealth; }
+	float GetShieldHealth() const { return m_shieldHealth; }
+	float GetSensorHealth() const { return m_sensorHealth; }
+	bool AreThrustersDisabled() const { return m_thrusterHealth <= 0.001f; }
+	bool IsHyperdriveOffline() const { return m_hyperdriveHealth <= 0.001f; }
+	bool AreSensorsDisabled() const { return m_sensorHealth <= 0.001f; }
 
 	// Black Box Flight Recorder & Diagnostic Tracking
 	struct BlackBoxRecord {
@@ -449,6 +465,12 @@ private:
 	void SpawnThrusterExhaustParticles(float timeStep);
 
 	std::deque<CargoBody *> m_cargoSpawnQueue;
+
+	std::vector<Subsystems::SubsystemNode> m_subsystems;
+	float m_thrusterHealth = 1.0f;
+	float m_hyperdriveHealth = 1.0f;
+	float m_shieldHealth = 1.0f;
+	float m_sensorHealth = 1.0f;
 
 	LastCollisionInfo m_lastCollision;
 	std::string m_lastAttackerLabel;

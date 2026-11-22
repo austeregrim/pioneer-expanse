@@ -227,6 +227,50 @@ uint32_t GunManager::GetWeaponIndexForHardpoint(const StringName &hardpoint) con
 	return std::distance(m_weapons.begin(), iter);
 }
 
+bool GunManager::GetMountLocalPosition(const StringName &hardpoint, vector3d &outPos) const
+{
+	auto iter = m_mounts.find(hardpoint);
+	if (iter == m_mounts.end() || !iter->second.tag)
+		return false;
+
+	outPos = vector3d(iter->second.tag->GetGlobalTransform().GetTranslate());
+	return true;
+}
+
+void GunManager::SetWeaponHealth(const StringName &hardpoint, float health)
+{
+	const float clamped = Clamp(health, 0.0f, 1.0f);
+	for (WeaponState &ws : m_weapons) {
+		if (ws.mount && ws.mount->id == hardpoint) {
+			ws.health = clamped;
+			ws.disabled = (clamped <= 0.001f);
+		}
+	}
+}
+
+void GunManager::SetWeaponDisabled(const StringName &hardpoint, bool disabled)
+{
+	for (WeaponState &ws : m_weapons) {
+		if (ws.mount && ws.mount->id == hardpoint) {
+			ws.disabled = disabled;
+			if (!disabled && ws.health <= 0.001f)
+				ws.health = 0.15f;
+			else if (disabled)
+				ws.health = 0.0f;
+		}
+	}
+}
+
+bool GunManager::IsWeaponDisabled(const StringName &hardpoint) const
+{
+	for (const WeaponState &ws : m_weapons) {
+		if (ws.mount && ws.mount->id == hardpoint) {
+			return ws.disabled;
+		}
+	}
+	return false;
+}
+
 void GunManager::SetupDefaultGroups()
 {
 	m_groups.clear();
@@ -316,16 +360,58 @@ void GunManager::SetGroupTarget(uint32_t group, const Body *target)
 	if (!gs.weapons.any())
 		return;
 
+	const bool targetChanged = (gs.target != target);
+
 	// Clear the prior callback, if any
 	if (gs.target)
 		gs.onTargetDestroyed.disconnect();
 
-	m_groups[group].target = target;
+	gs.target = target;
+	if (targetChanged || !target) {
+		gs.hasTargetOffset = false;
+		gs.targetLocalOffset = vector3d::Zero;
+	}
 
 	if (target) {
 		gs.onTargetDestroyed = target->onDelete.connect([=]() {
 			this->SetGroupTarget(group, nullptr);
 		});
+	}
+}
+
+void GunManager::SetGroupTargetOffset(uint32_t group, const vector3d &localOffset)
+{
+	if (group >= m_groups.size())
+		return;
+
+	m_groups[group].targetLocalOffset = localOffset;
+	m_groups[group].hasTargetOffset = true;
+}
+
+void GunManager::ClearGroupTargetOffset(uint32_t group)
+{
+	if (group >= m_groups.size())
+		return;
+
+	m_groups[group].targetLocalOffset = vector3d::Zero;
+	m_groups[group].hasTargetOffset = false;
+}
+
+void GunManager::SetTrackingTargetOffset(const vector3d &localOffset)
+{
+	for (size_t i = 0; i < m_groups.size(); ++i) {
+		if (m_groups[i].target) {
+			m_groups[i].targetLocalOffset = localOffset;
+			m_groups[i].hasTargetOffset = true;
+		}
+	}
+}
+
+void GunManager::ClearTrackingTargetOffset()
+{
+	for (size_t i = 0; i < m_groups.size(); ++i) {
+		m_groups[i].targetLocalOffset = vector3d::Zero;
+		m_groups[i].hasTargetOffset = false;
 	}
 }
 
@@ -419,7 +505,11 @@ void GunManager::StaticUpdate(float deltaTime)
 		// Compute weapon lead direction
 		if (gs.target) {
 			const matrix3x3d &orient = m_parent->GetOrient();
-			const vector3d relPosition = gs.target->GetPositionRelTo(m_parent);
+			vector3d relPosition = gs.target->GetPositionRelTo(m_parent);
+			if (gs.hasTargetOffset) {
+				const matrix3x3d targOrient = gs.target->GetOrientRelTo(m_parent->GetFrame());
+				relPosition += targOrient * gs.targetLocalOffset;
+			}
 			const vector3d relVelocity = gs.target->GetVelocityRelTo(m_parent->GetFrame()) - m_parent->GetVelocity();
 			vector3d relAccel = vector3d::Zero;
 
@@ -442,8 +532,8 @@ void GunManager::StaticUpdate(float deltaTime)
 		isAnyFiring |= gs.firing;
 
 		// determine if something prevents this gun from firing
-		// Temperature, gimbal checks, etc.
-		bool canFire = gun.temperature < gun.data.overheatThreshold && (gs.fireWithoutTargeting || gs.target && gun.withinGimbalLimit);
+		// Component integrity, temperature, gimbal checks, etc.
+		bool canFire = !gun.disabled && gun.temperature < gun.data.overheatThreshold && (gs.fireWithoutTargeting || gs.target && gun.withinGimbalLimit);
 
 		if (gs.firing && canFire && currentTime >= gun.nextFireTime) {
 
@@ -500,8 +590,9 @@ void GunManager::Fire(WeaponState &weapon)
 	// mount-relative aiming direction
 	const vector3d leadDir = vector3d(wpn_orient * weapon.currentLead).Normalized();
 
+	const float heatPenalty = (!weapon.disabled && weapon.health < 0.75f) ? (1.0f + (0.75f - weapon.health) * 0.6f) : 1.0f;
 	for (size_t idx = firstBarrel; idx < firstBarrel + numBarrels; idx++) {
-		weapon.temperature += data->firingHeat;
+		weapon.temperature += data->firingHeat * heatPenalty;
 		// TODO: get individual barrel locations from gun model and cache them
 		const vector3d dir = orient * leadDir;
 		const vector3d pos = orient * wpn_pos + m_parent->GetPosition();
@@ -669,6 +760,8 @@ void from_json(const Json &obj, GunManager::WeaponState &weapon)
 	weapon.lastBarrel = obj.value("lastBarrel", 0);
 	weapon.temperature = obj.value("temperature", 0.f);
 	weapon.nextFireTime = obj.value("nextFireTime", 0.0);
+	weapon.health = obj.value("health", 1.0f);
+	weapon.disabled = obj.value("disabled", weapon.health <= 0.001f);
 	weapon.data = obj["data"].get<GunManager::WeaponData>();
 }
 
@@ -679,6 +772,8 @@ void to_json(Json &out, const GunManager::WeaponState &weapon)
 	out["lastBarrel"] = weapon.lastBarrel;
 	out["temperature"] = weapon.temperature;
 	out["nextFireTime"] = weapon.nextFireTime;
+	out["health"] = weapon.health;
+	out["disabled"] = weapon.disabled;
 
 	// All lead calculation variables are transient and will be recreated on next timestep
 	// Weapon model is reconstructed from WeaponData

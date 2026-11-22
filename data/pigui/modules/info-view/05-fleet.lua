@@ -41,6 +41,7 @@ local ORDER_COLOR_MAP = {
 local STATUS_COLOR_MAP = {
 	DOCKED      = colors.econProfit,
 	UNDOCKING   = colors.alertYellow,
+	DEPARTING   = colors.alertYellow,
 	FLYING      = colors.uiPrimaryLight,
 	SUPERCRUISE = colors.hyperspaceInfo,
 	DOCKING     = colors.alertYellow,

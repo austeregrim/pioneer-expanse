@@ -248,6 +248,10 @@ function HyperdriveType:HyperjumpTo(ship, destination)
 		return "WRONG_SHIP"
 	end
 
+	if (rawget(self, "integrity") or 1.0) <= 0.001 or (ship.IsFsdOffline and ship:IsFsdOffline()) then
+		return "SAFETY_LOCKOUT"
+	end
+
 	local distance, fuel_use, duration = self:CheckDestination(ship, destination)
 	if not distance then
 		return "OUT_OF_RANGE"
@@ -257,6 +261,7 @@ function HyperdriveType:HyperjumpTo(ship, destination)
 	end
 
 	ship:setprop('nextJumpFuelUse', fuel_use)
+	ship:setprop('nextJumpDuration', duration)
 	local warmup_time = 5 + self.capabilities.hyperclass*1.5
 
 	local sounds
@@ -274,6 +279,11 @@ end
 -- Handle cleanup after leaving hyperspace
 ---@param ship Ship
 function HyperdriveType:OnLeaveHyperspace(ship)
+	local jumpDuration = ship:hasprop('nextJumpDuration') and ship['nextJumpDuration'] or 0
+	if ship:hasprop('nextJumpDuration') then
+		ship:unsetprop('nextJumpDuration')
+	end
+
 	if ship:hasprop('nextJumpFuelUse') then
 		local amount = ship['nextJumpFuelUse']
 		ship:unsetprop('nextJumpFuelUse')
@@ -286,6 +296,11 @@ function HyperdriveType:OnLeaveHyperspace(ship)
 			local byproductAmount = math.min(math.ceil(amount), cargoMgr:GetFreeSpace())
 			cargoMgr:AddCommodity(self.byproduct, byproductAmount)
 		end
+	end
+
+	local okCI, ComponentIntegrity = pcall(require, 'modules.ComponentIntegrity.ComponentIntegrity')
+	if okCI and ComponentIntegrity and ComponentIntegrity.ApplyHyperjumpWear then
+		ComponentIntegrity.ApplyHyperjumpWear(ship, jumpDuration)
 	end
 end
 

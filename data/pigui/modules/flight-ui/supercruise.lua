@@ -605,6 +605,47 @@ local function drawInterdictionHUD(player, center, reticuleRadius)
 	ui.addRect(rightTL, rightTL + Vector2(barW, barH), colBorder, 2, ui.RoundCornersAll, 1.0)
 end
 
+local function drawDisabledSubsystemBanner(player, center, reticuleRadius)
+	if player:IsDocked() or player:IsLanded() or player:IsSupercruiseActive() then
+		return
+	end
+	local okCI, ComponentIntegrity = pcall(require, 'modules.ComponentIntegrity.ComponentIntegrity')
+	if not okCI or not ComponentIntegrity or not ComponentIntegrity.GetDisabledSubsystems then
+		return
+	end
+
+	local disabled = ComponentIntegrity.GetDisabledSubsystems(player)
+	local rebootActive = ComponentIntegrity.IsRebootActive()
+	if not rebootActive and #disabled == 0 then
+		return
+	end
+
+	local boxW = 340
+	local boxH = 34
+	local yTop = center.y + reticuleRadius + 58
+	local tl = Vector2(center.x - boxW * 0.5, yTop)
+	local br = Vector2(center.x + boxW * 0.5, yTop + boxH)
+
+	if rebootActive then
+		local rem = math.max(0.0, ComponentIntegrity.GetRebootRemaining())
+		ui.addRectFilled(tl, br, colPanelBg, 4, ui.RoundCornersAll)
+		ui.addRect(tl, br, colCyan, 4, ui.RoundCornersAll, 1.5)
+		ui.addStyledText(Vector2(center.x, tl.y + boxH * 0.5), ui.anchor.center, ui.anchor.center,
+			string.format("FIELD REBOOT IN PROGRESS — %.1fs", rem), colCyan, pionillium.small)
+		return
+	end
+
+	local hovered = ui.isMouseHoveringRect(tl, br)
+	ui.addRectFilled(tl, br, hovered and Color(50, 18, 18, 235) or colPanelBg, 4, ui.RoundCornersAll)
+	ui.addRect(tl, br, colRed, 4, ui.RoundCornersAll, hovered and 2.5 or 1.8)
+	ui.addStyledText(Vector2(center.x, tl.y + boxH * 0.5), ui.anchor.center, ui.anchor.center,
+		string.format("SUBSYSTEM OFFLINE (%s) — [ CLICK TO REBOOT ]", disabled[1].name), colRed, pionillium.tiny)
+
+	if hovered and ui.isMouseClicked(0) then
+		ComponentIntegrity.StartFieldReboot(player)
+	end
+end
+
 gameView.registerModule("supercruise-hud", {
 	showInHyperspace = false,
 	draw = function()
@@ -615,6 +656,7 @@ gameView.registerModule("supercruise-hud", {
 		local radius = ui.reticuleCircleRadius or (math.min(ui.screenWidth, ui.screenHeight) / 8)
 
 		drawStatusBanner(player, center, radius)
+		drawDisabledSubsystemBanner(player, center, radius)
 
 		if player:IsSupercruiseActive() then
 			drawSupercruiseRightGauge(player, center, radius)

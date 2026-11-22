@@ -201,6 +201,31 @@ local ROLE_PROFILES = {
 		org = "HABER CORPORATION",
 		border = Color(255, 71, 87, 215),
 	},
+	opli = {
+		svg = "corp_opli",
+		org = "OMNI-PRODUCT LATTICE (OPLI)",
+		border = Color(0, 210, 255, 215),
+	},
+	kaluri = {
+		svg = "corp_kaluri",
+		org = "KALURI HEAVY INDUSTRIES",
+		border = Color(56, 239, 125, 215),
+	},
+	mandarava = {
+		svg = "corp_mandarava",
+		org = "MANDARAVA-CSEPEL",
+		border = Color(253, 203, 110, 215),
+	},
+	albr = {
+		svg = "corp_albr",
+		org = "ALBR AEROSPACE",
+		border = Color(255, 121, 63, 215),
+	},
+	auronox = {
+		svg = "corp_auronox",
+		org = "AURONOX CORPORATION",
+		border = Color(243, 156, 18, 215),
+	},
 	syndicate = {
 		svg = "corp_syndicate",
 		org = "COVERT OPERATIONS SYNDICATE",

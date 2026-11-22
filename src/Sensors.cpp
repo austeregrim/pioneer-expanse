@@ -66,32 +66,42 @@ Body* Sensors::ChooseTarget(TargetingCriteria crit, const Body* oldTarget )
 	if(!m_owner->IsType(ObjectType::PLAYER))
 		return nullptr;
 
-	const Body* currTarget = oldTarget;
-
 	m_radarContacts.sort(ContactDistanceSort);
 
+	std::vector<Body *> candidates;
+	candidates.reserve(m_radarContacts.size());
+
 	for (auto it = m_radarContacts.begin(); it != m_radarContacts.end(); ++it) {
-		//match object type
-		//match iff
-		if (it->body->IsType(ObjectType::SHIP)) {
+		if (!it->body || it->body->IsDead() || !it->body->IsType(ObjectType::SHIP))
+			continue;
+		const Ship *otherShip = static_cast<const Ship *>(it->body);
+		if (!SupercruiseController::IsShipVisibleToSensors(m_owner, otherShip))
+			continue;
 
-			if(crit == CYCLE_HOSTILE && currTarget) {
-				if(currTarget == it->body) {
-					currTarget = nullptr;
-					//next hostile will be selected
-				}
+		if (crit == TARGET_NEAREST_HOSTILE || crit == CYCLE_HOSTILE) {
+			if (it->iff != IFF_HOSTILE)
 				continue;
+		}
+		candidates.push_back(it->body);
+	}
+
+	if (candidates.empty())
+		return nullptr;
+
+	if (crit == TARGET_NEAREST_HOSTILE || !oldTarget)
+		return (crit == CYCLE_ALL_PREV) ? candidates.back() : candidates.front();
+
+	for (size_t i = 0; i < candidates.size(); ++i) {
+		if (candidates[i] == oldTarget) {
+			if (crit == CYCLE_ALL_PREV) {
+				return candidates[(i + candidates.size() - 1) % candidates.size()];
 			}
-
-			if (it->iff != IFF_HOSTILE) continue;
-			//should move the target to ship after all (from PlayerShipController)
-			//targeting inputs stay in PSC
-
-			return it->body;
+			// CYCLE_HOSTILE / CYCLE_ALL_NEXT advance cleanly and wrap around
+			return candidates[(i + 1) % candidates.size()];
 		}
 	}
 
-	return nullptr;
+	return (crit == CYCLE_ALL_PREV) ? candidates.back() : candidates.front();
 }
 
 Sensors::IFF Sensors::CheckIFF(Body *other)

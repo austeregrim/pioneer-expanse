@@ -1283,13 +1283,16 @@ static void CollideWithTerrain(Body *body, float timeStep)
 		return;
 	TerrainBody *terrain = static_cast<TerrainBody *>(f->GetBody());
 	if (f->GetId() != terrain->GetFrame()) {
-		// If inside the planet's physical/terrain envelope while still in the parent orbital frame,
+		// If inside the planet's rotating frame envelope while still in the parent orbital frame,
 		// switch into the planet's rotating frame so terrain collision is evaluated accurately.
+		// Never pull bodies from outside rotFrame->GetRadius() (which is already >= GetMaxFeatureRadius() + 1000):
+		// Body::UpdateFrame() immediately ejects bodies outside rotFrame->GetRadius(), causing an infinite
+		// frame ping-pong that prevents entering low-orbit space station frames below 2 * planetRadius.
 		const Frame *rotFrame = Frame::GetFrame(terrain->GetFrame());
 		if (!rotFrame)
 			return;
 		const vector3d posInRot = body->GetPositionRelTo(terrain->GetFrame());
-		if (posInRot.Length() >= std::max(rotFrame->GetRadius(), terrain->GetMaxFeatureRadius() * 2.0))
+		if (posInRot.Length() >= rotFrame->GetRadius())
 			return;
 		body->SwitchToFrame(terrain->GetFrame());
 		f = Frame::GetFrame(body->GetFrame());

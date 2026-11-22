@@ -31,6 +31,7 @@ local PlayerState     = require 'PlayerState'
 local Passengers      = require 'Passengers'
 local FactionStanding = require 'FactionStanding'
 local Ship            = require 'Ship'
+local ShipDealerships = require 'ShipDealerships'
 local Insurance       = require 'modules.Insurance.Insurance'
 local SystemPath      = package.core['SystemPath']
 
@@ -58,6 +59,8 @@ local fleetState = {
 }
 
 local tickTimerActive = false
+local liveOrderRuntime = {}
+local soldDepartingShips = {}
 
 local function normalizeFleetState(data)
 	local s = (type(data) == "table") and data or {}
@@ -223,6 +226,94 @@ local function findNearestStationPath(refPath, preferPath)
 			for _, ns in ipairs(near) do
 				local nst = findBestStationInSystem(ns)
 				if nst then return nst end
+			end
+		end
+	end
+	return nil
+end
+
+local function getShipAICommand(ship)
+	if not ship or not ship:exists() or not ship.GetCurrentAICommand then
+		return nil
+	end
+	local ok, cmd = pcall(function() return ship:GetCurrentAICommand() end)
+	return ok and cmd or nil
+end
+
+local function isShipDeparting(ship)
+	if not ship or not ship:exists() then return false end
+	if ship.flightState == "UNDOCKING" then return true end
+	return getShipAICommand(ship) == "CMD_DEPART"
+end
+
+local function tryUndockWithATC(ship)
+	if not ship or not ship:exists() then return false, nil end
+	local fs = ship.flightState
+	if fs == "UNDOCKING" then
+		return true, ship:GetDockedWith()
+	elseif fs == "DOCKED" then
+		local port = ship:GetDockedWith()
+		if not port or not port:exists() then
+			return false, nil
+		end
+		if port.CanLaunch and not port:CanLaunch(ship) then
+			return false, port
+		end
+		local ok, launched = pcall(function() return ship:Undock() end)
+		return (ok and launched == true), port
+	elseif fs == "LANDED" then
+		local ok = pcall(function() ship:BlastOff() end)
+		return ok, nil
+	end
+	return false, nil
+end
+
+local function resolveStationByPath(path)
+	if not path or not path:IsBodyPath() or not Game.system or Game.InHyperspace() then
+		return nil
+	end
+	if not sameSystem(path, Game.system.path) then
+		return nil
+	end
+	local okB, b = pcall(function() return Space.GetBody(path.bodyIndex) end)
+	if okB and b and b:exists() and b:isa("SpaceStation") then
+		return b
+	end
+	return nil
+end
+
+local function enterSafeHoldingOrbit(ship, stationBody)
+	if not ship or not ship:exists() or not stationBody or not stationBody:exists() then
+		return false
+	end
+	local okSb, sbody = pcall(function() return stationBody.path and stationBody.path:GetSystemBody() end)
+	local parentBody = (okSb and sbody and sbody.parent) and Space.GetBody(sbody.parent.index) or nil
+	if not parentBody or not parentBody:exists() then
+		return false
+	end
+	local ok = pcall(function() ship:AIEnterLowOrbit(parentBody) end)
+	return ok
+end
+
+local function getStationSafeSpawnKm(stationBody)
+	local r = (stationBody and stationBody.GetPhysicalRadius and stationBody:GetPhysicalRadius()) or 2000
+	return math.max(3.5, (r + 2500) / 1000)
+end
+
+local function getStationHyperjumpClearanceMeters(stationBody)
+	local r = (stationBody and stationBody.GetPhysicalRadius and stationBody:GetPhysicalRadius()) or 1500
+	return math.max(2200, r * 1.5 + 500)
+end
+
+local function findAlternativeOrbitalStation(sys, excludePath)
+	if not sys then return nil end
+	local ok, stPaths = pcall(function() return sys:GetStationPaths() end)
+	if not ok or not stPaths then return nil end
+	for _, sp in ipairs(stPaths) do
+		if not excludePath or not samePath(sp, excludePath) then
+			local okSb, sb = pcall(function() return sp:GetSystemBody() end)
+			if okSb and sb and sb.type == "STARPORT_ORBITAL" then
+				return sp
 			end
 		end
 	end
@@ -467,10 +558,14 @@ local function packEquipFromShip(ship)
 	local equipSet = ship:GetComponent('EquipSet')
 	if not equipSet then return list end
 	for key, eq in pairs(equipSet.installed) do
+		local isUsed = rawget(eq, "isUsed") == true
 		table.insert(list, {
 			slotId = (type(key) == "string") and key or nil,
 			id = eq.id,
 			count = eq.count,
+			integrity = rawget(eq, "integrity"),
+			isUsed = isUsed or nil,
+			usedPrice = isUsed and rawget(eq, "price") or nil,
 			subsidized = (rawget(eq, "price") == 0) or (eq.insuranceSubsidized == true) or nil,
 		})
 	end
@@ -515,6 +610,10 @@ local function applyEquipListToShip(ship, equipList)
 			if item.subsidized then
 				inst.price = 0
 				inst.insuranceSubsidized = true
+			else
+				if item.integrity ~= nil then inst.integrity = item.integrity end
+				if item.isUsed then inst.isUsed = true end
+				if item.usedPrice ~= nil then inst.price = item.usedPrice end
 			end
 
 			if item.slotId then
@@ -592,10 +691,14 @@ local function buildDefaultEquipForAdvert(def, advertEquip)
 	local list = {}
 	for _, pair in ipairs(advertEquip or {}) do
 		local slotId, inst = pair[1], pair[2]
+		local isUsed = rawget(inst, "isUsed") == true
 		table.insert(list, {
 			slotId = slotId,
 			id = inst.id,
 			count = inst.count,
+			integrity = rawget(inst, "integrity"),
+			isUsed = isUsed or nil,
+			usedPrice = isUsed and rawget(inst, "price") or nil,
 		})
 	end
 	-- Ensure hyperdrive is included if chassis supports one
@@ -715,9 +818,13 @@ function PlayerFleet.ComputeShipValue(entry)
 	local value = hullBase * SHIP_SELL_RATIO * ((entry.hullPercent or 100) / 100)
 	for _, eq in ipairs(entry.equip or {}) do
 		if not eq.subsidized then
-			local proto = Equipment.Get(eq.id)
-			if proto and proto.price then
-				value = value + (proto.price * (eq.count or 1) * EQUIP_SELL_RATIO)
+			if eq.usedPrice ~= nil then
+				value = value + (eq.usedPrice * EQUIP_SELL_RATIO)
+			else
+				local proto = Equipment.Get(eq.id)
+				if proto and proto.price then
+					value = value + (proto.price * (eq.count or 1) * EQUIP_SELL_RATIO)
+				end
 			end
 		end
 	end
@@ -777,39 +884,7 @@ local function setupPlayerShipFromAdvert(player, sos, advertData)
 	if sos.pattern then player.model:SetPattern(sos.pattern) end
 	player:SetLabel(sos.label)
 
-	local equipSet = player:GetComponent('EquipSet')
-	for _, pair in ipairs(advertData.equip or {}) do
-		local handle = equipSet:GetSlotHandle(pair[1])
-		if handle and equipSet:CanInstallInSlot(handle, pair[2]) then
-			local copyInst = Equipment.Get(pair[2].id):Instance()
-			local cfg = HullConfig.GetHullConfig(def.id)
-			if copyInst.SpecializeForShip and cfg then copyInst:SpecializeForShip(cfg) end
-			if pair[2].count and copyInst.SetCount then copyInst:SetCount(pair[2].count) end
-			equipSet:Install(copyInst, handle)
-		end
-	end
-
-	if def.hyperdriveClass > 0 and not player:GetInstalledHyperdrive() then
-		local slot = equipSet:GetAllSlotsOfType('hyperdrive')[1]
-		if slot then
-			local hyperdrive = nil
-			local bestScore = -1
-			for _, equip in pairs(Equipment.new) do
-				if EquipSet.CompatibleWithSlot(equip, slot) and equip.slot and equip.slot.type:match("%.civilian") then
-					local hc = equip.capabilities and equip.capabilities.hyperclass or 0
-					if hc > bestScore then
-						bestScore = hc
-						hyperdrive = equip
-					end
-				end
-			end
-			if hyperdrive then
-				equipSet:Install(hyperdrive:Instance(), slot)
-			end
-		end
-	end
-
-	player:SetFuelPercent(100)
+	ShipDealerships.InstallListingEquipment(player, advertData, sos)
 end
 
 -- Buy a ship and store Game.player's current ship in the station's hangar (no trade-in)
@@ -911,7 +986,7 @@ function PlayerFleet.BuyShipToHangar(sos, advertData)
 		shipId = def.id,
 		skin = sos.skin,
 		pattern = sos.pattern or 0,
-		hullPercent = 100,
+		hullPercent = sos.hullPercent or 100,
 		shieldPercent = 100,
 		fuel = 100,
 		cargoCap = def.cargo,
@@ -1095,7 +1170,23 @@ function PlayerFleet.SellShip(uid)
 		pcall(function()
 			soldLive:SetShipName("Sold Vessel")
 			if soldLive.flightState == "DOCKED" then
-				soldLive:Undock()
+				local port = soldLive:GetDockedWith()
+				local stowed = port and port:exists() and port.StowShipInHangar and port:StowShipInHangar(soldLive)
+				if not stowed then
+					soldDepartingShips[soldLive] = true
+					tryUndockWithATC(soldLive)
+					Timer:CallEvery(4, function()
+						if not Game.system or Game.InHyperspace() or not soldLive or not soldLive:exists() then
+							if soldLive then soldDepartingShips[soldLive] = nil end
+							return true
+						end
+						if soldLive.flightState ~= "DOCKED" then
+							return true
+						end
+						tryUndockWithATC(soldLive)
+						return false
+					end)
+				end
 			elseif Game.system then
 				local stars = Game.system:GetStars()
 				if stars and stars[1] and stars[1].body then
@@ -1529,7 +1620,12 @@ spawnOrUpdateLiveFleetShip = function(entry, spawnNearPlayer, forceLaunchSpace)
 	if spawnNearPlayer then
 		local refBody = (Game.player.flightState == "FLYING" or Game.player.flightState == "SUPERCRUISE") and Game.player or Game.player:GetDockedWith()
 		if refBody and refBody:exists() then
-			local ok, s = pcall(function() return Space.SpawnShipNear(entry.shipId, refBody, 4, 8) end)
+			local minKm, maxKm = 4, 8
+			if refBody:isa("SpaceStation") then
+				minKm = math.max(4.0, getStationSafeSpawnKm(refBody))
+				maxKm = minKm + 4.0
+			end
+			local ok, s = pcall(function() return Space.SpawnShipNear(entry.shipId, refBody, minKm, maxKm) end)
 			if ok and s then ship = s end
 		end
 	elseif entry.locationPath and sameSystem(entry.locationPath, Game.system.path) then
@@ -1549,7 +1645,8 @@ spawnOrUpdateLiveFleetShip = function(entry, spawnNearPlayer, forceLaunchSpace)
 				if okP and sp then
 					ship = sp
 				else
-					local okN, sn = pcall(function() return Space.SpawnShipNear(entry.shipId, st, 0.8, 1.6) end)
+					local safeKm = getStationSafeSpawnKm(st)
+					local okN, sn = pcall(function() return Space.SpawnShipNear(entry.shipId, st, safeKm, safeKm + 2.0) end)
 					if okN and sn then ship = sn end
 				end
 			end
@@ -1619,7 +1716,7 @@ end
 local function convertInSystemToOOS(entry)
 	local t = entry and entry.transit
 	if not t then return end
-	if t.state == "UNDOCKING" or t.state == "IN_SYSTEM_FLIGHT" then
+	if t.state == "UNDOCKING" or t.state == "DEPARTING" or t.state == "IN_SYSTEM_FLIGHT" then
 		local curSys = t.fromSysPath or entry.locationPath
 		if curSys and sameSystem(t.destPath, curSys) then
 			local scDur, distMeters = computeOOSSupercruiseDurationSec(entry, t.destPath)
@@ -1676,6 +1773,9 @@ local function startFleetTransit(entry, destPath, destName, purpose)
 		oosTotalDist = nil,
 		cmdIssued = false,
 		aiRetryAt = 0,
+		departStationPath = nil,
+		departCompleted = false,
+		undockRetryAt = 0,
 	}
 	entry.transit = t
 	entry.orderTargetPath = destPath
@@ -1688,15 +1788,38 @@ local function startFleetTransit(entry, destPath, destName, purpose)
 		local live = spawnOrUpdateLiveFleetShip(entry, false, true)
 		if live and live:exists() then
 			local fs = live.flightState
+			if fs == "DOCKED" and destPath:IsBodyPath() and sameSystem(destPath, Game.system.path) then
+				local destBody = Space.GetBody(destPath.bodyIndex)
+				if destBody and live:GetDockedWith() == destBody then
+					t.state = "IN_SYSTEM_FLIGHT"
+					updateFleetTransit(entry)
+					return
+				end
+			end
 			if fs == "DOCKED" or fs == "LANDED" then
+				local launched, port = tryUndockWithATC(live)
 				t.state = "UNDOCKING"
+				t.departStationPath = (port and port.path) or nil
 				entry.status = "UNDOCKING"
-				entry.orderPhase = string.format("[UNDOCKING] Launching from %s -> %s", formatPathName(entry.locationPath), cleanDestName)
-				pcall(function() live:Undock() end)
+				if launched then
+					entry.orderPhase = string.format("[UNDOCKING] Launching from %s -> %s", formatPathName(entry.locationPath), cleanDestName)
+				else
+					local waitSec = math.clamp((port and port.GetLaunchWaitTime and port:GetLaunchWaitTime()) or 4, 2, 6)
+					t.undockRetryAt = Game.time + waitSec
+					entry.orderPhase = string.format("[ATC HOLD] Awaiting departure clearance at %s", formatPathName(entry.locationPath))
+				end
 			elseif fs == "UNDOCKING" then
+				local port = live:GetDockedWith()
 				t.state = "UNDOCKING"
+				t.departStationPath = (port and port.path) or nil
 				entry.status = "UNDOCKING"
 				entry.orderPhase = string.format("[UNDOCKING] Clearing docking bay -> %s", cleanDestName)
+			elseif isShipDeparting(live) then
+				t.state = "DEPARTING"
+				t.departCompleted = false
+				t.cmdIssued = true
+				entry.status = "DEPARTING"
+				entry.orderPhase = string.format("[DEPARTING] Clearing station departure corridor -> %s", cleanDestName)
 			else
 				if sameSystem(destPath, Game.system.path) then
 					t.state = "IN_SYSTEM_FLIGHT"
@@ -1769,28 +1892,101 @@ updateFleetTransit = function(entry)
 
 		local fs = live.flightState
 		if fs == "DOCKED" or fs == "LANDED" then
-			pcall(function() live:Undock() end)
+			local port = live:GetDockedWith()
+			if port and port.path then
+				t.departStationPath = port.path
+			end
+			local launched = false
+			if Game.time >= (t.undockRetryAt or 0) then
+				launched, port = tryUndockWithATC(live)
+				if port and port.path then
+					t.departStationPath = port.path
+				end
+				if not launched then
+					local waitSec = math.clamp((port and port.GetLaunchWaitTime and port:GetLaunchWaitTime()) or 4, 2, 6)
+					t.undockRetryAt = Game.time + waitSec
+				end
+			end
 			entry.status = "UNDOCKING"
 			entry.orderProgress = 0.03
-			entry.orderPhase = string.format("[UNDOCKING] Requesting launch clearance at %s", formatPathName(entry.locationPath))
+			if launched then
+				entry.orderPhase = string.format("[UNDOCKING] Launching from %s -> %s", formatPathName(entry.locationPath), t.destName)
+			else
+				entry.orderPhase = string.format("[ATC HOLD] Awaiting departure clearance at %s", formatPathName(entry.locationPath))
+			end
 			return false
 		elseif fs == "UNDOCKING" then
 			entry.status = "UNDOCKING"
-			entry.orderProgress = 0.06
-			entry.orderPhase = string.format("[UNDOCKING] Exiting airlock -> %s", t.destName)
+			entry.orderProgress = 0.05
+			entry.orderPhase = string.format("[UNDOCKING] Exiting docking bay -> %s", t.destName)
 			return false
 		else
-			-- Undocked cleanly into flight!
-			t.cmdIssued = false
+			-- Transition cleanly into departure corridor autopilot before issuing external flight orders
+			t.state = "DEPARTING"
+			t.departCompleted = false
+			t.cmdIssued = true
 			t.phaseStartTime = Game.time
-			t.initialDist = nil
-			if inCurrentSys then
-				t.state = "IN_SYSTEM_FLIGHT"
-			else
-				t.state = "CLEARING_MASS_LOCK"
+			local departSt = resolveStationByPath(t.departStationPath) or resolveStationByPath(entry.locationPath)
+			if departSt and departSt:exists() and getShipAICommand(live) ~= "CMD_DEPART" then
+				pcall(function() live:AIDepart(departSt) end)
 			end
-			-- Fall through immediately to issue first flight/departure AI command
+			entry.status = "DEPARTING"
+			entry.orderProgress = 0.08
+			entry.orderPhase = string.format("[DEPARTING] Clearing station departure corridor -> %s", t.destName)
+			return false
 		end
+	end
+
+	if t.state == "DEPARTING" then
+		local originInCurrentSys = Game.system and not Game.InHyperspace() and (
+			(entry.liveShip and entry.liveShip:exists()) or
+			(entry.locationPath and sameSystem(entry.locationPath, Game.system.path))
+		)
+		if not originInCurrentSys then
+			convertInSystemToOOS(entry)
+			return updateFleetTransit(entry)
+		end
+
+		local live = entry.liveShip
+		if not live or not live:exists() then
+			convertInSystemToOOS(entry)
+			return false
+		end
+
+		syncFromLiveShip(entry)
+
+		local fs = live.flightState
+		if fs == "DOCKED" or fs == "LANDED" or fs == "UNDOCKING" then
+			t.state = "UNDOCKING"
+			return false
+		end
+
+		local aiCmd = getShipAICommand(live)
+		if aiCmd == "CMD_DEPART" then
+			entry.status = "DEPARTING"
+			entry.orderProgress = 0.08
+			entry.orderPhase = string.format("[DEPARTING] Clearing station departure corridor -> %s", t.destName)
+			return false
+		end
+
+		if not t.departCompleted then
+			local departSt = resolveStationByPath(t.departStationPath) or resolveStationByPath(entry.locationPath)
+			if departSt and departSt:exists() and live:DistanceTo(departSt) < 1200 and (Game.time - (t.phaseStartTime or Game.time)) < 120 then
+				pcall(function() live:AIDepart(departSt) end)
+				entry.status = "DEPARTING"
+				entry.orderProgress = 0.08
+				entry.orderPhase = string.format("[DEPARTING] Clearing station departure corridor -> %s", t.destName)
+				return false
+			end
+		end
+
+		-- Departure corridor cleared; proceed with navigation
+		t.cmdIssued = false
+		t.departCompleted = false
+		t.phaseStartTime = Game.time
+		t.initialDist = nil
+		t.aiRetryAt = 0
+		t.state = inCurrentSys and "IN_SYSTEM_FLIGHT" or "CLEARING_MASS_LOCK"
 	end
 
 	if t.state == "IN_SYSTEM_FLIGHT" then
@@ -1817,6 +2013,18 @@ updateFleetTransit = function(entry)
 			return false
 		end
 
+		if live.flightState == "UNDOCKING" then
+			t.state = "UNDOCKING"
+			return false
+		end
+
+		if getShipAICommand(live) == "CMD_DEPART" then
+			t.state = "DEPARTING"
+			t.departCompleted = false
+			entry.status = "DEPARTING"
+			return false
+		end
+
 		local destBody = (t.destPath:IsBodyPath() and Space.GetBody(t.destPath.bodyIndex)) or nil
 		if not destBody or not destBody:exists() then
 			-- System-only target (arrival at star system completes)
@@ -1836,9 +2044,18 @@ updateFleetTransit = function(entry)
 				entry.orderPhase = "Docked at " .. t.destName
 				return true
 			else
-				pcall(function() live:Undock() end)
+				t.state = "UNDOCKING"
+				t.departStationPath = dockedAt and dockedAt.path or nil
+				t.cmdIssued = false
+				local launched, port = tryUndockWithATC(live)
 				entry.status = "UNDOCKING"
-				entry.orderPhase = string.format("[UNDOCKING] Launching for %s", t.destName)
+				if launched then
+					entry.orderPhase = string.format("[UNDOCKING] Launching for %s", t.destName)
+				else
+					local waitSec = math.clamp((port and port.GetLaunchWaitTime and port:GetLaunchWaitTime()) or 4, 2, 6)
+					t.undockRetryAt = Game.time + waitSec
+					entry.orderPhase = string.format("[ATC HOLD] Awaiting departure clearance for %s", t.destName)
+				end
 				return false
 			end
 		end
@@ -1848,16 +2065,24 @@ updateFleetTransit = function(entry)
 			if not t.initialDist or dist > t.initialDist then
 				t.initialDist = math.max(1000, dist)
 			end
-			if (not t.cmdIssued) and Game.time >= (t.aiRetryAt or 0) then
+			local fs = live.flightState
+			local aiCmd = getShipAICommand(live)
+			if fs ~= "DOCKING" and aiCmd ~= "CMD_DOCK" and Game.time >= (t.aiRetryAt or 0) then
 				local okCmd = pcall(function() live:AIDockWith(destBody) end)
-				if okCmd then t.cmdIssued = true end
+				if okCmd then
+					t.cmdIssued = true
+					t.holdReason = nil
+				end
 			end
 			local okV, vel = pcall(function() return live:GetVelocity() end)
 			local spd = (okV and vel and vel.length) and vel:length() or 0
-			local fs = live.flightState
 			entry.status = (fs == "SUPERCRUISE" and "SUPERCRUISE") or (fs == "DOCKING" and "DOCKING") or "FLYING"
 			entry.orderProgress = math.clamp(0.08 + 0.90 * (1.0 - (dist / math.max(1000, t.initialDist))), 0.08, 0.98)
-			entry.orderPhase = string.format("[%s] -> %s | %s rem (%.0f m/s)", entry.status, t.destName, formatDistanceMeters(dist), spd)
+			if Game.time < (t.aiRetryAt or 0) and t.holdReason then
+				entry.orderPhase = string.format("[HOLDING] %s at %s; holding orbit (%s)", t.holdReason, t.destName, formatDistanceMeters(dist))
+			else
+				entry.orderPhase = string.format("[%s] -> %s | %s rem (%.0f m/s)", entry.status, t.destName, formatDistanceMeters(dist), spd)
+			end
 			return false
 		else
 			-- Celestial body target (e.g. Ringed Planet for Auto-Mine or orbital Scout target)
@@ -1874,7 +2099,8 @@ updateFleetTransit = function(entry)
 			if not t.initialDist or dist > t.initialDist then
 				t.initialDist = math.max(arriveRadius + 1000, dist)
 			end
-			if (not t.cmdIssued) and Game.time >= (t.aiRetryAt or 0) then
+			local aiCmd = getShipAICommand(live)
+			if aiCmd ~= "CMD_FLYTO" and Game.time >= (t.aiRetryAt or 0) then
 				local okCmd = pcall(function() live:AIFlyTo(destBody) end)
 				if okCmd then t.cmdIssued = true end
 			end
@@ -1905,9 +2131,15 @@ updateFleetTransit = function(entry)
 			return false
 		end
 
-		if live.flightState == "DOCKED" or live.flightState == "UNDOCKING" then
+		if live.flightState == "DOCKED" or live.flightState == "LANDED" or live.flightState == "UNDOCKING" then
 			t.state = "UNDOCKING"
 			t.cmdIssued = false
+			return false
+		end
+
+		if getShipAICommand(live) == "CMD_DEPART" then
+			t.state = "DEPARTING"
+			t.departCompleted = false
 			return false
 		end
 
@@ -1915,7 +2147,11 @@ updateFleetTransit = function(entry)
 		local allowed = true
 		pcall(function() allowed = live:IsHyperjumpAllowed() end)
 		local fb = live.frameBody
-		if fb and fb:exists() and fb:isa("SpaceStation") and live:DistanceTo(fb) < 2200 then
+		if fb and fb:exists() and fb:isa("SpaceStation") and live:DistanceTo(fb) < getStationHyperjumpClearanceMeters(fb) then
+			allowed = false
+		end
+		local nearSt = live.FindNearestTo and live:FindNearestTo("SPACESTATION") or nil
+		if nearSt and nearSt:exists() and live:DistanceTo(nearSt) < getStationHyperjumpClearanceMeters(nearSt) then
 			allowed = false
 		end
 		if (Game.time - (t.phaseStartTime or Game.time)) < 3 then
@@ -1923,15 +2159,29 @@ updateFleetTransit = function(entry)
 		end
 
 		if not allowed then
-			if not t.cmdIssued then
+			local aiCmd = getShipAICommand(live)
+			if (aiCmd == nil or aiCmd == "CMD_NONE") and Game.time >= (t.aiRetryAt or 0) then
 				local stars = Game.system:GetStars()
-				local farTarget = stars and stars[1] and stars[1].body or nil
-				if fb and fb:exists() and fb:isa("SpaceStation") and farTarget then
+				local starBody = stars and stars[1] and stars[1].body or nil
+				local farTarget = nil
+				if starBody and starBody:exists() and starBody ~= fb and live:DistanceTo(starBody) > 5e7 then
+					farTarget = starBody
+				else
+					local stPaths = Game.system:GetStationPaths()
+					for _, sp in ipairs(stPaths or {}) do
+						local sb = resolveStationByPath(sp)
+						if sb and sb ~= fb and live:DistanceTo(sb) > 5e7 then
+							farTarget = sb
+							break
+						end
+					end
+				end
+				if farTarget then
 					pcall(function() live:AIFlyTo(farTarget) end)
-				elseif fb and fb:exists() then
+				elseif fb and fb:exists() and not fb:isa("SpaceStation") then
 					pcall(function() live:AIEnterLowOrbit(fb) end)
-				elseif farTarget then
-					pcall(function() live:AIFlyTo(farTarget) end)
+				elseif starBody and starBody:exists() then
+					pcall(function() live:AIFlyTo(starBody) end)
 				end
 				t.cmdIssued = true
 			end
@@ -2140,24 +2390,46 @@ local function updateEscortAI(entry)
 	if not Game.system or Game.InHyperspace() then return end
 	if not entry.captain then return end
 
+	local rt = liveOrderRuntime[entry.uid] or {}
+	liveOrderRuntime[entry.uid] = rt
+
 	-- Spawn escort only when player is undocked/flying or orbiting
 	if Game.player.flightState == "FLYING" or Game.player.flightState == "SUPERCRUISE" then
 		local live = spawnOrUpdateLiveFleetShip(entry, true, true)
 		if live and live:exists() then
-			if live.flightState == "DOCKED" then
-				live:Undock()
+			local fs = live.flightState
+			if fs == "DOCKED" or fs == "LANDED" then
+				local launched = tryUndockWithATC(live)
+				entry.status = "UNDOCKING"
+				entry.orderPhase = launched and "[UNDOCKING] Escort launching from station" or "[ATC HOLD] Escort awaiting departure clearance"
+				rt.escortCmd = nil
+				rt.escortTarget = nil
+				return
+			elseif fs == "UNDOCKING" then
+				entry.status = "UNDOCKING"
+				entry.orderPhase = "[UNDOCKING] Escort clearing docking bay"
+				return
+			elseif fs == "HYPERSPACE" or fs == "JUMPING" then
+				return
+			elseif getShipAICommand(live) == "CMD_DEPART" then
+				entry.status = "DEPARTING"
+				entry.orderPhase = "[DEPARTING] Escort clearing station departure corridor"
+				syncFromLiveShip(entry)
 				return
 			end
-			if live.flightState == "UNDOCKING" or live.flightState == "HYPERSPACE" then
-				return
-			end
+
 			entry.locationPath = Game.system.path
 			entry.locationName = Game.system.name .. " (Escort)"
 			entry.status = "ESCORTING"
 
+			local aiCmd = getShipAICommand(live)
 			local target = Game.player:GetCombatTarget()
 			if target and target:exists() and target:IsShip() and target ~= live then
-				live:AIKill(target)
+				if aiCmd ~= "CMD_KILL" or rt.escortTarget ~= target then
+					live:AIKill(target)
+					rt.escortCmd = "KILL"
+					rt.escortTarget = target
+				end
 				entry.orderPhase = "Engaging " .. (target.shipName ~= "" and target.shipName or target.label)
 				return
 			end
@@ -2168,7 +2440,11 @@ local function updateEscortAI(entry)
 				if other ~= Game.player and other ~= live and other:exists() then
 					local aiTarget = other.GetAITarget and other:GetAITarget() or nil
 					if aiTarget == Game.player then
-						live:AIKill(other)
+						if aiCmd ~= "CMD_KILL" or rt.escortTarget ~= other then
+							live:AIKill(other)
+							rt.escortCmd = "KILL"
+							rt.escortTarget = other
+						end
 						entry.orderPhase = "Defending Flagship vs " .. (other.shipName ~= "" and other.shipName or other.label)
 						return
 					end
@@ -2176,11 +2452,14 @@ local function updateEscortAI(entry)
 			end
 
 			local dist = live:DistanceTo(Game.player)
-			if dist > 4500 then
+			if (aiCmd ~= "CMD_FORMATION" and aiCmd ~= "CMD_FLYTO") or rt.escortCmd ~= "FOLLOW" then
 				live:AIFlyTo(Game.player)
+				rt.escortCmd = "FOLLOW"
+				rt.escortTarget = nil
+			end
+			if dist > 4500 then
 				entry.orderPhase = "Closing formation (" .. string.format("%.1f km)", dist / 1000)
 			else
-				live:AIFlyTo(Game.player)
 				entry.orderPhase = "Flying close escort near Flagship"
 			end
 			syncFromLiveShip(entry)
@@ -2188,14 +2467,52 @@ local function updateEscortAI(entry)
 	elseif Game.player.flightState == "DOCKED" then
 		local station = Game.player:GetDockedWith()
 		if station and entry.liveShip and entry.liveShip:exists() then
-			if entry.liveShip.flightState == "FLYING" or entry.liveShip.flightState == "SUPERCRUISE" then
-				entry.liveShip:AIDockWith(station)
+			local live = entry.liveShip
+			local fs = live.flightState
+			local aiCmd = getShipAICommand(live)
+			if fs == "DOCKED" then
+				if live:GetDockedWith() == station then
+					syncFromLiveShip(entry)
+					entry.locationPath = station.path
+					entry.locationName = formatPathName(station.path)
+					entry.status = "DOCKED"
+					entry.orderPhase = "Docked on escort standby at " .. station.label
+					rt.escortCmd = nil
+					rt.escortTarget = nil
+				else
+					local launched = tryUndockWithATC(live)
+					entry.status = "UNDOCKING"
+					entry.orderPhase = launched and "[UNDOCKING] Escort launching to join Flagship" or "[ATC HOLD] Escort awaiting departure clearance"
+					rt.escortCmd = nil
+					rt.escortTarget = nil
+				end
+			elseif fs == "LANDED" then
+				tryUndockWithATC(live)
+				entry.status = "UNDOCKING"
+				entry.orderPhase = "[UNDOCKING] Escort lifting off to join Flagship"
+				rt.escortCmd = nil
+				rt.escortTarget = nil
+			elseif fs == "UNDOCKING" then
+				entry.status = "UNDOCKING"
+				entry.orderPhase = "[UNDOCKING] Escort clearing docking bay"
+			elseif aiCmd == "CMD_DEPART" then
+				entry.status = "DEPARTING"
+				entry.orderPhase = "[DEPARTING] Escort clearing departure corridor"
+			elseif fs == "DOCKING" then
+				entry.status = "DOCKING"
 				entry.orderPhase = "Docking at " .. station.label .. " with Flagship"
-			elseif entry.liveShip.flightState == "DOCKED" then
-				syncFromLiveShip(entry)
-				entry.locationPath = station.path
-				entry.locationName = formatPathName(station.path)
-				entry.orderPhase = "Docked on escort standby at " .. station.label
+			elseif fs == "FLYING" or fs == "SUPERCRUISE" then
+				if (aiCmd ~= "CMD_DOCK" or rt.escortTarget ~= station) and Game.time >= (rt.escortDockRetryAt or 0) then
+					live:AIDockWith(station)
+					rt.escortCmd = "DOCK"
+					rt.escortTarget = station
+				end
+				entry.status = (fs == "SUPERCRUISE" and "SUPERCRUISE") or "DOCKING"
+				if Game.time < (rt.escortDockRetryAt or 0) then
+					entry.orderPhase = "[HOLDING] Awaiting free bay at " .. station.label
+				else
+					entry.orderPhase = "Docking at " .. station.label .. " with Flagship"
+				end
 			end
 		else
 			entry.orderPhase = "Escort docked alongside Flagship"
@@ -2441,6 +2758,7 @@ function PlayerFleet.IssueOrder(uid, orderType, params)
 
 	elseif orderType == "PATROL" then
 		local dur = calcDuration(75, entry.captain, "piloting")
+		liveOrderRuntime[entry.uid] = {}
 		entry.order = "PATROL"
 		entry.status = "PATROLLING"
 		entry.orderParams.startTime = Game.time
@@ -2451,7 +2769,11 @@ function PlayerFleet.IssueOrder(uid, orderType, params)
 		if Game.system and not Game.InHyperspace() and sameSystem(entry.locationPath, Game.system.path) then
 			local live = spawnOrUpdateLiveFleetShip(entry, false, true)
 			if live and live:exists() then
-				if live.flightState == "DOCKED" then pcall(function() live:Undock() end) end
+				if live.flightState == "DOCKED" or live.flightState == "LANDED" then
+					local launched = tryUndockWithATC(live)
+					entry.status = "UNDOCKING"
+					entry.orderPhase = launched and "[UNDOCKING] Launching on security patrol" or "[ATC HOLD] Awaiting patrol launch clearance"
+				end
 			end
 		end
 		addLog(entry.shipName, string.format("Initiated Sector Security Patrol (Combat Score %d).", PlayerFleet.GetShipCombatScore(entry)), 0)
@@ -2961,16 +3283,28 @@ end
 local function tickPatrol(entry)
 	local p = entry.orderParams
 	local startT = p.startTime or Game.time
+	local rt = liveOrderRuntime[entry.uid] or {}
+	liveOrderRuntime[entry.uid] = rt
 
 	if Game.system and not Game.InHyperspace() and sameSystem(entry.locationPath, Game.system.path) then
 		local live = spawnOrUpdateLiveFleetShip(entry, false, true)
 		if live and live:exists() then
 			syncFromLiveShip(entry)
 			local fs = live.flightState
+			local aiCmd = getShipAICommand(live)
 			if fs == "DOCKED" or fs == "LANDED" then
-				pcall(function() live:Undock() end)
+				local launched = tryUndockWithATC(live)
 				entry.status = "UNDOCKING"
-				entry.orderPhase = "[UNDOCKING] Launching on security patrol"
+				entry.orderPhase = launched and "[UNDOCKING] Launching on security patrol" or "[ATC HOLD] Awaiting patrol launch clearance"
+				rt.patrolTarget = nil
+				return
+			elseif fs == "UNDOCKING" then
+				entry.status = "UNDOCKING"
+				entry.orderPhase = "[UNDOCKING] Clearing docking bay for security patrol"
+				return
+			elseif aiCmd == "CMD_DEPART" then
+				entry.status = "DEPARTING"
+				entry.orderPhase = "[DEPARTING] Clearing station corridor for security patrol"
 				return
 			elseif fs == "FLYING" or fs == "SUPERCRUISE" then
 				entry.status = "PATROLLING"
@@ -2987,22 +3321,29 @@ local function tickPatrol(entry)
 						end
 						local isWanted = visibleToPatrol and other.IsWanted and other:IsWanted()
 						if isWanted then
-							live:AIKill(other)
+							if aiCmd ~= "CMD_KILL" or rt.patrolTarget ~= other then
+								live:AIKill(other)
+								rt.patrolTarget = other
+							end
 							entry.orderPhase = "[COMBAT] Intercepting pirate " .. (other.label or "hostile")
 							return
 						end
 					end
 				end
 				-- Keep moving between system patrol points so patrol ships fly shipping lanes
-				if Game.time >= (p.patrolWaypointAt or 0) then
+				if Game.time >= (p.patrolWaypointAt or 0) or aiCmd == nil or aiCmd == "CMD_NONE" then
 					local stPaths = Game.system:GetStationPaths()
-					if stPaths and #stPaths > 0 then
-						local pick = stPaths[Engine.rand:Integer(1, #stPaths)]
-						local b = pick and Space.GetBody(pick.bodyIndex)
-						if b and b:exists() then
-							pcall(function() live:AIFlyTo(b) end)
-							p.patrolWaypointName = b.label
+					local farStations = {}
+					for _, sp in ipairs(stPaths or {}) do
+						local b = sp and Space.GetBody(sp.bodyIndex)
+						if b and b:exists() and live:DistanceTo(b) > 25000 then
+							table.insert(farStations, b)
 						end
+					end
+					if #farStations > 0 then
+						local pick = farStations[Engine.rand:Integer(1, #farStations)]
+						pcall(function() live:AIFlyTo(pick) end)
+						p.patrolWaypointName = pick.label
 					else
 						local stars = Game.system:GetStars()
 						if stars and stars[1] and stars[1].body then
@@ -3010,6 +3351,7 @@ local function tickPatrol(entry)
 							p.patrolWaypointName = stars[1].name
 						end
 					end
+					rt.patrolTarget = nil
 					p.patrolWaypointAt = Game.time + 35
 				end
 				entry.orderPhase = "[PATROLLING] Sweeping shipping lanes near " .. (p.patrolWaypointName or Game.system.name)
@@ -3194,6 +3536,8 @@ Event.Register("onGameStart", function()
 	fleetState = normalizeFleetState(loaded_data)
 	loaded_data = nil
 	tickTimerActive = false
+	liveOrderRuntime = {}
+	soldDepartingShips = {}
 	ensureTickLoop()
 	if Game.system and not Game.InHyperspace() then
 		for _, entry in ipairs(fleetState.ships or {}) do
@@ -3210,6 +3554,8 @@ Event.Register("onGameEnd", function()
 	fleetState = normalizeFleetState(nil)
 	loaded_data = nil
 	tickTimerActive = false
+	liveOrderRuntime = {}
+	soldDepartingShips = {}
 end)
 
 Event.Register("onEnterSystem", function(player)
@@ -3243,6 +3589,8 @@ end)
 
 Event.Register("onLeaveSystem", function(ship)
 	if ship and ship:IsPlayer() then
+		liveOrderRuntime = {}
+		soldDepartingShips = {}
 		for _, entry in ipairs(fleetState.ships or {}) do
 			if entry.liveShip and entry.liveShip:exists() then
 				syncFromLiveShip(entry)
@@ -3256,16 +3604,51 @@ Event.Register("onLeaveSystem", function(ship)
 end)
 
 Event.Register("onShipUndocked", function(ship, starport)
+	if soldDepartingShips[ship] then
+		if starport and starport:exists() then
+			pcall(function() ship:AIDepart(starport) end)
+		end
+		return
+	end
 	local entry = findEntryByLiveShip(ship)
 	if not entry then return end
-	if entry.transit and entry.transit.state == "UNDOCKING" then
-		updateFleetTransit(entry)
+	if starport and starport:exists() then
+		pcall(function() ship:AIDepart(starport) end)
+	end
+	if entry.transit then
+		local t = entry.transit
+		if t.state == "UNDOCKING" or t.state == "IN_SYSTEM_FLIGHT" or t.state == "CLEARING_MASS_LOCK" then
+			t.state = "DEPARTING"
+			t.departStationPath = (starport and starport.path) or t.departStationPath
+			t.departCompleted = false
+			t.cmdIssued = true
+			t.phaseStartTime = Game.time
+			entry.status = "DEPARTING"
+			entry.orderProgress = 0.08
+			entry.orderPhase = string.format("[DEPARTING] Clearing station departure corridor -> %s", t.destName or "space")
+		end
+	elseif entry.order == "FOLLOW" then
+		local rt = liveOrderRuntime[entry.uid]
+		if rt then
+			rt.escortCmd = nil
+			rt.escortTarget = nil
+		end
+		entry.status = "DEPARTING"
+		entry.orderPhase = "[DEPARTING] Escort clearing station departure corridor"
+	elseif entry.order == "PATROL" then
+		local rt = liveOrderRuntime[entry.uid]
+		if rt then
+			rt.patrolTarget = nil
+		end
+		entry.status = "DEPARTING"
+		entry.orderPhase = "[DEPARTING] Clearing station corridor for security patrol"
 	end
 end)
 
 Event.Register("onShipDocked", function(ship, starport)
 	local entry = findEntryByLiveShip(ship)
 	if not entry then return end
+	liveOrderRuntime[entry.uid] = nil
 	syncFromLiveShip(entry)
 	if starport and starport.path then
 		entry.locationPath = starport.path
@@ -3282,6 +3665,8 @@ Event.Register("onShipDocked", function(ship, starport)
 		tickDockTransit(entry)
 	elseif entry.order == "SELL_CARGO" then
 		tickSellCargoTransit(entry)
+	elseif entry.order == "FOLLOW" then
+		entry.orderPhase = "Docked on escort standby at " .. (starport and starport.label or "station")
 	end
 end)
 
@@ -3312,13 +3697,104 @@ Event.Register("onShipEnterSystem", function(ship)
 end)
 
 Event.Register("onAICompleted", function(ship, ai_error)
+	if soldDepartingShips[ship] then
+		soldDepartingShips[ship] = nil
+		if ship:exists() and Game.system then
+			local stars = Game.system:GetStars()
+			if stars and stars[1] and stars[1].body then
+				pcall(function() ship:AIFlyTo(stars[1].body) end)
+			end
+		end
+		return
+	end
 	local entry = findEntryByLiveShip(ship)
-	if not entry or not entry.transit then return end
-	if entry.transit.state == "IN_SYSTEM_FLIGHT" and ai_error and ai_error ~= "NONE" then
-		entry.transit.cmdIssued = false
-		entry.transit.aiRetryAt = Game.time + 5
-	elseif entry.transit.state == "CLEARING_MASS_LOCK" and ai_error and ai_error ~= "NONE" then
-		entry.transit.cmdIssued = false
+	if not entry then return end
+	if entry.transit then
+		local t = entry.transit
+		if t.state == "DEPARTING" then
+			t.departCompleted = true
+			t.cmdIssued = false
+			t.aiRetryAt = 0
+			updateFleetTransit(entry)
+		elseif t.state == "IN_SYSTEM_FLIGHT" then
+			if ai_error == "REFUSED_PERM" then
+				t.cmdIssued = false
+				t.aiRetryAt = Game.time + 15
+				t.holdReason = "Bays full"
+				local destBody = (t.destPath and t.destPath:IsBodyPath() and Space.GetBody(t.destPath.bodyIndex)) or nil
+				enterSafeHoldingOrbit(ship, destBody)
+				entry.orderPhase = "[HOLDING] Docking bays full at " .. (t.destName or "station") .. "; holding orbit"
+			elseif ai_error == "PRESS_TOO_HIGH" or ai_error == "GRAV_TOO_HIGH" then
+				local reasonStr = (ai_error == "PRESS_TOO_HIGH") and "atmospheric pressure exceeds hull limit" or "surface gravity exceeds thruster lift"
+				addLog(entry.shipName, string.format("Cannot land at %s (%s).", t.destName or "surface port", reasonStr), 0)
+				Comms.ImportantMessage(string.format("%s cannot land at %s: %s.", entry.shipName, t.destName or "surface port", reasonStr), entry.captain and entry.captain.name or "Fleet Operations")
+				local altPath = nil
+				if entry.order == "DOCK" or entry.order == "SELL_CARGO" or t.purpose == "MINE_RETURN" then
+					altPath = findAlternativeOrbitalStation(Game.system, t.destPath)
+				end
+				if altPath then
+					t.destPath = altPath
+					t.destName = formatPathName(altPath)
+					entry.orderTargetPath = altPath
+					entry.orderTargetName = t.destName
+					if entry.orderParams then
+						if entry.orderParams.sellStationPath then
+							entry.orderParams.sellStationPath = altPath
+						end
+						if entry.orderParams.activeTrade then
+							entry.orderParams.activeTrade.sellPath = altPath
+							entry.orderParams.activeTrade.sellPathName = t.destName
+						end
+					end
+					t.cmdIssued = false
+					t.aiRetryAt = Game.time + 1
+					t.initialDist = nil
+					addLog(entry.shipName, string.format("Diverting to orbital port %s.", t.destName), 0)
+				else
+					local destBody = (t.destPath and t.destPath:IsBodyPath() and Space.GetBody(t.destPath.bodyIndex)) or nil
+					enterSafeHoldingOrbit(ship, destBody)
+					entry.transit = nil
+					entry.order = "IDLE"
+					entry.status = "FLYING"
+					entry.orderProgress = 0
+					entry.orderEta = 0
+					entry.orderPhase = "Holding orbit (unable to land at " .. (t.destName or "surface port") .. ")"
+				end
+			elseif ai_error and ai_error ~= "NONE" then
+				t.cmdIssued = false
+				t.aiRetryAt = Game.time + 5
+			else
+				t.cmdIssued = false
+				t.aiRetryAt = Game.time + 1
+			end
+		elseif t.state == "CLEARING_MASS_LOCK" then
+			t.cmdIssued = false
+			t.aiRetryAt = Game.time + 2
+			updateFleetTransit(entry)
+		end
+	elseif entry.order == "FOLLOW" then
+		local rt = liveOrderRuntime[entry.uid]
+		if ai_error == "REFUSED_PERM" and rt and rt.escortCmd == "DOCK" then
+			rt.escortDockRetryAt = Game.time + 15
+			rt.escortCmd = nil
+			rt.escortTarget = nil
+			local st = Game.player and Game.player:GetDockedWith()
+			if st then
+				enterSafeHoldingOrbit(ship, st)
+			end
+		else
+			if rt then
+				rt.escortCmd = nil
+				rt.escortTarget = nil
+			end
+			updateEscortAI(entry)
+		end
+	elseif entry.order == "PATROL" then
+		if liveOrderRuntime[entry.uid] then
+			liveOrderRuntime[entry.uid].patrolTarget = nil
+		end
+		entry.orderParams.patrolWaypointAt = 0
+		tickPatrol(entry)
 	end
 end)
 

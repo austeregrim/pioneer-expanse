@@ -316,6 +316,10 @@ static int l_get_distance_to_zero_v(lua_State *l)
 	double speed = LuaPull<double>(l, 2);
 	std::string thruster = LuaPull<std::string>(l, 3);
 	double acceleration = player->GetAccel(thrusters_map.at(thruster));
+	if (acceleration <= 1e-9) {
+		LuaPush(l, 0.0);
+		return 1;
+	}
 	// approximation, ignores mass change and gravity
 	LuaPush(l, speed * speed / (2 * acceleration));
 	return 1;
@@ -683,6 +687,87 @@ static int l_player_is_ship_drifting(lua_State *l)
 	return 1;
 }
 
+static int l_player_has_subsystem_targeting(lua_State *l)
+{
+	Player *player = LuaObject<Player>::CheckFromLua(1);
+	LuaPush(l, player->GetPlayerController()->HasSubsystemTargetingComputer());
+	return 1;
+}
+
+static int l_player_get_target_subsystem(lua_State *l)
+{
+	Player *player = LuaObject<Player>::CheckFromLua(1);
+	PlayerShipController *psc = player->GetPlayerController();
+	const std::string &id = psc->GetTargetSubsystemId();
+	if (id.empty()) {
+		lua_pushnil(l);
+		return 1;
+	}
+
+	Body *target = psc->GetCombatTarget();
+	if (!target || !target->IsType(ObjectType::SHIP)) {
+		lua_pushnil(l);
+		return 1;
+	}
+
+	const Ship *targetShip = static_cast<const Ship *>(target);
+	const Subsystems::SubsystemNode *sub = targetShip->FindSubsystem(id);
+	if (!sub) {
+		lua_pushnil(l);
+		return 1;
+	}
+
+	vector3d relPos;
+	const bool hasRelPos = psc->GetTargetSubsystemWorldRelPos(relPos);
+
+	lua_createtable(l, 0, 8);
+	LuaPush(l, sub->id);
+	lua_setfield(l, -2, "id");
+	LuaPush(l, sub->name);
+	lua_setfield(l, -2, "name");
+	LuaPush(l, sub->slotId);
+	lua_setfield(l, -2, "slotId");
+	LuaPush(l, sub->category);
+	lua_setfield(l, -2, "category");
+	LuaPush(l, double(sub->integrity));
+	lua_setfield(l, -2, "integrity");
+	LuaPush(l, sub->disabled);
+	lua_setfield(l, -2, "disabled");
+	LuaPush(l, sub->localPos);
+	lua_setfield(l, -2, "localPos");
+	if (hasRelPos) {
+		LuaPush(l, relPos);
+		lua_setfield(l, -2, "relPos");
+	}
+	return 1;
+}
+
+static int l_player_set_target_subsystem(lua_State *l)
+{
+	Player *player = LuaObject<Player>::CheckFromLua(1);
+	std::string id;
+	if (!lua_isnil(l, 2))
+		id = LuaPull<std::string>(l, 2);
+	player->GetPlayerController()->SetTargetSubsystemId(id);
+	return 0;
+}
+
+static int l_player_cycle_target_subsystem(lua_State *l)
+{
+	Player *player = LuaObject<Player>::CheckFromLua(1);
+	int dir = luaL_optinteger(l, 2, 1);
+	player->GetPlayerController()->CycleSubsystems(dir);
+	return 0;
+}
+
+static int l_player_cycle_targets(lua_State *l)
+{
+	Player *player = LuaObject<Player>::CheckFromLua(1);
+	int dir = luaL_optinteger(l, 2, 1);
+	player->GetPlayerController()->CycleTargets(dir);
+	return 0;
+}
+
 template <>
 const char *LuaObject<Player>::s_type = "Player";
 
@@ -729,6 +814,11 @@ void LuaObject<Player>::RegisterClass()
 		{ "SetSpeedLimit", l_player_set_speed_limit },
 		{ "SetSpeedLimiterActive", l_player_set_speed_limiter_active },
 		{ "IsShipDrifting", l_player_is_ship_drifting },
+		{ "HasSubsystemTargeting", l_player_has_subsystem_targeting },
+		{ "GetTargetSubsystem", l_player_get_target_subsystem },
+		{ "SetTargetSubsystem", l_player_set_target_subsystem },
+		{ "CycleTargetSubsystem", l_player_cycle_target_subsystem },
+		{ "CycleTargets", l_player_cycle_targets },
 		{ 0, 0 }
 	};
 

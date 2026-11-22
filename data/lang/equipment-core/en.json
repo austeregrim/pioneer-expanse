@@ -1091,6 +1091,14 @@
     "description": "Stat label for equipment weight",
     "message": "Weight"
   },
+  "SUBSYSTEM_TARGETING_COMPUTER": {
+    "description": "Ship computer module enabling subsystem targeting and lead pips",
+    "message": "Subsystem Targeting Computer"
+  },
+  "SUBSYSTEM_TARGETING_COMPUTER_DESCRIPTION": {
+    "description": "Description for Subsystem Targeting Computer",
+    "message": "Tactical fire-control co-processor that resolves an enemy vessel's thrusters, hyperdrive, shields, weapon hardpoints, and sensor arrays, projecting 3D subsystem lead pips to allow disabling targets without hull destruction."
+  },
   "SURFACE_SCANNER": {
     "description": "A ship equipment that records data of terrain, for cartography mapping/geological survey. Note: Scout Mission module reference and distinguishes between 'orbital' and 'surface' scanner types, the former scans planet from orbit, the latter from low altitude. Model manufacturer name is meant to sound like a cheap brand.",
     "message": "Surface scanner Nadir-150"

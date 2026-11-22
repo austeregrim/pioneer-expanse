@@ -6,6 +6,7 @@ local Engine = require 'Engine'
 local Game = require 'Game'
 local Vector2 = _G.Vector2
 local Vector3 = _G.Vector3
+local Color = _G.Color
 
 -- cache ui
 local pionillium = ui.fonts.pionillium
@@ -153,6 +154,19 @@ local function displayCombatTargetIndicator(combatTarget)
 	displayIndicator(onscreen, position, direction, icons.prograde, colors.combatTarget, true, lui.HUD_INDICATOR_COMBAT_TARGET_PROGRADE)
 	onscreen,position,direction = Engine.ProjectRelDirection(-vel)
 	displayIndicator(onscreen, position, direction, icons.retrograde, colors.combatTarget, false, lui.HUD_INDICATOR_COMBAT_TARGET_RETROGRADE)
+
+	local sub = player.GetTargetSubsystem and player:GetTargetSubsystem()
+	if sub and sub.relPos then
+		local subOn, subPos = Engine.ProjectRelPosition(sub.relPos)
+		if subOn then
+			local pct = math.floor((sub.integrity or 1.0) * 100 + 0.5)
+			local label = sub.disabled
+				and (string.upper(sub.name or sub.id) .. " OFFLINE")
+				or string.format("%s %d%%", string.upper(sub.name or sub.id), pct)
+			local col = sub.disabled and Color(255, 75, 65, 245) or Color(255, 200, 60, 245)
+			ui.addStyledText(subPos + Vector2(15, 0), ui.anchor.left, ui.anchor.center, label, col, pionillium.tiny)
+		end
+	end
 end
 
 -- display indicators relative to frame
