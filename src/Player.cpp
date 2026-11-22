@@ -407,6 +407,7 @@ void Player::StaticUpdate(const float timeStep)
 			if (m_takeoffTimer <= 0.0f) {
 				m_takeoffTimer = 0.0f;
 				m_takeoffFromStation = false;
+				ResetLaunchLockTimeout();
 				auto con = GetPlayerController();
 				if (con && con->GetFlightControlState() == CONTROL_FIXSPEED && con->GetCruiseDirection() == PlayerShipController::CRUISE_UP) {
 					// Pad clearance achieved: transition cleanly to forward manual flight mode with full thruster authority
@@ -424,6 +425,7 @@ bool Player::TakeoverUndocking()
 	if (m_takeoffTimer > 0.0f) {
 		m_takeoffTimer = 0.0f;
 		m_takeoffFromStation = false;
+		ResetLaunchLockTimeout();
 		if (PlayerShipController *con = GetPlayerController()) {
 			con->SetCruiseDirection(PlayerShipController::CRUISE_FWD);
 			if (con->GetFlightControlState() != CONTROL_FIXSPEED) {

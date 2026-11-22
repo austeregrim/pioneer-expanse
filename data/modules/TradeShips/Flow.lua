@@ -424,6 +424,7 @@ local function buildTrafficVariants()
 	for k, v in pairs(port_params) do
 		if k and k:exists() then
 			v.port = k
+			v._sortTie = Engine.rand:Number(1)
 			table.insert(port_summary, v)
 		end
 	end
@@ -431,13 +432,10 @@ local function buildTrafficVariants()
 	local focusPort = getPlayerFocusPort(Core.params.ports)
 	local focusParentIdx = focusPort and getParentBodyIndex(focusPort) or nil
 	table.sort(port_summary, function(a, b)
-		local pa, pb = a.port, b.port
-		if pa == focusPort and pb ~= focusPort then return true end
-		if pb == focusPort and pa ~= focusPort then return false end
-		local aSamePlanet = focusParentIdx and (getParentBodyIndex(pa) == focusParentIdx)
-		local bSamePlanet = focusParentIdx and (getParentBodyIndex(pb) == focusParentIdx)
-		if aSamePlanet ~= bSamePlanet then return aSamePlanet == true end
-		return (a.ndocks or pa.numDocks or 0) > (b.ndocks or pb.numDocks or 0)
+		local da = a.ndocks or a.port.numDocks or 0
+		local db = b.ndocks or b.port.numDocks or 0
+		if da ~= db then return da > db end
+		return a._sortTie < b._sortTie
 	end)
 
 	local dockedVariantsByPort = {}
@@ -487,9 +485,9 @@ Flow.getTrafficTargets = function()
 	local pop = (Game.system and Game.system.population) or 0
 	local ports = (Core.params and Core.params.ports) or {}
 	local sec = math.max(0.25, 1.0 - ((Game.system and Game.system.lawlessness) or 0))
-	local targetInFlight = math.clamp(math.floor((6 + #ports * 0.9 + math.min(pop, 20) * 0.4) * (0.55 + 0.45 * sec)), 6, 30)
-	local maxInFlight = targetInFlight + 8
-	local targetDocked = math.clamp(math.floor(4 + #ports * 1.4 + math.min(pop, 20) * 0.3), 6, 44)
+	local targetInFlight = math.clamp(math.floor((10 + #ports * 1.6 + math.min(pop, 20) * 0.6) * (0.65 + 0.35 * sec)), 10, 52)
+	local maxInFlight = targetInFlight + 12
+	local targetDocked = math.clamp(math.floor(6 + #ports * 1.8 + math.min(pop, 20) * 0.4), 6, 48)
 	return targetInFlight, maxInFlight, targetDocked
 end
 
@@ -512,7 +510,7 @@ Flow.countActiveShips = function()
 	return inFlight, docked, clouds
 end
 
-Flow.populateStationPads = function(port_summary, dockedVariantsByPort, targetDocked, focusPort, isInitial, forceFocusOnly)
+Flow.populateStationPads = function(port_summary, dockedVariantsByPort, targetDocked, focusPort, isInitial, _)
 	local existingByPort = {}
 	local totalDocked = 0
 	for ship, trader in pairs(Core.ships or {}) do
@@ -527,60 +525,53 @@ Flow.populateStationPads = function(port_summary, dockedVariantsByPort, targetDo
 		end
 	end
 
-	for portIdx, portParam in ipairs(port_summary) do
-		local portBody = portParam.port
-		if forceFocusOnly and portBody ~= focusPort then
-			break
-		end
-		if totalDocked >= targetDocked and not (portBody == focusPort and (existingByPort[portBody] or 0) == 0) then
-			break
-		end
-		local portBodyIdx = portBody.path and portBody.path.bodyIndex or nil
-		local candidates = dockedVariantsByPort[portBody]
-		local ndocks = portParam.ndocks or portBody.numDocks or 0
-		local freeDocks = portBody.freeDocks or (ndocks - (portBody.numShipsDocked or 0))
-		if candidates and #candidates > 0 and ndocks > 1 and freeDocks >= 2 then
-			utils.normWeights(candidates)
-			local minLeaveFree = (ndocks >= 4) and 2 or 1
-			local perPortCap = (ndocks >= 14) and 3 or ((ndocks >= 6) and 2 or 1)
-			if portBody == focusPort then
-				perPortCap = (ndocks >= 10) and 3 or 2
-			end
-			local existing = existingByPort[portBody] or 0
-			local desiredForPort = math.clamp(math.ceil(ndocks * 0.25), 1, perPortCap)
-			if portBody == focusPort then
-				desiredForPort = math.max(desiredForPort, math.min(ndocks - minLeaveFree, perPortCap))
-			end
-			local maxAddByFree = math.max(0, freeDocks - minLeaveFree)
-			local need = math.min(math.max(0, desiredForPort - existing), maxAddByFree)
-			if portBody ~= focusPort then
-				need = math.min(need, math.max(0, targetDocked - totalDocked))
-			end
-			for i = 1, need do
-				local pick = utils.chooseNormalized(candidates)
-				local rec = pick and Game.system and ShipRegistry.AcquireShipForSystem(Game.system, nil, pick.id, { stationBodyIdx = portBodyIdx })
-				local ship = pick and Space.SpawnShipDocked(pick.id, portBody)
-				if ship then
-					totalDocked = totalDocked + 1
-					Core.ships[ship] = { ts_error = "OK", status = 'docked', starport = portBody, ship_name = pick.id }
-					if rec then
-						ShipRegistry.ApplyRecordToShip(ship, rec)
-					else
-						ship:SetLabel(Ship.MakeRandomLabel(pick.id, "TRADER"))
+	-- Round-robin multi-pass across all stations so outer/smaller hubs are populated alongside major hubs
+	for pass = 1, 3 do
+		if totalDocked >= targetDocked then break end
+		for portIdx, portParam in ipairs(port_summary) do
+			if totalDocked >= targetDocked then break end
+			local portBody = portParam.port
+			local portBodyIdx = portBody.path and portBody.path.bodyIndex or nil
+			local candidates = dockedVariantsByPort[portBody]
+			local ndocks = portParam.ndocks or portBody.numDocks or 0
+			local freeDocks = portBody.freeDocks or (ndocks - (portBody.numShipsDocked or 0))
+			if candidates and #candidates > 0 and ndocks > 1 and freeDocks >= 2 then
+				utils.normWeights(candidates)
+				local minLeaveFree = (ndocks >= 4) and 2 or 1
+				local perPortCap = (ndocks >= 14) and 3 or ((ndocks >= 6) and 2 or 1)
+				local existing = existingByPort[portBody] or 0
+				local desiredForPort = math.clamp(math.ceil(ndocks * 0.25), 1, perPortCap)
+				local passTarget = math.min(pass, desiredForPort)
+				local maxAddByFree = math.max(0, freeDocks - minLeaveFree)
+				local need = math.min(math.max(0, passTarget - existing), maxAddByFree, math.max(0, targetDocked - totalDocked))
+				for _ = 1, need do
+					local pick = utils.chooseNormalized(candidates)
+					local rec = pick and Game.system and ShipRegistry.AcquireShipForSystem(Game.system, nil, pick.id, { stationBodyIdx = portBodyIdx })
+					local ship = pick and Space.SpawnShipDocked(pick.id, portBody)
+					if ship then
+						totalDocked = totalDocked + 1
+						existing = existing + 1
+						existingByPort[portBody] = existing
+						Core.ships[ship] = { ts_error = "OK", status = 'docked', starport = portBody, ship_name = pick.id }
+						if rec then
+							ShipRegistry.ApplyRecordToShip(ship, rec)
+						else
+							ship:SetLabel(Ship.MakeRandomLabel(pick.id, "TRADER"))
+						end
+						Trader.addEquip(ship)
+						Trader.addHyperdriveFuel(ship)
+						Trader.addCargo(ship, 'export')
+						local plan = Trader.computeStationDwellPlan(ship, portBody, ship.usedCargo or 0, 0, rec, isInitial)
+						local stagger = ((pass - 1) * 28) + ((portIdx - 1) % 5) * 6
+						if plan.action == 'hangar' then
+							Core.ships[ship].hangarDuration = plan.hangarDuration
+							Trader.assignTask(ship, Game.time + plan.padDuration + ((portIdx - 1) % 4) * 5, 'doStowHangar')
+						else
+							Trader.assignTask(ship, Game.time + plan.padDuration + stagger, 'doUndock')
+						end
+					elseif rec then
+						ShipRegistry.ReleaseLive(rec.label)
 					end
-					Trader.addEquip(ship)
-					Trader.addHyperdriveFuel(ship)
-					Trader.addCargo(ship, 'export')
-					local plan = Trader.computeStationDwellPlan(ship, portBody, ship.usedCargo or 0, 0, rec, isInitial)
-					local stagger = (portIdx - 1) * 10 + (i - 1) * 35
-					if plan.action == 'hangar' then
-						Core.ships[ship].hangarDuration = plan.hangarDuration
-						Trader.assignTask(ship, Game.time + plan.padDuration + (portIdx - 1) * 5, 'doStowHangar')
-					else
-						Trader.assignTask(ship, Game.time + plan.padDuration + stagger, 'doUndock')
-					end
-				elseif rec then
-					ShipRegistry.ReleaseLive(rec.label)
 				end
 			end
 		end
@@ -594,7 +585,7 @@ Flow.populateShippingLanes = function(routes_variants, local_routes, hyper_route
 	if need <= 0 then return end
 
 	local priorityCorridors = {}
-	local interStationCorridors = {}
+	local allCorridors = {}
 	if #port_summary >= 2 then
 		for i = 1, #port_summary do
 			for j = 1, #port_summary do
@@ -603,12 +594,11 @@ Flow.populateShippingLanes = function(routes_variants, local_routes, hyper_route
 					local pB = port_summary[j].port
 					if pA and pB and pA:DistanceTo(pB) > 4000000 then
 						local corr = { from = pA, to = pB }
+						table.insert(allCorridors, corr)
 						local touchesFocus = (pA == focusPort) or (pB == focusPort)
 						local touchesFocusPlanet = focusParentIdx and (getParentBodyIndex(pA) == focusParentIdx or getParentBodyIndex(pB) == focusParentIdx)
 						if touchesFocus or (touchesFocusPlanet and (pB.numDocks or 0) >= 6) then
 							table.insert(priorityCorridors, corr)
-						else
-							table.insert(interStationCorridors, corr)
 						end
 					end
 				end
@@ -616,7 +606,16 @@ Flow.populateShippingLanes = function(routes_variants, local_routes, hyper_route
 		end
 	end
 	shuffleArray(priorityCorridors)
-	shuffleArray(interStationCorridors)
+	shuffleArray(allCorridors)
+
+	-- Shuffled port list for round-robin destination diversity across the whole system
+	local portOrder = {}
+	for _, ps in ipairs(port_summary) do
+		if ps.port and ps.port:exists() then
+			table.insert(portOrder, ps.port)
+		end
+	end
+	shuffleArray(portOrder)
 
 	for idx = 1, need do
 		local params = utils.chooseNormalized(routes_variants)
@@ -625,16 +624,18 @@ Flow.populateShippingLanes = function(routes_variants, local_routes, hyper_route
 		if params and hj_route then
 			local fromBody = params.from
 			local toBody = params.to
-			local useInterStation = ((#priorityCorridors + #interStationCorridors) > 0) and (idx % 2 == 0 or (#priorityCorridors > 0 and idx <= math.ceil(need * 0.4)))
+			local shipRoutes = local_routes[params.id] or {}
+			local useInterStation = (#allCorridors > 0) and (idx % 5 ~= 0)
 			if useInterStation then
 				local corr
-				if #priorityCorridors > 0 and (idx % 3 ~= 0 or #interStationCorridors == 0) then
+				-- Modest (~20%) inclusion of player's local cluster; ~80% spread uniformly across all system corridors
+				if #priorityCorridors > 0 and (idx % 5 == 1) then
 					corr = priorityCorridors[((idx - 1) % #priorityCorridors) + 1]
 				else
-					corr = interStationCorridors[((idx - 1) % #interStationCorridors) + 1]
+					corr = allCorridors[((idx - 1) % #allCorridors) + 1]
 				end
 				local canLand = false
-				for _, r in ipairs(local_routes[params.id] or {}) do
+				for _, r in ipairs(shipRoutes) do
 					if r.to == corr.to then
 						canLand = true
 						break
@@ -646,9 +647,11 @@ Flow.populateShippingLanes = function(routes_variants, local_routes, hyper_route
 				else
 					useInterStation = false
 				end
-			elseif focusPort and idx % 4 == 1 then
-				for _, r in ipairs(local_routes[params.id] or {}) do
-					if r.to == focusPort then
+			end
+			if not useInterStation and #portOrder > 0 then
+				local rrPort = portOrder[((idx - 1) % #portOrder) + 1]
+				for _, r in ipairs(shipRoutes) do
+					if r.to == rrPort then
 						fromBody = r.from
 						toBody = r.to
 						break
@@ -679,9 +682,9 @@ Flow.populateShippingLanes = function(routes_variants, local_routes, hyper_route
 				Trader.addHyperdriveFuel(ship, hj_route.fuel)
 				Trader.addCargo(ship, 'import')
 
-				local baseFrac = 0.10 + 0.80 * ((idx - 0.5) / need)
+				local baseFrac = 0.08 + 0.84 * ((idx - 0.5) / math.max(1, need))
 				local jitter = Engine.rand:Number(-0.04, 0.04)
-				local tRatio = math.clamp(baseFrac + jitter, 0.10, 0.90)
+				local tRatio = math.clamp(baseFrac + jitter, 0.08, 0.92)
 				Space.PutShipOnRoute(ship, toBody, tRatio)
 				ship:AIDockWith(toBody)
 			elseif rec then
@@ -734,13 +737,13 @@ Flow.spawnInitialShips = function()
 
 	-- 3. Short-Fuse Arrival Hyperspace Clouds
 	if #cloud_variants > 0 then
-		local numClouds = Engine.rand:Integer(4, 6)
+		local numClouds = Engine.rand:Integer(6, 9)
 		for _ = 1, numClouds do
 			local cloud = utils.chooseNormalized(cloud_variants)
 			local routesForShip = cloud and Core.params.local_routes[cloud.ship]
 			local route = routesForShip and #routesForShip > 0 and utils.chooseNormalized(routesForShip)
 			if cloud and route then
-				local dest_time = Game.time + Engine.rand:Number(12, 75)
+				local dest_time = Game.time + Engine.rand:Number(8, 55)
 				Trader.spawnInCloud(cloud.ship, cloud, route, dest_time)
 			end
 		end
@@ -809,6 +812,9 @@ Flow.reconcileTrafficOnLoad = function()
 			Core.ships[ship] = nil
 		elseif trader.delay and trader.fnc then
 			local fireAt = math.max(trader.delay, Game.time + Engine.rand:Number(4, 18))
+			if (trader.status == 'docked' or trader.status == 'unstowing') and fireAt > Game.time + 150 then
+				fireAt = Game.time + Engine.rand:Number(18, 120)
+			end
 			Core.log:add(ship, "Resume " .. trader.fnc)
 			Trader.assignTask(ship, fireAt, trader.fnc)
 		elseif trader.status == 'docked' then
@@ -839,34 +845,49 @@ Flow.reconcileTrafficOnLoad = function()
 	Core.params.spawn_in = {{"inbound", v.ships_in_space}, {"hyperspace", v.ships_in_cloud}, {"docked", v.ships_docked}}
 
 	local inFlight, docked, clouds = Flow.countActiveShips()
-	if docked < targetDocked or v.focusPort then
-		local forceFocusOnly = (docked >= targetDocked)
-		Flow.populateStationPads(v.port_summary, v.dockedVariantsByPort, targetDocked, v.focusPort, true, forceFocusOnly)
+	if docked < targetDocked then
+		Flow.populateStationPads(v.port_summary, v.dockedVariantsByPort, targetDocked, v.focusPort, true, false)
 	end
 	if inFlight < targetInFlight then
 		Flow.populateShippingLanes(v.routes_variants, Core.params.local_routes, Core.params.hyper_routes, v.port_summary, targetInFlight, v.focusPort, v.focusParentIdx)
 	end
-	if clouds < 2 and #v.cloud_variants > 0 then
-		local numClouds = 3 - clouds
+	if clouds < 5 and #v.cloud_variants > 0 then
+		local numClouds = 5 - clouds
 		for _ = 1, numClouds do
 			local cloud = utils.chooseNormalized(v.cloud_variants)
 			local routesForShip = cloud and Core.params.local_routes[cloud.ship]
 			local route = routesForShip and #routesForShip > 0 and utils.chooseNormalized(routesForShip)
 			if cloud and route then
-				Trader.spawnInCloud(cloud.ship, cloud, route, Game.time + Engine.rand:Number(10, 40))
+				Trader.spawnInCloud(cloud.ship, cloud, route, Game.time + Engine.rand:Number(8, 38))
 			end
 		end
 	end
 
-	-- Ensure focus starport has an active hangar unstow soon after load if hangar ships exist
-	if v.focusPort and v.focusPort:exists() and (v.focusPort.freeDocks or 0) >= 2 and v.focusPort.path then
-		local ready = ShipRegistry.GetHangarReadyShips(Game.system, v.focusPort.path.bodyIndex, Game.time + 30)
+	-- Clamp overly long legacy hangar layovers in this system and schedule prompt launches across up to 8 hubs
+	local sysKey = ShipRegistry.SystemKey(Game.system.path)
+	local roster = ShipRegistry.GetSystemRoster(Game.system)
+	for _, lbl in ipairs(roster) do
+		local rec = ShipRegistry.GetRecord(lbl)
+		if rec and rec.status == "HANGAR" and rec.locationSystemKey == sysKey and (rec.hangarUntil or 0) > Game.time + 1500 then
+			rec.hangarUntil = Game.time + Engine.rand:Number(120, 1200)
+		end
+	end
+	local shuffledPorts = {}
+	for _, p in ipairs(Core.params.ports or {}) do
+		if p and p:exists() and (p.freeDocks or 0) >= 2 and p.path then
+			table.insert(shuffledPorts, p)
+		end
+	end
+	shuffleArray(shuffledPorts)
+	local nudgeLimit = math.min(#shuffledPorts, 8)
+	for i = 1, nudgeLimit do
+		local port = shuffledPorts[i]
+		local ready = ShipRegistry.GetHangarReadyShips(Game.system, port.path.bodyIndex, Game.time + 30)
 		if #ready == 0 then
-			local roster = ShipRegistry.GetSystemRoster(Game.system)
 			for _, lbl in ipairs(roster) do
 				local rec = ShipRegistry.GetRecord(lbl)
-				if rec and rec.status == "HANGAR" and rec.locationStationBodyIdx == v.focusPort.path.bodyIndex then
-					rec.hangarUntil = Game.time + Engine.rand:Number(8, 22)
+				if rec and rec.status == "HANGAR" and rec.locationSystemKey == sysKey and rec.locationStationBodyIdx == port.path.bodyIndex then
+					rec.hangarUntil = Game.time + Engine.rand:Number(10, 45)
 					break
 				end
 			end
@@ -925,21 +946,16 @@ Flow.processHangars = function()
 	if #ports == 0 then return end
 
 	local orderedPorts = {}
-	local focusPort = getPlayerFocusPort(ports)
-	if focusPort and focusPort:exists() then
-		table.insert(orderedPorts, focusPort)
-	end
-	local startIdx = Engine.rand:Integer(1, #ports)
-	for offset = 0, #ports - 1 do
-		local p = ports[((startIdx + offset - 1) % #ports) + 1]
-		if p and p:exists() and p ~= focusPort then
+	for _, p in ipairs(ports) do
+		if p and p:exists() then
 			table.insert(orderedPorts, p)
 		end
 	end
+	shuffleArray(orderedPorts)
 
 	local launched = 0
 	for _, port in ipairs(orderedPorts) do
-		if totalActive >= Core.MAX_SHIPS or launched >= 3 then break end
+		if totalActive >= Core.MAX_SHIPS or launched >= 6 then break end
 		if port and port:exists() and (port.freeDocks or 0) >= 2 and port.path then
 			local readyList = ShipRegistry.GetHangarReadyShips(Game.system, port.path.bodyIndex, Game.time)
 			if #readyList > 0 then
@@ -975,7 +991,7 @@ Flow.run = function()
 	if totalActive < Core.MAX_SHIPS and (inFlight + clouds) < maxInFlight then
 		local focusPort = getPlayerFocusPort(Core.params.ports)
 		local deficit = maxInFlight - (inFlight + clouds)
-		local spawnCount = (deficit >= 6) and 2 or 1
+		local spawnCount = (deficit >= 8) and 3 or ((deficit >= 3) and 2 or 1)
 		for i = 1, spawnCount do
 			if totalActive >= Core.MAX_SHIPS then break end
 			local ship_name = utils.chooseEqual(Core.params.ship_names)
@@ -983,7 +999,7 @@ Flow.run = function()
 			local localRoutes = ship_name and Core.params.local_routes[ship_name]
 			local cloud = hyperRoutes and #hyperRoutes > 0 and utils.chooseEqual(hyperRoutes)
 			local route = localRoutes and #localRoutes > 0 and utils.chooseNormalized(localRoutes)
-			if focusPort and i == 1 and Engine.rand:Number(1) < 0.30 and localRoutes then
+			if focusPort and i == 1 and Engine.rand:Number(1) < 0.12 and localRoutes then
 				for _, r in ipairs(localRoutes) do
 					if r.to == focusPort then
 						route = r
@@ -992,14 +1008,14 @@ Flow.run = function()
 				end
 			end
 			if ship_name and cloud and route then
-				if Trader.spawnInCloud(ship_name, cloud, route, Game.time + Engine.rand:Number(15, 42)) then
+				if Trader.spawnInCloud(ship_name, cloud, route, Game.time + Engine.rand:Number(10, 35)) then
 					totalActive = totalActive + 1
 				end
 			end
 		end
 	end
-	local portFactor = math.clamp(1.0 - ((#(Core.params.ports or {}) - 4) * 0.015), 0.72, 1.0)
-	Core.last_spawn_interval = Engine.rand:Number(16, 32) * portFactor -- steady real-time arrival cadence
+	local portFactor = math.clamp(1.0 - ((#(Core.params.ports or {}) - 3) * 0.025), 0.55, 1.0)
+	Core.last_spawn_interval = Engine.rand:Number(10, 20) * portFactor -- active system-wide real-time arrival cadence
 	Trader.callInThisSystem(Game.time + Core.last_spawn_interval, Flow.run)
 end
 

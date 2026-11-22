@@ -260,7 +260,6 @@ end
 local Windows = {
 	systemName = layout.NewWindow("SystemMapSystemName"),
 	edgeButtons = layout.NewWindow("SystemMapEdgeButtons"),
-	timeButtons = layout.NewWindow("SystemMapTimeButtons"),
 	unexplored = layout.NewWindow("SystemMapUnexplored")
 }
 
@@ -283,6 +282,12 @@ function systemOverviewWidget:onBodyDoubleClicked(sBody)
 	systemView:ViewSelectedObject()
 end
 
+function systemOverviewWidget:onBodyContextMenu(sBody)
+	popup_object = { type = Projectable.OBJECT, base = Projectable.SYSTEMBODY, ref = sBody }
+	popup_objects = nil
+	ui.openPopup("system-view-ui-popup")
+end
+
 --
 -- Helper functions
 --
@@ -290,53 +295,6 @@ end
 local function textIcon(icon, tooltip)
 	ui.icon(icon, Vector2(ui.getTextLineHeight()), svColor.FONT, tooltip)
 	ui.sameLine()
-end
-
-local function showDvLine(leftIcon, resetIcon, rightIcon, key, Formatter, leftTooltip, resetTooltip, rightTooltip)
-	local wheel = function()
-		if ui.isItemHovered() then
-			local w = ui.getMouseWheel()
-			if w ~= 0 then
-				systemView:TransferPlannerAdd(key, w * 10)
-			end
-		end
-	end
-	local id =  "##" .. key
-
-	local press = ui.mainMenuButton(leftIcon, leftTooltip..id)
-	if press or (key ~= "factor" and ui.isItemActive()) then
-		systemView:TransferPlannerAdd(key, -10)
-	end
-	wheel()
-	ui.sameLine()
-	if ui.mainMenuButton(resetIcon, resetTooltip..id) then
-		systemView:TransferPlannerReset(key)
-	end
-	wheel()
-	ui.sameLine()
-	press = ui.mainMenuButton(rightIcon, rightTooltip..id)
-	if press or (key ~= "factor" and ui.isItemActive()) then
-		systemView:TransferPlannerAdd(key, 10)
-	end
-	wheel()
-	ui.sameLine()
-	local speed, speed_unit = Formatter(systemView:TransferPlannerGet(key))
-	ui.text(speed .. " " .. speed_unit)
-	return 0
-end
-
-local time_selected_button_icon = icons.time_center
-
-local function timeButton(icon, tooltip, factor)
-	if ui.mainMenuButton(icon, tooltip) then
-		time_selected_button_icon = icon
-	end
-	local active = ui.isItemActive()
-	if active then
-		systemView:AccelerateTime(factor)
-	end
-	ui.sameLine()
-	return active
 end
 
 -- Format the mass in tonnes
@@ -706,38 +664,11 @@ local infoView = {
 	end
 }
 
----@type UI.Sidebar.Module
-local plannerView = {
-	icon = icons.semi_major_axis,
-	tooltip = lc.ORBIT_PLANNER,
-	title = lc.ORBIT_PLANNER,
-	disabled = false,
-
-	drawBody = function(self)
-		showDvLine(icons.decrease, icons.delta, icons.increase, "factor", function(i) return i, "x" end, luc.DECREASE, lc.PLANNER_RESET_FACTOR, luc.INCREASE)
-		showDvLine(icons.decrease, icons.clock, icons.increase, "starttime",
-			function(_)
-				local now = Game.time
-				local start = systemView:GetOrbitPlannerStartTime()
-				if start then
-					return ui.Format.Duration(math.floor(start - now)), ""
-				else
-					return lc.NOW, ""
-				end
-			end,
-			luc.DECREASE, lc.PLANNER_RESET_START, luc.INCREASE)
-		showDvLine(icons.decrease, icons.orbit_prograde, icons.increase, "prograde", ui.Format.SpeedUnit, luc.DECREASE, lc.PLANNER_RESET_PROGRADE, luc.INCREASE)
-		showDvLine(icons.decrease, icons.orbit_normal, icons.increase, "normal", ui.Format.SpeedUnit, luc.DECREASE, lc.PLANNER_RESET_NORMAL, luc.INCREASE)
-		showDvLine(icons.decrease, icons.orbit_radial, icons.increase, "radial", ui.Format.SpeedUnit, luc.DECREASE, lc.PLANNER_RESET_RADIAL, luc.INCREASE)
-	end
-}
-
 table.insert(leftSidebar.modules, infoView)
 table.insert(leftSidebar.modules, economyView)
 table.insert(leftSidebar.modules, settingsView)
 
 table.insert(rightSidebar.modules, overviewView)
-table.insert(rightSidebar.modules, plannerView)
 
 --
 -- Window functions
@@ -745,10 +676,6 @@ table.insert(rightSidebar.modules, plannerView)
 
 function Windows.edgeButtons.ShouldShow()
 	return true
-end
-
-function Windows.timeButtons.ShouldShow()
-	return systemView:GetDisplayMode() == 'Orrery'
 end
 
 function Windows.edgeButtons.Show()
@@ -788,27 +715,6 @@ function Windows.edgeButtons.Show()
 			end
 		end
 	end)
-end
-
--- time conntrol buttons
-function Windows.timeButtons.Show()
-	local t = systemView:GetOrbitPlannerTime()
-	ui.text(t and ui.Format.Datetime(t) or lc.NOW)
-	local r = false
-	r = timeButton(icons.time_backward_100x, "-10,000,000x",-10000000) or r
-	r = timeButton(icons.time_backward_10x, "-100,000x", -100000) or r
-	r = timeButton(icons.time_backward_1x, "-1,000x", -1000) or r
-	r = timeButton(icons.time_center, lc.NOW, nil) or r
-	r = timeButton(icons.time_forward_1x, "1,000x", 1000) or r
-	r = timeButton(icons.time_forward_10x, "100,000x", 100000) or r
-	r = timeButton(icons.time_forward_100x, "10,000,000x", 10000000) or r
-	if not r then
-		if time_selected_button_icon == icons.time_center then
-			systemView:AccelerateTime(nil)
-		else
-			systemView:AccelerateTime(0.0)
-		end
-	end
 end
 
 local function getLabel(obj)
@@ -877,10 +783,6 @@ local function drawGroupIcons(coords, icon, color, iconSize, group, isSelected)
 	end
 	if group.hasCombatTarget then
 		ui.addIcon(coords, icons.square, svColor.COMBAT_TARGET, stackedSize, ui.anchor.center, ui.anchor.center)
-		stackedSize = stackedSize + stackStep
-	end
-	if group.hasPlanner then
-		ui.addIcon(coords, icons.square, svColor.PLANNER, stackedSize, ui.anchor.center, ui.anchor.center)
 		stackedSize = stackedSize + stackStep
 	end
 
@@ -998,38 +900,132 @@ local function displaySurfPorts(center, radius, ports, mouseover)
 end
 
 local popup_object
+local popup_objects = nil
+local select_popup_objects = nil
+
+local function setObjectNavTarget(obj)
+	local combatTarget = player:GetCombatTarget()
+	local isSystemBody = obj.base == Projectable.SYSTEMBODY
+	local isCloud = not isSystemBody and obj.ref:IsHyperspaceCloud()
+	if isSystemBody then
+		if obj.ref.physicsBody then
+			player:SetNavTarget(obj.ref.physicsBody)
+			ui.playSfx("OK")
+		end
+	elseif isCloud then
+		player:SetNavTarget(obj.ref)
+		ui.playSfx("OK")
+	else
+		if combatTarget == obj.ref then player:SetCombatTarget(nil) end
+		player:SetNavTarget(obj.ref)
+		ui.playSfx("OK")
+	end
+end
+
+local function isTargetableObject(obj)
+	if not obj or obj.type ~= Projectable.OBJECT or not obj.ref then return false end
+	if obj.base == Projectable.SYSTEMBODY then
+		return obj.ref.physicsBody ~= nil
+	end
+	return obj.ref:IsShip() or obj.ref:IsHyperspaceCloud()
+end
+
+local function makeSelectPopup()
+	ui.popup("system-view-select-popup", {"NoMove"}, function()
+		if not select_popup_objects then return end
+		local currentSelRef = systemView:GetSelectedObject().ref
+		for i, obj in ipairs(select_popup_objects) do
+			if obj.type == Projectable.OBJECT and obj.ref then
+				local lbl = getLabel(obj)
+				if #lbl == 0 then lbl = "Unknown" end
+				ui.icon(getBodyIcon(obj, true, true), bodyIconSize, getColor(obj))
+				ui.sameLine()
+				ui.alignTextToLineHeight(bodyIconSize.y)
+				if ui.selectable(lbl .. "##sv_sel_" .. tostring(i), obj.ref == currentSelRef, {}) then
+					selectedObject = obj.ref
+					systemView:SetSelectedObject(obj.type, obj.base, obj.ref)
+				end
+			end
+		end
+	end)
+end
+
 function makePopup()
 	ui.popup("system-view-ui-popup", function()
+		if not popup_object then return end
 		local isOrrery = systemView:GetDisplayMode() == "Orrery"
 		local combatTarget = player:GetCombatTarget()
 		local navTarget = Game.player:GetNavTarget()
+		if popup_objects and #popup_objects > 1 then
+			ui.text(lc.SET_AS_TARGET)
+			ui.separator()
+			local hasShip = false
+			for i, obj in ipairs(popup_objects) do
+				if obj.type == Projectable.OBJECT and obj.ref then
+					local lbl = getLabel(obj)
+					if #lbl == 0 then lbl = "Unknown" end
+					if isTargetableObject(obj) then
+						local isNav = (obj.base == Projectable.SYSTEMBODY and obj.ref.physicsBody == navTarget) or (obj.ref == navTarget)
+						ui.icon(getBodyIcon(obj, true, isOrrery), bodyIconSize, getColor(obj))
+						ui.sameLine()
+						ui.alignTextToLineHeight(bodyIconSize.y)
+						if ui.selectable(lbl .. "##sv_tgt_" .. tostring(i), isNav, {}) then
+							setObjectNavTarget(obj)
+						end
+					end
+					if obj.base ~= Projectable.SYSTEMBODY and obj.ref:IsShip() then
+						hasShip = true
+					end
+				end
+			end
+			if hasShip then
+				ui.separator()
+				for i, obj in ipairs(popup_objects) do
+					if obj.type == Projectable.OBJECT and obj.base ~= Projectable.SYSTEMBODY and obj.ref and obj.ref:IsShip() then
+						local lbl = getLabel(obj)
+						if ui.selectable(lc.SET_AS_COMBAT_TARGET .. ": " .. lbl .. "##sv_cmb_" .. tostring(i), obj.ref == combatTarget, {}) then
+							if navTarget == obj.ref then player:SetNavTarget(nil) end
+							player:SetCombatTarget(obj.ref)
+						end
+					end
+				end
+			end
+			if isOrrery then
+				ui.separator()
+				for i, obj in ipairs(popup_objects) do
+					if obj.type == Projectable.OBJECT and obj.ref then
+						local lbl = getLabel(obj)
+						if #lbl == 0 then lbl = "Unknown" end
+						if ui.selectable(lc.CENTER .. ": " .. lbl .. "##sv_ctr_" .. tostring(i), false, {}) then
+							selectedObject = obj.ref
+							systemView:SetSelectedObject(obj.type, obj.base, obj.ref)
+							systemView:ViewSelectedObject()
+						end
+					end
+				end
+			end
+			return
+		end
+
 		local isObject = popup_object.type == Projectable.OBJECT
 		local isSystemBody = isObject and popup_object.base == Projectable.SYSTEMBODY
 		local isShip = isObject and not isSystemBody and popup_object.ref:IsShip()
-		local isCloud = isObject and not isSystemBody and popup_object.ref:IsHyperspaceCloud()
+		ui.icon(getBodyIcon(popup_object, true, isOrrery), bodyIconSize, getColor(popup_object))
+		ui.sameLine()
+		ui.alignTextToLineHeight(bodyIconSize.y)
 		ui.text(getLabel(popup_object))
 		ui.separator()
-		if isOrrery and ui.selectable(lc.CENTER, false, {}) then
-			selectedObject = popup_object.ref
-			systemView:SetSelectedObject(popup_object.type, popup_object.base, popup_object.ref)
-			systemView:ViewSelectedObject()
-		end
-		if (isShip or isCloud or isSystemBody and popup_object.ref.physicsBody) and ui.selectable(lc.SET_AS_TARGET, false, {}) then
-			if isSystemBody then
-				player:SetNavTarget(popup_object.ref.physicsBody)
-				ui.playSfx("OK")
-			elseif isCloud then
-				player:SetNavTarget(popup_object.ref)
-				ui.playSfx("OK")
-			else
-				if combatTarget == popup_object.ref then player:SetCombatTarget(nil) end
-				player:SetNavTarget(popup_object.ref)
-				ui.playSfx("OK")
-			end
+		if isTargetableObject(popup_object) and ui.selectable(lc.SET_AS_TARGET, false, {}) then
+			setObjectNavTarget(popup_object)
 		end
 		if isShip and ui.selectable(lc.SET_AS_COMBAT_TARGET, false, {}) then
 			if navTarget == popup_object.ref then player:SetNavTarget(nil) end
 			player:SetCombatTarget(popup_object.ref)
+		end
+		if isOrrery and ui.selectable(lc.CENTER, false, {}) then
+			selectedObject = popup_object.ref
+			systemView:SetSelectedObject(popup_object.type, popup_object.base, popup_object.ref)
+			systemView:ViewSelectedObject()
 		end
 	end)
 end
@@ -1056,15 +1052,24 @@ local function displayOnScreenObjects()
 	local objects_grouped = systemView:GetProjectedGrouped(collapse, 1e64)
 
 	local hoveredObject = nil
+	local hoveredGroup = nil
 	local was_hovered = false
 	local atlas_label_objects = {}
+	local currentSelectedRef = systemView:GetSelectedObject().ref
 
 	for _,group in ipairs(objects_grouped) do
 		local mainObject = group.mainObject
 
 		local mainCoords = Vector2(group.screenCoordinates.x, group.screenCoordinates.y)
-		local isSelected = mainObject.type == Projectable.OBJECT and mainObject.ref == systemView:GetSelectedObject().ref
-		group.hasPlanner = mainObject.type == Projectable.OBJECT and mainObject.base == Projectable.PLANNER
+		local isSelected = mainObject.type == Projectable.OBJECT and mainObject.ref == currentSelectedRef
+		if not isSelected and currentSelectedRef and group.objects then
+			for _, obj in ipairs(group.objects) do
+				if obj.type == Projectable.OBJECT and obj.ref == currentSelectedRef then
+					isSelected = true
+					break
+				end
+			end
+		end
 		local hoverSize = group.screenSize
 
 		local ports = {} -- ground ports
@@ -1120,21 +1125,14 @@ local function displayOnScreenObjects()
 			end
 		end
 
-		if mainObject.type == Projectable.OBJECT and (mainObject.base == Projectable.SYSTEMBODY or mainObject.base == Projectable.SHIP or mainObject.base == Projectable.PLAYER or mainObject.base == Projectable.OBJECT) then
-			-- mouse release handler for right button
-			if mouseover then
-				if ui.isWindowHovered() and ui.isMouseReleased(1) then
-					popup_object = mainObject
-					ui.openPopup("system-view-ui-popup")
-				end
-			end
-		end
-		-- mouse release handler for left button
+		-- track hovered object/group (later groups are drawn on top)
 		if mouseover and mainObject.type == Projectable.OBJECT then
 			hoveredObject = mainObject
+			hoveredGroup = group
 		end
 		objectCounter = objectCounter + 1
 	end
+	makeSelectPopup()
 	makePopup()
 	if not was_hovered then expanded_hover_body = nil end
 
@@ -1143,18 +1141,39 @@ local function displayOnScreenObjects()
 		drawAtlasBodyLabel(table.unpack(v))
 	end
 
-	-- click once: select or deselect a body
-	-- double click: zoom to body or reset viewpoint
-	local clicked = ui.isWindowHovered() and (ui.isMouseClicked(0) or ui.isMouseDoubleClicked(0))
-	if clicked then
+	-- right click on object: open menu to set as target (suppressed if right-dragged to pan)
+	if ui.isWindowHovered() and ui.isMouseReleased(1) and not (isOrrery and systemView:WasRightMouseDragged()) then
+		if hoveredObject and (hoveredObject.base == Projectable.SYSTEMBODY or hoveredObject.base == Projectable.SHIP or hoveredObject.base == Projectable.PLAYER or hoveredObject.base == Projectable.BODY) then
+			popup_object = hoveredObject
+			popup_objects = (isOrrery and hoveredGroup and hoveredGroup.objects and #hoveredGroup.objects > 1) and hoveredGroup.objects or nil
+			ui.openPopup("system-view-ui-popup")
+		end
+	end
+
+	-- click once: select object (or open selection menu if multiple items), never target
+	-- double click: center on body or reset viewpoint
+	if ui.isWindowHovered() and ui.isMouseDoubleClicked(0) then
 		if hoveredObject then
 			selectedObject = hoveredObject.ref
 			systemView:SetSelectedObject(hoveredObject.type, hoveredObject.base, hoveredObject.ref)
-			if ui.isMouseDoubleClicked(0) then systemView:ViewSelectedObject() end
+			systemView:ViewSelectedObject()
 		else
 			selectedObject = nil
 			systemView:ClearSelectedObject()
-			if ui.isMouseDoubleClicked(0) then systemView:ResetViewpoint() end
+			systemView:ResetViewpoint()
+		end
+	elseif ui.isWindowHovered() and ui.isMouseClicked(0) then
+		if hoveredObject then
+			if isOrrery and hoveredGroup and hoveredGroup.objects and #hoveredGroup.objects > 1 then
+				select_popup_objects = hoveredGroup.objects
+				ui.openPopup("system-view-select-popup")
+			else
+				selectedObject = hoveredObject.ref
+				systemView:SetSelectedObject(hoveredObject.type, hoveredObject.base, hoveredObject.ref)
+			end
+		else
+			selectedObject = nil
+			systemView:ClearSelectedObject()
 		end
 	end
 end
@@ -1162,7 +1181,6 @@ end
 function systemViewLayout:onUpdateWindowPivots(w)
 	w.systemName.anchors   = { ui.anchor.center, ui.anchor.top }
 	w.edgeButtons.anchors  = { ui.anchor.center,  ui.anchor.bottom }
-	w.timeButtons.anchors  = { ui.anchor.right,  ui.anchor.bottom }
 	w.unexplored.anchors   = { ui.anchor.center, ui.anchor.center }
 end
 
@@ -1196,14 +1214,6 @@ local function displaySystemViewUI(delta_t, refresh)
 	if ui.isKeyReleased(ui.keys.tab) then
 		systemViewLayout.enabled = not systemViewLayout.enabled
 	end
-
-	local isOrrery = systemView:GetDisplayMode() == "Orrery"
-	plannerView.disabled = not isOrrery
-	plannerView.hidden = not isOrrery
-	if not isOrrery and rightSidebar.active == plannerView then
-		rightSidebar.active = nil
-	end
-	plannerView.icon = plannerView.disabled and icons.square_dashed or icons.semi_major_axis
 
 	systemViewLayout:display()
 	if systemViewLayout.enabled then

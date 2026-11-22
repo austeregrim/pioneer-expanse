@@ -381,7 +381,7 @@ function ShipRegistry.EnsureSystemRoster(system, acceptableShipIds, ports)
 	end
 
 	s.systemRosters[sysKey] = s.systemRosters[sysKey] or {}
-	local targetCount = math.clamp(12 + #ports * 3 + math.floor(math.min(pop, 20) * 1.0), 18, 96)
+	local targetCount = math.clamp(18 + #ports * 4 + math.floor(math.min(pop, 20) * 1.25), 24, 140)
 	local living = countLivingForSystem(sysKey)
 
 	-- Allow regional attrition recovery only gradually or when roster is significantly depleted
@@ -393,7 +393,7 @@ function ShipRegistry.EnsureSystemRoster(system, acceptableShipIds, ports)
 	end
 
 	for i = 1, needCommission do
-		local port = (#ports > 0) and ports[Engine.rand:Integer(1, #ports)] or nil
+		local port = (#ports > 0) and ports[((i - 1) % #ports) + 1] or nil
 		local stBodyIdx = port and port.path and port.path.bodyIndex or nil
 		local stName = port and port.label or nil
 
@@ -415,12 +415,12 @@ function ShipRegistry.EnsureSystemRoster(system, acceptableShipIds, ports)
 			if rec.status == "HANGAR" then
 				local tierRoll = Engine.rand:Number(1)
 				local delay
-				if tierRoll < 0.35 then
-					delay = Engine.rand:Number(45, 360)
-				elseif tierRoll < 0.70 then
-					delay = Engine.rand:Number(360, 2400)
+				if tierRoll < 0.50 then
+					delay = Engine.rand:Number(25, 150)
+				elseif tierRoll < 0.85 then
+					delay = Engine.rand:Number(150, 480)
 				else
-					delay = Engine.rand:Number(2400, 28800)
+					delay = Engine.rand:Number(480, 1500)
 				end
 				rec.hangarUntil = (Game.time or 0) + delay
 			end

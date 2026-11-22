@@ -24,6 +24,7 @@ public:
 	static constexpr double SAFE_DISENGAGE_SPEED = 1000000.0; // 1,000 km/s
 	static constexpr double SUBLIGHT_AUTOPILOT_MAX_DIST = 2500000.0; // 2,500 km (covers safe drop-in envelope + approach buffer)
 	static constexpr float CHARGE_DURATION = 5.0f;            // 5s FSD charge-up
+	static constexpr float ENTRY_FLASH_DURATION = 0.75f;      // 0.75s FSD Supercruise entry optical flash
 	static constexpr float NORMAL_COOLDOWN = 5.0f;            // 5s normal FSD cooldown
 	static constexpr float HYPERJUMP_COOLDOWN = 12.0f;        // 12s post-hyperjump FSD cooldown
 	static constexpr float EMERGENCY_COOLDOWN = 25.0f;        // 25s emergency FSD cooldown
@@ -60,10 +61,24 @@ public:
 	void SetTarget(Body *target);
 	void SetTargetPosition(FrameId frameId, const vector3d &offset);
 	Body *GetTarget() const { return m_target; }
+	bool AcquireSupercruiseLock(Ship *target);
+	void ClearSupercruiseLock()
+	{
+		m_lockedShip = nullptr;
+		m_lockedShipIndex = 0;
+	}
+	Ship *GetLockedShip() const { return m_lockedShip; }
 	void ComputeAISteering(const vector3d &targetPosRelToShip, const Body *targetBody, vector3d &outAngInput, double &outThrottle) const;
 
 	// State queries
 	bool IsActive() const;
+	bool IsFTL() const { return IsActive() && m_speed >= LIGHT_SPEED; }
+	bool IsInterdictingPeer(const Ship *other) const { return other && m_interdictPeer == other && m_interdictRole != INTERDICT_NONE; }
+	static bool IsShipFTL(const Ship *ship);
+	static bool HasTrackedLock(const Ship *observer, const Ship *target);
+	static bool IsShipVisibleToSensors(const Ship *observer, const Ship *target);
+	float GetEntryFlashTimer() const { return m_entryFlashTimer; }
+	const vector3d &GetEntryFlashRootPos() const { return m_entryFlashRootPos; }
 	bool IsCharging() const { return m_charging; }
 	float GetChargeProgress() const { return m_charging ? (1.0f - m_chargeCountdown / CHARGE_DURATION) : 0.0f; }
 	float GetChargeCountdown() const { return m_chargeCountdown; }
@@ -172,6 +187,8 @@ private:
 	int m_targetIndex = 0;
 	FrameId m_targetFrame;
 	vector3d m_targetOffset = vector3d(0.0);
+	Ship *m_lockedShip = nullptr;
+	int m_lockedShipIndex = 0;
 	bool m_charging = false;
 	float m_chargeCountdown = 0.0f;
 	float m_cooldown = 0.0f;
@@ -195,6 +212,8 @@ private:
 	bool m_fsdOffline = false;
 	std::deque<vector3d> m_trailPositions;
 	float m_trailSampleTimer = 0.0f;
+	float m_entryFlashTimer = 0.0f;
+	vector3d m_entryFlashRootPos = vector3d(0.0);
 
 	InterdictionRole m_interdictRole = INTERDICT_NONE;
 	Ship *m_interdictPeer = nullptr;

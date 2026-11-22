@@ -197,6 +197,13 @@ static int l_systemview_reset_viewpoint(lua_State *l)
 	return 0;
 }
 
+static int l_systemview_was_right_mouse_dragged(lua_State *l)
+{
+	SystemView *sv = LuaObject<SystemView>::CheckFromLua(1);
+	LuaPush(l, sv->GetMap()->WasRightMouseDragged());
+	return 1;
+}
+
 static int l_systemview_set_visibility(lua_State *l)
 {
 	SystemView *sv = LuaObject<SystemView>::CheckFromLua(1);
@@ -392,6 +399,7 @@ void LuaObject<SystemView>::RegisterClass()
 		{ "SetSelectedObject", l_systemview_set_selected_object },
 		{ "ViewSelectedObject", l_systemview_view_selected_object },
 		{ "ResetViewpoint", l_systemview_reset_viewpoint },
+		{ "WasRightMouseDragged", l_systemview_was_right_mouse_dragged },
 		{ "SetVisibility", l_systemview_set_visibility },
 		{ "SetColor", l_systemview_set_color },
 		{ "SetRotateMode", l_systemview_set_rotate_mode },

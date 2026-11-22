@@ -172,9 +172,10 @@ void Camera::Update()
 		if (b->GetFlags() & Body::FLAG_DRAW_EXCLUDE)
 			continue;
 
-		// Non-player ships in Supercruise render exclusively as sharp points of light with glare in WorldView::DrawSupercruiseShips
+		// Non-player ships in Supercruise (and all sublight ships while the player is in Supercruise) do not render 3D meshes
+		const bool playerInSC = Pi::player && (Pi::player->GetFlightState() == Ship::SUPERCRUISE);
 		if (b != Pi::player && b->IsType(ObjectType::SHIP) &&
-			static_cast<const Ship *>(b)->GetFlightState() == Ship::SUPERCRUISE)
+			(playerInSC || static_cast<const Ship *>(b)->GetFlightState() == Ship::SUPERCRUISE))
 			continue;
 
 		// determine position and transform for draw

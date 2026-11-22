@@ -56,6 +56,12 @@ EquipmentWidget.Sections = {
 ---@param equip EquipType
 function EquipmentWidget:onBuyItem(equip)
 	local player = Game.player
+	if self.ship == player then
+		local okIns, Insurance = pcall(require, 'modules.Insurance.Insurance')
+		if okIns and Insurance and Insurance.HasClaim and Insurance.HasClaim() then
+			return
+		end
+	end
 
 	if self.selectedEquip then
 		self:onSellItem(self.selectedEquip)
@@ -99,6 +105,12 @@ function EquipmentWidget:onSellItem(equip)
 	assert(self.selectedEquip == equip)
 
 	local player = Game.player
+	if self.ship == player then
+		local okIns, Insurance = pcall(require, 'modules.Insurance.Insurance')
+		if okIns and Insurance and Insurance.HasClaim and Insurance.HasClaim() then
+			return
+		end
+	end
 	local sellPrice = self.market:getSellPrice(equip)
 
 	PlayerState.AddMoney(sellPrice)

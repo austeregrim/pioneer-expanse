@@ -301,8 +301,8 @@ end
 Trader.computeStationDwellPlan = function(ship, starport, unloadedTons, damageFrac, rec, isInitialSpawn)
 	unloadedTons = unloadedTons or 0
 	damageFrac = damageFrac or 0
-	local cargoSec = math.clamp(45.0 + unloadedTons * 2.5, 45.0, 420.0)
-	local repairSec = (damageFrac > 0.001) and (120.0 + damageFrac * 600.0) or 0.0
+	local cargoSec = math.clamp(22.0 + unloadedTons * 0.85, 22.0, 120.0)
+	local repairSec = (damageFrac > 0.001) and (45.0 + damageFrac * 180.0) or 0.0
 	local prepSec = cargoSec + repairSec
 
 	local stationIdx = starport and starport.path and starport.path.bodyIndex or nil
@@ -312,23 +312,23 @@ Trader.computeStationDwellPlan = function(ship, starport, unloadedTons, damageFr
 	local occupancy = (numDocks > 0) and (1.0 - (freeDocks / numDocks)) or 0.0
 
 	local roll = Engine.rand:Number(1)
-	local hangarThreshold = isHomePort and 0.60 or 0.40
+	local hangarThreshold = isHomePort and 0.38 or 0.26
 	if isInitialSpawn and occupancy < 0.50 then
-		hangarThreshold = isHomePort and 0.42 or 0.30
-	elseif occupancy >= 0.60 then
-		hangarThreshold = math.max(hangarThreshold, 0.70)
+		hangarThreshold = isHomePort and 0.28 or 0.20
+	elseif occupancy >= 0.65 then
+		hangarThreshold = math.max(hangarThreshold, 0.62)
 	end
 
 	if roll < hangarThreshold then
-		local isLongLayover = (isHomePort and Engine.rand:Number(1) < 0.45) or (Engine.rand:Number(1) < 0.25)
-		local hangarDur = isLongLayover and Engine.rand:Number(3600, 28800) or Engine.rand:Number(600, 2400)
-		local padSec = isInitialSpawn and Engine.rand:Number(45, 145) or (prepSec + Engine.rand:Number(30, 90))
+		local isLongLayover = (isHomePort and Engine.rand:Number(1) < 0.22) or (Engine.rand:Number(1) < 0.12)
+		local hangarDur = isLongLayover and Engine.rand:Number(480, 1500) or Engine.rand:Number(110, 360)
+		local padSec = isInitialSpawn and Engine.rand:Number(18, 60) or (math.min(prepSec, 85.0) + Engine.rand:Number(12, 32))
 		return { action = 'hangar', padDuration = padSec, hangarDuration = hangarDur }
-	elseif roll < hangarThreshold + ((1.0 - hangarThreshold) * 0.35) then
-		local padSec = isInitialSpawn and Engine.rand:Number(55, 160) or (prepSec + Engine.rand:Number(60, 180))
+	elseif roll < hangarThreshold + ((1.0 - hangarThreshold) * 0.55) then
+		local padSec = isInitialSpawn and Engine.rand:Number(16, 55) or (prepSec + Engine.rand:Number(15, 45))
 		return { action = 'pad', padDuration = padSec }
 	else
-		local padSec = isInitialSpawn and Engine.rand:Number(120, 320) or (prepSec + Engine.rand:Number(240, 660))
+		local padSec = isInitialSpawn and Engine.rand:Number(45, 110) or (prepSec + Engine.rand:Number(45, 110))
 		return { action = 'pad', padDuration = padSec }
 	end
 end
@@ -418,7 +418,7 @@ trader_task.doStowHangar = function(ship)
 	local port = ship:GetDockedWith()
 	if not port or not port:exists() then return end
 
-	local hangarDur = trader.hangarDuration or Engine.rand:Number(1800, 28800)
+	local hangarDur = trader.hangarDuration or Engine.rand:Number(120, 420)
 	local okStow = port.StowShipInHangar and port:StowShipInHangar(ship)
 	if okStow then
 		trader.status = 'stowing'
@@ -427,7 +427,7 @@ trader_task.doStowHangar = function(ship)
 		end
 		Core.log:add(ship, 'Lowering into hangar bay at ' .. port.label)
 	else
-		Trader.assignTask(ship, Game.time + Engine.rand:Number(45, 90), 'doUndock')
+		Trader.assignTask(ship, Game.time + Engine.rand:Number(20, 45), 'doUndock')
 	end
 end
 

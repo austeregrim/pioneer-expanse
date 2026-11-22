@@ -31,6 +31,7 @@
 #include "pigui/PiGui.h"
 #include "pigui/Widgets.h"
 #include "ship/PlayerShipController.h"
+#include "ship/SupercruiseController.h"
 #include "sound/Sound.h"
 #include "utils.h"
 
@@ -2609,8 +2610,9 @@ static int l_pigui_get_projected_bodies_grouped(lua_State *l)
 		const bool isExplicitTarget = (body == nav_target || body == combat_target || body == follow_target);
 		bool checkTerrainOcclusion = false;
 		if (body->GetType() == ObjectType::SHIP) {
-			const bool targetInSC = (static_cast<const Ship *>(body)->GetFlightState() == Ship::SUPERCRUISE);
-			if (targetInSC && !playerInSC) continue;
+			const Ship *otherShip = static_cast<const Ship *>(body);
+			if (!SupercruiseController::IsShipVisibleToSensors(Pi::player, otherShip)) continue;
+			const bool targetInSC = (otherShip->GetFlightState() == Ship::SUPERCRUISE);
 			if (!targetInSC && body->GetPositionRelTo(Pi::player).Length() > ship_max_distance) continue;
 			checkTerrainOcclusion = !isExplicitTarget;
 		} else if (body->GetType() == ObjectType::HYPERSPACECLOUD) {
@@ -2722,6 +2724,9 @@ static int l_pigui_get_projected_bodies(lua_State *l)
 	for (Body *body : Pi::game->GetSpace()->GetBodies()) {
 		if (body == Pi::game->GetPlayer()) continue;
 		if (body->GetType() == ObjectType::PROJECTILE) continue;
+		if (body->GetType() == ObjectType::SHIP &&
+			!SupercruiseController::IsShipVisibleToSensors(Pi::player, static_cast<const Ship *>(body)))
+			continue;
 		const PiGui::TScreenSpace res = lua_world_space_to_screen_space(body); // defined in LuaPiGui.cpp
 		if (!res._onScreen) continue;
 		filtered.emplace_back(res);
@@ -2756,8 +2761,8 @@ static int l_pigui_get_targets_nearby(lua_State *l)
 	for (Body *body : nearby) {
 		if (body == Pi::player) continue;
 		if (body->GetType() == ObjectType::PROJECTILE) continue;
-		if (body->GetType() == ObjectType::SHIP && !playerInSC &&
-			static_cast<const Ship *>(body)->GetFlightState() == Ship::SUPERCRUISE)
+		if (body->GetType() == ObjectType::SHIP &&
+			!SupercruiseController::IsShipVisibleToSensors(Pi::player, static_cast<const Ship *>(body)))
 			continue;
 		filtered.push_back(body);
 	}
@@ -2767,7 +2772,7 @@ static int l_pigui_get_targets_nearby(lua_State *l)
 			if (!body || body == Pi::player)
 				continue;
 			const bool isSCShip = body->IsType(ObjectType::SHIP) &&
-				static_cast<const Ship *>(body)->GetFlightState() == Ship::SUPERCRUISE;
+				SupercruiseController::IsShipVisibleToSensors(Pi::player, static_cast<const Ship *>(body));
 			const bool isLowWake = body->IsType(ObjectType::HYPERSPACECLOUD) &&
 				static_cast<const HyperspaceCloud *>(body)->IsLowWake();
 			if (!isSCShip && !isLowWake)

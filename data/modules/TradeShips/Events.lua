@@ -176,7 +176,7 @@ local onShipUnstowedFromHangar = function (station, ship)
 	Trader.addHyperdriveFuel(ship)
 	ship:SetFuelPercent()
 	Core.log:add(ship, 'Emerged onto pad from hangar at ' .. (station and station.label or 'station'))
-	Trader.assignTask(ship, Game.time + Engine.rand:Number(30, 75), 'doUndock')
+	Trader.assignTask(ship, Game.time + Engine.rand:Number(15, 38), 'doUndock')
 end
 Event.Register("onShipUnstowedFromHangar", onShipUnstowedFromHangar)
 
@@ -212,7 +212,7 @@ local onShipUndocked = function (ship, starport)
 		return
 	end
 
-	-- 2. In-system inter-station transport lanes (55% of departing traders in multi-station systems)
+	-- 2. In-system inter-station transport lanes (70% of departing traders in multi-station systems)
 	local otherPorts = {}
 	if Core.params and Core.params.ports then
 		for _, port in ipairs(Core.params.ports) do
@@ -221,7 +221,7 @@ local onShipUndocked = function (ship, starport)
 			end
 		end
 	end
-	if #otherPorts > 0 and Engine.rand:Number(1) < 0.55 then
+	if #otherPorts > 0 and Engine.rand:Number(1) < 0.70 then
 		local destPort = otherPorts[Engine.rand:Integer(1, #otherPorts)]
 		trader.assignment = { type = 'interstation', to = destPort }
 		return

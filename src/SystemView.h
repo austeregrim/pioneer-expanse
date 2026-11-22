@@ -264,6 +264,8 @@ public:
 	void ViewSelectedObject() { SetViewedObject(m_selectedObject); }
 	void SetViewedObject(const Projectable &p);
 	void ResetViewpoint();
+	bool WasRightMouseDragged() const { return m_rightMouseDragged; }
+	void ReleaseMouseCapture();
 
 	Projectable *GetViewedObject() { return &m_viewedObject; }
 
@@ -351,6 +353,7 @@ private:
 
 	// draw a grid with `radius` * 2 gridlines on an evenly spaced 1-AU grid
 	void DrawGrid(uint32_t radius);
+	double GetEffectiveSurfaceDistance() const;
 
 private:
 	GuiApplication *m_app;
@@ -381,6 +384,10 @@ private:
 	GridDrawing m_gridDrawing;
 
 	bool m_rotateWithMouseButton = false;
+	bool m_rightMouseDown = false;
+	bool m_panWithMouseButton = false;
+	bool m_rightMouseDragged = false;
+	vector2f m_rightDragAccum = vector2f(0.0f);
 	bool m_rotateView = false;
 	bool m_zoomView = false;
 	const float CAMERA_FOV = 50.f;
@@ -393,6 +400,7 @@ private:
 	int m_animateTransition;
 	vector3d m_trans;
 	vector3d m_transTo;
+	vector3d m_panOffset = vector3d(0.0);
 	double m_time;
 	double m_refTime;
 	bool m_realtime;

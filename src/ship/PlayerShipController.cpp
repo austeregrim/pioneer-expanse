@@ -329,20 +329,20 @@ void PlayerShipController::FlightAssist(const float timeStep, TotalDesiredAction
 	// the target's own acceleration (if it is, for example, a speeding ship)
 	vector3d followingAccel(0.0);
 	if (m_followTarget) {
-
-		vector3d currVel = m_followTarget->GetVelocityRelTo(m_ship->GetFrame());
-		followingAccel = currVel - m_followTargetPrevVel;
+		const vector3d currVel = m_followTarget->GetVelocityRelTo(m_ship->GetFrame());
+		const vector3d velDiff = currVel - m_followTargetPrevVel;
 		m_followTargetPrevVel = currVel;
+		if (timeStep > 1e-6f && velDiff.LengthSqr() < 1e6) {
+			followingAccel = velDiff / double(timeStep);
+		}
 
-		// centripetal acceleration, due to following a rotating target
+		// centripetal & Coriolis acceleration, due to following a rotating target
 		if (m_followMode == FOLLOW_ORI) {
-			vector3d av = m_followTarget->GetAngVelocity();
-			if (av.LengthSqr() > 1e-5) {
-				vector3d pos = m_followTarget->GetPositionRelTo(m_ship);
-				// need a perpendicular to the axis of rotation from the position of the ship
-				pos -= av.Normalized() * av.Normalized().Dot(pos);
-				vector3d ac = m_followTarget->GetAngVelocity().LengthSqr() * pos;
-				followingAccel += ac;
+			const vector3d av = m_followTarget->GetAngVelocity();
+			if (av.LengthSqr() > 1e-8) {
+				const vector3d pRel = m_ship->GetPosition() - m_followTarget->GetPositionRelTo(m_ship->GetFrame());
+				const vector3d vLocal = m_ship->GetVelocity() - (currVel + av.Cross(pRel));
+				followingAccel += av.Cross(av.Cross(pRel)) + 2.0 * av.Cross(vLocal);
 			}
 		}
 	}
@@ -625,6 +625,35 @@ void PlayerShipController::StaticUpdate(const float timeStep)
 			// maintain the thrust set by the station when undocking while the timeout lasts
 			// but only in manual mode
 			PollControls(timeStep, mouseMotion, act);
+			if (m_followTarget && m_followMode == FOLLOW_ORI && !act.desireLinVel) {
+				const FrameId frm = m_ship->GetFrame();
+				const vector3d targetVel = m_followTarget->GetVelocityRelTo(frm);
+				const vector3d velDiff = targetVel - m_followTargetPrevVel;
+				m_followTargetPrevVel = targetVel;
+				// Guard against 1-frame frame-switch spikes
+				const vector3d targetAccel = (timeStep > 1e-6f && velDiff.LengthSqr() < 1e6)
+					? (velDiff / double(timeStep))
+					: vector3d(0.0);
+
+				const vector3d av = m_followTarget->GetAngVelocity();
+				if (av.LengthSqr() > 1e-8) {
+					const vector3d pRel = m_ship->GetPosition() - m_followTarget->GetPositionRelTo(frm);
+					const vector3d vLocal = m_ship->GetVelocity() - (targetVel + av.Cross(pRel));
+					// Required inertial acceleration so dv_local/dt in the rotating station frame == pilot_accel:
+					// a_comp = a_target + omega x (omega x pRel) + 2 * (omega x vLocal)
+					const vector3d aCompWorld = targetAccel + av.Cross(av.Cross(pRel)) + 2.0 * av.Cross(vLocal);
+
+					const Propulsion *prop = m_ship->GetPropulsion();
+					const vector3d fPilotLocal = act.desiredLinear * prop->GetThrust(act.desiredLinear);
+					const vector3d fCompLocal = (aCompWorld * m_ship->GetOrient()) * m_ship->GetMass();
+					const vector3d fTotalLocal = fPilotLocal + fCompLocal;
+					const vector3d maxThrust = prop->GetThrust(fTotalLocal);
+
+					act.desiredLinear.x = (maxThrust.x > 1e-6) ? Clamp(fTotalLocal.x / maxThrust.x, -1.0, 1.0) : 0.0;
+					act.desiredLinear.y = (maxThrust.y > 1e-6) ? Clamp(fTotalLocal.y / maxThrust.y, -1.0, 1.0) : 0.0;
+					act.desiredLinear.z = (maxThrust.z > 1e-6) ? Clamp(fTotalLocal.z / maxThrust.z, -1.0, 1.0) : 0.0;
+				}
+			}
 			Util::LimitActualSpeed(*this, timeStep, act);
 			// synchronize the rotation in 'follow orient' mode
 			if (m_followTarget && m_followMode == FOLLOW_ORI) {
@@ -1019,17 +1048,16 @@ void PlayerShipController::SelectTarget()
 	//With radar ships will be selected at much greter distance, the idea is that even though
 	//you can't see them on screen overlay, they could be visible on radar
 	int ship_detect_dist = m_ship->m_stats.radar_cap > 0 ? MAX_RADAR_SIZE : IN_SPACE_INDICATOR_SHIP_MAX_DISTANCE;
-	const bool playerInSC = (m_ship->GetFlightState() == Ship::SUPERCRUISE);
 
 	//cycling
 	for (auto it = bodyDistList.begin(); it != bodyDistList.end(); ++it) {
 
 		if (it->body->GetType() == ObjectType::PROJECTILE) continue;
 		if (it->body->GetType() == ObjectType::SHIP) {
-			const bool targetInSC = (static_cast<const Ship *>(it->body)->GetFlightState() == Ship::SUPERCRUISE);
-			if (targetInSC && !playerInSC)
+			const Ship *otherShip = static_cast<const Ship *>(it->body);
+			if (!SupercruiseController::IsShipVisibleToSensors(m_ship, otherShip))
 				continue;
-			if (!targetInSC && it->dist > ship_detect_dist)
+			if (otherShip->GetFlightState() != Ship::SUPERCRUISE && it->dist > ship_detect_dist)
 				continue;
 		} else if ((it->body->GetType() == ObjectType::CARGOBODY || it->body->GetType() == ObjectType::HYPERSPACECLOUD)
 			&& it->dist > ship_detect_dist)
@@ -1150,8 +1178,7 @@ Body *PlayerShipController::GetFollowTarget() const
 void PlayerShipController::SetCombatTarget(Body *const target, bool setFollowTo)
 {
 	if (target && target->IsType(ObjectType::SHIP) &&
-		static_cast<const Ship *>(target)->GetFlightState() == Ship::SUPERCRUISE &&
-		m_ship->GetFlightState() != Ship::SUPERCRUISE) {
+		!SupercruiseController::IsShipVisibleToSensors(m_ship, static_cast<const Ship *>(target))) {
 		return;
 	}
 
@@ -1166,8 +1193,7 @@ void PlayerShipController::SetCombatTarget(Body *const target, bool setFollowTo)
 void PlayerShipController::SetNavTarget(Body *const target)
 {
 	if (target && target->IsType(ObjectType::SHIP) &&
-		static_cast<const Ship *>(target)->GetFlightState() == Ship::SUPERCRUISE &&
-		m_ship->GetFlightState() != Ship::SUPERCRUISE) {
+		!SupercruiseController::IsShipVisibleToSensors(m_ship, static_cast<const Ship *>(target))) {
 		return;
 	}
 

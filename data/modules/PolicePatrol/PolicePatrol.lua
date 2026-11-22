@@ -62,12 +62,6 @@ local function getPatrolHubCandidates(ship, currentPort)
 	local orbitalHubs = {}
 	local surfacePorts = {}
 	local allStations = Game.system and Game.system:GetStationPaths() or {}
-	local nearestPlayerPort = (Game.player and Game.player:exists()) and Game.player:FindNearestTo("SPACESTATION") or nil
-	local playerParentIdx = nil
-	if nearestPlayerPort and nearestPlayerPort:exists() then
-		local psb = nearestPlayerPort:GetSystemBody()
-		playerParentIdx = psb and psb.parent and psb.parent.index or nil
-	end
 
 	for _, path in ipairs(allStations) do
 		local body = Space.GetBody(path.bodyIndex)
@@ -76,12 +70,8 @@ local function getPatrolHubCandidates(ship, currentPort)
 				body = body,
 				ndocks = body.numDocks or 4,
 				isOrbital = (body.type == "STARPORT_ORBITAL"),
-				nearPlayerHub = false,
+				tie = Engine.rand:Number(1),
 			}
-			local sb = body:GetSystemBody()
-			if playerParentIdx and sb and sb.parent and sb.parent.index == playerParentIdx then
-				entry.nearPlayerHub = true
-			end
 			if entry.isOrbital then
 				table.insert(orbitalHubs, entry)
 			else
@@ -92,8 +82,8 @@ local function getPatrolHubCandidates(ship, currentPort)
 
 	local pool = (#orbitalHubs > 0) and orbitalHubs or surfacePorts
 	table.sort(pool, function(a, b)
-		if a.nearPlayerHub ~= b.nearPlayerHub then return a.nearPlayerHub end
-		return a.ndocks > b.ndocks
+		if a.ndocks ~= b.ndocks then return a.ndocks > b.ndocks end
+		return a.tie < b.tie
 	end)
 	return pool
 end
@@ -127,8 +117,7 @@ local function assignSupercruiseRoute(ship)
 			ship:AIFlyTo(primaryStar)
 			return
 		end
-		local topCount = math.min(#hubs, math.max(2, math.ceil(#hubs * 0.45)))
-		local chosen = hubs[Engine.rand:Integer(1, topCount)]
+		local chosen = hubs[Engine.rand:Integer(1, #hubs)]
 		if chosen and chosen.body and ship:DistanceTo(chosen.body) > 500000 then
 			st.lastPort = chosen.body
 			ship:AIFlyTo(chosen.body)
@@ -192,30 +181,53 @@ local function startPatrolHunterTimer()
 		if target and not target:exists() then
 			target = nil
 		end
+		if target then
+			local stillPursuing = false
+			for i = 1, #patrol do
+				if patrol[i]:GetCurrentAICommand() == "CMD_KILL" then
+					stillPursuing = true
+					break
+				end
+			end
+			if not stillPursuing then
+				target = nil
+			end
+		end
 		if target then return false end
 
+		local LIGHT_SPEED = 299792458.0
 		local policeId = Game.system.faction.policeShip
 		local playerLabel = (Game.player and Game.player.label) or ""
+		local patrolInSC = patrol[1]:GetFlightState() == "SUPERCRUISE"
 
-		local ships = Space.GetBodiesNear(patrol[1], lawEnforcedRange, "Ship")
-		for _, enemy in ipairs(ships) do
-			if enemy.shipId ~= policeId and enemy:GetCurrentAICommand() == "CMD_KILL" then
-				if not piracy then
-					Comms.ImportantMessage(string.interp(l_ui_core.X_CANNOT_BE_TOLERATED_HERE, { crime = l_ui_core.PIRACY }), patrol[1].label)
-					Comms.ImportantMessage(string.interp(l["RESTRICTIONS_WITHDRAWN_" .. Engine.rand:Integer(1, MissionUtils.getNumberOfFlavours(l, "RESTRICTIONS_WITHDRAWN"))], { ship_label = playerLabel }), patrol[1].label)
-					piracy = true
+		if not patrolInSC then
+			local ships = Space.GetBodiesNear(patrol[1], lawEnforcedRange, "Ship")
+			for _, enemy in ipairs(ships) do
+				if enemy.shipId ~= policeId and enemy:GetFlightState() == "FLYING" and enemy:GetCurrentAICommand() == "CMD_KILL" then
+					if not piracy then
+						Comms.ImportantMessage(string.interp(l_ui_core.X_CANNOT_BE_TOLERATED_HERE, { crime = l_ui_core.PIRACY }), patrol[1].label)
+						Comms.ImportantMessage(string.interp(l["RESTRICTIONS_WITHDRAWN_" .. Engine.rand:Integer(1, MissionUtils.getNumberOfFlavours(l, "RESTRICTIONS_WITHDRAWN"))], { ship_label = playerLabel }), patrol[1].label)
+						piracy = true
+					end
+					attackShip(enemy)
+					return false
 				end
-				attackShip(enemy)
-				return false
 			end
 		end
 
-		-- Supercruise patrol scan for WANTED criminals (NPC pirates or wanted player)
+		-- Patrol scan for WANTED criminals (Supercruise patrols see >= 1c FTL targets only; normal-space patrols see normal-space targets only)
 		local allShips = Space.GetBodies("Ship")
 		for _, enemy in ipairs(allShips) do
 			local fs = enemy:GetFlightState()
-			if enemy ~= patrol[1] and enemy.shipId ~= policeId and enemy.IsWanted and enemy:IsWanted() and (fs == "SUPERCRUISE" or fs == "FLYING") then
-				if patrol[1]:DistanceTo(enemy) < 3.0e10 then
+			if enemy ~= patrol[1] and enemy.shipId ~= policeId and enemy.IsWanted and enemy:IsWanted() then
+				if patrolInSC then
+					local scSpeed = (enemy.GetSupercruiseSpeed and enemy:GetSupercruiseSpeed()) or 0
+					if fs == "SUPERCRUISE" and scSpeed >= LIGHT_SPEED and patrol[1]:DistanceTo(enemy) < 3.0e10 then
+						piracy = true
+						attackShip(enemy)
+						return false
+					end
+				elseif fs == "FLYING" and patrol[1]:DistanceTo(enemy) < lawEnforcedRange then
 					piracy = true
 					attackShip(enemy)
 					return false
@@ -398,7 +410,7 @@ local function spawnAmbientPatrols(system)
 	if system.lawlessness < 0.75 and system.population > 0 then
 		local stations = system:GetStationPaths()
 		if stations and #stations > 0 then
-			local desiredPatrols = math.min(7, math.max(2, math.floor((1.0 - system.lawlessness) * 3.5 + #stations * 0.25)))
+			local desiredPatrols = math.min(10, math.max(3, math.floor((1.0 - system.lawlessness) * 4.5 + #stations * 0.30)))
 			local needed = math.max(0, desiredPatrols - #patrol)
 			if needed == 0 then return end
 
@@ -596,7 +608,7 @@ local onShipDocked = function (ship, station)
 			patrolState[ship].lastPort = station
 			ship:SetFuelPercent()
 			ship:SetHullPercent()
-			schedulePatrolUndock(ship, station, Engine.rand:Number(75, 180))
+			schedulePatrolUndock(ship, station, Engine.rand:Number(35, 85))
 		end
 		return
 	end
@@ -631,7 +643,7 @@ local onGameStart = function ()
 		else
 			patrolState[p] = patrolState[p] or { mode = 'lane', lastPort = nil }
 			if p:GetFlightState() == "DOCKED" then
-				schedulePatrolUndock(p, p:GetDockedWith(), Engine.rand:Number(25, 90))
+				schedulePatrolUndock(p, p:GetDockedWith(), Engine.rand:Number(15, 45))
 			end
 		end
 	end

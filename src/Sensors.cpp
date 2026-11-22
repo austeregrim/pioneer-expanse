@@ -9,6 +9,7 @@
 #include "Player.h"
 #include "Ship.h"
 #include "Space.h"
+#include "ship/SupercruiseController.h"
 
 #include "profiler/Profiler.h"
 
@@ -127,9 +128,7 @@ void Sensors::Update(float time)
 		if (body == m_owner || !body->IsType(ObjectType::SHIP)) return;
 		if (body->IsDead()) return;
 		const Ship *otherShip = static_cast<const Ship *>(body);
-		const bool otherInSC = (otherShip->GetFlightState() == Ship::SUPERCRUISE);
-		// Supercruise ships are only targetable/trackable on sensors while in Supercruise
-		if (otherInSC && !ownerInSC) return;
+		if (!SupercruiseController::IsShipVisibleToSensors(m_owner, otherShip)) return;
 
 		auto cit = m_radarContacts.begin();
 		while (cit != m_radarContacts.end()) {
@@ -152,8 +151,7 @@ void Sensors::Update(float time)
 	if (ownerInSC) {
 		for (Body *body : Pi::game->GetSpace()->GetBodies()) {
 			if (!body || !body->IsType(ObjectType::SHIP)) continue;
-			if (static_cast<const Ship *>(body)->GetFlightState() == Ship::SUPERCRUISE)
-				registerContact(body);
+			registerContact(body);
 		}
 	}
 
@@ -165,11 +163,11 @@ void Sensors::Update(float time)
 	//update contacts and delete stale ones
 	auto it = m_radarContacts.begin();
 	while (it != m_radarContacts.end()) {
-		if (!it->fresh || !it->body || it->body->IsDead()) {
+		const Ship *ship = (it->body && it->body->IsType(ObjectType::SHIP)) ? static_cast<const Ship *>(it->body) : nullptr;
+		if (!it->fresh || !it->body || it->body->IsDead() || (ship && !SupercruiseController::IsShipVisibleToSensors(m_owner, ship))) {
 			m_radarContacts.erase(it++);
 		} else {
-			const Ship *ship = it->body->IsType(ObjectType::SHIP) ? static_cast<Ship *>(it->body) : nullptr;
-			const bool validFlying = ship && (Ship::FLYING == ship->GetFlightState());
+			const bool validFlying = !ownerInSC && ship && (Ship::FLYING == ship->GetFlightState());
 			const bool validSC = ownerInSC && ship && (Ship::SUPERCRUISE == ship->GetFlightState());
 			if (validFlying || validSC) {
 				it->distance = m_owner->GetPositionRelTo(it->body).Length();

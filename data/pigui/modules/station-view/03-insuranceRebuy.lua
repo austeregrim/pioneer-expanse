@@ -32,14 +32,16 @@ local face = nil
 local stationSeed = false
 local statusBanner = nil
 local bannerColor = colors.uiPrimaryLight
-local sarClaimCommsText = EncryptedText.New("Under interstellar maritime charter, destroyed vessels covered by an active policy are eligible for immediate hull replacement or equity liquidation. You have been provided a standard starter scout craft to ensure mobility. You may rebuy your destroyed ship and outfitting for the 5% deductible, or liquidate the claim for net cash at any time.", 0.50)
+local sarClaimCommsText = EncryptedText.New("Under interstellar maritime charter, recovered pilots are placed into an Insurance Starter Ship (Coronatrix) upon arrival. You may pay your policy deductible to swap the starter ship for a factory-fresh replacement of your destroyed vessel, or keep the starter ship and receive any remaining insured equity in cash after deducting both the deductible and the starter ship's cost.", 0.50)
 local sarPolicyCommsText = EncryptedText.New("All licensed vessels are equipped with a standardized COSPAS-SARSAT cryogenic stasis pod. In the event of catastrophic hull integrity failure, emergency ejection is automatically executed and broadcast across the sub-space distress network. SAR trauma responders maintain continuous beacon monitoring across civilized space. Upon recovery, pilots are stabilized in medical starports without forfeiture of legal assets.", 0.50)
 
 local function drawClaimPending(claim)
 	local now = ui.getTime()
 	local playerMoney = PlayerState.GetMoney()
-	local canAffordRebuy = playerMoney >= claim.deductible
-	local payoutAmount = math.max(0, claim.totalValue - claim.deductible)
+	local bd = Insurance.GetClaimPayoutBreakdown(claim)
+	local canAffordRebuy = playerMoney >= bd.deductible
+	local starterDef = ShipDef[claim.starterShipId or Insurance.STARTER_SHIP_ID]
+	local starterHullName = (starterDef and starterDef.name) or "Coronatrix"
 
 	ui.withStyleVars({ItemSpacing = widgetSizes.itemSpacing}, function()
 		local padding = ui.getWindowPadding()
@@ -79,6 +81,9 @@ local function drawClaimPending(claim)
 
 			local shipDef = ShipDef[claim.hullId]
 			local hullName = (shipDef and shipDef.name) or claim.hullId
+			local payoutSummaryStr = bd.cashPayout > 0
+				and Format.Money(bd.cashPayout)
+				or "0.00 Cr (Charter-Subsidized Starter)"
 
 			if claim.isArrest then
 				textTable.draw({
@@ -86,10 +91,12 @@ local function drawClaimPending(claim)
 					{ "Incarceration Sentence Served", string.format("%d Standard Days", claim.totalSentenceDays or 1) },
 					{ "Fines Settled", claim.finePaid and claim.finePaid > 0 and Format.Money(claim.finePaid) or "0.00 Cr (Commuted via Labor)" },
 					{ "Legal Status", "Clean / Full Civilian Rights Restored" },
-					{ "Current Assigned Ship", "Discharged Starter Scout (Pad 1)" },
+					{ "Current Assigned Ship", string.format("Insurance Starter Ship (%s — Pad 1)", starterHullName) },
 					{ "Destroyed Vessel", string.format("%s (%s)", claim.shipName or "Unregistered", hullName) },
-					{ "Total Hull & Modules Value", Format.Money(claim.totalValue) },
-					{ "Insurance Deductible (5%)", Format.Money(claim.deductible) },
+					{ "Total Hull & Modules Value", Format.Money(bd.totalValue) },
+					{ string.format("Insurance Deductible (%d%%)", bd.deductibleRate), Format.Money(bd.deductible) },
+					{ string.format("Insurance Starter Cost (%s)", starterHullName), Format.Money(bd.starterCost) },
+					{ "Net Cash Payout (if keeping Starter)", payoutSummaryStr },
 					{ "Your Cash Balance", Format.Money(playerMoney) },
 				})
 			else
@@ -98,10 +105,12 @@ local function drawClaimPending(claim)
 					{ "Cryo-Stasis Duration", recoveryTimeStr },
 					{ "Patient Vitals", "Resuscitated & Stabilized" },
 					{ "Loss Incident Sector", claim.systemName or "Unknown Sector" },
-					{ "Current Assigned Ship", "Loaner Starter Scout (Pad 1)" },
+					{ "Current Assigned Ship", string.format("Insurance Starter Ship (%s — Pad 1)", starterHullName) },
 					{ "Destroyed Vessel", string.format("%s (%s)", claim.shipName or "Unregistered", hullName) },
-					{ "Total Hull & Modules Value", Format.Money(claim.totalValue) },
-					{ "Insurance Deductible (5%)", Format.Money(claim.deductible) },
+					{ "Total Hull & Modules Value", Format.Money(bd.totalValue) },
+					{ string.format("Insurance Deductible (%d%%)", bd.deductibleRate), Format.Money(bd.deductible) },
+					{ string.format("Insurance Starter Cost (%s)", starterHullName), Format.Money(bd.starterCost) },
+					{ "Net Cash Payout (if keeping Starter)", payoutSummaryStr },
 					{ "Your Cash Balance", Format.Money(playerMoney) },
 				})
 			end
@@ -117,7 +126,10 @@ local function drawClaimPending(claim)
 				ui.spacing()
 				ui.textColored(colors.fontDim, "All insured outfitting will be restored and fitted to the replacement hull:")
 				for _, eq in ipairs(claim.equipment) do
-					ui.bulletText(string.format("%s - %s", eq.name or eq.id, Format.Money(eq.price or 0)))
+					local priceStr = (eq.subsidized or (eq.price or 0) == 0)
+						and "0.00 Cr (Subsidized)"
+						or Format.Money(eq.price or 0)
+					ui.bulletText(string.format("%s - %s", eq.name or eq.id, priceStr))
 				end
 				ui.spacing()
 				ui.separator()
@@ -147,18 +159,20 @@ local function drawClaimPending(claim)
 
 			-- Column 1: Option A - Rebuy Destroyed Ship
 			ui.group(function()
-				ui.textColored(colors.uiPrimaryLight, "Option A: Full Insurance Rebuy (Recommended)")
+				ui.textColored(colors.uiPrimaryLight, "Option A: Rebuy Destroyed Ship (Recommended)")
 				ui.withStyleColors({ Text = colors.fontDim }, function()
-					ui.textWrapped(string.format("Swaps your temporary starter scout on Pad 1 for a factory-fresh replacement %s with all insured outfitting restored.", hullName))
+					ui.textWrapped(string.format("Pay the %d%% deductible (%s) to swap your %s starter ship on Pad 1 for a factory-fresh replacement %s with all insured outfitting restored.",
+						bd.deductibleRate, Format.Money(bd.deductible), starterHullName, hullName))
 				end)
 				ui.spacing()
 
 				local rebuyLabel = canAffordRebuy and
-					string.format("REBUY SHIP & OUTFITTING (%s)", Format.Money(claim.deductible)) or
-					string.format("INSUFFICIENT FUNDS (Need %s)", Format.Money(claim.deductible))
+					string.format("REBUY %s (%s)", string.upper(hullName), Format.Money(bd.deductible)) or
+					string.format("INSUFFICIENT FUNDS (Need %s)", Format.Money(bd.deductible))
 
 				if not canAffordRebuy then
-					ui.textColored(colors.compareWorse, "Insufficient credits for 5% deductible. You may pilot your starter scout, earn credits, and return here to rebuy at any time.")
+					ui.textColored(colors.compareWorse, string.format("Insufficient credits for the %d%% deductible. Sell stocks or secondary fleet ships at this station to raise funds, or select Option B to keep the %s starter ship.",
+						bd.deductibleRate, starterHullName))
 				else
 					ui.dummy(Vector2(0, 16))
 				end
@@ -173,7 +187,7 @@ local function drawClaimPending(claim)
 						ButtonActive = ui.theme.buttonColors.disabled.normal,
 						Text = colors.fontDim
 					}, function()
-						ui.button(rebuyLabel, Vector2(-1, widgetSizes.buttonSizeBase.y), nil, "Insufficient credits for 5% deductible")
+						ui.button(rebuyLabel, Vector2(-1, widgetSizes.buttonSizeBase.y), nil, string.format("Insufficient credits for %d%% deductible", bd.deductibleRate))
 					end)
 				else
 					if ui.button(rebuyLabel, Vector2(-1, widgetSizes.buttonSizeBase.y), rebuyVariant) then
@@ -192,21 +206,29 @@ local function drawClaimPending(claim)
 
 			ui.nextColumn()
 
-			-- Column 2: Option B - Insurance Payout & Keep Starter Scout
+			-- Column 2: Option B - Keep Insurance Starter Ship & Cash Payout
 			ui.group(function()
-				ui.textColored(colors.uiPrimaryLight, "Option B: Cash Insurance Payout (Keep Starter Scout)")
+				ui.textColored(colors.uiPrimaryLight, string.format("Option B: Keep %s Starter & Payout", starterHullName))
 				ui.withStyleColors({ Text = colors.fontDim }, function()
-					ui.textWrapped(string.format("Accept the net cash insurance settlement of %s. You keep your current starter scout and the claim is closed.", Format.Money(payoutAmount)))
+					if bd.cashPayout > 0 then
+						ui.textWrapped(string.format("Keep your %s starter ship (full ownership) and collect the remaining cash balance: %s insured value - %s deductible - %s starter ship cost = %s cash payout.",
+							starterHullName, Format.Money(bd.totalValue), Format.Money(bd.deductible), Format.Money(bd.starterCost), Format.Money(bd.cashPayout)))
+					else
+						ui.textWrapped(string.format("Net insured equity (%s) is below the %s %s starter cost. Cash payout is 0.00 Cr; the underwriter waives the %s difference and issues the %s as a Charter-Subsidized Starter (0 Cr hull/stock resale value).",
+							Format.Money(bd.netInsuredValue), Format.Money(bd.starterCost), starterHullName, Format.Money(bd.subsidyAmount), starterHullName))
+					end
 				end)
 				ui.spacing()
 
 				ui.dummy(Vector2(0, 16))
 				ui.spacing()
 
-				local payoutLabel = string.format("CLAIM PAYOUT (%s) & KEEP STARTER SCOUT", Format.Money(payoutAmount))
+				local payoutLabel = bd.cashPayout > 0
+					and string.format("KEEP STARTER & CLAIM %s PAYOUT", Format.Money(bd.cashPayout))
+					or string.format("KEEP CHARTER-SUBSIDIZED %s (0.00 Cr)", string.upper(starterHullName))
 
 				if ui.button(payoutLabel, Vector2(-1, widgetSizes.buttonSizeBase.y), ui.theme.buttonColors.default) then
-					local ok, msg = Insurance.ClaimPayoutAndLoaner()
+					local ok, msg = Insurance.ClaimPayoutAndKeepStarter()
 					if ok then
 						statusBanner = msg
 						bannerColor = colors.compareBetter
@@ -269,22 +291,33 @@ local function drawPolicyPortal()
 			ui.separator()
 			ui.spacing()
 
+			if statusBanner then
+				ui.textColored(bannerColor, statusBanner)
+				ui.spacing()
+				ui.separator()
+				ui.spacing()
+			end
+
 			ui.withFont(orbiteer.medlarge, function()
 				ui.textColored(colors.uiPrimaryLight, "CURRENT VESSEL POLICY SCHEDULE")
 			end)
 			ui.spacing()
 
-			textTable.draw({
+			local scheduleRows = {
 				{ "Insured Vessel Name", policy.shipLabel or "Unregistered" },
 				{ "Hull Classification", policy.hullName },
-				{ "Hull Base Valuation", Format.Money(policy.hullValue) },
+				{ "Hull Base Valuation", policy.isSubsidized and "0.00 Cr (Charter-Subsidized Starter)" or Format.Money(policy.hullValue) },
 				{ "Installed Equipment Valuation", Format.Money(policy.equipValue) },
 				{ "Total Insured Sum", Format.Money(policy.totalValue) },
 				{ "Policy Coverage Rate", string.format("%d%%", policy.coverageRate) },
-				{ "Rebuy Deductible", policy.hardcore and "N/A (Permadeath)" or Format.Money(policy.deductible) },
+				{ string.format("Rebuy Deductible (%d%%)", policy.deductibleRate), policy.hardcore and "N/A (Permadeath)" or Format.Money(policy.deductible) },
 				{ "Account Status", policy.hardcore and "UNINSURED (HARDCORE CHARTER)" or "ACTIVE & IN GOOD STANDING" },
 				{ "SAR Transponder Status", policy.beaconStatus },
-			})
+			}
+			if policy.isSubsidized then
+				table.insert(scheduleRows, 3, { "Hull Ownership Status", "Charter-Subsidized Starter (0 Cr hull trade-in; aftermarket gear covered)" })
+			end
+			textTable.draw(scheduleRows)
 
 			ui.spacing()
 			ui.separator()
@@ -294,7 +327,7 @@ local function drawPolicyPortal()
 				ui.text("PILOT ASSURANCE GUARANTEE")
 			end)
 			ui.spacing()
-			ui.textWrapped("Under standard interstellar charter laws, pilots recovered via cryogenic stasis are transported to the nearest regional medical starport. Upon discharge, you may exercise your right to rebuy your exact ship and outfitting for the 5% deductible fee, or receive an insurance cash payout with a complimentary starter loaner craft.")
+			ui.textWrapped(string.format("Under standard interstellar charter laws, pilots recovered via cryogenic stasis are placed into a standard Insurance Starter Ship (Coronatrix) at the nearest regional starport. Upon discharge, you may pay your %d%% deductible to swap the starter ship for a replacement of your destroyed vessel, or keep the starter ship and receive any remaining insured equity in cash after deducting both the deductible and the starter ship's cost.", policy.deductibleRate))
 		end)
 
 		ui.sameLine(0, padding.x * 2)
@@ -317,16 +350,22 @@ local function drawPolicyPortal()
 	end)
 end
 
+local insuranceViewTab
+
 local function drawInsuranceView()
 	local claim = Insurance.GetActiveClaim()
-	if claim and not claim.resolved then
+	local hasClaim = claim ~= nil and not claim.resolved
+	if insuranceViewTab then
+		insuranceViewTab.name = hasClaim and "Insurance [CLAIM]" or "Insurance & SAR"
+	end
+	if hasClaim then
 		drawClaimPending(claim)
 	else
 		drawPolicyPortal()
 	end
 end
 
-StationView:registerView({
+insuranceViewTab = StationView:registerView({
 	id = "insurance",
 	name = "Insurance & SAR",
 	icon = icons.hull,

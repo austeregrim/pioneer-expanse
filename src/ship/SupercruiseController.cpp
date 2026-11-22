@@ -42,6 +42,7 @@ void SupercruiseController::SaveToJson(Json &jsonObj, Space *space) const
 	scObj["heat_spike"] = m_heatSpike;
 	Space *sp = space ? space : (Pi::game ? Pi::game->GetSpace() : nullptr);
 	scObj["index_for_target"] = (sp && m_target) ? sp->GetIndexForBody(m_target) : 0;
+	scObj["index_for_locked_ship"] = (sp && m_lockedShip) ? sp->GetIndexForBody(m_lockedShip) : 0;
 	scObj["target_frame"] = m_targetFrame;
 	scObj["target_offset"] = m_targetOffset;
 	scObj["fsd_offline"] = m_fsdOffline;
@@ -73,6 +74,8 @@ void SupercruiseController::LoadFromJson(const Json &jsonObj)
 	m_heatSpike = scObj.value("heat_spike", 0.0);
 	m_targetIndex = scObj.value("index_for_target", 0);
 	m_target = nullptr;
+	m_lockedShipIndex = scObj.value("index_for_locked_ship", 0);
+	m_lockedShip = nullptr;
 	m_targetFrame = scObj.count("target_frame") ? scObj["target_frame"].get<FrameId>() : FrameId(FrameId::Invalid);
 	m_targetOffset = scObj.count("target_offset") ? scObj["target_offset"].get<vector3d>() : vector3d(0.0);
 	m_fsdOffline = scObj.value("fsd_offline", false);
@@ -91,6 +94,8 @@ void SupercruiseController::LoadFromJson(const Json &jsonObj)
 void SupercruiseController::PostLoadFixup(Space *space)
 {
 	m_target = (space && m_targetIndex) ? space->GetBodyByIndex(m_targetIndex) : nullptr;
+	Body *lockedBody = (space && m_lockedShipIndex) ? space->GetBodyByIndex(m_lockedShipIndex) : nullptr;
+	m_lockedShip = (lockedBody && lockedBody->IsType(ObjectType::SHIP)) ? static_cast<Ship *>(lockedBody) : nullptr;
 	Body *peerBody = (space && m_interdictPeerIndex) ? space->GetBodyByIndex(m_interdictPeerIndex) : nullptr;
 	m_interdictPeer = (peerBody && peerBody->IsType(ObjectType::SHIP)) ? static_cast<Ship *>(peerBody) : nullptr;
 	if (m_interdictRole != INTERDICT_NONE && !m_interdictPeer)
@@ -101,6 +106,10 @@ void SupercruiseController::OnDeleted(const Body *body)
 {
 	if (m_target == body)
 		m_target = nullptr;
+	if (m_lockedShip == body) {
+		m_lockedShip = nullptr;
+		m_lockedShipIndex = 0;
+	}
 	if (m_ringDropPlanet == body)
 		m_ringDropPlanet = nullptr;
 	if (m_ringImmersionPlanet == body)
@@ -115,6 +124,13 @@ void SupercruiseController::SetTarget(Body *target)
 	m_target = target;
 	m_targetFrame = FrameId::Invalid;
 	m_targetOffset = vector3d(0.0);
+	if (target && target->IsType(ObjectType::SHIP)) {
+		Ship *tShip = static_cast<Ship *>(target);
+		if (m_lockedShip != tShip && !AcquireSupercruiseLock(tShip))
+			ClearSupercruiseLock();
+	} else {
+		ClearSupercruiseLock();
+	}
 }
 
 void SupercruiseController::SetTargetPosition(FrameId frameId, const vector3d &offset)
@@ -122,11 +138,61 @@ void SupercruiseController::SetTargetPosition(FrameId frameId, const vector3d &o
 	m_target = nullptr;
 	m_targetFrame = frameId;
 	m_targetOffset = offset;
+	ClearSupercruiseLock();
+}
+
+bool SupercruiseController::AcquireSupercruiseLock(Ship *target)
+{
+	if (!m_ship || !IsActive() || !target || target->IsDead() || target == m_ship ||
+		target->GetFlightState() != Ship::SUPERCRUISE)
+		return false;
+	if (IsShipFTL(target) || m_lockedShip == target || IsInterdictingPeer(target)) {
+		m_lockedShip = target;
+		m_lockedShipIndex = 0;
+		return true;
+	}
+	return false;
 }
 
 bool SupercruiseController::IsActive() const
 {
 	return m_ship && m_ship->GetFlightState() == Ship::SUPERCRUISE;
+}
+
+bool SupercruiseController::IsShipFTL(const Ship *ship)
+{
+	if (!ship || ship->IsDead() || ship->GetFlightState() != Ship::SUPERCRUISE)
+		return false;
+	const SupercruiseController *sc = ship->GetSupercruise();
+	return sc && sc->GetSpeed() >= LIGHT_SPEED;
+}
+
+bool SupercruiseController::HasTrackedLock(const Ship *observer, const Ship *target)
+{
+	if (!observer || !target || target->IsDead() || observer == target)
+		return false;
+	if (observer->GetFlightState() != Ship::SUPERCRUISE || target->GetFlightState() != Ship::SUPERCRUISE)
+		return false;
+	const SupercruiseController *obsSc = observer->GetSupercruise();
+	if (obsSc && obsSc->IsInterdictingPeer(target))
+		return true;
+	if (observer->IsType(ObjectType::PLAYER)) {
+		const Player *p = static_cast<const Player *>(observer);
+		return (p->GetCombatTarget() == target || p->GetNavTarget() == target);
+	}
+	return obsSc && (obsSc->m_lockedShip == target);
+}
+
+bool SupercruiseController::IsShipVisibleToSensors(const Ship *observer, const Ship *target)
+{
+	if (!observer || !target || target->IsDead() || observer == target)
+		return false;
+	const bool observerInSC = (observer->GetFlightState() == Ship::SUPERCRUISE);
+	const bool targetInSC = (target->GetFlightState() == Ship::SUPERCRUISE);
+	if (observerInSC) {
+		return IsShipFTL(target) || HasTrackedLock(observer, target);
+	}
+	return !targetInSC;
 }
 
 double SupercruiseController::GetExclusionZoneRadius(const Body *body)
@@ -472,6 +538,7 @@ void SupercruiseController::EnterSupercruise()
 	}
 
 	m_ship->SetFlightState(Ship::SUPERCRUISE);
+	ClearSupercruiseLock();
 	m_speed = std::max(MIN_SPEED, m_ship->GetVelocity().Length());
 	if (m_throttle < 0.25)
 		m_throttle = 0.50;
@@ -484,8 +551,13 @@ void SupercruiseController::EnterSupercruise()
 	m_trailPositions.clear();
 	m_trailSampleTimer = 0.0f;
 	if (Pi::game && Pi::game->GetSpace()) {
-		m_trailPositions.push_front(m_ship->GetPositionRelTo(Pi::game->GetSpace()->GetRootFrame()));
+		const vector3d rootPos = m_ship->GetPositionRelTo(Pi::game->GetSpace()->GetRootFrame());
+		m_entryFlashRootPos = rootPos;
+		m_entryFlashTimer = ENTRY_FLASH_DURATION;
+		if (m_speed >= LIGHT_SPEED)
+			m_trailPositions.push_front(rootPos);
 	}
+	ClearStaleSupercruiseTarget();
 
 	Sound::BodyMakeNoise(m_ship, "Hyperdrive_Jump", 1.0f);
 	ShowStatusMessage("SUPERCRUISE ENGAGED", 3.5f);
@@ -499,6 +571,7 @@ void SupercruiseController::EnterSupercruiseImmediate(double initialSpeed)
 	m_charging = false;
 	m_chargeCountdown = 0.0f;
 	m_cooldown = 0.0f;
+	m_entryFlashTimer = 0.0f;
 
 	while (Frame *f = Frame::GetFrame(m_ship->GetFrame())) {
 		const bool isStationFrame = f->GetBody() && f->GetBody()->IsType(ObjectType::SPACESTATION);
@@ -510,6 +583,7 @@ void SupercruiseController::EnterSupercruiseImmediate(double initialSpeed)
 	}
 
 	m_ship->SetFlightState(Ship::SUPERCRUISE);
+	ClearSupercruiseLock();
 	m_speed = Clamp(initialSpeed, MIN_SPEED, MAX_SPEED);
 	m_throttle = 0.75;
 	m_desiredSpeed = m_speed;
@@ -519,9 +593,10 @@ void SupercruiseController::EnterSupercruiseImmediate(double initialSpeed)
 
 	m_trailPositions.clear();
 	m_trailSampleTimer = 0.0f;
-	if (Pi::game && Pi::game->GetSpace()) {
+	if (Pi::game && Pi::game->GetSpace() && m_speed >= LIGHT_SPEED) {
 		m_trailPositions.push_front(m_ship->GetPositionRelTo(Pi::game->GetSpace()->GetRootFrame()));
 	}
+	ClearStaleSupercruiseTarget();
 }
 
 void SupercruiseController::EnterSupercruiseOnHyperspaceExit()
@@ -538,8 +613,10 @@ void SupercruiseController::EnterSupercruiseOnHyperspaceExit()
 	m_safeDisengageReady = false;
 	m_slowDownWarning = false;
 	m_cooldown = HYPERJUMP_COOLDOWN;
+	m_entryFlashTimer = 0.0f;
 
 	m_ship->SetFlightState(Ship::SUPERCRUISE);
+	ClearSupercruiseLock();
 	m_speed = MIN_SPEED;
 	m_throttle = 0.0;
 	m_desiredSpeed = MIN_SPEED;
@@ -549,9 +626,7 @@ void SupercruiseController::EnterSupercruiseOnHyperspaceExit()
 
 	m_trailPositions.clear();
 	m_trailSampleTimer = 0.0f;
-	if (Pi::game && Pi::game->GetSpace()) {
-		m_trailPositions.push_front(m_ship->GetPositionRelTo(Pi::game->GetSpace()->GetRootFrame()));
-	}
+	ClearStaleSupercruiseTarget();
 
 	ShowStatusMessage("HYPERSPACE EXIT — FSD COOLDOWN ACTIVE", 5.0f);
 }
@@ -559,6 +634,7 @@ void SupercruiseController::EnterSupercruiseOnHyperspaceExit()
 void SupercruiseController::DropIntoRing(Planet *planet, const std::string &reason)
 {
 	ClearInterdiction();
+	ClearSupercruiseLock();
 	m_charging = false;
 	m_assistActive = false;
 	m_dockOnArrival = false;
@@ -642,6 +718,7 @@ void SupercruiseController::SafeDisengage()
 	Planet *ringPlanet = m_ringDropPlanet;
 	const bool dockAfterDrop = m_dockOnArrival;
 
+	ClearSupercruiseLock();
 	m_charging = false;
 	m_assistActive = false;
 	m_dockOnArrival = false;
@@ -818,18 +895,23 @@ void SupercruiseController::ClearStaleSupercruiseTarget()
 		return;
 	Player *p = static_cast<Player *>(m_ship);
 	if (Body *ct = p->GetCombatTarget()) {
-		if (ct->IsType(ObjectType::SHIP) && static_cast<const Ship *>(ct)->GetFlightState() == Ship::SUPERCRUISE)
+		if (ct->IsType(ObjectType::SHIP) && !IsShipVisibleToSensors(m_ship, static_cast<const Ship *>(ct)))
 			p->SetCombatTarget(nullptr);
 	}
 	if (Body *nt = p->GetNavTarget()) {
-		if (nt->IsType(ObjectType::SHIP) && static_cast<const Ship *>(nt)->GetFlightState() == Ship::SUPERCRUISE)
+		if (nt->IsType(ObjectType::SHIP) && !IsShipVisibleToSensors(m_ship, static_cast<const Ship *>(nt)))
 			p->SetNavTarget(nullptr);
+	}
+	if (Body *ft = p->GetFollowTarget()) {
+		if (ft->IsType(ObjectType::SHIP) && !IsShipVisibleToSensors(m_ship, static_cast<const Ship *>(ft)))
+			p->SetFollowTarget(nullptr);
 	}
 }
 
 void SupercruiseController::NormalDrop(const std::string &reason)
 {
 	ClearInterdiction();
+	ClearSupercruiseLock();
 	m_charging = false;
 	m_assistActive = false;
 	m_dockOnArrival = false;
@@ -857,6 +939,7 @@ void SupercruiseController::NormalDrop(const std::string &reason)
 void SupercruiseController::EmergencyDrop(const std::string &reason)
 {
 	ClearInterdiction();
+	ClearSupercruiseLock();
 	m_charging = false;
 	m_assistActive = false;
 	m_dockOnArrival = false;
@@ -888,6 +971,7 @@ void SupercruiseController::EmergencyDrop(const std::string &reason)
 void SupercruiseController::Reset()
 {
 	ClearInterdiction();
+	ClearSupercruiseLock();
 	m_charging = false;
 	m_chargeCountdown = 0.0f;
 	m_cooldown = 0.0f;
@@ -908,6 +992,7 @@ void SupercruiseController::Reset()
 	m_interdictRole = INTERDICT_NONE;
 	m_interdictPeerIndex = 0;
 	m_trailPositions.clear();
+	m_entryFlashTimer = 0.0f;
 	ResetFuelScoopState();
 	m_fsdOffline = false;
 	m_heatSpike = 0.0;
@@ -918,8 +1003,10 @@ void SupercruiseController::Reset()
 void SupercruiseController::OnEnterHyperspace()
 {
 	ClearInterdiction();
+	ClearSupercruiseLock();
 	ResetFuelScoopState();
 	m_trailPositions.clear();
+	m_entryFlashTimer = 0.0f;
 	m_charging = false;
 	m_chargeCountdown = 0.0f;
 	m_assistActive = false;
@@ -1542,6 +1629,18 @@ void SupercruiseController::StaticUpdate(float timeStep)
 		m_heatSpike = std::max(0.0, m_heatSpike - double(timeStep) * 0.045);
 	}
 
+	if (m_entryFlashTimer > 0.0f) {
+		m_entryFlashTimer = std::max(0.0f, m_entryFlashTimer - timeStep);
+	}
+
+	if (m_lockedShip && (!IsActive() || m_lockedShip->IsDead() || m_lockedShip->GetFlightState() != Ship::SUPERCRUISE)) {
+		ClearSupercruiseLock();
+	}
+
+	if (m_ship && m_ship->IsType(ObjectType::PLAYER)) {
+		ClearStaleSupercruiseTarget();
+	}
+
 	if (m_charging) {
 		std::string reason;
 		if (m_ship->GetFlightState() != Ship::FLYING) {
@@ -1662,15 +1761,23 @@ void SupercruiseController::StaticUpdate(float timeStep)
 			}
 		}
 	} else if (hasTarget && targetIsSCShip && !m_ship->IsType(ObjectType::PLAYER)) {
-		// AI pursuing another Supercruise ship: regulate speed envelope to smoothly close into rear interdiction cone
-		// without accelerating to 1,500c and orbiting the target in giant circles
+		// AI pursuing another Supercruise ship: match speed, follow distance, and approach path
+		// so pursuers smoothly settle behind both FTL and sub-1c locked targets for interdiction
 		const Ship *targetShip = static_cast<const Ship *>(activeTarget);
 		const double targetSpeed = (targetShip && targetShip->GetSupercruise()) ? targetShip->GetSupercruise()->GetSpeed() : MIN_SPEED;
 		const vector3d forwardDir = -m_ship->GetOrient().VectorZ();
-		const double closingDot = forwardDir.Dot(targetRel.NormalizedSafe());
+		const vector3d toTargetDir = targetRel.NormalizedSafe();
+		const double closingDot = forwardDir.Dot(toTargetDir);
+		const double behindDot = (-targetShip->GetOrient().VectorZ()).Dot(toTargetDir);
+		const double followGap = std::max(SAFE_DISENGAGE_DIST * 0.5, targetSpeed * 3.0);
 		double desiredPursuitSpeed;
 		if (closingDot > 0.55) {
-			desiredPursuitSpeed = std::max(MIN_SPEED, targetSpeed + m_targetDistance / 6.0);
+			if (m_targetDistance <= followGap * 2.5 && behindDot > 0.45) {
+				const double closure = std::max(0.0, (m_targetDistance - followGap) / 6.0);
+				desiredPursuitSpeed = std::max(MIN_SPEED, std::min(targetSpeed * 1.45 + MIN_SPEED, targetSpeed + closure));
+			} else {
+				desiredPursuitSpeed = std::max(MIN_SPEED, targetSpeed + m_targetDistance / 6.0);
+			}
 		} else {
 			desiredPursuitSpeed = std::max(MIN_SPEED, std::min(targetSpeed * 0.90, m_targetDistance / 8.0));
 		}
@@ -1702,16 +1809,21 @@ void SupercruiseController::StaticUpdate(float timeStep)
 
 	m_speed = Clamp(m_speed, MIN_SPEED, MAX_SPEED);
 
-	// Sample recent root-frame positions for curved FTL burn-in trails
-	if (Pi::game && Pi::game->GetSpace()) {
-		m_trailSampleTimer += timeStep;
-		if (m_trailSampleTimer >= 0.04f || m_trailPositions.empty()) {
-			m_trailSampleTimer = 0.0f;
-			const vector3d rootPos = m_ship->GetPositionRelTo(Pi::game->GetSpace()->GetRootFrame());
-			m_trailPositions.push_front(rootPos);
-			while (m_trailPositions.size() > MAX_TRAIL_SAMPLES)
-				m_trailPositions.pop_back();
+	// Sample recent root-frame positions for curved FTL burn-in trails (only at FTL >= 1c)
+	if (m_speed >= LIGHT_SPEED) {
+		if (Pi::game && Pi::game->GetSpace()) {
+			m_trailSampleTimer += timeStep;
+			if (m_trailSampleTimer >= 0.04f || m_trailPositions.empty()) {
+				m_trailSampleTimer = 0.0f;
+				const vector3d rootPos = m_ship->GetPositionRelTo(Pi::game->GetSpace()->GetRootFrame());
+				m_trailPositions.push_front(rootPos);
+				while (m_trailPositions.size() > MAX_TRAIL_SAMPLES)
+					m_trailPositions.pop_back();
+			}
 		}
+	} else if (!m_trailPositions.empty()) {
+		m_trailPositions.clear();
+		m_trailSampleTimer = 0.0f;
 	}
 
 	if (m_interdictRole == INTERDICT_ATTACKER) {
@@ -1978,13 +2090,18 @@ bool SupercruiseController::CanInterdict(const Ship *target, std::string *outRea
 			*outReason = "TARGET IS NOT IN SUPERCRUISE";
 		return false;
 	}
+	const SupercruiseController *targetSc = target->GetSupercruise();
+	if (!targetSc || (!IsShipFTL(target) && !HasTrackedLock(m_ship, target))) {
+		if (outReason)
+			*outReason = "TARGET IS SUBLIGHT (< 1.0c) — NO FTL SIGNATURE";
+		return false;
+	}
 	if (m_interdictRole != INTERDICT_NONE) {
 		if (outReason)
 			*outReason = "INTERDICTION TETHER ALREADY ACTIVE";
 		return false;
 	}
-	const SupercruiseController *targetSc = target->GetSupercruise();
-	if (targetSc && targetSc->m_interdictRole != INTERDICT_NONE) {
+	if (targetSc->m_interdictRole != INTERDICT_NONE) {
 		if (outReason)
 			*outReason = "TARGET ALREADY TETHERED BY ANOTHER INTERDICTOR";
 		return false;
@@ -1992,15 +2109,38 @@ bool SupercruiseController::CanInterdict(const Ship *target, std::string *outRea
 
 	const vector3d relToTarget = target->GetPositionRelTo(m_ship);
 	const double dist = relToTarget.Length();
+	const double targetSpeed = targetSc->GetSpeed();
 	const double levelMult = 1.0 + 0.35 * double(level - 1);
-	const double maxRange = std::max(10.0 * LIGHT_SPEED, m_speed * 10.0) * levelMult;
+	const double refSpeed = std::min(m_speed, targetSpeed);
+	const double maxRange = std::max(SAFE_DISENGAGE_DIST, refSpeed * 10.0) * levelMult;
 	if (dist > maxRange) {
 		if (outReason) {
 			char buf[128];
-			snprintf(buf, sizeof(buf), "OUT OF INTERDICTION RANGE (%.1f ls / MAX %.1f ls)",
-				dist / LIGHT_SPEED, maxRange / LIGHT_SPEED);
+			if (maxRange >= 0.1 * LIGHT_SPEED) {
+				snprintf(buf, sizeof(buf), "OUT OF INTERDICTION RANGE (%.1f ls / MAX %.1f ls)",
+					dist / LIGHT_SPEED, maxRange / LIGHT_SPEED);
+			} else if (maxRange >= 1.0e6) {
+				snprintf(buf, sizeof(buf), "OUT OF INTERDICTION RANGE (%.1f Mm / MAX %.1f Mm)",
+					dist / 1.0e6, maxRange / 1.0e6);
+			} else {
+				snprintf(buf, sizeof(buf), "OUT OF INTERDICTION RANGE (%.0f km / MAX %.0f km)",
+					dist / 1.0e3, maxRange / 1.0e3);
+			}
 			*outReason = buf;
 		}
+		return false;
+	}
+
+	const double maxMatchSpeed = std::max(targetSpeed * 2.25, MIN_SPEED * 4.0);
+	const double minMatchSpeed = (targetSpeed > MIN_SPEED * 2.5) ? (targetSpeed * 0.40) : 0.0;
+	if (m_speed > maxMatchSpeed) {
+		if (outReason)
+			*outReason = "TOO FAST — MATCH TARGET SPEED TO INTERDICT";
+		return false;
+	}
+	if (m_speed < minMatchSpeed) {
+		if (outReason)
+			*outReason = "TOO SLOW — MATCH TARGET SPEED TO INTERDICT";
 		return false;
 	}
 

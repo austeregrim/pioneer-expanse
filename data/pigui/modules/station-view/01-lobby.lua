@@ -91,7 +91,7 @@ local incarcerationModal = ModalWindow.New('incarcerationModal', function(self)
 		{ "Liquid Capital Garnished", Format.Money(rec.finePaid or 0) },
 		{ "Unpaid Balance Remitted", (rec.unpaidFine and rec.unpaidFine > 0) and string.format("%s (Discharged via Labor)", Format.Money(rec.unpaidFine)) or "0.00 Cr" },
 		{ "Criminal Record & Warrants", "CLEARED & EXPUNGED (TIME SERVED)" },
-		{ "Current Assigned Vessel", "Discharged Scout (Coronatrix - Pad Cleared)" },
+		{ "Current Assigned Vessel", "Insurance Starter Ship (Coronatrix — Claim Pending)" },
 		{ "Insurance Claim Status", "Underwriter Claim Open (Rebuy or payout at Insurance Office)" },
 	}
 
@@ -126,6 +126,9 @@ local incarcerationModal = ModalWindow.New('incarcerationModal', function(self)
 			if ui.button(btnText, Vector2(btnWidth, widgetSizes.buttonSizeBase.y)) then
 				Insurance.DismissIncarcerationRecord()
 				self:close()
+				if Insurance.HasClaim() then
+					StationView:SwitchTo("insurance")
+				end
 			end
 		end)
 	end)
@@ -134,6 +137,13 @@ incarcerationModal.centered = true
 incarcerationModal.size = Vector2(920 * rescaleVector.x, 0)
 
 local requestLaunch = function (station)
+	if Insurance.HasClaim() then
+		Comms.ImportantMessage("Launch clearance denied: settle your open insurance claim at the Insurance & SAR office first.", station.label)
+		popupMsg = "You have an unresolved insurance claim. Please visit the Insurance & SAR tab to either rebuy your ship or claim your payout and keep the starter ship before launching."
+		popup:open()
+		return
+	end
+
 	local _, fine = PlayerState.GetCrimeOutstanding()
 	local nearbyTraffic = station:GetNearbyTraffic(50000) -- ships within 50km of station
 
@@ -476,27 +486,25 @@ local function drawPlayerInfo()
 					local claim = Insurance.GetActiveClaim()
 					if claim and not claim.resolved then
 						ui.withFont(pionillium.body, function()
-							local shipDef = ShipDef[claim.hullId]
-							local name = claim.shipName or (shipDef and shipDef.name) or "destroyed vessel"
-							ui.textColored(colors.uiPrimaryLight, string.format("NOTICE: Open insurance claim pending for %s. Rebuy ship or collect payout at Insurance Office.", name))
+							local claimShipDef = ShipDef[claim.hullId]
+							local name = claim.shipName or (claimShipDef and claimShipDef.name) or "destroyed vessel"
+							ui.textColored(colors.alertRed, string.format("LAUNCH LOCKED: Open insurance claim pending for %s. Rebuy your ship or claim payout at the Insurance & SAR office.", name))
 						end)
 						ui.spacing()
-						local rebuyBtnSize = Vector2(ui.getContentRegion().x, 36 * rescaleVector.y)
 						ui.withFont(orbiteer.medlarge, function()
-							ui.withStyleColors({ Button = colors.uiPrimaryLight }, function()
-								if ui.button("OPEN INSURANCE OFFICE // REBUY SHIP##lobbyInsurance", rebuyBtnSize) then
+							ui.withStyleColors({ Button = colors.alertRed }, function()
+								if ui.button("SETTLE INSURANCE CLAIM TO LAUNCH##lobbyInsurance", size) then
 									StationView:SwitchTo("insurance")
 								end
 							end)
 						end)
-						ui.spacing()
+					else
+						ui.withFont(orbiteer.title, function()
+							if ui.button(l.REQUEST_LAUNCH, size) then
+								requestLaunch(station)
+							end
+						end)
 					end
-
-					ui.withFont(orbiteer.title, function()
-						if ui.button(l.REQUEST_LAUNCH, size) then
-							requestLaunch(station)
-						end
-					end)
 				end)
 			end)
 

@@ -1069,9 +1069,46 @@ void WorldView::DrawSupercruiseShips()
 		if (!b->IsType(ObjectType::SHIP))
 			continue;
 		const Ship *ship = static_cast<const Ship *>(b);
-		if (ship->IsDead() || ship->GetFlightState() != Ship::SUPERCRUISE)
+		if (ship->IsDead() || ship == Pi::player)
 			continue;
-		if (ship == Pi::player)
+
+		const SupercruiseController *sc = ship->GetSupercruise();
+		// Brief FSD Supercruise entry optical flash (visible when an NPC initiates Supercruise nearby)
+		if (sc && rootFrame && sc->GetEntryFlashTimer() > 0.0f) {
+			const vector3d flashCamPos = rootCamPos + rootCamOrient * sc->GetEntryFlashRootPos();
+			if (flashCamPos.z <= zClip) {
+				const double flashDist = flashCamPos.Length();
+				if (flashDist >= 10.0 && flashDist <= 5000000.0 && !isOccluded(flashCamPos, flashDist)) {
+					const vector3d flashScreen = projectToScreenSpace(flashCamPos, m_cameraContext, false);
+					if (flashScreen.x >= -120.0 && flashScreen.x <= winW + 120.0 &&
+						flashScreen.y >= -120.0 && flashScreen.y <= winH + 120.0) {
+						const float fx = float(flashScreen.x);
+						const float fy = float(flashScreen.y);
+						const float u = Clamp(sc->GetEntryFlashTimer() / SupercruiseController::ENTRY_FLASH_DURATION, 0.0f, 1.0f);
+						const float distFade = (flashDist <= 100000.0)
+							? 1.0f
+							: std::pow(float(Clamp(1.0 - (flashDist - 100000.0) / 4900000.0, 0.0, 1.0)), 1.5f);
+						const float flashVisAlpha = (inAtmosphere ? (bgVis * 0.85f) : Clamp(0.45f + 0.55f * bgVis, 0.45f, 1.0f)) * distFade;
+						const float fade = std::pow(u, 0.65f) * flashVisAlpha;
+						const float burstExpand = 0.60f + 0.90f * (1.0f - u);
+						const float scale = (inAtmosphere ? 0.70f : 1.0f) * burstExpand;
+						const Uint8 outerA = Uint8(Clamp(int(175.0f * fade), 0, 255));
+						const Uint8 midA = Uint8(Clamp(int(225.0f * fade), 0, 255));
+						const Uint8 streakA = Uint8(Clamp(int(210.0f * fade), 0, 255));
+						const Uint8 coreA = Uint8(Clamp(int(255.0f * fade), 0, 255));
+						if (coreA > 2) {
+							addGlowQuad(fx, fy, 18.0f * scale, Color(90, 200, 255, outerA));
+							addGlowQuad(fx, fy, 8.5f * scale, Color(185, 235, 255, midA));
+							addOrientedGlowQuad(fx, fy, 1.0f, 0.0f, 34.0f * scale, 1.85f, Color(135, 220, 255, streakA));
+							addOrientedGlowQuad(fx, fy, 0.0f, 1.0f, 18.0f * scale, 1.35f, Color(180, 235, 255, streakA));
+							addGlowQuad(fx, fy, 3.2f * scale, Color(255, 255, 255, coreA));
+						}
+					}
+				}
+			}
+		}
+
+		if (!SupercruiseController::IsShipFTL(ship))
 			continue;
 
 		const vector3d shipCamPos = ship->GetInterpPositionRelTo(camFrameId);
@@ -1087,7 +1124,6 @@ void WorldView::DrawSupercruiseShips()
 			screenHead.y < -80.0 || screenHead.y > winH + 80.0)
 			continue;
 
-		const SupercruiseController *sc = ship->GetSupercruise();
 		const double speed = sc ? sc->GetSpeed() : SupercruiseController::MIN_SPEED;
 		const double speedLog = Clamp(
 			std::log10(std::max(speed, SupercruiseController::MIN_SPEED) / SupercruiseController::MIN_SPEED) /

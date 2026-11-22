@@ -287,19 +287,6 @@ void SystemView::Update()
 		if (Pi::player->GetFlightState() == Ship::FlightState::FLYING) {
 			const double planetRadius = playerAround->GetRadius();
 			m_map->AddOrbitTrack({ Projectable::ORBIT, Projectable::PLAYER, PlayerBody, offset }, &playerOrbit, m_map->svColor[Col::PLAYER_ORBIT], planetRadius);
-
-			const double plannerStartTime = m_planner->GetStartTime();
-			if (!m_planner->GetPosition().ExactlyEqual(vector3d::Zero)) {
-				Orbit plannedOrbit = Orbit::FromBodyState(m_planner->GetPosition(),
-					m_planner->GetVel(),
-					playerAround->GetMass());
-
-				m_map->AddOrbitTrack({ Projectable::ORBIT, Projectable::PLANNER, PlayerBody, offset }, &plannedOrbit, m_map->svColor[Col::PLANNER_ORBIT], planetRadius);
-				if (std::fabs(time - m_game->GetTime()) > 1. && (time - plannerStartTime) > 0.)
-					m_map->AddObjectTrack({ Projectable::OBJECT, Projectable::PLANNER, PlayerBody, offset + plannedOrbit.OrbitalPosAtTime(time - plannerStartTime) });
-				else
-					m_map->AddObjectTrack({ Projectable::OBJECT, Projectable::PLANNER, PlayerBody, offset + m_planner->GetPosition() });
-			}
 		}
 	}
 }
@@ -327,6 +314,8 @@ void SystemView::OnSwitchFrom()
 {
 	// because ships from the previous system may remain after last update
 	// m_projected.clear();
+	if (m_map)
+		m_map->ReleaseMouseCapture();
 }
 
 void SystemView::SetSystemSelectionMode(SystemSelectionMode systemMode)
@@ -417,6 +406,7 @@ void SystemMapViewport::ResetViewpoint()
 	m_timeStep = 1.0f;
 	m_time = m_refTime;
 	m_transTo *= 0.0;
+	m_panOffset = vector3d(0.0);
 	m_animateTransition = MAX_TRANSITION_FRAMES;
 
 	m_viewedObject = {};
@@ -636,6 +626,15 @@ void SystemMapViewport::Draw3D()
 		DrawAtlasView();
 }
 
+double SystemMapViewport::GetEffectiveSurfaceDistance() const
+{
+	if (m_viewedObject.type == Projectable::OBJECT && m_viewedObject.base == Projectable::SYSTEMBODY && m_viewedObject.getRef()) {
+		const double r = m_viewedObject.ref.sbody->GetRadius();
+		return std::max(0.0, r - m_panOffset.Length());
+	}
+	return 0.0;
+}
+
 void SystemMapViewport::DrawOrreryView()
 {
 	PROFILE_SCOPED()
@@ -663,9 +662,7 @@ void SystemMapViewport::DrawOrreryView()
 	m_renderer->SetPerspectiveProjection(CAMERA_FOV, float(m_viewportSize.w) / m_viewportSize.h, 1.f, 1000.f * m_zoom * float(AU) + DEFAULT_VIEW_DISTANCE * 2);
 	//TODO add reserve
 
-	double surfaceDistance = 0.0;
-	if (m_viewedObject.type == Projectable::OBJECT && m_viewedObject.base == Projectable::SYSTEMBODY && m_viewedObject.getRef())
-		surfaceDistance += m_viewedObject.ref.sbody->GetRadius();
+	const double surfaceDistance = GetEffectiveSurfaceDistance();
 
 	// The matrix is shifted from the (0,0,0) by DEFAULT_VIEW_DISTANCE
 	// and then rotated (around 0,0,0) and scaled by m_zoom, shift doesn't scale.
@@ -710,7 +707,7 @@ void SystemMapViewport::DrawOrreryView()
 		AnimationCurves::Approach(m_trans.y, m_transTo.y, ft);
 		AnimationCurves::Approach(m_trans.z, m_transTo.z, ft);
 	} else {
-		m_trans = m_viewedObject.worldpos;
+		m_trans = m_viewedObject.worldpos + m_panOffset;
 	}
 
 	// Transform all tracks + render system bodies
@@ -896,6 +893,19 @@ void SystemMapViewport::DrawAtlasView()
 	RenderAtlasBody(m_atlasLayout, vector3f{ -m_atlasPosDefault.x, m_atlasPosDefault.y, 0.0f }, cameraTrans);
 }
 
+void SystemMapViewport::ReleaseMouseCapture()
+{
+	m_rotateWithMouseButton = false;
+	m_rightMouseDown = false;
+	m_panWithMouseButton = false;
+	m_rightMouseDragged = false;
+	m_rightDragAccum = vector2f(0.0f);
+	m_rotateView = false;
+	m_zoomView = false;
+	if (m_app && m_app->GetInput())
+		m_app->GetInput()->SetCapturingMouse(false);
+}
+
 void SystemMapViewport::HandleInput(float ft)
 {
 	Input::Manager *inputMgr = m_app->GetInput();
@@ -903,10 +913,33 @@ void SystemMapViewport::HandleInput(float ft)
 	// to capture mouse when button was pressed and release when released
 	if (inputMgr->MouseButtonState(SDL_BUTTON_MIDDLE) != m_rotateWithMouseButton) {
 		m_rotateWithMouseButton = !m_rotateWithMouseButton;
-		inputMgr->SetCapturingMouse(m_rotateWithMouseButton);
+		if (m_rotateWithMouseButton)
+			inputMgr->SetCapturingMouse(true);
+		else if (!m_panWithMouseButton && !m_rotateView && !m_zoomView)
+			inputMgr->SetCapturingMouse(false);
 	}
 
 	float speedMod = inputMgr->KeyState(SDLK_LSHIFT) ? 10.f : (inputMgr->KeyState(SDLK_LCTRL) ? 0.1f : 1.f);
+
+	const bool rmbDown = (m_displayMode == SystemView::Mode::Orrery) && inputMgr->MouseButtonState(SDL_BUTTON_RIGHT);
+	if (!rmbDown && !m_rightMouseDown) {
+		m_rightMouseDragged = false;
+	}
+	if (rmbDown && !m_rightMouseDown) {
+		m_rightMouseDown = true;
+		m_panWithMouseButton = false;
+		m_rightMouseDragged = false;
+		m_rightDragAccum = vector2f(0.0f);
+	} else if (!rmbDown && m_rightMouseDown) {
+		m_rightMouseDown = false;
+		if (m_panWithMouseButton) {
+			m_panWithMouseButton = false;
+			if (!m_rotateWithMouseButton && !m_rotateView && !m_zoomView)
+				inputMgr->SetCapturingMouse(false);
+		}
+		// Keep m_rightMouseDragged for this frame so PiGui's isMouseReleased(1) suppresses the context menu,
+		// then clear on the following idle frame.
+	}
 
 	if (m_rotateWithMouseButton || m_rotateView) {
 		int motion[2];
@@ -928,6 +961,47 @@ void SystemMapViewport::HandleInput(float ft)
 			m_zoomTo *= pow(ZOOM_IN_SPEED * 0.003 * speedMod + 1, -motion[1]);
 		else
 			m_atlasZoomTo += motion[1] * 0.005 * speedMod * Clamp(m_atlasZoomTo, MIN_ATLAS_ZOOM, MAX_ATLAS_ZOOM);
+	} else if (rmbDown && m_rightMouseDown) {
+		int motion[2];
+		inputMgr->GetMouseMotion(motion);
+		float panDx = 0.0f;
+		float panDy = 0.0f;
+		if (!m_panWithMouseButton) {
+			m_rightDragAccum.x += float(motion[0]);
+			m_rightDragAccum.y += float(motion[1]);
+			if (m_rightDragAccum.LengthSqr() >= 16.0f) {
+				m_panWithMouseButton = true;
+				m_rightMouseDragged = true;
+				inputMgr->SetCapturingMouse(true);
+				if (m_animateTransition > 0) {
+					m_panOffset = m_trans - m_viewedObject.worldpos;
+					m_animateTransition = 0;
+				}
+				panDx = m_rightDragAccum.x;
+				panDy = m_rightDragAccum.y;
+			}
+		} else {
+			panDx = float(motion[0]);
+			panDy = float(motion[1]);
+		}
+
+		if (panDx != 0.0f || panDy != 0.0f) {
+			const double rx = DEG2RAD(double(m_rot_x));
+			const double ry = DEG2RAD(double(m_rot_y));
+			const vector3d camRightHoriz(std::cos(ry), 0.0, std::sin(ry));
+			const vector3d camUpHoriz(std::sin(ry), 0.0, -std::cos(ry));
+			const double minSin = std::sin(DEG2RAD(15.0));
+			const double sinRx = std::sin(rx);
+			const double pitchDiv = (sinRx >= 0.0) ? std::max(sinRx, minSin) : std::min(sinRx, -minSin);
+
+			const double surfaceDistance = GetEffectiveSurfaceDistance();
+			const double viewDistCam = DEFAULT_VIEW_DISTANCE + surfaceDistance * double(m_zoom);
+			const double viewportH = double(std::max(1, m_viewportSize.h));
+			const double metersPerPixel = (2.0 * viewDistCam * std::tan(double(CAMERA_FOV_RADIANS) * 0.5)) /
+				(viewportH * std::max(double(m_zoom), 1e-30));
+
+			m_panOffset += (-camRightHoriz * double(panDx) + camUpHoriz * (double(panDy) / pitchDiv)) * (metersPerPixel * double(speedMod));
+		}
 	}
 
 	// camera control signals from devices, sent to the SectorView
@@ -1014,25 +1088,25 @@ void SystemMapViewport::DrawGrid(uint32_t radius)
 
 	m_lineVerts.reset(new Graphics::VertexArray(Graphics::ATTRIB_POSITION, half_lines * 4 + (m_gridDrawing == GridDrawing::GRID_AND_LEGS ? m_projected.size() * 2 : 0)));
 
-	float zoom = float(AU);
-	vector3f pos = vector3f(m_trans);
+	const double gridStep = double(AU);
+	const double extent = double(half_lines) * gridStep;
 
 	for (int i = -half_lines; i < half_lines + 1; i++) {
-		float z = float(i) * zoom;
-		m_lineVerts->Add(vector3f(-half_lines * zoom, 0.0f, z) - pos, svColor[GRID]);
-		m_lineVerts->Add(vector3f(+half_lines * zoom, 0.0f, z) - pos, svColor[GRID]);
+		const double z = double(i) * gridStep;
+		m_lineVerts->Add(vector3f(vector3d(-extent, 0.0, z) - m_trans), svColor[GRID]);
+		m_lineVerts->Add(vector3f(vector3d(+extent, 0.0, z) - m_trans), svColor[GRID]);
 	}
 
 	for (int i = -half_lines; i < half_lines + 1; i++) {
-		float x = float(i) * zoom;
-		m_lineVerts->Add(vector3f(x, 0.0f, -half_lines * zoom) - pos, svColor[GRID]);
-		m_lineVerts->Add(vector3f(x, 0.0f, +half_lines * zoom) - pos, svColor[GRID]);
+		const double x = double(i) * gridStep;
+		m_lineVerts->Add(vector3f(vector3d(x, 0.0, -extent) - m_trans), svColor[GRID]);
+		m_lineVerts->Add(vector3f(vector3d(x, 0.0, +extent) - m_trans), svColor[GRID]);
 	}
 
 	if (m_gridDrawing == GridDrawing::GRID_AND_LEGS)
 		for (Projectable &p : m_objectTracks) {
 			vector3d offset(p.worldpos - m_trans);
-			offset.y = 0; //-m_trans.y;
+			offset.y = -m_trans.y;
 			m_lineVerts->Add(vector3f(p.worldpos - m_trans), svColor[GRID_LEG] * 0.5);
 			m_lineVerts->Add(vector3f(offset), svColor[GRID_LEG] * 0.5);
 		}
@@ -1221,6 +1295,7 @@ void SystemMapViewport::SetViewedObject(const Projectable &p)
 	// there is a correct starting point of the transition animation, otherwise
 	// there may be an unwanted shift in the next frame
 	m_viewedObject = p;
+	m_panOffset = vector3d(0.0);
 	m_animateTransition = MAX_TRANSITION_FRAMES;
 }
 

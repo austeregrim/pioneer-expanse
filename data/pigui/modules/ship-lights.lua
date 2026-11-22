@@ -42,7 +42,9 @@ local function displayShipLights()
 
 	local player = Game.player
 	if not player or not player.GetBeaconsEnabled then return end
-	if player:GetFlightState() == "HYPERSPACE" then return end
+	local flightState = player:GetFlightState()
+	if flightState == "HYPERSPACE" or flightState == "SUPERCRUISE" then return end
+	if player.IsSupercruiseActive and player:IsSupercruiseActive() then return end
 
 	local beaconsOn = player:GetBeaconsEnabled()
 	local forwardOn = player:GetForwardLightsEnabled()

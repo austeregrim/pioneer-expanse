@@ -339,6 +339,12 @@ AICmdKill::AICmdKill(DynamicBody *dBody, Ship *target) :
 	m_guns = m_dBody->GetComponent<GunManager>();
 	assert(m_prop != nullptr);
 	assert(m_guns != nullptr);
+	if (m_dBody && m_dBody->IsType(ObjectType::SHIP)) {
+		Ship *ship = static_cast<Ship *>(m_dBody);
+		if (ship->GetFlightState() == Ship::SUPERCRUISE && ship->GetSupercruise()) {
+			ship->GetSupercruise()->AcquireSupercruiseLock(m_target);
+		}
+	}
 }
 
 AICmdKill::AICmdKill(const Json &jsonObj) :
@@ -359,6 +365,13 @@ void AICmdKill::SaveToJson(Json &jsonObj)
 AICmdKill::~AICmdKill()
 {
 	m_guns->SetAllGroupsFiring(false);
+	if (m_dBody && m_dBody->IsType(ObjectType::SHIP)) {
+		Ship *ship = static_cast<Ship *>(m_dBody);
+		if (SupercruiseController *sc = ship->GetSupercruise()) {
+			if (sc->GetLockedShip() == m_target && !sc->IsInterdictingPeer(m_target))
+				sc->ClearSupercruiseLock();
+		}
+	}
 }
 
 void AICmdKill::PostLoadFixup(Space *space)
@@ -421,6 +434,18 @@ bool AICmdKill::TimeStepUpdate()
 		if (!ship->IsType(ObjectType::PLAYER) && ship->GetPercentHull() < 30.0f) {
 			// Successfully escaped into Supercruise when badly damaged
 			return true;
+		}
+		if (!ship->IsType(ObjectType::PLAYER) && m_target->IsType(ObjectType::SHIP)) {
+			Ship *targetShip = static_cast<Ship *>(m_target);
+			SupercruiseController *sc = ship->GetSupercruise();
+			bool hasLock = SupercruiseController::HasTrackedLock(ship, targetShip);
+			if (!hasLock && sc && SupercruiseController::IsShipFTL(targetShip)) {
+				hasLock = sc->AcquireSupercruiseLock(targetShip);
+			}
+			if (!hasLock) {
+				m_child.reset();
+				return true;
+			}
 		}
 		if (!m_child)
 			m_child.reset(new AICmdFlyTo(m_dBody, m_target));
@@ -1153,14 +1178,16 @@ bool AICmdFlyTo::TimeStepUpdate()
 						return false;
 					}
 
+					const double targetSpeed = targetShip->GetSupercruise() ? targetShip->GetSupercruise()->GetSpeed() : SupercruiseController::MIN_SPEED;
+					const double idealTailDist = std::max(SupercruiseController::SAFE_DISENGAGE_DIST * 0.5, targetSpeed * 2.5);
 					const vector3d targetFwd = (-targetShip->GetOrient().VectorZ()).NormalizedSafe();
 					const vector3d dirToTarget = rawRel.NormalizedSafe();
 					// Positive when pursuer is behind target chasing in the same direction
 					const double behindDot = targetFwd.Dot(dirToTarget);
-					const double rearOffset = std::min(rawDist * 0.35, 1.2 * SupercruiseController::LIGHT_SPEED);
+					const double rearOffset = std::min(rawDist * 0.35, idealTailDist);
 					if (behindDot > 0.45) {
-						if (rawDist > 4.0 * SupercruiseController::LIGHT_SPEED)
-							steerRel = rawRel - targetFwd * (0.8 * SupercruiseController::LIGHT_SPEED);
+						if (rawDist > idealTailDist * 2.5)
+							steerRel = rawRel - targetFwd * (idealTailDist * 0.65);
 						else
 							steerRel = rawRel;
 						pursuitThrottle = 0.75;

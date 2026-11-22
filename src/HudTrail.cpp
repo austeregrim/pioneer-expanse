@@ -15,8 +15,9 @@
 
 #include "profiler/Profiler.h"
 
-const float UPDATE_INTERVAL = 0.1f;
-const Uint16 MAX_POINTS = 100;
+const float UPDATE_INTERVAL = 0.08f;
+const Uint16 MAX_POINTS = 32;
+const double MAX_TRAIL_STEP_DIST_SQR = 50000.0 * 50000.0;
 
 HudTrail::HudTrail(Body *b, const Color &c) :
 	m_body(b),
@@ -41,8 +42,9 @@ void HudTrail::Update(float time)
 		return;
 	}
 
-	// Supercruise ships use their own short FTL wake rather than sublight HUD trails
-	if (m_body->IsType(ObjectType::SHIP) && static_cast<const Ship *>(m_body)->GetFlightState() == Ship::SUPERCRUISE) {
+	// Supercruise ships and player Supercruise/Hyperspace do not show sublight HUD trails
+	if ((m_body->IsType(ObjectType::SHIP) && static_cast<const Ship *>(m_body)->GetFlightState() == Ship::SUPERCRUISE) ||
+		(Pi::player && (Pi::player->GetFlightState() == Ship::SUPERCRUISE || Pi::player->GetFlightState() == Ship::HYPERSPACE))) {
 		m_trailPoints.clear();
 		return;
 	}
@@ -55,7 +57,10 @@ void HudTrail::Update(float time)
 		Frame *pFrame = Frame::GetFrame(Pi::player->GetFrame());
 		if (!pFrame) return;
 		FrameId nrf = pFrame->GetNonRotFrame();
-		m_trailPoints.emplace_back(m_body->GetInterpPositionRelTo(nrf) - Pi::player->GetInterpPositionRelTo(nrf));
+		const vector3d relPos = m_body->GetInterpPositionRelTo(nrf) - Pi::player->GetInterpPositionRelTo(nrf);
+		if (!m_trailPoints.empty() && (relPos - m_trailPoints.back()).LengthSqr() > MAX_TRAIL_STEP_DIST_SQR)
+			m_trailPoints.clear();
+		m_trailPoints.emplace_back(relPos);
 	}
 
 	while (m_trailPoints.size() > MAX_POINTS)
@@ -71,13 +76,9 @@ void HudTrail::Render(Graphics::Renderer *r)
 		return;
 	}
 
-	if (m_body->IsType(ObjectType::SHIP) && static_cast<const Ship *>(m_body)->GetFlightState() == Ship::SUPERCRUISE) {
-		m_trailPoints.clear();
-		return;
-	}
-
-	// Supercruise ships use their own short FTL wake rather than sublight HUD trails
-	if (m_body->IsType(ObjectType::SHIP) && static_cast<const Ship *>(m_body)->GetFlightState() == Ship::SUPERCRUISE) {
+	// Supercruise ships and player Supercruise/Hyperspace do not show sublight HUD trails
+	if ((m_body->IsType(ObjectType::SHIP) && static_cast<const Ship *>(m_body)->GetFlightState() == Ship::SUPERCRUISE) ||
+		(Pi::player && (Pi::player->GetFlightState() == Ship::SUPERCRUISE || Pi::player->GetFlightState() == Ship::HYPERSPACE))) {
 		m_trailPoints.clear();
 		return;
 	}
@@ -104,16 +105,15 @@ void HudTrail::Render(Graphics::Renderer *r)
 
 		// Start with the object's current position relative to the player (so when we apply the above transform this
 		// works out to the object's current position). Then draw a line along the trail history, gradually fading out.
-		tvts.emplace_back(m_body->GetInterpPositionRelTo(nrf) - Pi::player->GetInterpPositionRelTo(nrf));
-		colors.emplace_back(m_color);
-		float alpha = 1.f;
-		const float decrement = 1.f / m_trailPoints.size();
+		float alpha = 0.65f;
 		const Color tcolor = m_color;
+		tvts.emplace_back(m_body->GetInterpPositionRelTo(nrf) - Pi::player->GetInterpPositionRelTo(nrf));
+		colors.emplace_back(tcolor.r, tcolor.g, tcolor.b, Uint8(alpha * 255));
+		const float decrement = alpha / m_trailPoints.size();
 		for (size_t i = m_trailPoints.size() - 1; i > 0; i--) {
 			tvts.emplace_back(vector3f(m_trailPoints[i]));
-			alpha -= decrement;
-			colors.emplace_back(tcolor);
-			colors.back().a = Uint8(alpha * 255);
+			alpha = std::max(0.f, alpha - decrement);
+			colors.emplace_back(tcolor.r, tcolor.g, tcolor.b, Uint8(alpha * 255));
 		}
 
 		r->SetTransform(matrix4x4f(m_transform));

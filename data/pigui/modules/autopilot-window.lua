@@ -97,15 +97,38 @@ local function button_supercruise()
 end
 
 local function button_undock()
+	local okIns, Insurance = pcall(require, 'modules.Insurance.Insurance')
+	local hasClaim = okIns and Insurance and Insurance.HasClaim and Insurance.HasClaim()
+
 	if player:IsLanded() then
-		if ui.mainMenuButton(icons.autopilot_blastoff, "Launch from Surface [F5] (or hold Thrust Up)") or (ui.noModifierHeld() and ui.isKeyReleased(ui.keys.f5)) then
+		if hasClaim then
+			local clicked = ui.mainMenuButton(icons.autopilot_blastoff, "Launch locked: settle open insurance claim at Insurance & SAR office", ui.theme.buttonColors.disabled)
+			if clicked or (ui.noModifierHeld() and ui.isKeyReleased(ui.keys.f5)) then
+				Comms.ImportantMessage("Launch denied: settle your open insurance claim at the Insurance & SAR office first.", "Flight Control")
+				Game.SetView("StationView")
+				local okSv, StationView = pcall(require, 'pigui.views.station-view')
+				if okSv and StationView and StationView.SwitchTo then
+					StationView:SwitchTo("insurance")
+				end
+			end
+		elseif ui.mainMenuButton(icons.autopilot_blastoff, "Launch from Surface [F5] (or hold Thrust Up)") or (ui.noModifierHeld() and ui.isKeyReleased(ui.keys.f5)) then
 			Game.SetTimeAcceleration("1x")
 			AutoSave.Save()
 			player:BlastOff()
 		end
 		return true
 	elseif player:IsDocked() then
-		if ui.mainMenuButton(icons.autopilot_undock, lui.HUD_BUTTON_UNDOCK) or (ui.noModifierHeld() and ui.isKeyReleased(ui.keys.f5)) then
+		if hasClaim then
+			local clicked = ui.mainMenuButton(icons.autopilot_undock, "Undock locked: settle open insurance claim at Insurance & SAR office", ui.theme.buttonColors.disabled)
+			if clicked or (ui.noModifierHeld() and ui.isKeyReleased(ui.keys.f5)) then
+				Comms.ImportantMessage("Undock denied: settle your open insurance claim at the Insurance & SAR office first.", "Flight Control")
+				Game.SetView("StationView")
+				local okSv, StationView = pcall(require, 'pigui.views.station-view')
+				if okSv and StationView and StationView.SwitchTo then
+					StationView:SwitchTo("insurance")
+				end
+			end
+		elseif ui.mainMenuButton(icons.autopilot_undock, lui.HUD_BUTTON_UNDOCK) or (ui.noModifierHeld() and ui.isKeyReleased(ui.keys.f5)) then
 			Game.SetTimeAcceleration("1x")
 			AutoSave.Save()
 			player:Undock()

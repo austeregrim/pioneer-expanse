@@ -381,7 +381,9 @@ local onGameStart = function ()
 		local policeId = Game.system.faction and Game.system.faction.policeShip
 		local allShips = Space.GetBodies("Ship")
 		local playerInSC = Game.player:GetFlightState() == "SUPERCRUISE"
-		if playerInSC then
+		local playerSCSpeed = (playerInSC and Game.player.GetSupercruiseSpeed) and Game.player:GetSupercruiseSpeed() or 0
+		local playerIsFTL = playerInSC and (playerSCSpeed >= LIGHT_SPEED)
+		if playerIsFTL then
 			if not playerSCStartTime then
 				playerSCStartTime = Game.time
 				nextPlayerSCCheckTime = Game.time + 40.0
@@ -393,30 +395,43 @@ local onGameStart = function ()
 		local playerBusy = playerInSC and Game.player.IsBeingInterdicted and Game.player:IsBeingInterdicted()
 
 		-- Check if a pirate is already actively hunting/interdicting the player,
-		-- and clean up any pirate whose interdiction attempt already ended
+		-- and clean up any pirate whose target dropped out of Supercruise or whose interdiction attempt ended
 		local playerHunterActive = false
 		for p, s in pairs(pirates) do
 			if p:exists() and (s.status == 'INTERDICT_PLAYER' or s.status == 'ATTACK') then
-				if s.status == 'INTERDICT_PLAYER' and playerInSC and p:GetFlightState() ~= "SUPERCRUISE" then
-					-- Pirate dropped out of Supercruise (e.g. player evaded interdiction)
+				local tetheredToPlayer = p.GetInterdictionPeer and (p:GetInterdictionPeer() == Game.player)
+				if s.status == 'INTERDICT_PLAYER' and not tetheredToPlayer and (not playerInSC or p:GetFlightState() ~= "SUPERCRUISE") then
+					-- Pirate dropped out of Supercruise or untethered player left Supercruise
+					if playerInSC and p:GetFlightState() ~= "SUPERCRUISE" then
+						nextPlayerInterdictTime = math.max(nextPlayerInterdictTime, Game.time + 180.0)
+					end
 					s.status = 'ORBIT'
 					s.target = nil
 					s.warned = false
-					nextPlayerInterdictTime = math.max(nextPlayerInterdictTime, Game.time + 180.0)
 					s.planet = assignSupercruisePatrol(p, s.planet)
-				elseif s.target == Game.player or (p.GetInterdictionPeer and p:GetInterdictionPeer() == Game.player) then
+				elseif s.status == 'ATTACK' and s.target and s.target ~= Game.player and p:GetFlightState() == "SUPERCRUISE" then
+					local victimValid = s.target:exists()
+					local victimTethered = victimValid and p.GetInterdictionPeer and (p:GetInterdictionPeer() == s.target)
+					local victimInSC = victimValid and (s.target:GetFlightState() == "SUPERCRUISE")
+					if not victimValid or (not victimTethered and not victimInSC) then
+						s.status = 'ORBIT'
+						s.target = nil
+						s.warned = false
+						s.planet = assignSupercruisePatrol(p, s.planet)
+					end
+				elseif s.target == Game.player or tetheredToPlayer then
 					playerHunterActive = true
 				end
 			end
 		end
 
-		-- Require at least 40s in Supercruise, evaluate at most once per 75s, and respect 180s post-interdiction cooldown
+		-- Require at least 40s at >= 1c in Supercruise, evaluate at most once per 75s, and respect 180s post-interdiction cooldown
 		local scGraceElapsed = playerSCStartTime and (Game.time - playerSCStartTime >= 40.0)
 		local scCheckDue = Game.time >= nextPlayerSCCheckTime
 		local cooldownElapsed = Game.time >= nextPlayerInterdictTime
 
-		-- Actively pursue and interdict the player when flying in Supercruise
-		if playerInSC and scGraceElapsed and scCheckDue and cooldownElapsed and not playerBusy and not playerHunterActive then
+		-- Actively pursue and interdict the player when flying at >= 1c in Supercruise
+		if playerIsFTL and scGraceElapsed and scCheckDue and cooldownElapsed and not playerBusy and not playerHunterActive then
 			nextPlayerSCCheckTime = Game.time + 75.0
 			local wantPlayerAmbush = shouldInterdictPlayerInSC(Game.player)
 			if wantPlayerAmbush then
@@ -441,17 +456,18 @@ local onGameStart = function ()
 			end
 		end
 
-		-- Stalk and interdict passing Supercruise trade traffic for remaining idle pirates
+		-- Stalk and interdict passing FTL (>= 1c) Supercruise trade traffic for remaining idle pirates
 		for p, s in pairs(pirates) do
 			if p:exists() and s.status ~= 'ATTACK' and s.status ~= 'INTERDICT_PLAYER' then
-				if not playerInSC and s.status == 'LURK' and p:DistanceTo(Game.player) < 2.5e10 and p:GetFlightState() == Game.player:GetFlightState() then
+				if not playerInSC and s.status == 'LURK' and p:DistanceTo(Game.player) < 100000 and p:GetFlightState() == Game.player:GetFlightState() then
 					p:AIKill(Game.player)
 					s.status = 'ATTACK'
 					s.target = Game.player
 				elseif p:GetFlightState() == "SUPERCRUISE" then
 					for _, victim in ipairs(allShips) do
 						if victim ~= p and victim ~= Game.player and not pirates[victim] and victim.shipId ~= policeId then
-							if victim:GetFlightState() == "SUPERCRUISE" and not (victim.IsWanted and victim:IsWanted()) then
+							local victimSpeed = (victim.GetSupercruiseSpeed and victim:GetSupercruiseSpeed()) or 0
+							if victim:GetFlightState() == "SUPERCRUISE" and victimSpeed >= LIGHT_SPEED and not (victim.IsWanted and victim:IsWanted()) then
 								if p:DistanceTo(victim) < 1.8e10 then
 									p:AIKill(victim)
 									s.status = 'ATTACK'

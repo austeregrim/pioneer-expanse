@@ -31,6 +31,7 @@ local PlayerState     = require 'PlayerState'
 local Passengers      = require 'Passengers'
 local FactionStanding = require 'FactionStanding'
 local Ship            = require 'Ship'
+local Insurance       = require 'modules.Insurance.Insurance'
 local SystemPath      = package.core['SystemPath']
 
 local CAPTAIN_SIGNING_BONUS = 1500
@@ -470,6 +471,7 @@ local function packEquipFromShip(ship)
 			slotId = (type(key) == "string") and key or nil,
 			id = eq.id,
 			count = eq.count,
+			subsidized = (rawget(eq, "price") == 0) or (eq.insuranceSubsidized == true) or nil,
 		})
 	end
 	-- Parent slots first (shortest slotId), loose items last
@@ -509,6 +511,10 @@ local function applyEquipListToShip(ship, equipList)
 			end
 			if item.count and inst.SetCount then
 				inst:SetCount(item.count)
+			end
+			if item.subsidized then
+				inst.price = 0
+				inst.insuranceSubsidized = true
 			end
 
 			if item.slotId then
@@ -645,6 +651,7 @@ local function createFleetEntryFromShip(ship, stationPath, customName)
 		shipId = ship.shipId,
 		skin = ship:GetSkin(),
 		pattern = ship.model and ship.model.pattern or 0,
+		isCharterStarter = (ship == Game.player) and Insurance.IsPlayerShipSubsidized() or false,
 		hullPercent = math.clamp(ship.hullPercent or 100, 1, 100),
 		shieldPercent = 100,
 		fuel = math.clamp(ship.fuel or 100, 0, 100),
@@ -704,11 +711,14 @@ function PlayerFleet.ComputeShipValue(entry)
 	local def = ShipDef[entry.shipId]
 	if not def then return 0 end
 
-	local value = def.basePrice * SHIP_SELL_RATIO * ((entry.hullPercent or 100) / 100)
+	local hullBase = entry.isCharterStarter and 0 or def.basePrice
+	local value = hullBase * SHIP_SELL_RATIO * ((entry.hullPercent or 100) / 100)
 	for _, eq in ipairs(entry.equip or {}) do
-		local proto = Equipment.Get(eq.id)
-		if proto and proto.price then
-			value = value + (proto.price * (eq.count or 1) * EQUIP_SELL_RATIO)
+		if not eq.subsidized then
+			local proto = Equipment.Get(eq.id)
+			if proto and proto.price then
+				value = value + (proto.price * (eq.count or 1) * EQUIP_SELL_RATIO)
+			end
 		end
 	end
 	for name, count in pairs(entry.cargo or {}) do
@@ -804,6 +814,9 @@ end
 
 -- Buy a ship and store Game.player's current ship in the station's hangar (no trade-in)
 function PlayerFleet.StorePlayerShipAndBuy(sos, advertData)
+	if Insurance.HasClaim() then
+		return false, "Settle your open insurance claim at the Insurance & SAR office before storing or purchasing ships."
+	end
 	local player = Game.player
 	local station = player:GetDockedWith()
 	if not station then
@@ -847,6 +860,7 @@ function PlayerFleet.StorePlayerShipAndBuy(sos, advertData)
 	PlayerState.AddMoney(-cost)
 	station:RemoveShipOnSale(sos)
 	setupPlayerShipFromAdvert(player, sos, advertData)
+	Insurance.SetPlayerShipSubsidized(false)
 
 	fleetState.ships = fleetState.ships or {}
 	table.insert(fleetState.ships, storedEntry)
@@ -958,6 +972,9 @@ end
 -- ============================================================================
 
 function PlayerFleet.SwapWithFlagship(uid)
+	if Insurance.HasClaim() then
+		return false, "Settle your open insurance claim at the Insurance & SAR office before swapping ships."
+	end
 	local player = Game.player
 	local station = player:GetDockedWith()
 	if not station then
@@ -1039,6 +1056,7 @@ function PlayerFleet.SwapWithFlagship(uid)
 	applyCargoToShip(player, entry.cargo)
 	player:SetHullPercent(math.clamp(entry.hullPercent or 100, 1, 100))
 	player:SetFuelPercent(math.clamp(entry.fuel or 100, 0, 100))
+	Insurance.SetPlayerShipSubsidized(entry.isCharterStarter == true)
 
 	-- Reuse old physical ship body in the bay for the newly parked old flagship
 	if oldLive and oldLive:exists() then
@@ -2959,7 +2977,15 @@ local function tickPatrol(entry)
 				local near = Space.GetBodiesNear(live, 40000, "Ship")
 				for _, other in ipairs(near or {}) do
 					if other ~= Game.player and other ~= live and other:exists() then
-						local isWanted = other.IsWanted and other:IsWanted()
+						local otherFs = other:GetFlightState()
+						local visibleToPatrol = false
+						if fs == "SUPERCRUISE" then
+							local otherSpeed = (other.GetSupercruiseSpeed and other:GetSupercruiseSpeed()) or 0
+							visibleToPatrol = (otherFs == "SUPERCRUISE") and (otherSpeed >= 299792458.0)
+						else
+							visibleToPatrol = (otherFs == "FLYING")
+						end
+						local isWanted = visibleToPatrol and other.IsWanted and other:IsWanted()
 						if isWanted then
 							live:AIKill(other)
 							entry.orderPhase = "[COMBAT] Intercepting pirate " .. (other.label or "hostile")
@@ -3301,7 +3327,7 @@ Event.Register("onShipDestroyed", function(ship, attacker)
 		if entry.liveShip == ship then
 			entry.liveShip = nil
 			entry.transit = nil
-			local salvagePayout = math.floor((ShipDef[entry.shipId] and ShipDef[entry.shipId].basePrice or 10000) * 0.5)
+			local salvagePayout = entry.isCharterStarter and 0 or math.floor((ShipDef[entry.shipId] and ShipDef[entry.shipId].basePrice or 10000) * 0.5)
 			PlayerState.AddMoney(salvagePayout)
 			local killerName = (attacker and attacker.shipName ~= "" and attacker.shipName) or (attacker and attacker.label) or "hostile fire"
 			addLog(entry.shipName, string.format("DESTROYED in action vs %s. Insurance payout +%s.", killerName, Format.Money(salvagePayout, false)), salvagePayout)

@@ -111,7 +111,14 @@ if not stationView then
 	end
 
 	Event.Register("onPlayerRescued", function()
-		stationView.currentTab = stationView.tabs["lobby"] or 1
+		local okIns, Insurance = pcall(require, 'modules.Insurance.Insurance')
+		if okIns and Insurance and Insurance.IsArrestClaim and Insurance.IsArrestClaim() then
+			stationView.currentTab = stationView.tabs["lobby"] or 1
+		elseif okIns and Insurance and Insurance.HasClaim and Insurance.HasClaim() then
+			stationView.currentTab = stationView.tabs["insurance"] or stationView.tabs["lobby"] or 1
+		else
+			stationView.currentTab = stationView.tabs["lobby"] or 1
+		end
 	end)
 
 	ui.registerHandler("StationView", function(delta_t, refresh)

@@ -15,6 +15,7 @@ local HullConfig = require 'HullConfig'
 local PlayerState= require 'PlayerState'
 local Passengers = require 'Passengers'
 local PlayerFleet = require 'modules.PlayerFleet.PlayerFleet'
+local Insurance = require 'modules.Insurance.Insurance'
 
 local ui = require 'pigui'
 
@@ -152,25 +153,33 @@ end
 ---@param ship Ship
 local tradeInValue = function(ship)
 	local shipDef = ShipDef[ship.shipId]
-	local value = shipDef.basePrice * shipSellPriceReduction * ship.hullPercent/100
+	local hullBase = Insurance.IsPlayerShipSubsidized() and 0 or shipDef.basePrice
+	local value = hullBase * shipSellPriceReduction * ship.hullPercent/100
 
 	-- We don't need to remove the hyperdrive from the value of the ship since the player is charged for it when buying the ship
 	local equipment = ship:GetComponent("EquipSet"):GetInstalledEquipment()
 	for _, e in pairs(equipment) do
-		value = value + e.price * equipSellPriceReduction
+		value = value + (e.price or 0) * equipSellPriceReduction
 	end
 
 	return math.ceil(value)
 end
 
 local function buyShip (mkt, sos)
+	if Insurance.HasClaim() then
+		mkt.popup.msg = "Please settle your open insurance claim at the Insurance & SAR office before purchasing or trading in a ship."
+		mkt.popup:open()
+		return
+	end
+
 	local player = Game.player
 	local station = assert(player:GetDockedWith())
 	local def = sos.def
 
 	local shipData = advertDataCache[sos]
+	local tradeIn = tradeInValue(Game.player)
 
-	local cost = shipData.price - tradeInValue(Game.player)
+	local cost = shipData.price - tradeIn
 	if math.floor(cost) ~= cost then
 		error("Ship price non-integer value.")
 	end
@@ -204,7 +213,7 @@ local function buyShip (mkt, sos)
 			details = {
 				{ "Vessel Model", def.name },
 				{ "Vessel Registration", sos.label or "Unnamed" },
-				{ "Trade-in Deducted", Format.Money(tradeInValue or 0) },
+				{ "Trade-in Deducted", Format.Money(tradeIn or 0) },
 				{ "Net Cost Paid", Format.Money(cost) },
 			},
 			note = string.format("Acquired %s (%s) from shipyard.", def.name, sos.label or "Unnamed")
@@ -219,6 +228,7 @@ local function buyShip (mkt, sos)
 	})
 
 	player:SetShipType(def.id)
+	Insurance.SetPlayerShipSubsidized(false)
 	player:SetSkin(sos.skin)
 	if sos.pattern then player.model:SetPattern(sos.pattern) end
 	player:SetLabel(sos.label)
@@ -482,6 +492,11 @@ local tradeMenu = function()
 					ui.sameLine()
 					ui.text(l.AFTER_TRADE_IN..": "..Format.Money(cost - tradeInValue(Game.player), false))
 				end)
+				if Insurance.IsPlayerShipSubsidized() then
+					ui.withFont(pionillium.body, function()
+						ui.textColored(ui.theme.colors.fontDim, "(Charter-Subsidized Starter: 0 Cr hull trade-in)")
+					end)
+				end
 
 				ui.nextColumn()
 				ui.dummy(widgetSizes.iconSpacer)
