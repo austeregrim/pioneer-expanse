@@ -176,6 +176,7 @@ void SectorView::InitDefaults()
 {
 	InputBindings.RegisterBindings();
 	m_drawRouteLines = true; // where should this go?!
+	m_setupLines = true;
 	m_route = std::vector<SystemPath>();
 }
 
@@ -692,23 +693,44 @@ void SectorView::GetPlayerPosAndStarSize(vector3f &playerPosOut, float &currentS
 	}
 }
 
+SystemPath SectorView::GetDefaultFocusPath() const
+{
+	// Prefer a distinct selected system first; if none is selected beyond the current system,
+	// fall back to the active route destination, hyperspace target, or current system.
+	if (m_selected.HasValidSystem() && (!m_current.HasValidSystem() || !m_selected.IsSameSystem(m_current))) {
+		return m_selected;
+	}
+	if (!m_route.empty() && m_route.back().HasValidSystem()) {
+		return m_route.back();
+	}
+	if (m_hyperspaceTarget.HasValidSystem() && (!m_current.HasValidSystem() || !m_hyperspaceTarget.IsSameSystem(m_current))) {
+		return m_hyperspaceTarget;
+	}
+	if (m_selected.HasValidSystem()) {
+		return m_selected;
+	}
+	if (m_current.HasValidSystem()) {
+		return m_current;
+	}
+	return SystemPath();
+}
+
 void SectorView::OnSwitchTo()
 {
 	InputBindings.manager->AddInputFrame(&InputBindings);
 	InputBindings.manager->AddInputFrame(&m_map->InputBindings);
 	Update();
 
-	if (!m_route.empty()) {
-		SwitchToPath(m_route.back());
-	} else if (m_hyperspaceTarget.IsSystemPath() && !m_hyperspaceTarget.IsSameSystem(m_current)) {
-		SwitchToPath(m_hyperspaceTarget);
-	} else if (m_current.IsSystemPath()) {
-		SwitchToPath(m_current);
+	const SystemPath focusPath = GetDefaultFocusPath();
+	if (focusPath.HasValidSystem()) {
+		SetSelectedPath(focusPath);
+		m_map->GotoSystem(focusPath);
 	}
 }
 
 void SectorView::OnSwitchFrom()
 {
+	m_map->ReleaseMouseCapture();
 	InputBindings.manager->RemoveInputFrame(&InputBindings);
 	InputBindings.manager->RemoveInputFrame(&m_map->InputBindings);
 }
@@ -741,12 +763,10 @@ void SectorView::Update()
 
 void SectorView::ResetView()
 {
-	if (!m_route.empty()) {
-		SwitchToPath(m_route.back());
-	} else if (m_hyperspaceTarget.IsSystemPath() && !m_hyperspaceTarget.IsSameSystem(m_current)) {
-		SwitchToPath(m_hyperspaceTarget);
-	} else {
-		SwitchToPath(m_current);
+	const SystemPath focusPath = GetDefaultFocusPath();
+	if (focusPath.HasValidSystem()) {
+		SetSelectedPath(focusPath);
+		m_map->GotoSystem(focusPath);
 	}
 	m_map->ResetView();
 }

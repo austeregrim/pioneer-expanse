@@ -106,6 +106,7 @@ public:
 	void ZoomIn();
 	void ZoomOut();
 	void ResetView();
+	void ReleaseMouseCapture();
 
 	void CreateRenderTarget();
 	void SetSize(vector2d size);
@@ -181,6 +182,7 @@ private:
 	float m_zoomMovingTo;
 
 	bool m_rotateWithMouseButton = false;
+	bool m_panWithMouseButton = false;
 	bool m_rotateView = false;
 	bool m_zoomView = false;
 	bool m_manualMove = false;

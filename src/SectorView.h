@@ -82,6 +82,7 @@ private:
 	void InitDefaults();
 	void InitObject();
 	const SystemPath &CheckPathInRoute(const SystemPath &path);
+	SystemPath GetDefaultFocusPath() const;
 	void SetupLines(const vector3f &playerAbsPos, const matrix4x4f &trans);
 	void GetPlayerPosAndStarSize(vector3f &playerPosOut, float &currentStarSizeOut);
 

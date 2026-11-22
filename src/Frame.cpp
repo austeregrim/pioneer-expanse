@@ -13,6 +13,9 @@
 #include "galaxy/SystemBody.h"
 #include "utils.h"
 
+#include <algorithm>
+#include <vector>
+
 std::vector<Frame> Frame::s_frames;
 std::vector<CollisionSpace *> Frame::s_collisionSpaces;
 
@@ -177,61 +180,96 @@ FrameId Frame::CreateFrame(FrameId parent, const char *label, unsigned int flags
 	return (s_frames.size() - 1);
 }
 
-FrameId Frame::FromJson(const Json &frameObj, Space *space, FrameId parent, double at_time)
+static void FindMaxFrameId(const Json &frameObj, size_t &maxId)
 {
-	Dummy dummy;
-	dummy.madeWithFactory = true;
-
-	// Set parent to nullptr here in order to avoid this frame
-	// being a child twice (due to ctor calling AddChild)
-	s_frames.emplace_back(dummy, FrameId(), nullptr);
-
-	Frame *f = &s_frames.back();
-
-	f->m_parent = parent;
-	f->d.madeWithFactory = false;
-
-	try {
-		f->m_thisId = frameObj["frameId"];
-
-		// Check if frames order in load and save are the same
-		assert(s_frames.size() == 0 || (s_frames.size() - 1) == f->m_thisId.id());
-
-		f->m_flags = frameObj["flags"];
-		f->m_radius = frameObj["radius"];
-		f->m_label = frameObj["label"].get<std::string>();
-
-		f->m_pos = frameObj["pos"];
-		f->m_angSpeed = frameObj["ang_speed"];
-		f->SetInitialOrient(frameObj["init_orient"], at_time);
-		f->m_sbody = space->GetSystemBodyByIndex(frameObj["index_for_system_body"], f->m_label);
-		f->m_astroBodyIndex = frameObj["index_for_astro_body"];
-		f->m_vel = vector3d(0.0); // m_vel is set to zero.
-
-		if (frameObj.count("child_frames") && frameObj["child_frames"].is_array()) {
-			Json childFrameArray = frameObj["child_frames"];
-			f->m_children.reserve(childFrameArray.size());
-			for (unsigned int i = 0; i < childFrameArray.size(); ++i) {
-				// During 'FromJson' a reallocation may happens, invalidating 'f',
-				// thus store his FrameId and renew it
-				FrameId temp = f->m_thisId;
-				FrameId kidId = FromJson(childFrameArray[i], space, f->m_thisId, at_time);
-				f = &s_frames[temp];
-				f->m_children.push_back(kidId);
-			}
-		} else {
-			f->m_children.clear();
-		}
-	} catch (Json::type_error &) {
-		Output("Loading error in '%s'\n", typeid(f).name());
-		f->d.madeWithFactory = true;
+	if (!frameObj.is_object() || !frameObj.count("frameId"))
 		throw SavedGameCorruptException();
+
+	const FrameId fId = frameObj["frameId"];
+	if (!fId.valid())
+		throw SavedGameCorruptException();
+
+	maxId = std::max(maxId, fId.id());
+
+	if (frameObj.count("child_frames") && frameObj["child_frames"].is_array()) {
+		const Json &childFrameArray = frameObj["child_frames"];
+		for (size_t i = 0; i < childFrameArray.size(); ++i)
+			FindMaxFrameId(childFrameArray[i], maxId);
+	}
+}
+
+FrameId Frame::FromJsonRecursive(const Json &frameObj, Space *space, FrameId parent, double at_time, std::vector<bool> &populated)
+{
+	const FrameId fId = frameObj["frameId"];
+	if (!fId.valid() || fId.id() >= s_frames.size() || populated[fId.id()])
+		throw SavedGameCorruptException();
+
+	populated[fId.id()] = true;
+
+	Frame *f = &s_frames[fId];
+	f->m_thisId = fId;
+	f->m_parent = parent;
+	f->m_flags = frameObj["flags"];
+	f->m_radius = frameObj["radius"];
+	f->m_label = frameObj["label"].get<std::string>();
+
+	f->m_pos = frameObj["pos"];
+	f->m_angSpeed = frameObj["ang_speed"];
+	f->SetInitialOrient(frameObj["init_orient"], at_time);
+	f->m_sbody = space->GetSystemBodyByIndex(frameObj["index_for_system_body"], f->m_label);
+	f->m_astroBodyIndex = frameObj["index_for_astro_body"];
+	f->m_vel = vector3d(0.0); // m_vel is set to zero.
+
+	f->m_children.clear();
+	if (frameObj.count("child_frames") && frameObj["child_frames"].is_array()) {
+		const Json &childFrameArray = frameObj["child_frames"];
+		f->m_children.reserve(childFrameArray.size());
+		for (unsigned int i = 0; i < childFrameArray.size(); ++i) {
+			const FrameId kidId = FromJsonRecursive(childFrameArray[i], space, fId, at_time, populated);
+			f = &s_frames[fId];
+			f->m_children.push_back(kidId);
+		}
 	}
 
-	SfxManager::FromJson(frameObj, f->m_thisId);
+	SfxManager::FromJson(frameObj, fId);
 
 	f->ClearMovement();
-	return f->GetId();
+	return fId;
+}
+
+FrameId Frame::FromJson(const Json &frameObj, Space *space, FrameId parent, double at_time)
+{
+	if (!s_frames.empty())
+		DeleteFrames();
+
+	try {
+		size_t maxId = 0;
+		FindMaxFrameId(frameObj, maxId);
+		if (maxId >= 100000)
+			throw SavedGameCorruptException();
+
+		// Pre-allocate slots indexed by saved frameId so non-DFS frameIds (e.g. from legacy save synthesis)
+		// land at their exact FrameId indices without vector reallocation or out-of-bounds access.
+		const size_t frameCount = maxId + 1;
+		Dummy dummy;
+		dummy.madeWithFactory = true;
+		s_frames.reserve(frameCount);
+		s_collisionSpaces.reserve(frameCount);
+		for (size_t i = 0; i < frameCount; ++i) {
+			s_frames.emplace_back(dummy, FrameId(), nullptr);
+			s_frames.back().d.madeWithFactory = false;
+		}
+
+		std::vector<bool> populated(frameCount, false);
+		return FromJsonRecursive(frameObj, space, parent, at_time, populated);
+	} catch (Json::type_error &) {
+		Output("Loading error in '%s'\n", typeid(Frame).name());
+		DeleteFrames();
+		throw SavedGameCorruptException();
+	} catch (SavedGameCorruptException &) {
+		DeleteFrames();
+		throw;
+	}
 }
 
 void Frame::DeleteFrames()
@@ -254,7 +292,7 @@ Frame *Frame::GetFrame(FrameId fId)
 		Error("In '%s': fId is valid but out of range (%zu)...\n", __func__, fId.id());
 #endif
 
-	return fId.valid() ? &s_frames[fId] : nullptr;
+	return (fId.valid() && fId.id() < s_frames.size()) ? &s_frames[fId] : nullptr;
 }
 
 FrameId Frame::CreateCameraFrame(FrameId parent)

@@ -654,7 +654,21 @@ void SectorMap::InitObject()
 	m_drawList.reset(new ImDrawList(ImGui::GetDrawListSharedData()));
 }
 
-SectorMap::~SectorMap() {}
+SectorMap::~SectorMap()
+{
+	ReleaseMouseCapture();
+}
+
+void SectorMap::ReleaseMouseCapture()
+{
+	const bool wasCapturing = m_rotateWithMouseButton || m_panWithMouseButton || m_rotateView || m_zoomView;
+	m_rotateWithMouseButton = false;
+	m_panWithMouseButton = false;
+	m_rotateView = false;
+	m_zoomView = false;
+	if (wasCapturing && m_context.input)
+		m_context.input->SetCapturingMouse(false);
+}
 
 void SectorMap::SaveToJson(Json &jsonObj)
 {
@@ -864,7 +878,7 @@ void SectorMap::DrawLabelsInternal(bool interactive, const ImVec2 &imagePos)
 		mpos.y -= imagePos.y;
 		for (int i = m_labels.array.size() - 1; i >= 0; --i) {
 			Label &label = *m_labels.array[i];
-			if (hovered_i == NOT_FOUND && !m_rotateWithMouseButton && label.Hovered(mpos)) {
+			if (hovered_i == NOT_FOUND && !m_rotateWithMouseButton && !m_panWithMouseButton && label.Hovered(mpos)) {
 				hovered_i = i;
 				if (m_context.input->IsMouseButtonReleased(SDL_BUTTON_LEFT)) {
 					label.OnClick();
@@ -872,7 +886,7 @@ void SectorMap::DrawLabelsInternal(bool interactive, const ImVec2 &imagePos)
 				break;
 			}
 		}
-		if (hovered_i == NOT_FOUND && !m_rotateWithMouseButton && m_voronoiAlpha > 0.1f && m_context.input->IsMouseButtonReleased(SDL_BUTTON_LEFT)) {
+		if (hovered_i == NOT_FOUND && !m_rotateWithMouseButton && !m_panWithMouseButton && m_voronoiAlpha > 0.1f && m_context.input->IsMouseButtonReleased(SDL_BUTTON_LEFT)) {
 			HandleMacroClick(mpos);
 		}
 	}
@@ -915,11 +929,13 @@ void SectorMap::DrawLabelsInternal(bool interactive, const ImVec2 &imagePos)
 
 void SectorMap::GotoSector(const SystemPath &path)
 {
+	m_manualMove = false;
 	m_posMovingTo = vector3f(path.sectorX, path.sectorY, path.sectorZ);
 }
 
 void SectorMap::GotoSystem(const SystemPath &path)
 {
+	m_manualMove = false;
 	RefCountedPtr<Sector> ps = GetCached(path);
 	const vector3f &p = ps->m_systems[path.systemIndex].GetPosition();
 	m_posMovingTo.x = path.sectorX + p.x / Sector::SIZE;
@@ -1109,7 +1125,7 @@ void SectorMap::DrawNearSector(const int sx, const int sy, const int sz, const m
 				fabs(m_posMovingTo.z - m_pos.z));
 
 			// Ideally, since this takes so f'ing long, it wants to be done as a threaded job but haven't written that yet.
-			if ((diff.x < 0.001f && diff.y < 0.001f && diff.z < 0.001f)) {
+			if (!m_panWithMouseButton && (diff.x < 0.001f && diff.y < 0.001f && diff.z < 0.001f)) {
 				SystemPath current = SystemPath(sx, sy, sz, sysIdx);
 				RefCountedPtr<StarSystem> pSS = m_context.galaxy->GetStarSystem(current);
 				i->SetPopulation(pSS->GetTotalPop());
@@ -1407,10 +1423,23 @@ void SectorMap::Update(float frameTime)
 	if (InputBindings.mapViewYaw->IsActive()) m_rotZMovingTo += 0.5f * moveSpeed * InputBindings.mapViewYaw->GetValue();
 	if (InputBindings.mapViewPitch->IsActive()) m_rotXMovingTo += 0.5f * moveSpeed * InputBindings.mapViewPitch->GetValue();
 
-	// to capture mouse when button was pressed and release when released
-	if (input->MouseButtonState(SDL_BUTTON_MIDDLE) != m_rotateWithMouseButton) {
-		m_rotateWithMouseButton = !m_rotateWithMouseButton;
-		input->SetCapturingMouse(m_rotateWithMouseButton);
+	// Capture mouse while middle-dragging (rotate) or right-dragging (view-plane pan)
+	const bool mmbDown = input->MouseButtonState(SDL_BUTTON_MIDDLE);
+	const bool rmbDown = input->MouseButtonState(SDL_BUTTON_RIGHT);
+	const bool captureChanged = (mmbDown != m_rotateWithMouseButton) || (rmbDown != m_panWithMouseButton);
+	if (mmbDown != m_rotateWithMouseButton) {
+		m_rotateWithMouseButton = mmbDown;
+	}
+	if (rmbDown != m_panWithMouseButton) {
+		m_panWithMouseButton = rmbDown;
+		if (m_panWithMouseButton) {
+			// Cancel any ongoing fly-to lerp so dragging starts cleanly from the current focal point
+			m_posMovingTo = m_pos;
+			m_manualMove = false;
+		}
+	}
+	if (captureChanged) {
+		input->SetCapturingMouse(m_rotateWithMouseButton || m_panWithMouseButton || m_rotateView || m_zoomView);
 	}
 
 	if (m_rotateWithMouseButton || m_rotateView) {
@@ -1423,6 +1452,29 @@ void SectorMap::Update(float frameTime)
 		int motion[2];
 		input->GetMouseMotion(motion);
 		m_zoomMovingTo += ZOOM_SPEED * 0.002f * zoomScale * motion[1];
+	} else if (m_panWithMouseButton) {
+		int motion[2];
+		input->GetMouseMotion(motion);
+		if (motion[0] != 0 || motion[1] != 0) {
+			// Extract camera view-plane basis in world (galactic XYZ) space.
+			// Top-down view (rotX -> 0): spans XY plane. Side view (rotX = -90): spans horizontal-perp & Z.
+			const matrix3x3f camOrient = PointOfView().GetOrient().Transpose();
+			const vector3f camRight = camOrient * vector3f(1.0f, 0.0f, 0.0f);
+			const vector3f camUp = camOrient * vector3f(0.0f, 1.0f, 0.0f);
+
+			// Scale displacement 1:1 with screen pixels at the observed focal plane (40 deg vertical FOV)
+			const float camDist = 10.0f + 10.0f * m_zoom;
+			const float tanHalfFov = std::tan(DEG2RAD(20.0f));
+			const float viewportH = std::max(1.0f, m_size.y);
+			const float lyPerPixel = (2.0f * camDist * tanHalfFov) / viewportH;
+			const float panSpeedMod = input->KeyState(SDLK_LSHIFT) ? 10.0f : (input->KeyState(SDLK_LCTRL) ? 0.1f : 1.0f);
+			const float sectorsPerPixel = (lyPerPixel / Sector::SIZE) * panSpeedMod;
+
+			// Grab-and-drag sign: dragging right (+dx) moves focus along -camRight; dragging down (+dy) moves focus along +camUp
+			const vector3f deltaSectors = (-camRight * float(motion[0]) + camUp * float(motion[1])) * sectorsPerPixel;
+			m_pos += deltaSectors;
+			m_posMovingTo += deltaSectors;
+		}
 	}
 
 	m_rotXMovingTo = Clamp(m_rotXMovingTo, -170.0f, -10.0f);
@@ -1594,18 +1646,18 @@ void SectorMap::SetFactionVisible(const Faction *faction, bool visible)
 void SectorMap::SetZoomMode(bool enable)
 {
 	if (enable != m_zoomView) {
-		m_context.input->SetCapturingMouse(enable);
 		m_zoomView = enable;
 		if (m_zoomView) m_rotateView = false;
+		m_context.input->SetCapturingMouse(m_rotateWithMouseButton || m_panWithMouseButton || m_rotateView || m_zoomView);
 	}
 }
 
 void SectorMap::SetRotateMode(bool enable)
 {
 	if (enable != m_rotateView) {
-		m_context.input->SetCapturingMouse(enable);
 		m_rotateView = enable;
 		if (m_rotateView) m_zoomView = false;
+		m_context.input->SetCapturingMouse(m_rotateWithMouseButton || m_panWithMouseButton || m_rotateView || m_zoomView);
 	}
 }
 
@@ -1628,16 +1680,19 @@ vector3f SectorMap::GetSystemPosition(const SystemPath &path)
 
 void SectorMap::GotoPositionLy(const vector3f &posLy)
 {
+	m_manualMove = false;
 	m_posMovingTo = posLy * (1.0f / Sector::SIZE);
 }
 
 void SectorMap::GotoSol()
 {
+	m_manualMove = false;
 	m_posMovingTo = vector3f(0.0f, 0.0f, 0.0f);
 }
 
 void SectorMap::GotoGalacticCore()
 {
+	m_manualMove = false;
 	m_posMovingTo = GetGalacticCorePositionLy() * (1.0f / Sector::SIZE);
 }
 

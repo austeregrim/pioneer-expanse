@@ -13,6 +13,7 @@
 #include "vector3.h"
 #include <list>
 #include <string>
+#include <vector>
 
 class Body;
 class CollisionSpace;
@@ -135,6 +136,7 @@ public:
 private:
 	FrameId m_thisId;
 
+	static FrameId FromJsonRecursive(const Json &frameObj, Space *space, FrameId parent, double at_time, std::vector<bool> &populated);
 	void UpdateRootRelativeVars();
 
 	FrameId m_parent;				 // if parent is null then frame position is absolute
