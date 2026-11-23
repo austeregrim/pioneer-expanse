@@ -221,13 +221,12 @@ bulletinBoard = Table.New("BulletinBoardTable", false, {
 
 		local active = adActive(item.__ref, item)
 		local isSelected = (activeAd == item)
-		local isLockedOut = (chatForm ~= nil and not isSelected)
 
 		local adTextColor = colors.font
-		if isLockedOut then
+		if not active then
 			adTextColor = colors.fontDisabled
-		elseif not active then
-			adTextColor = colors.fontDisabled
+		elseif isSelected then
+			adTextColor = colors.uiPrimaryLight
 		end
 
 		ui.withFont(pionillium.heading, function()
@@ -288,8 +287,8 @@ bulletinBoard = Table.New("BulletinBoardTable", false, {
 			ui.nextColumn()
 		end)
 
-		if isLockedOut then
-			return colors.tableHighlightDisabled
+		if isSelected then
+			return colors.tableSelection
 		end
 		return active and colors.tableHighlight or colors.tableHighlightDisabled
 	end,
@@ -312,13 +311,27 @@ bulletinBoard = Table.New("BulletinBoardTable", false, {
 		end
 	end,
 	onClickItem = function(self, item, key)
-		if chatForm then
+		local station = Game.player:GetDockedWith()
+		local ref = item.__ref
+
+		if chatForm and activeRef == ref and activeStation == station then
 			return
 		end
 
-		local station = Game.player:GetDockedWith()
-		local ref = item.__ref
-		local ad = SpaceStation.adverts[station][ref]
+		if chatForm or activeRef or SpaceStation.lockedAdvert ~= nil then
+			local prevRemoveOnReleased = SpaceStation.removeOnReleased
+			closeActiveComms()
+			if SpaceStation.lockedAdvert ~= nil then
+				SpaceStation.lockedAdvert = nil
+				SpaceStation.advertLockCount = 0
+				SpaceStation.removeOnReleased = false
+			end
+			if prevRemoveOnReleased then
+				refresh()
+			end
+		end
+
+		local ad = station and SpaceStation.adverts[station] and SpaceStation.adverts[station][ref]
 
 		-- TODO: if the player is watching the BBS while an ad expires, the ad
 		-- will be grayed-out but not removed until the player clicks on
@@ -347,15 +360,6 @@ bulletinBoard = Table.New("BulletinBoardTable", false, {
 			if chatForm then
 				chatForm.style.contentWidth = nil
 				widgetSizes.chatButtonSize(widgetSizes.chatButtonBase.x, widgetSizes.chatButtonBase.y)
-			end
-		end
-
-		if SpaceStation.lockedAdvert ~= nil then
-			closeActiveComms()
-			if SpaceStation.lockedAdvert ~= nil then
-				SpaceStation.lockedAdvert = nil
-				SpaceStation.advertLockCount = 0
-				SpaceStation.removeOnReleased = false
 			end
 		end
 

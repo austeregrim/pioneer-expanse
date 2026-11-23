@@ -49,7 +49,11 @@ local function formatSupercruiseDist(distM)
 		return string.format("%.2f ly", distM / LIGHT_YEAR)
 	elseif distM >= LIGHT_SPEED * 1.0 then
 		local ls = distM / LIGHT_SPEED
-		if ls >= 1000.0 then
+		if ls >= 100000.0 then
+			return string.format("%.0fk ls", ls / 1000.0)
+		elseif ls >= 10000.0 then
+			return string.format("%.1fk ls", ls / 1000.0)
+		elseif ls >= 100.0 then
 			return string.format("%.0f ls", ls)
 		else
 			return string.format("%.1f ls", ls)
@@ -61,6 +65,23 @@ local function formatSupercruiseDist(distM)
 	else
 		return string.format("%.0f m", distM)
 	end
+end
+
+local function truncateTextToWidth(str, font, maxWidth)
+	if not str or str == "" then return "" end
+	if ui.calcTextSize(str, font).x <= maxWidth then
+		return str
+	end
+	local ellipsis = ".."
+	local len = #str
+	while len > 1 do
+		len = len - 1
+		local candidate = string.sub(str, 1, len) .. ellipsis
+		if ui.calcTextSize(candidate, font).x <= maxWidth then
+			return candidate
+		end
+	end
+	return ellipsis
 end
 
 local function formatETA(etaSec)
@@ -250,9 +271,10 @@ local function drawFuelScoopHUD(player, center, reticuleRadius)
 end
 
 local function drawSupercruiseRightGauge(player, center, reticuleRadius)
-	local panelW = 168
-	local panelH = 176
-	local panelX = center.x + reticuleRadius + 36
+	local s = pionillium.small.size / 13.0
+	local panelW = math.round(176 * s)
+	local panelH = math.round(176 * s)
+	local panelX = center.x + reticuleRadius + math.round(36 * s)
 	local panelY = center.y - panelH * 0.5
 
 	local tl = Vector2(panelX, panelY)
@@ -267,10 +289,10 @@ local function drawSupercruiseRightGauge(player, center, reticuleRadius)
 	local assist = player:IsSupercruiseAssistActive()
 
 	-- Vertical Throttle Bar with 75% Blue Zone ([0.65, 0.80])
-	local barX = panelX + 12
-	local barTop = panelY + 26
-	local barH = 116
-	local barW = 18
+	local barX = panelX + math.round(12 * s)
+	local barTop = panelY + math.round(26 * s)
+	local barH = math.round(116 * s)
+	local barW = math.round(18 * s)
 	local barTL = Vector2(barX, barTop)
 	local barBR = Vector2(barX + barW, barTop + barH)
 
@@ -303,37 +325,37 @@ local function drawSupercruiseRightGauge(player, center, reticuleRadius)
 	ui.addRect(barTL, barBR, colBorder, 2, ui.RoundCornersAll, 1.0)
 
 	-- Readouts on the right of the throttle bar
-	local textX = barX + barW + 12
-	ui.addStyledText(Vector2(panelX + 10, panelY + 6), ui.anchor.left, ui.anchor.top,
+	local textX = barX + barW + math.round(12 * s)
+	ui.addStyledText(Vector2(panelX + math.round(10 * s), panelY + math.round(6 * s)), ui.anchor.left, ui.anchor.top,
 		"FSD SUPERCRUISE", colCyan, pionillium.small)
 
-	ui.addStyledText(Vector2(textX, panelY + 26), ui.anchor.left, ui.anchor.top,
+	ui.addStyledText(Vector2(textX, panelY + math.round(26 * s)), ui.anchor.left, ui.anchor.top,
 		"VELOCITY", colDimText, pionillium.tiny)
-	ui.addStyledText(Vector2(textX, panelY + 40), ui.anchor.left, ui.anchor.top,
+	ui.addStyledText(Vector2(textX, panelY + math.round(40 * s)), ui.anchor.left, ui.anchor.top,
 		formatSupercruiseSpeed(speed), colWhite, pionillium.medlarge)
 
 	local thrLabel = string.format("THR: %.0f%%", throttle * 100.0)
 	if inBlueZone then
 		thrLabel = thrLabel .. " [OPT]"
 	end
-	ui.addStyledText(Vector2(textX, panelY + 70), ui.anchor.left, ui.anchor.top,
+	ui.addStyledText(Vector2(textX, panelY + math.round(70 * s)), ui.anchor.left, ui.anchor.top,
 		thrLabel, inBlueZone and colCyan or colDimText, pionillium.small)
 
 	if assist then
-		ui.addStyledText(Vector2(textX, panelY + 88), ui.anchor.left, ui.anchor.top,
+		ui.addStyledText(Vector2(textX, panelY + math.round(88 * s)), ui.anchor.left, ui.anchor.top,
 			"SC ASSIST ON", colGreen, pionillium.small)
 	else
-		ui.addStyledText(Vector2(textX, panelY + 88), ui.anchor.left, ui.anchor.top,
+		ui.addStyledText(Vector2(textX, panelY + math.round(88 * s)), ui.anchor.left, ui.anchor.top,
 			"MAX: " .. formatSupercruiseSpeed(envMax), colDimText, pionillium.tiny)
 	end
 
 	-- Gravity Well Strain Meter
-	ui.addStyledText(Vector2(textX, panelY + 108), ui.anchor.left, ui.anchor.top,
+	ui.addStyledText(Vector2(textX, panelY + math.round(108 * s)), ui.anchor.left, ui.anchor.top,
 		"GRAV STRAIN", colDimText, pionillium.tiny)
 	local gwX = textX
-	local gwY = panelY + 122
-	local gwW = panelW - (textX - panelX) - 10
-	local gwH = 8
+	local gwY = panelY + math.round(122 * s)
+	local gwW = panelW - (textX - panelX) - math.round(10 * s)
+	local gwH = math.round(8 * s)
 	ui.addRectFilled(Vector2(gwX, gwY), Vector2(gwX + gwW, gwY + gwH), colBarBg, 2, ui.RoundCornersAll)
 	local strainW = math.max(0.0, math.min(1.0, strain)) * gwW
 	local strainCol = (strain > 0.65) and colRed or ((strain > 0.30) and colAmber or colCyan)
@@ -343,8 +365,8 @@ local function drawSupercruiseRightGauge(player, center, reticuleRadius)
 	ui.addRect(Vector2(gwX, gwY), Vector2(gwX + gwW, gwY + gwH), colBorder, 2, ui.RoundCornersAll, 1.0)
 
 	-- Quick Throttle Buttons (75% and 0%)
-	local btn75TL = Vector2(panelX + 10, panelY + panelH - 24)
-	local btn75BR = Vector2(panelX + 54, panelY + panelH - 6)
+	local btn75TL = Vector2(panelX + math.round(10 * s), panelY + panelH - math.round(24 * s))
+	local btn75BR = Vector2(panelX + math.round(54 * s), panelY + panelH - math.round(6 * s))
 	local h75 = ui.isMouseHoveringRect(btn75TL, btn75BR)
 	ui.addRectFilled(btn75TL, btn75BR, h75 and colBlueZone or colBarBg, 2, ui.RoundCornersAll)
 	ui.addRect(btn75TL, btn75BR, colCyan, 2, ui.RoundCornersAll, 1.0)
@@ -354,8 +376,8 @@ local function drawSupercruiseRightGauge(player, center, reticuleRadius)
 		player:SetSupercruiseThrottle(0.75)
 	end
 
-	local btn0TL = Vector2(panelX + 60, panelY + panelH - 24)
-	local btn0BR = Vector2(panelX + 96, panelY + panelH - 6)
+	local btn0TL = Vector2(panelX + math.round(60 * s), panelY + panelH - math.round(24 * s))
+	local btn0BR = Vector2(panelX + math.round(96 * s), panelY + panelH - math.round(6 * s))
 	local h0 = ui.isMouseHoveringRect(btn0TL, btn0BR)
 	ui.addRectFilled(btn0TL, btn0BR, h0 and colBorder or colBarBg, 2, ui.RoundCornersAll)
 	ui.addRect(btn0TL, btn0BR, colDimText, 2, ui.RoundCornersAll, 1.0)
@@ -365,7 +387,7 @@ local function drawSupercruiseRightGauge(player, center, reticuleRadius)
 		player:SetSupercruiseThrottle(0.0)
 	end
 
-	ui.addStyledText(Vector2(panelX + panelW - 10, panelY + panelH - 15), ui.anchor.right, ui.anchor.center,
+	ui.addStyledText(Vector2(panelX + panelW - math.round(10 * s), panelY + panelH - math.round(15 * s)), ui.anchor.right, ui.anchor.center,
 		"[W/S] THR", colDimText, pionillium.tiny)
 end
 
@@ -375,19 +397,10 @@ local function drawSupercruiseTargetPanel(player, center, reticuleRadius)
 		return
 	end
 
+	local s = pionillium.small.size / 13.0
 	local isShipTarget = target:IsShip()
 	local hasInterdictor = player.HasFSDInterdictor and player:HasFSDInterdictor()
 	local showInterdictRow = isShipTarget and hasInterdictor
-
-	local panelW = 196
-	local panelH = showInterdictRow and 202 or 176
-	local panelX = center.x - reticuleRadius - panelW - 36
-	local panelY = center.y - panelH * 0.5
-
-	local tl = Vector2(panelX, panelY)
-	local br = Vector2(panelX + panelW, panelY + panelH)
-	ui.addRectFilled(tl, br, colPanelBg, 5, ui.RoundCornersAll)
-	ui.addRect(tl, br, colBorder, 5, ui.RoundCornersAll, 1.0)
 
 	local dist = player:GetSupercruiseTargetDistance()
 	local eta = player:GetSupercruiseTargetETA()
@@ -396,19 +409,33 @@ local function drawSupercruiseTargetPanel(player, center, reticuleRadius)
 	local slowDown = player:IsSlowDownWarning()
 	local assist = player:IsSupercruiseAssistActive()
 
-	local targetName = target:GetLabel() or "TARGET"
-	if #targetName > 22 then
-		targetName = string.sub(targetName, 1, 20) .. ".."
-	end
+	local distText = "DIST: " .. formatSupercruiseDist(dist)
+	local etaText = "ETA " .. formatETA(eta)
+	local distW = ui.calcTextSize(distText, pionillium.small).x
+	local etaW = ui.calcTextSize(etaText, pionillium.small).x
+	local padX = math.round(10 * s)
 
-	ui.addStyledText(Vector2(panelX + 10, panelY + 6), ui.anchor.left, ui.anchor.top,
+	local panelW = math.max(math.round(210 * s), math.ceil(distW + etaW + padX * 2 + math.round(14 * s)))
+	local panelH = math.round((showInterdictRow and 202 or 176) * s)
+	local panelX = center.x - reticuleRadius - panelW - math.round(36 * s)
+	local panelY = center.y - panelH * 0.5
+
+	local tl = Vector2(panelX, panelY)
+	local br = Vector2(panelX + panelW, panelY + panelH)
+	ui.addRectFilled(tl, br, colPanelBg, 5, ui.RoundCornersAll)
+	ui.addRect(tl, br, colBorder, 5, ui.RoundCornersAll, 1.0)
+
+	local targetName = truncateTextToWidth(target:GetLabel() or "TARGET", pionillium.small, panelW - padX * 2)
+
+	ui.addStyledText(Vector2(panelX + padX, panelY + math.round(6 * s)), ui.anchor.left, ui.anchor.top,
 		"FSD NAV LOCK", colCyan, pionillium.small)
-	ui.addStyledText(Vector2(panelX + 10, panelY + 24), ui.anchor.left, ui.anchor.top,
+	ui.addStyledText(Vector2(panelX + padX, panelY + math.round(24 * s)), ui.anchor.left, ui.anchor.top,
 		targetName, colWhite, pionillium.small)
 
-	-- Distance & ETA row
-	ui.addStyledText(Vector2(panelX + 10, panelY + 44), ui.anchor.left, ui.anchor.top,
-		"DIST: " .. formatSupercruiseDist(dist), colWhite, pionillium.small)
+	-- Distance & ETA row (guaranteed non-overlapping)
+	local rowDistY = panelY + math.round(44 * s)
+	ui.addStyledText(Vector2(panelX + padX, rowDistY), ui.anchor.left, ui.anchor.top,
+		distText, colWhite, pionillium.small)
 
 	local etaColor = colWhite
 	if slowDown then
@@ -416,19 +443,20 @@ local function drawSupercruiseTargetPanel(player, center, reticuleRadius)
 	elseif eta >= 5.5 and eta <= 8.0 then
 		etaColor = colCyan
 	end
-	ui.addStyledText(Vector2(panelX + panelW - 10, panelY + 44), ui.anchor.right, ui.anchor.top,
-		"ETA " .. formatETA(eta), etaColor, pionillium.small)
+	ui.addStyledText(Vector2(panelX + panelW - padX, rowDistY), ui.anchor.right, ui.anchor.top,
+		etaText, etaColor, pionillium.small)
 
 	-- Safe Disengage Alignment Bar 1: DISTANCE (< 1,000 km)
-	local barX = panelX + 10
-	local barW = panelW - 20
+	local barX = panelX + padX
+	local barW = panelW - padX * 2
+	local barH = math.round(8 * s)
 	local safeZoneW = barW * 0.28
 
-	ui.addStyledText(Vector2(barX, panelY + 68), ui.anchor.left, ui.anchor.top,
+	ui.addStyledText(Vector2(barX, panelY + math.round(68 * s)), ui.anchor.left, ui.anchor.top,
 		"DROP DISTANCE (<1,000 km)", (dist <= SAFE_DROP_DIST) and colGreen or colDimText, pionillium.tiny)
-	local dBarY = panelY + 83
-	ui.addRectFilled(Vector2(barX, dBarY), Vector2(barX + barW, dBarY + 8), colBarBg, 2, ui.RoundCornersAll)
-	ui.addRectFilled(Vector2(barX, dBarY), Vector2(barX + safeZoneW, dBarY + 8), colCyanDim, 2, ui.RoundCornersAll)
+	local dBarY = panelY + math.round(83 * s)
+	ui.addRectFilled(Vector2(barX, dBarY), Vector2(barX + barW, dBarY + barH), colBarBg, 2, ui.RoundCornersAll)
+	ui.addRectFilled(Vector2(barX, dBarY), Vector2(barX + safeZoneW, dBarY + barH), colCyanDim, 2, ui.RoundCornersAll)
 
 	-- Log-scaled distance marker
 	local distNorm = 0.0
@@ -439,16 +467,16 @@ local function drawSupercruiseTargetPanel(player, center, reticuleRadius)
 		distNorm = 0.28 + 0.72 * math.max(0.0, math.min(1.0, logD))
 	end
 	local dMarkerX = barX + math.max(2.0, math.min(barW - 2.0, distNorm * barW))
-	ui.addLine(Vector2(dMarkerX, dBarY - 2), Vector2(dMarkerX, dBarY + 10),
+	ui.addLine(Vector2(dMarkerX, dBarY - 2), Vector2(dMarkerX, dBarY + barH + 2),
 		(dist <= SAFE_DROP_DIST) and colGreen or colAmber, 2.5)
-	ui.addRect(Vector2(barX, dBarY), Vector2(barX + barW, dBarY + 8), colBorder, 2, ui.RoundCornersAll, 1.0)
+	ui.addRect(Vector2(barX, dBarY), Vector2(barX + barW, dBarY + barH), colBorder, 2, ui.RoundCornersAll, 1.0)
 
 	-- Safe Disengage Alignment Bar 2: SPEED (< 1,000 km/s)
-	ui.addStyledText(Vector2(barX, panelY + 98), ui.anchor.left, ui.anchor.top,
+	ui.addStyledText(Vector2(barX, panelY + math.round(98 * s)), ui.anchor.left, ui.anchor.top,
 		"DROP SPEED (<1,000 km/s)", (speed <= SAFE_DROP_SPEED) and colGreen or colDimText, pionillium.tiny)
-	local sBarY = panelY + 113
-	ui.addRectFilled(Vector2(barX, sBarY), Vector2(barX + barW, sBarY + 8), colBarBg, 2, ui.RoundCornersAll)
-	ui.addRectFilled(Vector2(barX, sBarY), Vector2(barX + safeZoneW, sBarY + 8), colCyanDim, 2, ui.RoundCornersAll)
+	local sBarY = panelY + math.round(113 * s)
+	ui.addRectFilled(Vector2(barX, sBarY), Vector2(barX + barW, sBarY + barH), colBarBg, 2, ui.RoundCornersAll)
+	ui.addRectFilled(Vector2(barX, sBarY), Vector2(barX + safeZoneW, sBarY + barH), colCyanDim, 2, ui.RoundCornersAll)
 
 	local speedNorm = 0.0
 	if speed <= SAFE_DROP_SPEED then
@@ -458,14 +486,16 @@ local function drawSupercruiseTargetPanel(player, center, reticuleRadius)
 		speedNorm = 0.28 + 0.72 * math.max(0.0, math.min(1.0, logS))
 	end
 	local sMarkerX = barX + math.max(2.0, math.min(barW - 2.0, speedNorm * barW))
-	ui.addLine(Vector2(sMarkerX, sBarY - 2), Vector2(sMarkerX, sBarY + 10),
+	ui.addLine(Vector2(sMarkerX, sBarY - 2), Vector2(sMarkerX, sBarY + barH + 2),
 		(speed <= SAFE_DROP_SPEED) and colGreen or colAmber, 2.5)
-	ui.addRect(Vector2(barX, sBarY), Vector2(barX + barW, sBarY + 8), colBorder, 2, ui.RoundCornersAll, 1.0)
+	ui.addRect(Vector2(barX, sBarY), Vector2(barX + barW, sBarY + barH), colBorder, 2, ui.RoundCornersAll, 1.0)
 
 	-- Bottom Drop / Assist / Interdictor Action Row inside target panel
-	local bottomOffset = showInterdictRow and 52 or 28
-	local btnDropTL = Vector2(panelX + 8, panelY + panelH - bottomOffset)
-	local btnDropBR = Vector2(panelX + panelW - 8, panelY + panelH - bottomOffset + 22)
+	local bottomOffset = math.round((showInterdictRow and 52 or 28) * s)
+	local btnPadX = math.round(8 * s)
+	local btnDropTL = Vector2(panelX + btnPadX, panelY + panelH - bottomOffset)
+	local btnDropBR = Vector2(panelX + panelW - btnPadX, panelY + panelH - bottomOffset + math.round(22 * s))
+	local maxInnerTextW = panelW - btnPadX * 2 - math.round(8 * s)
 
 	local occluded, blocker = player.IsSupercruiseTargetOccluded and player:IsSupercruiseTargetOccluded()
 
@@ -483,13 +513,10 @@ local function drawSupercruiseTargetPanel(player, center, reticuleRadius)
 			ui.anchor.center, ui.anchor.center, "SUPERCRUISE INTERCEPT", colCyan, pionillium.tiny)
 	elseif occluded then
 		local blkName = blocker and blocker:GetLabel() or "PLANET"
-		if assist then
-			ui.addStyledText(Vector2(panelX + panelW * 0.5, (btnDropTL.y + btnDropBR.y) * 0.5),
-				ui.anchor.center, ui.anchor.center, "SC ASSIST: ORBITING " .. blkName, colAmber, pionillium.tiny)
-		else
-			ui.addStyledText(Vector2(panelX + panelW * 0.5, (btnDropTL.y + btnDropBR.y) * 0.5),
-				ui.anchor.center, ui.anchor.center, "TARGET OCCLUDED BY " .. blkName, colAmber, pionillium.tiny)
-		end
+		local occMsg = assist and ("SC ASSIST: ORBITING " .. blkName) or ("TARGET OCCLUDED BY " .. blkName)
+		occMsg = truncateTextToWidth(occMsg, pionillium.tiny, maxInnerTextW)
+		ui.addStyledText(Vector2(panelX + panelW * 0.5, (btnDropTL.y + btnDropBR.y) * 0.5),
+			ui.anchor.center, ui.anchor.center, occMsg, colAmber, pionillium.tiny)
 	elseif assist then
 		ui.addStyledText(Vector2(panelX + panelW * 0.5, (btnDropTL.y + btnDropBR.y) * 0.5),
 			ui.anchor.center, ui.anchor.center, "SC ASSIST: AUTO-DROP", colGreen, pionillium.small)
@@ -503,15 +530,13 @@ local function drawSupercruiseTargetPanel(player, center, reticuleRadius)
 
 	if showInterdictRow then
 		local canInt, reason = player:CanInterdictTarget(target)
-		local btnIntTL = Vector2(panelX + 8, panelY + panelH - 26)
-		local btnIntBR = Vector2(panelX + panelW - 8, panelY + panelH - 6)
+		local btnIntTL = Vector2(panelX + btnPadX, panelY + panelH - math.round(26 * s))
+		local btnIntBR = Vector2(panelX + panelW - btnPadX, panelY + panelH - math.round(6 * s))
 		local intCol = canInt and colGreen or colAmber
 		ui.addRectFilled(btnIntTL, btnIntBR, canInt and Color(15, 50, 35, 220) or colBarBg, 3, ui.RoundCornersAll)
 		ui.addRect(btnIntTL, btnIntBR, intCol, 3, ui.RoundCornersAll, 1.0)
 		local intLabel = canInt and "[M] ENGAGE INTERDICTOR" or (reason or "OUT OF ENVELOPE")
-		if #intLabel > 26 then
-			intLabel = string.sub(intLabel, 1, 24) .. ".."
-		end
+		intLabel = truncateTextToWidth(intLabel, pionillium.tiny, maxInnerTextW)
 		ui.addStyledText(Vector2(panelX + panelW * 0.5, (btnIntTL.y + btnIntBR.y) * 0.5),
 			ui.anchor.center, ui.anchor.center, intLabel, intCol, pionillium.tiny)
 		if canInt and ui.isMouseHoveringRect(btnIntTL, btnIntBR) and ui.isMouseClicked(0) then

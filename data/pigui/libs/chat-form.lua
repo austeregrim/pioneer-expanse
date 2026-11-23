@@ -123,6 +123,7 @@ end
 function ChatForm:renderCommsHeader (decryptProgress)
 	local statusLabel = l.COMMS_CHANNEL_OPEN
 	local statusColor = colors.econMajorImport or colors.font
+	local clickedHangUp = false
 
 	if decryptProgress < 1 then
 		statusLabel = l.COMMS_DECRYPTING
@@ -135,13 +136,21 @@ function ChatForm:renderCommsHeader (decryptProgress)
 		ui.sameLine()
 		ui.textColored(statusColor, statusLabel)
 		ui.sameLine()
+
+		local hangUpW = ui.calcTextSize(l.HANG_UP).x + ui.theme.styles.ButtonPadding.x * 2 + 8
 		local protoText = l.COMMS_PROTOCOL
 		local avail = ui.getContentRegion().x
 		local protoW = ui.calcTextSize(protoText).x
-		if avail > protoW then
-			ui.addCursorPos(Vector2(avail - protoW, 0))
+		if avail > protoW + hangUpW + 12 then
+			ui.addCursorPos(Vector2(avail - protoW - hangUpW - 8, 0))
+			ui.textColored(colors.fontDim, protoText)
+			ui.sameLine()
+		elseif avail > hangUpW then
+			ui.addCursorPos(Vector2(avail - hangUpW, 0))
 		end
-		ui.textColored(colors.fontDim, protoText)
+		if ui.button(l.HANG_UP .. "##headerHangUp", Vector2(hangUpW, lineH + 4), ui.theme.buttonColors.danger) then
+			clickedHangUp = true
+		end
 	end)
 
 	local barStart = ui.getCursorScreenPos()
@@ -152,6 +161,7 @@ function ChatForm:renderCommsHeader (decryptProgress)
 		ui.addRectFilled(barStart, barStart + Vector2(barWidth * decryptProgress, barHeight), statusColor, 0, ui.RoundCornersNone)
 	end
 	ui.dummy(Vector2(0, barHeight + ui.rescaleUI(Vector2(0, 6), Vector2(1920, 1080)).y))
+	return clickedHangUp
 end
 
 function ChatForm:render ()
@@ -161,49 +171,101 @@ function ChatForm:render ()
 	ui.withFont(self.style.font.name, self.style.font.size, function()
 		self.style.contentWidth = ui.getContentRegion().x
 
+		local headerClosed = false
 		if self.style.showCommsHeader then
-			self:renderCommsHeader(decryptProgress)
+			headerClosed = self:renderCommsHeader(decryptProgress)
 		end
-
-		if self.title then
-			ui.withFont(self.style.titleFont.name, self.style.titleFont.size, function()
-				ui.pushTextWrapPos(self.style.contentWidth)
-				ui.textWrapped(self.title)
-				ui.popTextWrapPos()
-			end)
-		end
-
-		if self.face then
-			self.face:render()
-		end
-
-		if displayMessage then
-			ui.text('')
-			ui.pushTextWrapPos(self.style.contentWidth)
-			ui.textWrapped(displayMessage)
-			ui.popTextWrapPos()
-			ui.text('')
+		if headerClosed then
+			self:Close()
+			return
 		end
 
 		local btnSize = self:getButtonSize()
 
-		if self.options then
-			for _, option in ipairs(self.options) do
-				if ui.button(option[1], btnSize) then
-					if (option[2] == -1) then
-						self:Close()
-					else
-						self.chatFunc(self, option[2])
+		if self.market then
+			-- Compact side-by-side layout when a market widget is embedded so the market and Hang Up button fit without scrolling
+			local savedFaceSize = self.face and self.face.style and self.face.style.size
+			local compactFaceSize = ui.rescaleUI(Vector2(138, 176), Vector2(1920, 1080))
+			if self.face then
+				self.face.style.size = compactFaceSize
+				ui.columns(2, "##ChatMarketTopCols", false)
+				ui.setColumnWidth(0, compactFaceSize.x + ui.rescaleUI(14, Vector2(1920, 1080)))
+				self.face:render()
+				self.face.style.size = savedFaceSize
+				ui.nextColumn()
+			end
+
+			if self.title then
+				ui.withFont(self.style.titleFont.name, self.style.titleFont.size, function()
+					ui.textWrapped(self.title)
+				end)
+			end
+			if displayMessage and displayMessage ~= "" then
+				ui.spacing()
+				ui.textWrapped(displayMessage)
+				ui.spacing()
+			end
+			if self.options then
+				local colW = ui.getContentRegion().x
+				local optSize = Vector2(colW, self.style.buttonSize.y)
+				for _, option in ipairs(self.options) do
+					if ui.button(option[1], optSize) then
+						if (option[2] == -1) then
+							if self.face then ui.columns(1) end
+							self:Close()
+							return
+						else
+							self.chatFunc(self, option[2])
+						end
 					end
 				end
 			end
-		end
 
-		if self.market then
+			if self.face then
+				ui.columns(1)
+			end
+			ui.spacing()
+
+			local remainingY = ui.getContentRegion().y - (btnSize.y + ui.rescaleUI(12, Vector2(1920, 1080)))
+			local mHeight = self.style.fitMarketToPanel
+				and math.max(ui.rescaleUI(220, Vector2(1920, 1080)), remainingY)
+				or self.style.marketSize.y
 			local mSize = self.style.fitMarketToPanel
-				and Vector2(self.style.contentWidth, self.style.marketSize.y)
+				and Vector2(self.style.contentWidth, mHeight)
 				or self.style.marketSize
 			self.market:Render(mSize)
+		else
+			if self.title then
+				ui.withFont(self.style.titleFont.name, self.style.titleFont.size, function()
+					ui.pushTextWrapPos(self.style.contentWidth)
+					ui.textWrapped(self.title)
+					ui.popTextWrapPos()
+				end)
+			end
+
+			if self.face then
+				self.face:render()
+			end
+
+			if displayMessage then
+				ui.spacing()
+				ui.pushTextWrapPos(self.style.contentWidth)
+				ui.textWrapped(displayMessage)
+				ui.popTextWrapPos()
+				ui.spacing()
+			end
+
+			if self.options then
+				for _, option in ipairs(self.options) do
+					if ui.button(option[1], btnSize) then
+						if (option[2] == -1) then
+							self:Close()
+						else
+							self.chatFunc(self, option[2])
+						end
+					end
+				end
+			end
 		end
 
 		self.navButton()

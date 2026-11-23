@@ -23,9 +23,9 @@ local Vector2 = _G.Vector2
 local rescaleVector = ui.rescaleUI(Vector2(1, 1), Vector2(1920, 1080), true)
 local commsChildFlags = ui.ChildFlags { 'AlwaysUseWindowPadding', 'Borders' }
 local widgetSizes = ui.rescaleUI({
-	itemSpacing = Vector2(4, 7),
-	faceSize = Vector2(460, 440),
-	buttonSizeBase = Vector2(64, 40),
+	itemSpacing = Vector2(4, 4),
+	faceSize = Vector2(440, 420),
+	buttonSizeBase = Vector2(64, 34),
 }, Vector2(1920, 1080))
 
 local face = nil
@@ -353,16 +353,18 @@ end
 local insuranceViewTab
 
 local function drawInsuranceView()
-	local claim = Insurance.GetActiveClaim()
-	local hasClaim = claim ~= nil and not claim.resolved
-	if insuranceViewTab then
-		insuranceViewTab.name = hasClaim and "Insurance [CLAIM]" or "Insurance & SAR"
-	end
-	if hasClaim then
-		drawClaimPending(claim)
-	else
-		drawPolicyPortal()
-	end
+	ui.withFont(pionillium.body, function()
+		local claim = Insurance.GetActiveClaim()
+		local hasClaim = claim ~= nil and not claim.resolved
+		if insuranceViewTab then
+			insuranceViewTab.name = hasClaim and "Insurance [CLAIM]" or "Insurance & SAR"
+		end
+		if hasClaim then
+			drawClaimPending(claim)
+		else
+			drawPolicyPortal()
+		end
+	end)
 end
 
 insuranceViewTab = StationView:registerView({

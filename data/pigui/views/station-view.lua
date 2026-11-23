@@ -27,9 +27,9 @@ if not stationView then
 		windowPadding = Vector2(12, 12),
 		itemSpacing = Vector2(4, 6),
 		inventoryPadding = Vector2(14, 6),
-		fontSize = 16,
 		height = 16 + 6 + 6 + 6
 	}, Vector2(1920, 1080))
+	stationView.style.fontSize = pionillium.body.size
 
 	function stationView:renderTab(tabFn)
 		local panelStyleColors = {

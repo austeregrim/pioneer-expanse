@@ -339,7 +339,7 @@ local function drawNavLocusLottery()
 	-- Sub Tab 1: 3D Astrolabe Ticket Viewer & Single Buy
 	if currentSubTab == "TICKET" then
 		local availW = ui.getContentRegion().x
-		local canvasH = math.max(540, ui.getContentRegion().y - 20)
+		local canvasH = math.max(360, ui.getContentRegion().y - 6)
 
 		-- Holographic Chit Frame
 		ui.child("##holographicChit", Vector2(availW, canvasH), nil, childFlags, function()
@@ -576,7 +576,7 @@ local function drawNavLocusLottery()
 			ui.separator()
 
 			local canvasPos = ui.getCursorScreenPos()
-			local canvasH = math.max(480, ui.getContentRegion().y - 95)
+			local canvasH = math.max(300, ui.getContentRegion().y - 85)
 
 			-- Determine selected focus ticket
 			local focusTicketLocus = nil

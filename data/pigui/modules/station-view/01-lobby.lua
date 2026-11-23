@@ -32,9 +32,9 @@ local Vector2 = _G.Vector2
 
 local rescaleVector = ui.rescaleUI(Vector2(1, 1), Vector2(1920, 1080), true)
 local widgetSizes = ui.rescaleUI({
-	itemSpacing = Vector2(4, 7),
-	faceSize = Vector2(460, 440),
-	buttonSizeBase = Vector2(64, 40),
+	itemSpacing = Vector2(4, 4),
+	faceSize = Vector2(440, 420),
+	buttonSizeBase = Vector2(64, 34),
 }, Vector2(1920, 1080))
 
 widgetSizes.itemSpacing = Vector2(math.ceil(widgetSizes.itemSpacing.x), math.ceil(widgetSizes.itemSpacing.y))
@@ -196,7 +196,7 @@ local function drawCivilAdministrationSection(station)
 	ui.spacing()
 
 	-- Header
-	ui.withFont(orbiteer.medlarge, function()
+	ui.withFont(orbiteer.heading, function()
 		ui.textColored(colors.uiPrimaryLight, "INTERSTELLAR REVENUE SERVICE & CIVIL ADMINISTRATION")
 	end)
 	ui.spacing()
@@ -208,7 +208,7 @@ local function drawCivilAdministrationSection(station)
 
 	-- Left Column: Residency & Civic Allegiance
 	ui.group(function()
-		ui.withFont(orbiteer.medlarge, function()
+		ui.withFont(orbiteer.body, function()
 			ui.textColored(colors.uiPrimaryLight, "CIVIL RESIDENCY & JURISDICTION")
 		end)
 		ui.spacing()
@@ -242,17 +242,17 @@ local function drawCivilAdministrationSection(station)
 		if resInfo.isResident and not resInfo.canChange then
 			ui.textColored(colors.fontDim, string.format("90-Day Residency Commitment: %d / %d Days", resInfo.termDaysTotal - resInfo.remainingDays, resInfo.termDaysTotal))
 			local gaugePos = ui.getCursorScreenPos()
-			local gaugeHeight = 16 * rescaleVector.y
+			local gaugeHeight = 14 * rescaleVector.y
 			local gaugeWidth = ui.getContentRegion().x
 			ui.gauge(gaugePos, resInfo.progress * 100, '', "%d%% Term Elapsed",
 				0, 100, icons.station or icons.info, false, colors.gaugeEquipmentMarket, '',
 				gaugeWidth, gaugeHeight, pionillium.details)
-			ui.dummy(Vector2(0, gaugeHeight + 8 * rescaleVector.y))
+			ui.dummy(Vector2(0, gaugeHeight + 4 * rescaleVector.y))
 		end
 
 		ui.spacing()
 
-		ui.withFont(orbiteer.medlarge, function()
+		ui.withFont(orbiteer.body, function()
 			ui.textColored(isPrison and colors.alertRed or colors.fontDim, isPrison and "HIGH-SECURITY CORRECTIONAL FACILITY" or "RESIDENCY PRIVILEGES & INCENTIVES")
 		end)
 
@@ -261,7 +261,7 @@ local function drawCivilAdministrationSection(station)
 			ui.bulletText("Civil Status Suspended: Commercial residency and tax domicile are strictly prohibited.")
 			ui.bulletText("Starport Flight Clearance: Granted only to discharged pilots or verified couriers.")
 			ui.spacing()
-			local actionBtnSize = Vector2(ui.getContentRegion().x, 36 * rescaleVector.y)
+			local actionBtnSize = Vector2(ui.getContentRegion().x, 30 * rescaleVector.y)
 			ui.withStyleColors({ Button = ui.theme.buttonColors.disabled.normal, Text = colors.fontDim }, function()
 				ui.button("CIVIL RESIDENCY PROHIBITED AT CORRECTIONAL FACILITY##lobbyRes", actionBtnSize)
 			end)
@@ -273,7 +273,7 @@ local function drawCivilAdministrationSection(station)
 			ui.spacing()
 			if station then
 				local isCurrentHome = (resInfo.isResident and resInfo.homeStationName == station.label)
-				local actionBtnSize = Vector2(ui.getContentRegion().x, 36 * rescaleVector.y)
+				local actionBtnSize = Vector2(ui.getContentRegion().x, 30 * rescaleVector.y)
 				if isCurrentHome then
 					ui.withStyleColors({ Button = ui.theme.buttonColors.disabled.normal, Text = colors.fontDim }, function()
 						ui.button("CURRENT REGISTERED HOME STATION##lobbyRes", actionBtnSize)
@@ -309,7 +309,7 @@ local function drawCivilAdministrationSection(station)
 
 	-- Right Column: Quarterly Tax Statements, Current Quarter Accrual & Payment
 	ui.group(function()
-		ui.withFont(orbiteer.medlarge, function()
+		ui.withFont(orbiteer.body, function()
 			ui.textColored(colors.uiPrimaryLight, "QUARTERLY TAX ASSESSMENT")
 		end)
 		ui.withFont(pionillium.details, function()
@@ -369,9 +369,9 @@ local function drawCivilAdministrationSection(station)
 		local curPos = ui.getCursorScreenPos()
 		local colW = ui.getContentRegion().x
 		ui.addLine(curPos, Vector2(curPos.x + colW, curPos.y), colors.border or colors.fontDim, 1.0)
-		ui.dummy(Vector2(0, 6 * rescaleVector.y))
+		ui.dummy(Vector2(0, 4 * rescaleVector.y))
 
-		ui.withFont(orbiteer.large, function()
+		ui.withFont(orbiteer.heading, function()
 			local balColor = (reportedDue > 0 and (assess.isDelinquent and colors.alertRed or colors.alertYellow)) or (colors.econProfit or colors.uiPrimaryLight)
 			ui.textColored(balColor, string.format("REPORTED TAX DUE: %s", Format.Money(reportedDue)))
 		end)
@@ -391,7 +391,7 @@ local function drawCivilAdministrationSection(station)
 		end)
 
 		ui.spacing()
-		local payBtnSize = Vector2(ui.getContentRegion().x, 38 * rescaleVector.y)
+		local payBtnSize = Vector2(ui.getContentRegion().x, 30 * rescaleVector.y)
 		if reportedDue > 0 then
 			local canAfford = playerMoney >= reportedDue
 			local payBtnLabel = string.format("PAY REPORTED TAXES (%s)##lobbyPayTax", Format.Money(reportedDue))
@@ -433,7 +433,7 @@ local function drawCivilAdministrationSection(station)
 	ui.spacing()
 	ui.separator()
 	ui.spacing()
-	ui.withFont(orbiteer.medlarge, function()
+	ui.withFont(orbiteer.body, function()
 		ui.textColored(colors.uiPrimaryLight, "FINANCIAL MANAGEMENT & AUTOMATED TAX FILING")
 	end)
 	ui.spacing()
@@ -456,7 +456,7 @@ local function drawCivilAdministrationSection(station)
 			end
 			textTable.draw(mRows)
 		else
-			ui.withFont(pionillium.body, function()
+			ui.withFont(pionillium.details, function()
 				ui.textWrapped("Retain a bonded Financial Manager to monitor quarterly tax statements and automatically settle reported assessments on your behalf—preventing late penalties during multi-month deep-space voyages.")
 			end)
 			ui.spacing()
@@ -471,7 +471,7 @@ local function drawCivilAdministrationSection(station)
 	ui.nextColumn()
 
 	ui.group(function()
-		local mgrBtnSize = Vector2(ui.getContentRegion().x, 38 * rescaleVector.y)
+		local mgrBtnSize = Vector2(ui.getContentRegion().x, 32 * rescaleVector.y)
 		if mgr.hired then
 			if ui.button("DISMISS FINANCIAL MANAGER##lobbyDismissMgr", mgrBtnSize) then
 				local ok, msg = TaxAuthority.DismissManager()
@@ -550,7 +550,7 @@ local function drawPlayerInfo()
 				parent_body = station.path:GetSystemBody().parent.name})
 	end
 
-	ui.withFont(pionillium.heading, function()
+	ui.withFont(pionillium.body, function()
 		ui.withStyleVars({ItemSpacing = widgetSizes.itemSpacing}, function()
 			local buttonSizeSpacing = widgetSizes.buttonLaunchSize.y + widgetSizes.itemSpacing.y
 
@@ -558,13 +558,17 @@ local function drawPlayerInfo()
 				-- face display has 1:1 aspect ratio, and we need size for a launch button underneath
 				local infoColumnWidth = -math.min(ui.getContentRegion().y - buttonSizeSpacing, widgetSizes.faceSize.x) - widgetSizes.itemSpacing.x
 				ui.child("StationCivilInfo", Vector2(infoColumnWidth, 0), nil, commsChildFlags, function()
-					ui.spacing()  -- Extra padding for umlaut and other signs on top of the station label.
-					textTable.withHeading(station.label, orbiteer.title, {
+					local stationRows = {
 						{ tech_certified, "" },
 						{ station_docks, "" },
-						{ station_orbit_info, "" },
-						{ local_gravity_pressure, ""},
-					})
+					}
+					if station_orbit_info ~= "" then
+						table.insert(stationRows, { station_orbit_info, "" })
+					end
+					if local_gravity_pressure ~= "" then
+						table.insert(stationRows, { local_gravity_pressure, "" })
+					end
+					textTable.withHeading(station.label, orbiteer.heading, stationRows)
 
 					drawCivilAdministrationSection(station)
 				end)

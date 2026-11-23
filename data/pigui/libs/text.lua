@@ -20,9 +20,18 @@ local font_factor = ui.rescaleFraction(1, Vector2(1920, 1080))
 local textBackgroundMarginPixels = 2
 
 -- apply a subtle bias to prevent fonts from becoming overly tiny at small resolutions
+-- or overly large on high-DPI / 1440p / 4K monitors
 local function fontScale(size)
-	return math.round(size * (font_factor < 1 and font_factor * 0.8 + 0.2 or font_factor))
+	local factor = font_factor
+	if factor < 1 then
+		factor = factor * 0.8 + 0.2
+	elseif factor > 1 then
+		factor = 1 + (factor - 1) * 0.45
+	end
+	return math.round(size * factor)
 end
+
+ui.fontScale = fontScale
 
 ui.fonts = {
 	-- dummy font, actually renders icons

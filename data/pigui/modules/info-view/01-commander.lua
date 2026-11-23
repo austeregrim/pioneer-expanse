@@ -20,7 +20,7 @@ local textTable = require 'pigui.libs.text-table'
 local l = Lang.GetResource("ui-core")
 
 local childFlags = ui.ChildFlags { 'AlwaysUseWindowPadding', 'Borders' }
-local itemSpacing = ui.rescaleUI(Vector2(6, 12), Vector2(1920, 1200))
+local itemSpacing = ui.rescaleUI(Vector2(6, 5), Vector2(1920, 1080))
 
 local face = nil
 
@@ -32,13 +32,17 @@ local function drawPlayerInfo()
 		{ l.KILLS,  string.format('%d',player.killcount) },
 	})
 
-	ui.newLine()
+	ui.spacing()
+	ui.separator()
+	ui.spacing()
 
 	textTable.withHeading(l.REPUTATION, orbiteer.heading, {
 		{ l.STATUS..":", l[player:GetReputationRating()] },
 	})
 
-	ui.newLine()
+	ui.spacing()
+	ui.separator()
+	ui.spacing()
 
 	local financeRows = {
 		{ l.CASH .. ":", ui.Format.Money(PlayerState.GetMoney()) }
@@ -64,7 +68,9 @@ local function drawPlayerInfo()
 
 	local standings = FactionStanding.GetAll(true)
 	if #standings > 0 then
-		ui.newLine()
+		ui.spacing()
+		ui.separator()
+		ui.spacing()
 		local rows = {}
 		for _, entry in ipairs(standings) do
 			local pct = math.floor((entry.mult - 1.0) * 100 + 0.5)
@@ -85,7 +91,7 @@ InfoView:registerView({
 		local leftWidth = math.floor(region.x * 0.50)
 
 		ui.withStyleVars({ItemSpacing = itemSpacing}, function()
-			ui.withFont(pionillium.heading, function()
+			ui.withFont(pionillium.body, function()
 				ui.child("PlayerInfoDetails", Vector2(leftWidth, 0), nil, childFlags, drawPlayerInfo)
 
 				ui.sameLine()

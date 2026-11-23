@@ -398,7 +398,7 @@ local function drawStockExchange()
 				-- Main Interactive Financial Chart Canvas
 				local chartPos = ui.getCursorScreenPos()
 				local chartW = rightW - 24
-				local chartH = 200
+				local chartH = math.clamp(math.floor(ui.getContentRegion().y - 220), 130, 220)
 				ui.dummy(Vector2(chartW, chartH))
 				local history = StockExchange.GetStockHistory(corp.ticker)
 				drawInteractiveStockChart(chartPos, chartW, chartH, history, selectedTimeframe, chartMode)
@@ -660,7 +660,7 @@ local function drawStockExchange()
 				-- Main Interactive Financial Chart Canvas
 				local chartPos = ui.getCursorScreenPos()
 				local chartW = rightW - 24
-				local chartH = 200
+				local chartH = math.clamp(math.floor(ui.getContentRegion().y - 190), 130, 220)
 				ui.dummy(Vector2(chartW, chartH))
 				local history = StockExchange.GetStockHistory(selectedLocal.ticker)
 				drawInteractiveStockChart(chartPos, chartW, chartH, history, selectedTimeframe, chartMode)

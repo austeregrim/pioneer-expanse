@@ -22,7 +22,13 @@ local LONG_JUMP_THRESHOLD_GAME_SEC = 4.0 * 86400.0 -- >= 4 game days (~3.5s real
 
 local uiScale = ui.rescaleFraction(1, Vector2(1920, 1080))
 local function scaledFontSize(basePx)
-	return math.max(10, math.round(basePx * (uiScale < 1 and uiScale * 0.8 + 0.2 or uiScale)))
+	local factor = uiScale
+	if factor < 1 then
+		factor = factor * 0.8 + 0.2
+	elseif factor > 1 then
+		factor = 1 + (factor - 1) * 0.45
+	end
+	return math.max(10, math.round(basePx * factor))
 end
 
 local hyperHeaderFont   = { name = "orbiteer",   size = scaledFontSize(18) }

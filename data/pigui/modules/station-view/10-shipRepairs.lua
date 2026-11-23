@@ -57,11 +57,11 @@ local activeTab = 0
 local repairsCommsText = EncryptedText.New("Starport engineering drydock uplink active. Diagnostic telemetry online. Structural hull reinforcement, pressure seal maintenance, and precision shipyard outfitting ready for deployment.", 0.50)
 
 local widgetSizes = ui.rescaleUI({
-	itemSpacing = Vector2(4, 7),
-	faceSize = Vector2(460, 440),
+	itemSpacing = Vector2(4, 4),
+	faceSize = Vector2(440, 420),
 	buttonSize = Vector2(90, 0),
-	buttonSizeBase = Vector2(64, 40),
-	verticalDummy = Vector2(0, 36),
+	buttonSizeBase = Vector2(64, 34),
+	verticalDummy = Vector2(0, 28),
 	gaugeWidth = 520,
 }, Vector2(1920, 1080))
 
