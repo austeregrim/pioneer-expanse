@@ -37,7 +37,8 @@ public:
 	enum class DockingRefusedReason { // <enum scope='SpaceStation::DockingRefusedReason' name='DockingRefusedReason' public>
 		ClearanceAlreadyGranted,
 		TooFarFromStation,
-		NoBaysAvailable
+		NoBaysAvailable,
+		TransponderOff
 	};
 
 	SpaceStation() = delete;

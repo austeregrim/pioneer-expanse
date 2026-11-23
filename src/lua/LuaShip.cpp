@@ -7,6 +7,7 @@
 #include "Game.h"
 #include "HyperspaceCloud.h"
 #include "Lua.h"
+#include "LuaEvent.h"
 #include "LuaObject.h"
 #include "LuaTable.h"
 #include "LuaVector.h"
@@ -23,6 +24,7 @@
 #include "ship/PlayerShipController.h"
 #include "ship/PrecalcPath.h"
 #include "ship/SupercruiseController.h"
+#include "ship/Visibility.h"
 #include "lua.h"
 
 /*
@@ -1948,6 +1950,123 @@ static int l_ship_set_fsd_offline(lua_State *l)
 	return 0;
 }
 
+static int l_ship_get_transponder(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushboolean(l, s->IsTransponderActive());
+	return 1;
+}
+
+static int l_ship_get_transponder_requested(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushboolean(l, s->IsTransponderRequested());
+	return 1;
+}
+
+static int l_ship_is_transponder_warming_up(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushboolean(l, s->IsTransponderWarmingUp());
+	return 1;
+}
+
+static int l_ship_set_transponder(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	s->SetTransponder(lua_toboolean(l, 2) != 0);
+	return 0;
+}
+
+static int l_ship_toggle_transponder(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushboolean(l, s->ToggleTransponder());
+	return 1;
+}
+
+static int l_ship_can_see_ship(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	Ship *other = LuaObject<Ship>::GetFromLua(2);
+	lua_pushboolean(l, SupercruiseController::IsShipVisibleToSensors(s, other));
+	return 1;
+}
+
+static int l_ship_can_identify(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	Ship *other = LuaObject<Ship>::GetFromLua(2);
+	lua_pushboolean(l, Visibility::CanReadShipIdentity(s, other));
+	return 1;
+}
+
+static int l_ship_is_occluded_from(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	Body *other = LuaObject<Body>::GetFromLua(2);
+	const Space *space = Pi::game ? Pi::game->GetSpace() : nullptr;
+	lua_pushboolean(l, Visibility::IsOccludedInSpace(space, s, other));
+	return 1;
+}
+
+static int l_ship_can_witness_dark_ftl(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	Ship *other = LuaObject<Ship>::GetFromLua(2);
+	const double fovDeg = (lua_gettop(l) >= 3 && lua_isnumber(l, 3))
+		? LuaPull<double>(l, 3)
+		: Visibility::POLICE_WITNESS_FOV_FULL_ANGLE_DEG;
+	const Space *space = Pi::game ? Pi::game->GetSpace() : nullptr;
+	lua_pushboolean(l, Visibility::CanWitnessDarkFTL(space, s, other, fovDeg));
+	return 1;
+}
+
+static int l_ship_acquire_supercruise_lock(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	Ship *other = LuaObject<Ship>::GetFromLua(2);
+	lua_pushboolean(l, s->GetSupercruise() ? s->GetSupercruise()->AcquireSupercruiseLock(other) : false);
+	return 1;
+}
+
+static int l_ship_clear_supercruise_lock(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	if (s->GetSupercruise())
+		s->GetSupercruise()->ClearSupercruiseLock();
+	return 0;
+}
+
+static int l_ship_get_locked_ship(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	Ship *locked = s->GetSupercruise() ? s->GetSupercruise()->GetLockedShip() : nullptr;
+	if (locked)
+		LuaObject<Ship>::PushToLua(locked);
+	else
+		lua_pushnil(l);
+	return 1;
+}
+
+static int l_ship_set_supercruise_speed_cap(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	const double cap = (lua_gettop(l) >= 2 && !lua_isnil(l, 2)) ? LuaPull<double>(l, 2) : 0.0;
+	if (s->GetSupercruise())
+		s->GetSupercruise()->SetSpeedCap(cap);
+	return 0;
+}
+
+static int l_ship_notify_scanned(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	Ship *scanner = LuaObject<Ship>::GetFromLua(2);
+	const char *scanType = (lua_gettop(l) >= 3 && lua_isstring(l, 3)) ? lua_tostring(l, 3) : "CARGO";
+	LuaEvent::Queue("onShipScanned", s, scanner, std::string(scanType));
+	return 0;
+}
+
 static int l_ship_get_subsystems(lua_State *l)
 {
 	Ship *s = LuaObject<Ship>::CheckFromLua(1);
@@ -2297,6 +2416,20 @@ void LuaObject<Ship>::RegisterClass()
 		{ "GetShipMassLockFactor", l_ship_get_ship_mass_lock_factor },
 		{ "IsFsdOffline", l_ship_is_fsd_offline },
 		{ "SetFsdOffline", l_ship_set_fsd_offline },
+		{ "GetTransponder", l_ship_get_transponder },
+		{ "GetTransponderRequested", l_ship_get_transponder_requested },
+		{ "IsTransponderWarmingUp", l_ship_is_transponder_warming_up },
+		{ "SetTransponder", l_ship_set_transponder },
+		{ "ToggleTransponder", l_ship_toggle_transponder },
+		{ "CanSeeShip", l_ship_can_see_ship },
+		{ "CanIdentify", l_ship_can_identify },
+		{ "IsOccludedFrom", l_ship_is_occluded_from },
+		{ "CanWitnessDarkFTL", l_ship_can_witness_dark_ftl },
+		{ "AcquireSupercruiseLock", l_ship_acquire_supercruise_lock },
+		{ "ClearSupercruiseLock", l_ship_clear_supercruise_lock },
+		{ "GetLockedShip", l_ship_get_locked_ship },
+		{ "SetSupercruiseSpeedCap", l_ship_set_supercruise_speed_cap },
+		{ "NotifyScanned", l_ship_notify_scanned },
 		{ "GetSubsystems", l_ship_get_subsystems },
 		{ "SyncSubsystems", l_ship_sync_subsystems },
 		{ "SetSubsystemHealthSummary", l_ship_set_subsystem_health_summary },

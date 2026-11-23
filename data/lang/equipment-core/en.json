@@ -913,7 +913,55 @@
   },
   "RADAR_DESCRIPTION": {
     "description": "",
-    "message": "Provides a 3D map of nearby ships."
+    "message": "Baseline tactical radar. Displays transponder-active ships within 50 km and supercruise lights above 1c. Does not detect dark ships beyond visual hull-ID range."
+  },
+  "SUBLIGHT_SENSOR_ARRAY_1": {
+    "description": "",
+    "message": "Sub-Light Sensor Array Mk I"
+  },
+  "SUBLIGHT_SENSOR_ARRAY_1_DESCRIPTION": {
+    "description": "",
+    "message": "Upgraded passive emissions array extending radar coverage to 80 km and detecting dark sub-light vessels out to 15 km."
+  },
+  "SUBLIGHT_SENSOR_ARRAY_2": {
+    "description": "",
+    "message": "Sub-Light Sensor Array Mk II"
+  },
+  "SUBLIGHT_SENSOR_ARRAY_2_DESCRIPTION": {
+    "description": "",
+    "message": "High-sensitivity thermal and mass-flux sensor extending radar coverage to 150 km and detecting dark sub-light vessels out to 45 km."
+  },
+  "SUBLIGHT_SENSOR_ARRAY_3": {
+    "description": "",
+    "message": "Sub-Light Sensor Array Mk III"
+  },
+  "SUBLIGHT_SENSOR_ARRAY_3_DESCRIPTION": {
+    "description": "",
+    "message": "Military-grade stealth acquisition array extending radar coverage to 300 km and detecting dark sub-light vessels out to 120 km."
+  },
+  "WARRANT_SCANNER": {
+    "description": "",
+    "message": "Warrant Scanner"
+  },
+  "WARRANT_SCANNER_DESCRIPTION": {
+    "description": "",
+    "message": "Queries active bounty registries for identified vessels. Displays warrants issued by factions for which you hold an active Bounty Hunter Licence."
+  },
+  "SCAN_DETECTOR": {
+    "description": "",
+    "message": "Scan Detector"
+  },
+  "SCAN_DETECTOR_DESCRIPTION": {
+    "description": "",
+    "message": "Passive RF/gravimetric receiver that alerts you immediately whenever another ship conducts a cargo or warrant scan on your hull."
+  },
+  "WAKE_TRACER": {
+    "description": "",
+    "message": "Supercruise Wake Tracer"
+  },
+  "WAKE_TRACER_DESCRIPTION": {
+    "description": "",
+    "message": "Analyzes low-energy Supercruise drop wakes to display wake age, drop vector, and estimated heading."
   },
   "REINFORCED_STRUCTURE": {
     "description": "Name for an equipment item that reinforces the hull's superstructure",

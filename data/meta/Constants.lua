@@ -159,6 +159,7 @@ local DockingRefusedReason = {
 	ClearanceAlreadyGranted = 1,
 	TooFarFromStation = 2,
 	NoBaysAvailable = 3,
+	TransponderOff = 4,
 }
 
 ---@type DockingRefusedReason[]

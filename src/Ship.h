@@ -18,6 +18,7 @@
 #include "graphics/Material.h"
 #include "ship/Propulsion.h"
 #include "ship/Subsystems.h"
+#include "ship/Visibility.h"
 
 namespace SceneGraph {
 	class MatrixTransform;
@@ -69,6 +70,10 @@ struct shipstats_t {
 	// cached equipment information to avoid costly Lua lookups
 	int atmo_shield_cap;
 	int radar_cap;
+	int sublight_sensor_cap;
+	int warrant_scanner_cap;
+	int scan_detector_cap;
+	int wake_tracer_cap;
 	int fuel_scoop_cap;
 	int cargo_life_support_cap;
 	int hull_autorepair_cap;
@@ -173,6 +178,12 @@ public:
 	void SetForwardLightsEnabled(bool on) { m_forwardLightsEnabled = on; }
 	bool GetLandingLightsEnabled() const { return m_landingLightsEnabled; }
 	void SetLandingLightsEnabled(bool on) { m_landingLightsEnabled = on; }
+	bool IsTransponderActive() const { return m_transponder.IsActive(); }
+	bool IsTransponderRequested() const { return m_transponder.IsRequested(); }
+	bool IsTransponderWarmingUp() const { return m_transponder.IsWarmingUp(); }
+	float GetTransponderWarmup() const { return m_transponder.GetWarmupRemaining(); }
+	void SetTransponder(bool on) { m_transponder.Set(on); }
+	bool ToggleTransponder() { return m_transponder.Toggle(); }
 	void CollectSpotLights(const matrix4x4d &shipToCam, std::vector<Graphics::SpotLight> &outLights) const;
 	void RenderCockpitLights(Graphics::Renderer *r, const matrix4x4d &shipToCam);
 	float CalcLightBeamScatter() const;
@@ -449,6 +460,7 @@ private:
 	bool m_beaconsEnabled = true;
 	bool m_forwardLightsEnabled = false;
 	bool m_landingLightsEnabled = false;
+	Visibility::TransponderState m_transponder;
 
 	std::unique_ptr<Sensors> m_sensors;
 	std::unordered_map<Body *, Uint8> m_relationsMap;

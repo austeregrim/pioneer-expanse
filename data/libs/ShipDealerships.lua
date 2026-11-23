@@ -414,6 +414,9 @@ local function getAftermarketPoolForSlot(slot, archetype, hullPercent)
 		add("misc.trade_computer")
 		add("misc.autopilot")
 	elseif st:match("^sensor") then
+		if archetype == "INTERCEPTOR" or archetype == "MILITARY" then
+			add("sensor.sublight_array_1")
+		end
 		add("sensor.radar")
 		add("sensor.discovery_scanner")
 	elseif st:match("^fuel_scoop") then
@@ -437,10 +440,13 @@ local function getAftermarketPoolForSlot(slot, archetype, hullPercent)
 		elseif archetype == "INTERCEPTOR" or archetype == "SMUGGLER" then
 			add("misc.ecm_basic")
 			add("misc.target_scanner")
+			add("misc.warrant_scanner")
+			add("misc.scan_detector")
 		else
 			add("misc.planetscanner")
 			add("misc.target_scanner")
 			add("misc.ecm_basic")
+			add("misc.scan_detector")
 		end
 	elseif st:match("^cabin") then
 		if archetype == "SMUGGLER" then

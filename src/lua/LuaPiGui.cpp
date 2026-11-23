@@ -32,6 +32,7 @@
 #include "pigui/Widgets.h"
 #include "ship/PlayerShipController.h"
 #include "ship/SupercruiseController.h"
+#include "ship/Visibility.h"
 #include "sound/Sound.h"
 #include "utils.h"
 
@@ -2612,8 +2613,10 @@ static int l_pigui_get_projected_bodies_grouped(lua_State *l)
 		if (body->GetType() == ObjectType::SHIP) {
 			const Ship *otherShip = static_cast<const Ship *>(body);
 			if (!SupercruiseController::IsShipVisibleToSensors(Pi::player, otherShip)) continue;
-			const bool targetInSC = (otherShip->GetFlightState() == Ship::SUPERCRUISE);
-			if (!targetInSC && body->GetPositionRelTo(Pi::player).Length() > ship_max_distance) continue;
+			const bool alwaysTargetable = SupercruiseController::IsShipFTL(otherShip) ||
+				otherShip->IsTransponderActive() ||
+				SupercruiseController::HasTrackedLock(Pi::player, otherShip);
+			if (!alwaysTargetable && body->GetPositionRelTo(Pi::player).Length() > ship_max_distance) continue;
 			checkTerrainOcclusion = !isExplicitTarget;
 		} else if (body->GetType() == ObjectType::HYPERSPACECLOUD) {
 			const bool isLowWake = static_cast<const HyperspaceCloud *>(body)->IsLowWake();
@@ -2755,28 +2758,34 @@ static int l_pigui_get_targets_nearby(lua_State *l)
 	Space::BodyNearList nearby = Pi::game->GetSpace()->GetBodiesMaybeNear(Pi::player, range_max);
 
 	const bool playerInSC = (Pi::player->GetFlightState() == Ship::SUPERCRUISE);
+	const double radarRange = Visibility::GetRadarDisplayRange(Pi::player);
 
 	std::vector<Body *> filtered;
 	filtered.reserve(nearby.size() + 16);
 	for (Body *body : nearby) {
 		if (body == Pi::player) continue;
 		if (body->GetType() == ObjectType::PROJECTILE) continue;
-		if (body->GetType() == ObjectType::SHIP &&
-			!SupercruiseController::IsShipVisibleToSensors(Pi::player, static_cast<const Ship *>(body)))
-			continue;
+		if (body->GetType() == ObjectType::SHIP) continue;
 		filtered.push_back(body);
 	}
 
-	if (playerInSC) {
-		for (Body *body : Pi::game->GetSpace()->GetBodies()) {
-			if (!body || body == Pi::player)
+	for (Body *body : Pi::game->GetSpace()->GetBodies()) {
+		if (!body || body == Pi::player)
+			continue;
+		if (body->IsType(ObjectType::SHIP)) {
+			const Ship *otherShip = static_cast<const Ship *>(body);
+			if (!SupercruiseController::IsShipVisibleToSensors(Pi::player, otherShip))
 				continue;
-			const bool isSCShip = body->IsType(ObjectType::SHIP) &&
-				SupercruiseController::IsShipVisibleToSensors(Pi::player, static_cast<const Ship *>(body));
-			const bool isLowWake = body->IsType(ObjectType::HYPERSPACECLOUD) &&
-				static_cast<const HyperspaceCloud *>(body)->IsLowWake();
-			if (!isSCShip && !isLowWake)
+			const double dist = body->GetPositionRelTo(Pi::player).Length();
+			if (dist > double(range_max))
 				continue;
+			const bool isFTL = SupercruiseController::IsShipFTL(otherShip);
+			const bool isLocked = SupercruiseController::HasTrackedLock(Pi::player, otherShip);
+			if (!isFTL && !isLocked && otherShip->IsTransponderActive() && dist > radarRange)
+				continue;
+			filtered.push_back(body);
+		} else if (playerInSC && body->IsType(ObjectType::HYPERSPACECLOUD) &&
+			static_cast<const HyperspaceCloud *>(body)->IsLowWake()) {
 			if (std::find(filtered.begin(), filtered.end(), body) == filtered.end())
 				filtered.push_back(body);
 		}
@@ -2804,8 +2813,13 @@ static int l_pigui_get_targets_nearby(lua_State *l)
 
 		LuaTable object(l, 0, 4);
 
+		std::string displayLabel = body->GetLabel();
+		if (body->IsType(ObjectType::SHIP) && !Visibility::CanReadShipIdentity(Pi::player, static_cast<const Ship *>(body))) {
+			displayLabel = "UNIDENTIFIED";
+		}
+
 		object.Set("distance", distance);
-		object.Set("label", body->GetLabel());
+		object.Set("label", displayLabel);
 		object.Set("rel_position", shipSpacePosition);
 
 		//		object.Set("type", EnumStrings::GetString("PhysicsObjectType", (*i)->GetType()));

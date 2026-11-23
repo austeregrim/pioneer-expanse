@@ -6,6 +6,8 @@
 #include "FrameId.h"
 #include "JsonFwd.h"
 #include "vector3.h"
+#include <algorithm>
+#include <cmath>
 #include <deque>
 #include <string>
 
@@ -18,7 +20,7 @@ class SupercruiseController {
 public:
 	static constexpr double LIGHT_SPEED = 299792458.0;        // 1c in m/s
 	static constexpr double MIN_SPEED = 30000.0;              // 30 km/s (0.0001c)
-	static constexpr double MIN_ENGAGE_SPEED = 500.0;         // 500 m/s minimum sublight engagement speed
+	static constexpr double MIN_ENGAGE_SPEED = 350.0;         // 350 m/s minimum sublight engagement speed
 	static constexpr double MAX_SPEED = 2001.0 * LIGHT_SPEED; // 2,001c in m/s
 	static constexpr double SAFE_DISENGAGE_DIST = 1000000.0;  // 1,000 km
 	static constexpr double SAFE_DISENGAGE_SPEED = 1000000.0; // 1,000 km/s
@@ -97,6 +99,8 @@ public:
 	void SetSpeed(double speed);
 	double GetMaxEnvSpeed() const { return m_maxEnvSpeed; }
 	double GetDesiredSpeed() const { return m_desiredSpeed; }
+	double GetSpeedCap() const { return m_speedCap; }
+	void SetSpeedCap(double maxSpeed) { m_speedCap = (maxSpeed > 0.0) ? maxSpeed : 0.0; }
 	double GetGravityStrain() const { return m_gravityStrain; }
 
 	// Target telemetry & Safe Disengage
@@ -171,6 +175,31 @@ public:
 	static double GetExclusionZoneRadius(const Body *body);
 	static double GetExclusionZoneRadiusAtDir(const Body *body, const vector3d &unitDirInBodyFrame);
 
+	// Advance Supercruise speed for one timestep, smoothly ramping from sublight entry speed through MIN_SPEED
+	static inline double StepSpeed(double currentSpeed, double desiredSpeed, double throttle, double gravityStrain, bool inBlueZoneOrAssist, float timeStep)
+	{
+		const double clampedDesired = std::clamp(desiredSpeed, MIN_SPEED, MAX_SPEED);
+		const double clampedThrottle = std::clamp(throttle, 0.0, 1.0);
+		double nextSpeed = currentSpeed;
+		const double dt = std::max(0.0, double(timeStep));
+		if (nextSpeed < clampedDesired) {
+			const double baseAccel = (nextSpeed < MIN_SPEED)
+				? std::max(6000.0, nextSpeed * 3.5)
+				: std::max(45000.0, nextSpeed * 0.38);
+			const double accel = baseAccel * (0.35 + 0.65 * clampedThrottle);
+			nextSpeed = std::min(clampedDesired, nextSpeed + accel * dt);
+		} else if (nextSpeed > clampedDesired) {
+			const double speedDelta = nextSpeed - clampedDesired;
+			const double decelFactor = inBlueZoneOrAssist
+				? (0.85 + 2.0 * gravityStrain)
+				: (0.45 + 1.25 * gravityStrain);
+			const double decel = std::max(150000.0, nextSpeed * decelFactor + speedDelta * (1.5 + 2.5 * gravityStrain));
+			nextSpeed = std::max(clampedDesired, nextSpeed - decel * dt);
+		}
+		const double minFloor = (currentSpeed >= MIN_SPEED) ? MIN_SPEED : 0.0;
+		return std::clamp(nextSpeed, minFloor, MAX_SPEED);
+	}
+
 	// Planetary occlusion queries & great-circle bypass routing
 	const Body *GetTargetObscuredBy(const vector3d &targetPosRelToShip, const Body *targetBody) const;
 	bool IsTargetOccluded(Body **outBlocker = nullptr) const;
@@ -197,10 +226,11 @@ private:
 	bool m_charging = false;
 	float m_chargeCountdown = 0.0f;
 	float m_cooldown = 0.0f;
-	double m_throttle = 0.5;
+	double m_throttle = 0.75;
 	double m_speed = 0.0;
 	double m_maxEnvSpeed = MAX_SPEED;
 	double m_desiredSpeed = MIN_SPEED;
+	double m_speedCap = 0.0;
 	double m_gravityStrain = 0.0;
 
 	bool m_safeDisengageReady = false;

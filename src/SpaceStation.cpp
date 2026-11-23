@@ -24,6 +24,8 @@
 #include "Space.h"
 #include "SpaceStationType.h"
 #include "StringF.h"
+#include "galaxy/Polit.h"
+#include "galaxy/StarSystem.h"
 #include "graphics/RenderState.h"
 #include "graphics/Renderer.h"
 #include "graphics/VertexArray.h"
@@ -1102,6 +1104,23 @@ int SpaceStation::GetNearbyTraffic(double radius)
 bool SpaceStation::GetDockingClearance(Ship *s)
 {
 	assert(m_shipDocking.size() == m_type->NumDockingPorts());
+	if (!s)
+		return false;
+
+	if (Pi::game && Pi::game->GetSpace() && Pi::game->GetSpace()->GetStarSystem()) {
+		const StarSystem *sys = Pi::game->GetSpace()->GetStarSystem().Get();
+		const SysPolit &polit = sys->GetSysPolit();
+		const bool transponderRequired = (sys->GetTotalPop() > fixed(0)) &&
+			(polit.lawlessness.ToDouble() < 0.75) &&
+			(polit.govType != Polit::GOV_NONE) &&
+			(polit.govType != Polit::GOV_DISORDER);
+		if (transponderRequired && !s->IsTransponderActive()) {
+			LuaEvent::Queue("onDockingClearanceDenied", this, s,
+				EnumStrings::GetString("DockingRefusedReason", int(DockingRefusedReason::TransponderOff)));
+			return false;
+		}
+	}
+
 	for (Uint32 i = 0; i < m_shipDocking.size(); i++) {
 		if (m_shipDocking[i].ship == s) {
 			LuaEvent::Queue("onDockingClearanceDenied", this, s,

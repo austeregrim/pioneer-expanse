@@ -41,6 +41,7 @@ public:
 	void FireMissile();
 	void ToggleCruise();
 	void ToggleSupercruise();
+	void ToggleTransponder();
 	void SelectTarget();
 	void CycleHostiles();
 	void CycleTargets(int direction);
@@ -126,6 +127,7 @@ private:
 		Action *toggleCruise;
 		Action *toggleSpeedLimiter;
 		Action *toggleSupercruise;
+		Action *toggleTransponder;
 
 		// Landing Controls
 		Action *toggleLandingGear;
@@ -191,6 +193,7 @@ private:
 	ConnectionTicket m_toggleCruise;
 	ConnectionTicket m_toggleSpeedLimiter;
 	ConnectionTicket m_toggleSupercruise;
+	ConnectionTicket m_toggleTransponder;
 	ConnectionTicket m_selectTarget;
 	ConnectionTicket m_cycleHostiles;
 	ConnectionTicket m_cycleTargetsNext;

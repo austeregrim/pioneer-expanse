@@ -150,6 +150,13 @@ void Player::OnDocked(SpaceStation *s, int port)
 {
 	Ship::OnDocked(s, port);
 
+	if (Body *ct = GetCombatTarget(); ct && ct->IsType(ObjectType::SHIP))
+		SetCombatTarget(nullptr);
+	if (Body *nt = GetNavTarget(); nt && nt->IsType(ObjectType::SHIP))
+		SetNavTarget(nullptr);
+	if (Body *ft = GetFollowTarget(); ft && ft->IsType(ObjectType::SHIP))
+		SetFollowTarget(nullptr);
+
 	LuaEvent::Queue("onPlayerDocked", this, s, port);
 }
 

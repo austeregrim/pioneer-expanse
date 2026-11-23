@@ -19,6 +19,7 @@
 #include "ship/GunManager.h"
 #include "ship/ShipController.h"
 #include "ship/SupercruiseController.h"
+#include "ship/Visibility.h"
 #include "sound/Sound.h"
 #include "Sensors.h"
 
@@ -169,6 +170,7 @@ REGISTER_INPUT_BINDING(PlayerShipController)
 	input->AddActionBinding("BindToggleCruise", speedGroup, Action({ SDLK_v }));
 	input->AddActionBinding("BindToggleSpeedLimiter", speedGroup, Action({ SDLK_l, SDLK_RALT }));
 	input->AddActionBinding("BindToggleSupercruise", speedGroup, Action({ SDLK_j }));
+	input->AddActionBinding("BindToggleTransponder", speedGroup, Action({ SDLK_BACKSLASH }));
 
 	auto landingGroup = controlsPage->GetBindingGroup("LandingControl");
 	input->AddActionBinding("BindToggleLandingGear", landingGroup, Action({ SDLK_n }));
@@ -217,6 +219,9 @@ PlayerShipController::PlayerShipController() :
 
 	m_toggleSupercruise = InputBindings.toggleSupercruise->onPressed.connect(
 		sigc::mem_fun(this, &PlayerShipController::ToggleSupercruise));
+
+	m_toggleTransponder = InputBindings.toggleTransponder->onPressed.connect(
+		sigc::mem_fun(this, &PlayerShipController::ToggleTransponder));
 
 	m_selectTarget = InputBindings.targetObject->onPressed.connect (
 		sigc::mem_fun(this, &PlayerShipController::SelectTarget));
@@ -267,6 +272,7 @@ void PlayerShipController::InputBinding::RegisterBindings()
 	toggleCruise = AddAction("BindToggleCruise");
 	toggleSpeedLimiter = AddAction("BindToggleSpeedLimiter");
 	toggleSupercruise = AddAction("BindToggleSupercruise");
+	toggleTransponder = AddAction("BindToggleTransponder");
 
 	toggleLandingGear = AddAction("BindToggleLandingGear");
 	controlLandingGear = AddAxis("BindControlLandingGear");
@@ -619,6 +625,22 @@ void PlayerShipController::StaticUpdate(const float timeStep)
 			}
 		} else {
 			gunManager->ClearTrackingTargetOffset();
+		}
+	}
+
+	// Target lock persistence: break lock if target died, docked, left space, or became occluded behind a body.
+	if (m_combatTarget && m_combatTarget->IsType(ObjectType::SHIP)) {
+		const Ship *ts = static_cast<const Ship *>(m_combatTarget);
+		if (!Visibility::EvaluateLockPersistence(!ts->IsDead(), ts->IsInSpace(), ts->IsDocked(), m_ship->IsDocked(),
+				Visibility::IsOccludedInSpace(Pi::game ? Pi::game->GetSpace() : nullptr, m_ship, ts))) {
+			SetCombatTarget(nullptr);
+		}
+	}
+	if (m_navTarget && m_navTarget->IsType(ObjectType::SHIP)) {
+		const Ship *ts = static_cast<const Ship *>(m_navTarget);
+		if (!Visibility::EvaluateLockPersistence(!ts->IsDead(), ts->IsInSpace(), ts->IsDocked(), m_ship->IsDocked(),
+				Visibility::IsOccludedInSpace(Pi::game ? Pi::game->GetSpace() : nullptr, m_ship, ts))) {
+			SetNavTarget(nullptr);
 		}
 	}
 
@@ -1102,7 +1124,10 @@ void PlayerShipController::SelectTarget()
 			const Ship *otherShip = static_cast<const Ship *>(it->body);
 			if (!SupercruiseController::IsShipVisibleToSensors(m_ship, otherShip))
 				continue;
-			if (otherShip->GetFlightState() != Ship::SUPERCRUISE && it->dist > ship_detect_dist)
+			const bool alwaysTargetable = SupercruiseController::IsShipFTL(otherShip) ||
+				otherShip->IsTransponderActive() ||
+				SupercruiseController::HasTrackedLock(m_ship, otherShip);
+			if (!alwaysTargetable && it->dist > ship_detect_dist)
 				continue;
 		} else if ((it->body->GetType() == ObjectType::CARGOBODY || it->body->GetType() == ObjectType::HYPERSPACECLOUD)
 			&& it->dist > ship_detect_dist)
@@ -1314,6 +1339,19 @@ void PlayerShipController::ToggleSupercruise()
 		return;
 	if (SupercruiseController *sc = m_ship->GetSupercruise()) {
 		sc->Toggle();
+	}
+}
+
+void PlayerShipController::ToggleTransponder()
+{
+	if (!Pi::game || Pi::game->IsPaused() || !m_ship || Pi::player->IsDead())
+		return;
+	if (!InputBindings.active || (Pi::GetView() != Pi::game->GetWorldView() && Pi::GetView() != Pi::game->GetSystemView()))
+		return;
+	const bool on = m_ship->ToggleTransponder();
+	Sound::BodyMakeNoise(m_ship, "OK", 0.7f);
+	if (SupercruiseController *sc = m_ship->GetSupercruise()) {
+		sc->ShowStatusMessage(on ? "TRANSPONDER: INITIALIZING" : "TRANSPONDER: OFF — RUNNING DARK", 3.0f);
 	}
 }
 

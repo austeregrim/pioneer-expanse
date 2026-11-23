@@ -25,7 +25,7 @@ Detailed design and implementation roadmap for **Phase 7** (referenced from [02_
 * **Point-of-Light Rendering**: Every ship in `SUPERCRUISE` renders across the entire star system as a bright glowing point of light with a short directional velocity streak/wake—visible whether the player is in `SUPERCRUISE` or sublight `FLYING`.
 * **Sensors & Targeting**:
   * `Sensors` expands in `SUPERCRUISE` to track system-wide Supercruise contacts (plus **Low Wake / Distress Signal** markers).
-  * Locking/targeting Supercruise ships is only permitted while the player is also in `SUPERCRUISE`.
+  * **Anyone can see and target a ship above 1c** (it is a point of light), whether they are in `SUPERCRUISE` or normal flight. *(Revised by [Plan I](./I_PLAN_TRANSPONDER_AND_STEALTH.md); the earlier "only while also in `SUPERCRUISE`" restriction was removed.)*
   * Successful interdiction preserves the player's combat target lock on the opponent when both transition to `FLYING`.
 * **Scan Information Split**:
   * Resolving a Supercruise contact reveals **Ship Type, Pilot/Faction, and `WANTED`/`CLEAN` status** (via network ID).
@@ -77,7 +77,7 @@ Detailed design and implementation roadmap for **Phase 7** (referenced from [02_
 
 ### Milestone 2: Supercruise Sensors, Targeting, Wanted Status & Scan Split (COMPLETED)
 * [x] Expand [`Sensors`](src/Sensors.h) in `SUPERCRUISE` to detect system-wide Supercruise ships and Low Wakes.
-* [x] Enforce Supercruise-only targeting for Supercruise ships (while preserving target lock across an interdiction drop into `FLYING`).
+* [x] ~~Enforce Supercruise-only targeting for Supercruise ships~~ — **superseded by Plan I**: any ship can see and target a ship above 1c; target lock is preserved across interdiction drops into `FLYING`.
 * [x] Add ship-level `wanted` / bounty state (`Ship::IsWanted()`, Lua bindings, synced by `Pirates.lua` / `CrimeTracking`).
 * [x] Update HUD target info (`data/pigui/modules/flight-ui/target-scanner.lua`) to show Ship Type, Pilot/Faction, and `WANTED`/`CLEAN` in Supercruise while hiding Cargo & Hull/Shield percentages until sublight.
 

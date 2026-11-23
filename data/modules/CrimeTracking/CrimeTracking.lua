@@ -103,14 +103,19 @@ local onShipHit = function(ship, attacker)
 end
 
 local onShipInterdicted = function(ship, attacker)
-	if attacker and attacker:IsPlayer() and ship and not (ship.IsWanted and ship:IsWanted()) then
-		local system = Game.system
-		if system and system.population > 0 and system.lawlessness < 0.85 then
+	if not attacker or not ship then return end
+	local sys = Game.system
+	local policeId = sys and sys.faction and sys.faction.policeShip
+	if policeId and attacker.shipId == policeId then
+		return
+	end
+	if attacker:IsPlayer() and not (ship.IsWanted and ship:IsWanted()) then
+		if sys and sys.population > 0 and sys.lawlessness < 0.85 then
 			local _, fineBefore = PlayerState.GetCrimeOutstanding()
 			Legal:notifyOfCrime(attacker, "PIRACY")
 			local _, fineAfter = PlayerState.GetCrimeOutstanding()
 			if fineAfter == fineBefore then
-				local newFine = Legal:fine("PIRACY", system.lawlessness)
+				local newFine = Legal:fine("PIRACY", sys.lawlessness)
 				PlayerState.AddCrime("PIRACY", newFine)
 				fineAfter = fineBefore + newFine
 			end

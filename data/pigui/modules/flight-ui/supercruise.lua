@@ -3,6 +3,7 @@
 
 local ui = require 'pigui'
 local Engine = require 'Engine'
+local Event = require 'Event'
 local Game = require 'Game'
 local Vector2 = _G.Vector2
 local Color = _G.Color
@@ -27,6 +28,60 @@ local colBorder     = Color(60, 130, 180, 140)
 local colWhite      = Color(235, 245, 255, 240)
 local colDimText    = Color(150, 175, 195, 210)
 
+local policeWarning = nil -- { count, deadline, officerLabel }
+local scanAlert = nil -- { expiresAt, scannerLabel, scanType }
+local policeEscort = nil -- { officerLabel }
+
+Event.Register("onPoliceTransponderWarning", function(officer, count, deadline)
+	policeWarning = {
+		officerLabel = (officer and officer.GetLabel) and officer:GetLabel() or "System Security",
+		count = count or 1,
+		deadline = deadline or (Game.time + 4.0),
+	}
+end)
+
+Event.Register("onPoliceTransponderWarningCleared", function()
+	policeWarning = nil
+end)
+
+Event.Register("onPoliceEscortStatus", function(active, officerLabel)
+	if active then
+		policeEscort = { officerLabel = officerLabel or "System Security" }
+	else
+		policeEscort = nil
+	end
+end)
+
+Event.Register("onShipScanned", function(target, scanner, scanType)
+	local player = Game.player
+	if not player or target ~= player then return end
+	if (player["scan_detector_cap"] or 0) <= 0 then return end
+	local scannerLabel = "UNIDENTIFIED"
+	if scanner and scanner:exists() then
+		if not player.CanIdentify or player:CanIdentify(scanner) then
+			scannerLabel = scanner:GetLabel() or "Unknown Vessel"
+		end
+	end
+	scanAlert = {
+		expiresAt = Game.time + 6.0,
+		scannerLabel = scannerLabel,
+		scanType = scanType or "CARGO",
+	}
+	ui.playSfx("warning")
+end)
+
+Event.Register("onLeaveSystem", function()
+	policeWarning = nil
+	scanAlert = nil
+	policeEscort = nil
+end)
+
+Event.Register("onGameEnd", function()
+	policeWarning = nil
+	scanAlert = nil
+	policeEscort = nil
+end)
+
 local function formatSupercruiseSpeed(speedMs)
 	if speedMs >= LIGHT_SPEED * 0.10 then
 		local cVal = speedMs / LIGHT_SPEED
@@ -39,8 +94,12 @@ local function formatSupercruiseSpeed(speedMs)
 		end
 	elseif speedMs >= 1000000.0 then
 		return string.format("%.2f Mm/s", speedMs / 1000000.0)
-	else
+	elseif speedMs >= 10000.0 then
 		return string.format("%.0f km/s", speedMs / 1000.0)
+	elseif speedMs >= 1000.0 then
+		return string.format("%.1f km/s", speedMs / 1000.0)
+	else
+		return string.format("%.0f m/s", speedMs)
 	end
 end
 
@@ -425,7 +484,11 @@ local function drawSupercruiseTargetPanel(player, center, reticuleRadius)
 	ui.addRectFilled(tl, br, colPanelBg, 5, ui.RoundCornersAll)
 	ui.addRect(tl, br, colBorder, 5, ui.RoundCornersAll, 1.0)
 
-	local targetName = truncateTextToWidth(target:GetLabel() or "TARGET", pionillium.small, panelW - padX * 2)
+	local rawLabel = target:GetLabel() or "TARGET"
+	if isShipTarget and player.CanIdentify and not player:CanIdentify(target) then
+		rawLabel = "UNIDENTIFIED"
+	end
+	local targetName = truncateTextToWidth(rawLabel, pionillium.small, panelW - padX * 2)
 
 	ui.addStyledText(Vector2(panelX + padX, panelY + math.round(6 * s)), ui.anchor.left, ui.anchor.top,
 		"FSD NAV LOCK", colCyan, pionillium.small)
@@ -671,6 +734,74 @@ local function drawDisabledSubsystemBanner(player, center, reticuleRadius)
 	end
 end
 
+local function drawTransponderAndScanBanners(player, center, reticuleRadius)
+	local yTop = center.y - reticuleRadius - 94
+
+	if policeWarning then
+		if player.GetTransponder and player:GetTransponder() then
+			policeWarning = nil
+		elseif Game.time > (policeWarning.deadline + 1.5) then
+			policeWarning = nil
+		else
+			local rem = math.max(0.0, policeWarning.deadline - Game.time)
+			local pulse = 0.65 + 0.35 * math.sin(Game.time * 12.0)
+			local borderCol = Color(255, math.floor(75 * pulse), math.floor(55 * pulse), 250)
+			local boxW = 460
+			local boxH = 38
+			local tl = Vector2(center.x - boxW * 0.5, yTop)
+			local br = Vector2(center.x + boxW * 0.5, yTop + boxH)
+			local hovered = ui.isMouseHoveringRect(tl, br)
+
+			ui.addRectFilled(tl, br, hovered and Color(55, 18, 18, 235) or colPanelBg, 4, ui.RoundCornersAll)
+			ui.addRect(tl, br, borderCol, 4, ui.RoundCornersAll, hovered and 2.5 or 2.0)
+			ui.addStyledText(Vector2(center.x, tl.y + boxH * 0.5), ui.anchor.center, ui.anchor.center,
+				string.format("POLICE ORDER: TURN TRANSPONDER ON (WARN %d/2 — %.1fs) [ \\ OR CLICK ]",
+					policeWarning.count, rem),
+				borderCol, pionillium.small)
+			if hovered and ui.isMouseClicked(0) and player.SetTransponder then
+				player:SetTransponder(true)
+				ui.playSfx("OK")
+			end
+			yTop = yTop - 44
+		end
+	end
+
+	if scanAlert then
+		if Game.time > scanAlert.expiresAt then
+			scanAlert = nil
+		else
+			local boxW = 390
+			local boxH = 28
+			local tl = Vector2(center.x - boxW * 0.5, yTop)
+			local br = Vector2(center.x + boxW * 0.5, yTop + boxH)
+			ui.addRectFilled(tl, br, colPanelBg, 4, ui.RoundCornersAll)
+			ui.addRect(tl, br, colAmber, 4, ui.RoundCornersAll, 1.5)
+			ui.addStyledText(Vector2(center.x, tl.y + boxH * 0.5), ui.anchor.center, ui.anchor.center,
+				string.format("SCAN DETECTED (%s) BY %s", scanAlert.scanType, scanAlert.scannerLabel),
+				colAmber, pionillium.small)
+			yTop = yTop - 34
+		end
+	end
+
+	if policeEscort and not player:IsDocked() and not player:IsLanded() then
+		local boxW = 320
+		local boxH = 24
+		local tl = Vector2(center.x - boxW * 0.5, yTop)
+		local br = Vector2(center.x + boxW * 0.5, yTop + boxH)
+		local hovered = ui.isMouseHoveringRect(tl, br)
+		ui.addRectFilled(tl, br, hovered and Color(18, 42, 60, 225) or colPanelBg, 4, ui.RoundCornersAll)
+		ui.addRect(tl, br, colCyan, 4, ui.RoundCornersAll, 1.0)
+		ui.addStyledText(Vector2(center.x, tl.y + boxH * 0.5), ui.anchor.center, ui.anchor.center,
+			string.format("SECURITY ESCORT: %s [ CLICK TO DISMISS ]", policeEscort.officerLabel),
+			colCyan, pionillium.tiny)
+		if hovered and ui.isMouseClicked(0) then
+			Event.Queue("onPlayerDismissPoliceEscort")
+			policeEscort = nil
+			ui.playSfx("OK")
+		end
+	end
+end
+
 gameView.registerModule("supercruise-hud", {
 	showInHyperspace = false,
 	draw = function()
@@ -681,6 +812,7 @@ gameView.registerModule("supercruise-hud", {
 		local radius = ui.reticuleCircleRadius or (math.min(ui.screenWidth, ui.screenHeight) / 8)
 
 		drawStatusBanner(player, center, radius)
+		drawTransponderAndScanBanners(player, center, radius)
 		drawDisabledSubsystemBanner(player, center, radius)
 
 		if player:IsSupercruiseActive() then

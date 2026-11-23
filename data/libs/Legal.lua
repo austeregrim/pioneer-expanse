@@ -1,6 +1,7 @@
 -- Copyright © 2008-2026 Pioneer Developers. See AUTHORS.txt for details
 -- Licensed under the terms of the GPL v3. See licenses/GPL-3.txt
 local Comms = require 'Comms'
+local FactionRoles = require 'FactionRoles'
 local Game = require 'Game'
 local PlayerState = require 'PlayerState'
 
@@ -38,6 +39,79 @@ Legal.CrimeType["TRADING_ILLEGAL_GOODS"] = {basefine = 5e3, name = l.TRADING_ILL
 Legal.CrimeType["WEAPONS_DISCHARGE"] = {basefine = 5e2, name = l.UNLAWFUL_WEAPONS_DISCHARGE}
 Legal.CrimeType["ECM_DISCHARGE"] = {basefine = 7.5e2, name = l.UNLAWFUL_ECM_DISCHARGE}
 Legal.CrimeType["CONTRACT_FRAUD"] = {basefine = 5e2, name = l.CONTRACT_FRAUD}
+Legal.CrimeType["TRANSPONDER_OFF"] = {basefine = 1.5e3, name = l.TRANSPONDER_OFF or "Transponder Offline"}
+
+-- Returns true if the given (or current) star system requires transponders in open space and at stations.
+function Legal.IsTransponderRequired(system)
+	local sys = system or Game.system
+	if not sys then return false end
+	local pop = sys.population or 0
+	local lawlessness = sys.lawlessness or 1.0
+	local gov = sys.govtype
+	if pop <= 0 or lawlessness >= 0.75 then
+		return false
+	end
+	if gov == "NONE" or gov == "DISORDER" then
+		return false
+	end
+	return true
+end
+
+-- Checks warrant status of `target` from `observer`'s perspective per Plan I §3b.
+-- Returns: status ("UNKNOWN" | "NO_SCANNER" | "NO_ACCESS" | "WANTED" | "CLEAN"), bounty, factionName
+function Legal.LookupWarrant(target, observer)
+	if not target or not target:exists() then
+		return "UNKNOWN", 0, nil
+	end
+	local obs = observer or Game.player
+	if obs and obs.CanIdentify and not obs:CanIdentify(target) then
+		return "UNKNOWN", 0, nil
+	end
+
+	local sys = Game.system
+	local factionName = (sys and sys.faction and sys.faction.name) or nil
+	local isWanted = target.IsWanted and target:IsWanted() or false
+	local bounty = (isWanted and target.GetBounty) and target:GetBounty() or 0
+
+	if obs and obs.IsPlayer and obs:IsPlayer() then
+		local hasWarrantScanner = (obs["warrant_scanner_cap"] or 0) > 0
+		if not hasWarrantScanner then
+			return "NO_SCANNER", 0, factionName
+		end
+		if factionName and not FactionRoles.HasBountyLicence(factionName) then
+			return "NO_ACCESS", 0, factionName
+		end
+	else
+		local policeId = sys and sys.faction and sys.faction.policeShip
+		local isPolice = (policeId and obs and obs.shipId == policeId)
+		if not isPolice then
+			local hasWarrantScanner = obs and ((obs["warrant_scanner_cap"] or 0) > 0)
+			if not hasWarrantScanner then
+				return "NO_SCANNER", 0, factionName
+			end
+		end
+	end
+
+	return (isWanted and "WANTED" or "CLEAN"), bounty, factionName
+end
+
+-- Records a police-witnessed crime citation anywhere in a policed system (including open space).
+function Legal:recordPoliceCitation(ship, crime, fineOverride, sourceLabel)
+	if not ship or not ship:IsPlayer() then return 0 end
+	if not self.CrimeType[crime] then return 0 end
+	local sys = Game.system
+	local lawlessness = (sys and sys.lawlessness) or 0.0
+	local fine = fineOverride or self:fine(crime, lawlessness)
+	if sourceLabel then
+		Comms.ImportantMessage(string.interp(l.X_CANNOT_BE_TOLERATED_HERE, { crime = self.CrimeType[crime].name }), sourceLabel)
+	end
+	PlayerState.AddCrime(crime, fine)
+	local _, totalFine = PlayerState.GetCrimeOutstanding()
+	if Game.player and Game.player.SetWanted then
+		Game.player:SetWanted(totalFine > 5500, totalFine)
+	end
+	return fine
+end
 
 
 function Legal:fine (crime, lawlessness)

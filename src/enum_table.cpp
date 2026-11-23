@@ -125,6 +125,7 @@ const struct EnumItem ENUM_DockingRefusedReason[] = {
 	{ "ClearanceAlreadyGranted", int(SpaceStation::DockingRefusedReason::ClearanceAlreadyGranted) },
 	{ "TooFarFromStation", int(SpaceStation::DockingRefusedReason::TooFarFromStation) },
 	{ "NoBaysAvailable", int(SpaceStation::DockingRefusedReason::NoBaysAvailable) },
+	{ "TransponderOff", int(SpaceStation::DockingRefusedReason::TransponderOff) },
 	{ 0, 0 },
 };
 

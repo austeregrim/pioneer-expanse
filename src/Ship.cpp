@@ -25,6 +25,8 @@
 #include "Shields.h"
 #include "ShipAICmd.h"
 #include "ship/ShipLights.h"
+#include "ship/SupercruiseController.h"
+#include "ship/Visibility.h"
 #include "Space.h"
 #include "SpaceStation.h"
 #include "WorldView.h"
@@ -308,8 +310,16 @@ Ship::Ship(const Json &jsonObj, Space *space) :
 		m_beaconsEnabled = shipObj.value("beacons_enabled", true);
 		m_forwardLightsEnabled = shipObj.value("forward_lights_enabled", false);
 		m_landingLightsEnabled = shipObj.value("landing_lights_enabled", m_wheelState > 0.01f);
+		m_transponder.requested = shipObj.value("transponder_requested", true);
+		m_transponder.active = shipObj.value("transponder_active", true);
+		m_transponder.warmupRemaining = Clamp(shipObj.value("transponder_warmup", 0.0f), 0.0f, Visibility::TransponderState::WARMUP_TIME);
 		if (m_supercruise)
 			m_supercruise->LoadFromJson(shipObj);
+		if (m_flightState == SUPERCRUISE) {
+			SetMoving(true);
+			if (m_supercruise && m_supercruise->GetSpeed() > 0.0 && GetVelocity().LengthSqr() < 1.0)
+				SetVelocity(-GetOrient().VectorZ() * m_supercruise->GetSpeed());
+		}
 
 		m_shields->LoadFromJson(shipObj["shields"]);
 
@@ -446,6 +456,9 @@ void Ship::SaveToJson(Json &jsonObj, Space *space)
 	shipObj["beacons_enabled"] = m_beaconsEnabled;
 	shipObj["forward_lights_enabled"] = m_forwardLightsEnabled;
 	shipObj["landing_lights_enabled"] = m_landingLightsEnabled;
+	shipObj["transponder_requested"] = m_transponder.requested;
+	shipObj["transponder_active"] = m_transponder.active;
+	shipObj["transponder_warmup"] = m_transponder.warmupRemaining;
 	if (m_supercruise)
 		m_supercruise->SaveToJson(shipObj, space);
 
@@ -1248,6 +1261,10 @@ void Ship::UpdateEquipStats()
 
 	m_stats.atmo_shield_cap = p.Get("atmo_shield_cap");
 	m_stats.radar_cap = p.Get("radar_cap");
+	m_stats.sublight_sensor_cap = p.Get("sublight_sensor_cap");
+	m_stats.warrant_scanner_cap = p.Get("warrant_scanner_cap");
+	m_stats.scan_detector_cap = p.Get("scan_detector_cap");
+	m_stats.wake_tracer_cap = p.Get("wake_tracer_cap");
 	m_stats.fuel_scoop_cap = p.Get("fuel_scoop_cap");
 	m_stats.cargo_life_support_cap = p.Get("cargo_life_support_cap");
 	m_stats.hull_autorepair_cap = p.Get("hull_autorepair_cap");
@@ -1630,6 +1647,7 @@ void Ship::TimeStepUpdate(const float timeStep)
 	PROFILE_SCOPED()
 
 	m_lastDamageSound += timeStep;
+	m_transponder.Update(timeStep);
 
 	if (m_flightState == SUPERCRUISE) {
 		// In Supercruise, cancel Newtonian forces/torques so DynamicBody integrates kinematic FSD velocity cleanly
@@ -1845,10 +1863,18 @@ void Ship::UpdateAlertState()
 				if (ship->GetShipType()->tag == ShipType::TAG_STATIC_SHIP) continue;
 				if (ship->GetFlightState() == LANDED || ship->GetFlightState() == DOCKED) continue;
 
+				Uint32 gunstate = ship->m_gunManager->IsFiring();
+				if (!SupercruiseController::IsShipVisibleToSensors(this, ship) && !gunstate)
+					continue;
+				if (!gunstate && !SupercruiseController::HasTrackedLock(this, ship) && !SupercruiseController::IsShipFTL(ship) && ship->IsTransponderActive()) {
+					const double radarRange = Visibility::GetRadarDisplayRange(this);
+					if (radarRange <= 0.0 || GetPositionRelTo(ship).LengthSqr() > radarRange * radarRange)
+						continue;
+				}
+
 				if (GetPositionRelTo(ship).LengthSqr() < ALERT_DISTANCE * ALERT_DISTANCE) {
 					ship_is_near = true;
 
-					Uint32 gunstate = ship->m_gunManager->IsFiring();
 					if (gunstate) {
 						ship_is_firing = true;
 						break;
@@ -2266,6 +2292,8 @@ void Ship::NotifyRemoved(const Body *const removedBody)
 
 void Ship::OnDocked(SpaceStation *s, int port)
 {
+	if (m_supercruise)
+		m_supercruise->ClearSupercruiseLock();
 	LuaEvent::Queue("onShipDocked", this, s, port);
 }
 

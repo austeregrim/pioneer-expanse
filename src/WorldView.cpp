@@ -1076,7 +1076,7 @@ void WorldView::DrawSupercruiseShips()
 			continue;
 
 		// Low Wake / Distress Signal beacon (visible in Supercruise)
-		if (b->IsType(ObjectType::HYPERSPACECLOUD) && static_cast<const HyperspaceCloud *>(b)->IsLowWake()) {
+		if (pState == Ship::SUPERCRUISE && b->IsType(ObjectType::HYPERSPACECLOUD) && static_cast<const HyperspaceCloud *>(b)->IsLowWake()) {
 			const vector3d wakeCamPos = b->GetInterpPositionRelTo(camFrameId);
 			if (wakeCamPos.z <= zClip) {
 				const double dist = wakeCamPos.Length();
@@ -1102,8 +1102,9 @@ void WorldView::DrawSupercruiseShips()
 			continue;
 
 		const SupercruiseController *sc = ship->GetSupercruise();
-		// Brief FSD Supercruise entry optical flash (visible when an NPC initiates Supercruise nearby)
-		if (sc && rootFrame && sc->GetEntryFlashTimer() > 0.0f) {
+		// Brief FSD Supercruise entry optical flash (only when visible to player sensors)
+		if (sc && rootFrame && sc->GetEntryFlashTimer() > 0.0f &&
+			SupercruiseController::IsShipVisibleToSensors(Pi::player, ship)) {
 			const vector3d flashCamPos = rootCamPos + rootCamOrient * sc->GetEntryFlashRootPos();
 			if (flashCamPos.z <= zClip) {
 				const double flashDist = flashCamPos.Length();
@@ -1160,8 +1161,14 @@ void WorldView::DrawSupercruiseShips()
 			0.0, 1.0);
 
 		const double distLs = dist / SupercruiseController::LIGHT_SPEED;
-		const float proxScale = float(Clamp(1.35 - 0.35 * std::log10(1.0 + distLs * 0.2), 0.75, 1.35));
-		const float visAlpha = inAtmosphere ? (bgVis * 0.85f) : Clamp(0.45f + 0.55f * bgVis, 0.45f, 1.0f);
+		const bool isPlayerTarget = (ship == Pi::player->GetCombatTarget() || ship == Pi::player->GetNavTarget());
+		float proxScale = float(Clamp(1.30 - 0.38 * std::log10(1.0 + distLs * 0.25), 0.28, 1.30));
+		float distAlpha = (distLs <= 600.0) ? 1.0f : float(Clamp(1.0 / (1.0 + std::pow((distLs - 600.0) / 2200.0, 1.35)), 0.14, 1.0));
+		if (isPlayerTarget) {
+			proxScale = std::max(proxScale, 0.55f);
+			distAlpha = std::max(distAlpha, 0.55f);
+		}
+		const float visAlpha = (inAtmosphere ? (bgVis * 0.85f) : Clamp(0.45f + 0.55f * bgVis, 0.45f, 1.0f)) * distAlpha;
 		const float glareScale = (inAtmosphere ? 0.65f : 1.0f) * proxScale;
 
 		const float outerHaloHalf = (9.5f + 6.5f * float(speedLog)) * glareScale;

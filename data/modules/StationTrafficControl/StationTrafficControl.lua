@@ -140,6 +140,8 @@ local function onDockingClearanceDenied(station, ship, reason)
 		Comms.Message(l.CLEARANCE_ALREADY_GRANTED_BAY_N:interp({ bay = station:GetAssignedBayNumber(ship) + 1 }), station.label)
 	elseif reason == "TooFarFromStation" then
 		Comms.Message(l.CLEARANCE_DENIED_TOO_FAR, station.label)
+	elseif reason == "TransponderOff" then
+		Comms.ImportantMessage("Docking clearance DENIED — ship transponder is offline. Activate your transponder and request clearance again.", station.label)
 	else
 		Comms.Message(l.CLEARANCE_DENIED_NO_BAYS, station.label)
 	end

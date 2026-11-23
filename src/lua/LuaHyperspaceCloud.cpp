@@ -69,6 +69,20 @@ static int l_hyperspace_cloud_get_due_date(lua_State *l)
 	return 1;
 }
 
+static int l_hyperspace_cloud_is_low_wake(lua_State *l)
+{
+	HyperspaceCloud *cloud = LuaObject<HyperspaceCloud>::CheckFromLua(1);
+	LuaPush(l, cloud->IsLowWake());
+	return 1;
+}
+
+static int l_hyperspace_cloud_get_birth_date(lua_State *l)
+{
+	HyperspaceCloud *cloud = LuaObject<HyperspaceCloud>::CheckFromLua(1);
+	LuaPush(l, cloud->GetBirthDate());
+	return 1;
+}
+
 template <>
 const char *LuaObject<HyperspaceCloud>::s_type = "HyperspaceCloud";
 
@@ -79,8 +93,10 @@ void LuaObject<HyperspaceCloud>::RegisterClass()
 
 	static const luaL_Reg l_methods[] = {
 		{ "IsArrival", l_hyperspace_cloud_is_arrival },
+		{ "IsLowWake", l_hyperspace_cloud_is_low_wake },
 		{ "GetShip", l_hyperspace_cloud_get_ship },
 		{ "GetDueDate", l_hyperspace_cloud_get_due_date },
+		{ "GetBirthDate", l_hyperspace_cloud_get_birth_date },
 
 		{ 0, 0 }
 	};

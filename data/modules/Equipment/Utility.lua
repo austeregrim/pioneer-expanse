@@ -57,6 +57,30 @@ Equipment.Register("misc.hypercloud_analyzer", EquipType.New {
 	icon_name="equip_scanner"
 })
 
+Equipment.Register("misc.warrant_scanner", EquipType.New {
+	l10n_key="WARRANT_SCANNER",
+	price=3200, purchasable=true, tech_level=4,
+	slot = { type="utility.scanner.warrant", size=1, hardpoint=true },
+	mass=0.4, volume=0.5, capabilities={ warrant_scanner=1 },
+	icon_name="equip_scanner"
+})
+
+Equipment.Register("misc.scan_detector", EquipType.New {
+	l10n_key="SCAN_DETECTOR",
+	price=2200, purchasable=true, tech_level=3,
+	slot = { type="utility.scanner.scan_detector", size=1, hardpoint=true },
+	mass=0.2, volume=0.3, capabilities={ scan_detector=1 },
+	icon_name="equip_scanner"
+})
+
+Equipment.Register("misc.wake_tracer", EquipType.New {
+	l10n_key="WAKE_TRACER",
+	price=5400, purchasable=true, tech_level=6,
+	slot = { type="utility.scanner.wake_tracer", size=1, hardpoint=true },
+	mass=0.5, volume=0.5, capabilities={ wake_tracer=1 },
+	icon_name="equip_scanner"
+})
+
 Equipment.Register("misc.planetscanner", BodyScannerType.New {
 	l10n_key = 'SURFACE_SCANNER',
 	price=2950, purchasable=true, tech_level=5,

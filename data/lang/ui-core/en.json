@@ -2859,6 +2859,10 @@
     "description": "",
     "message": "Trading illegal goods"
   },
+  "TRANSPONDER_OFF": {
+    "description": "",
+    "message": "Transponder Offline"
+  },
   "TRADING_TO": {
     "description": "Indicates the destination system of a commodity trade.",
     "message": "To {system}:"

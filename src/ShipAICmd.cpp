@@ -446,7 +446,7 @@ bool AICmdKill::TimeStepUpdate()
 			Ship *targetShip = static_cast<Ship *>(m_target);
 			SupercruiseController *sc = ship->GetSupercruise();
 			bool hasLock = SupercruiseController::HasTrackedLock(ship, targetShip);
-			if (!hasLock && sc && SupercruiseController::IsShipFTL(targetShip)) {
+			if (!hasLock && sc && SupercruiseController::IsShipVisibleToSensors(ship, targetShip)) {
 				hasLock = sc->AcquireSupercruiseLock(targetShip);
 			}
 			if (!hasLock) {

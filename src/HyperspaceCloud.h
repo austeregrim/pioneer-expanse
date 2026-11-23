@@ -29,6 +29,7 @@ public:
 	void TimeStepUpdate(const float timeStep) override;
 	Ship *GetShip() { return m_ship; }
 	Ship *EvictShip();
+	double GetBirthDate() const { return m_birthdate; }
 	double GetDueDate() const { return m_due; }
 	void SetIsArrival(bool isArrival);
 	bool IsArrival() const { return m_isArrival; }

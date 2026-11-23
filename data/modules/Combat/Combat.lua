@@ -16,6 +16,7 @@ local NameGen = require 'NameGen'
 local utils = require 'utils'
 local PlayerState = require 'PlayerState'
 local FactionStanding = require 'FactionStanding'
+local FactionRoles = require 'FactionRoles'
 
 local MissionUtils = require 'modules.MissionUtils'
 local ShipBuilder = require 'modules.MissionUtils.ShipBuilder'
@@ -134,6 +135,14 @@ local onChat = function (form, ref, option)
 			form:SetMessage(l.RADAR_NOT_INSTALLED)
 			form:RemoveNavButton()
 			return
+		end
+		if ad.flavour and ad.flavour.id == "POLICE" then
+			local reqFaction = ad.factionName or (Game.system and Game.system.faction and Game.system.faction.name)
+			if reqFaction and not FactionRoles.HasBountyLicence(reqFaction) then
+				form:SetMessage(string.format("You need an active %s Bounty Hunter Licence to take this contract. Visit the station Police office to register.", reqFaction))
+				form:RemoveNavButton()
+				return
+			end
 		end
 		form:RemoveAdvertOnClose()
 		ads[ref] = nil

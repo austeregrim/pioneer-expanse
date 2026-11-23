@@ -239,6 +239,10 @@
     "description": "Toggle Frame Shift Drive / Supercruise",
     "message": "Toggle Frame Shift Drive / Supercruise"
   },
+  "BIND_TOGGLE_TRANSPONDER": {
+    "description": "Toggle ship identification transponder on or off",
+    "message": "Toggle Ship Transponder"
+  },
   "BIND_TOP_CAMERA": {
     "description": "Descriptive name for the TopCamera action.",
     "message": "Switch to Top Camera"

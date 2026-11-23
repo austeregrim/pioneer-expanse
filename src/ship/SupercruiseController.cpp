@@ -3,6 +3,7 @@
 
 #include "SupercruiseController.h"
 #include "ship/OrbitalDockingGeometry.h"
+#include "ship/Visibility.h"
 #include "Frame.h"
 #include "Game.h"
 #include "HyperspaceCloud.h"
@@ -38,6 +39,7 @@ void SupercruiseController::SaveToJson(Json &jsonObj, Space *space) const
 	scObj["cooldown"] = m_cooldown;
 	scObj["throttle"] = m_throttle;
 	scObj["speed"] = m_speed;
+	scObj["speed_cap"] = m_speedCap;
 	scObj["assist_active"] = m_assistActive;
 	scObj["dock_on_arrival"] = m_dockOnArrival;
 	scObj["nullifier_cooldown"] = m_nullifierCooldown;
@@ -68,8 +70,9 @@ void SupercruiseController::LoadFromJson(const Json &jsonObj)
 	m_charging = scObj.value("charging", false);
 	m_chargeCountdown = scObj.value("charge_countdown", 0.0f);
 	m_cooldown = scObj.value("cooldown", 0.0f);
-	m_throttle = scObj.value("throttle", 0.5);
+	m_throttle = scObj.value("throttle", 0.75);
 	m_speed = scObj.value("speed", 0.0);
+	m_speedCap = scObj.value("speed_cap", 0.0);
 	m_assistActive = scObj.value("assist_active", false);
 	m_dockOnArrival = scObj.value("dock_on_arrival", false);
 	m_nullifierCooldown = scObj.value("nullifier_cooldown", 0.0f);
@@ -145,10 +148,9 @@ void SupercruiseController::SetTargetPosition(FrameId frameId, const vector3d &o
 
 bool SupercruiseController::AcquireSupercruiseLock(Ship *target)
 {
-	if (!m_ship || !IsActive() || !target || target->IsDead() || target == m_ship ||
-		target->GetFlightState() != Ship::SUPERCRUISE)
+	if (!m_ship || m_ship->IsDocked() || !target || target->IsDead() || target->IsDocked() || target == m_ship)
 		return false;
-	if (IsShipFTL(target) || m_lockedShip == target || IsInterdictingPeer(target)) {
+	if (IsShipVisibleToSensors(m_ship, target) || m_lockedShip == target || IsInterdictingPeer(target)) {
 		m_lockedShip = target;
 		m_lockedShipIndex = 0;
 		return true;
@@ -163,18 +165,24 @@ bool SupercruiseController::IsActive() const
 
 bool SupercruiseController::IsShipFTL(const Ship *ship)
 {
-	if (!ship || ship->IsDead() || ship->GetFlightState() != Ship::SUPERCRUISE)
+	if (!ship || ship->IsDead() || !ship->IsMoving() || ship->GetFlightState() != Ship::SUPERCRUISE)
 		return false;
 	const SupercruiseController *sc = ship->GetSupercruise();
-	return sc && sc->GetSpeed() >= LIGHT_SPEED;
+	if (!sc || sc->GetSpeed() < LIGHT_SPEED)
+		return false;
+	const double minActualSpeedSq = (LIGHT_SPEED * 0.90) * (LIGHT_SPEED * 0.90);
+	return ship->GetVelocity().LengthSqr() >= minActualSpeedSq;
 }
 
 bool SupercruiseController::HasTrackedLock(const Ship *observer, const Ship *target)
 {
-	if (!observer || !target || target->IsDead() || observer == target)
+	if (!observer || !target || observer == target)
 		return false;
-	if (observer->GetFlightState() != Ship::SUPERCRUISE || target->GetFlightState() != Ship::SUPERCRUISE)
+	const Space *space = Pi::game ? Pi::game->GetSpace() : nullptr;
+	const bool occluded = Visibility::IsOccludedInSpace(space, observer, target);
+	if (!Visibility::EvaluateLockPersistence(!target->IsDead(), target->IsInSpace(), target->IsDocked(), observer->IsDocked(), occluded))
 		return false;
+
 	const SupercruiseController *obsSc = observer->GetSupercruise();
 	if (obsSc && obsSc->IsInterdictingPeer(target))
 		return true;
@@ -187,14 +195,22 @@ bool SupercruiseController::HasTrackedLock(const Ship *observer, const Ship *tar
 
 bool SupercruiseController::IsShipVisibleToSensors(const Ship *observer, const Ship *target)
 {
-	if (!observer || !target || target->IsDead() || observer == target)
+	if (!observer || !target || observer == target)
 		return false;
-	const bool observerInSC = (observer->GetFlightState() == Ship::SUPERCRUISE);
-	const bool targetInSC = (target->GetFlightState() == Ship::SUPERCRUISE);
-	if (observerInSC) {
-		return IsShipFTL(target) || HasTrackedLock(observer, target);
-	}
-	return !targetInSC;
+	const Space *space = Pi::game ? Pi::game->GetSpace() : nullptr;
+	Visibility::SensorVisibilityParams params;
+	params.targetAlive = !target->IsDead();
+	params.targetInSpace = target->IsInSpace();
+	params.targetDocked = target->IsDocked();
+	params.targetInSC = (target->GetFlightState() == Ship::SUPERCRUISE);
+	params.targetIsFTL = IsShipFTL(target);
+	params.targetTransponderActive = target->IsTransponderActive();
+	params.observerInSC = (observer->GetFlightState() == Ship::SUPERCRUISE);
+	params.hasExistingLock = HasTrackedLock(observer, target);
+	params.isOccluded = Visibility::IsOccludedInSpace(space, observer, target);
+	params.distance = observer->GetPositionRelTo(target).Length();
+	params.darkSensorRange = Visibility::GetDarkSensorRange(observer);
+	return Visibility::EvaluateSensorVisibility(params);
 }
 
 double SupercruiseController::GetExclusionZoneRadius(const Body *body)
@@ -547,12 +563,9 @@ void SupercruiseController::EnterSupercruise()
 	}
 
 	m_ship->SetFlightState(Ship::SUPERCRUISE);
-	ClearSupercruiseLock();
-	m_speed = std::max(MIN_SPEED, m_ship->GetVelocity().Length());
-	if (m_throttle < 0.25)
-		m_throttle = 0.50;
-	if (m_assistActive)
-		m_throttle = 0.75;
+	const double entrySpeed = std::max(MIN_ENGAGE_SPEED, m_ship->GetVelocity().Length());
+	m_speed = Clamp(entrySpeed, MIN_ENGAGE_SPEED, MAX_SPEED);
+	m_throttle = 0.75;
 
 	m_ship->SetAngVelocity(vector3d(0.0));
 	m_ship->SetVelocity(-m_ship->GetOrient().VectorZ() * m_speed);
@@ -594,8 +607,10 @@ void SupercruiseController::EnterSupercruiseImmediate(double initialSpeed)
 	}
 
 	m_ship->SetFlightState(Ship::SUPERCRUISE);
-	ClearSupercruiseLock();
-	m_speed = Clamp(initialSpeed, MIN_SPEED, MAX_SPEED);
+	double clampedSpeed = Clamp(initialSpeed, MIN_SPEED, MAX_SPEED);
+	if (m_speedCap > 0.0)
+		clampedSpeed = std::min(clampedSpeed, std::max(MIN_SPEED, m_speedCap));
+	m_speed = clampedSpeed;
 	m_throttle = 0.75;
 	m_desiredSpeed = m_speed;
 
@@ -646,7 +661,6 @@ void SupercruiseController::EnterSupercruiseOnHyperspaceExit()
 void SupercruiseController::DropIntoRing(Planet *planet, const std::string &reason)
 {
 	ClearInterdiction();
-	ClearSupercruiseLock();
 	m_charging = false;
 	m_assistActive = false;
 	m_dockOnArrival = false;
@@ -731,7 +745,6 @@ void SupercruiseController::SafeDisengage()
 	Planet *ringPlanet = m_ringDropPlanet;
 	const bool dockAfterDrop = m_dockOnArrival;
 
-	ClearSupercruiseLock();
 	m_charging = false;
 	m_assistActive = false;
 	m_dockOnArrival = false;
@@ -909,7 +922,6 @@ void SupercruiseController::ClearStaleSupercruiseTarget()
 void SupercruiseController::NormalDrop(const std::string &reason)
 {
 	ClearInterdiction();
-	ClearSupercruiseLock();
 	m_charging = false;
 	m_assistActive = false;
 	m_dockOnArrival = false;
@@ -938,7 +950,6 @@ void SupercruiseController::NormalDrop(const std::string &reason)
 void SupercruiseController::EmergencyDrop(const std::string &reason)
 {
 	ClearInterdiction();
-	ClearSupercruiseLock();
 	m_charging = false;
 	m_assistActive = false;
 	m_dockOnArrival = false;
@@ -979,7 +990,7 @@ void SupercruiseController::Reset()
 	m_dockOnArrival = false;
 	m_speed = 0.0;
 	m_desiredSpeed = 0.0;
-	m_throttle = 0.5;
+	m_throttle = 0.75;
 	m_safeDisengageReady = false;
 	m_slowDownWarning = false;
 	m_ringDropPlanet = nullptr;
@@ -1293,7 +1304,7 @@ void SupercruiseController::ComputeAISteering(const vector3d &targetPosRelToShip
 
 			// Keep a tighter buffer when approaching the target body (or a station on/orbiting it) vs an intervening body
 			const double margin = (b == targetBody)
-				? (exclR * 1.03 + 20000.0)
+				? (exclR + std::min(200000.0, SAFE_DISENGAGE_DIST * 0.25))
 				: (targetOnOrNearBody ? (exclR + 15000.0) : (exclR * 1.35 + 80000.0));
 			const vector3d toBody = b->GetPositionRelTo(m_ship);
 			const double bodyDist = toBody.Length();
@@ -1308,6 +1319,9 @@ void SupercruiseController::ComputeAISteering(const vector3d &targetPosRelToShip
 				bestAvoidDist = std::min(bestAvoidDist, bodyDist);
 				continue;
 			}
+
+			if (b == targetBody)
+				continue;
 
 			// Occlusion behind a host planet is already handled in branch 1 (GetTargetObscuredBy),
 			// so do not deflect away from a surface or low-orbit target unless the path actually pierces the exclusion zone.
@@ -1635,8 +1649,16 @@ void SupercruiseController::StaticUpdate(float timeStep)
 		m_entryFlashTimer = std::max(0.0f, m_entryFlashTimer - timeStep);
 	}
 
-	if (m_lockedShip && (!IsActive() || m_lockedShip->IsDead() || m_lockedShip->GetFlightState() != Ship::SUPERCRUISE)) {
-		ClearSupercruiseLock();
+	if (m_lockedShip) {
+		const Space *space = Pi::game ? Pi::game->GetSpace() : nullptr;
+		const bool keepLock = Visibility::EvaluateLockPersistence(
+			!m_lockedShip->IsDead(),
+			m_lockedShip->IsInSpace(),
+			m_lockedShip->IsDocked(),
+			m_ship && m_ship->IsDocked(),
+			Visibility::IsOccludedInSpace(space, m_ship, m_lockedShip));
+		if (!keepLock)
+			ClearSupercruiseLock();
 	}
 
 	if (m_ship && m_ship->IsType(ObjectType::PLAYER)) {
@@ -1803,25 +1825,12 @@ void SupercruiseController::StaticUpdate(float timeStep)
 	} else {
 		m_desiredSpeed = std::max(MIN_SPEED, m_throttle * targetCapSpeed);
 	}
-
-	// Exponential acceleration & braking physics:
-	// Responsive deceleration allows 6-second rule approaches and prompt speed reduction
-	// when throttling down or entering gravity wells, while overthrottling past 0:05 ETA
-	// causes an overshoot ("Loop of Shame").
-	if (m_speed < m_desiredSpeed) {
-		const double accel = std::max(45000.0, m_speed * 0.38) * (0.35 + 0.65 * m_throttle);
-		m_speed = std::min(m_desiredSpeed, m_speed + accel * timeStep);
-	} else if (m_speed > m_desiredSpeed) {
-		const double speedDelta = m_speed - m_desiredSpeed;
-		double decelFactor = 0.45 + 1.25 * m_gravityStrain;
-		if (inBlueZone || m_assistActive) {
-			decelFactor = 0.85 + 2.0 * m_gravityStrain;
-		}
-		const double decel = std::max(150000.0, m_speed * decelFactor + speedDelta * (1.5 + 2.5 * m_gravityStrain));
-		m_speed = std::max(m_desiredSpeed, m_speed - decel * timeStep);
+	if (m_speedCap > 0.0) {
+		m_desiredSpeed = std::min(m_desiredSpeed, std::max(MIN_SPEED, m_speedCap));
 	}
 
-	m_speed = Clamp(m_speed, MIN_SPEED, MAX_SPEED);
+	// Smooth speed transitions (including sublight-entry ramp through MIN_SPEED) & gravity-well braking
+	m_speed = StepSpeed(m_speed, m_desiredSpeed, m_throttle, m_gravityStrain, (inBlueZone || m_assistActive), timeStep);
 
 	// Sample recent root-frame positions for curved FTL burn-in trails (only at FTL >= 1c)
 	if (m_speed >= LIGHT_SPEED) {
@@ -2105,9 +2114,9 @@ bool SupercruiseController::CanInterdict(const Ship *target, std::string *outRea
 		return false;
 	}
 	const SupercruiseController *targetSc = target->GetSupercruise();
-	if (!targetSc || (!IsShipFTL(target) && !HasTrackedLock(m_ship, target))) {
+	if (!targetSc || !IsShipVisibleToSensors(m_ship, target)) {
 		if (outReason)
-			*outReason = "TARGET IS SUBLIGHT (< 1.0c) — NO FTL SIGNATURE";
+			*outReason = "NO SENSOR LOCK ON TARGET";
 		return false;
 	}
 	if (m_interdictRole != INTERDICT_NONE) {
@@ -2448,7 +2457,10 @@ void SupercruiseController::DropPairFromInterdiction(Ship *attacker, Ship *targe
 	// Preserve/assign player combat target lock for immediate dogfighting
 	if (attacker->IsType(ObjectType::PLAYER)) {
 		static_cast<Player *>(attacker)->SetCombatTarget(target);
-	} else if (target->IsType(ObjectType::PLAYER)) {
+	} else {
+		attSc->AcquireSupercruiseLock(target);
+	}
+	if (target->IsType(ObjectType::PLAYER)) {
 		static_cast<Player *>(target)->SetCombatTarget(attacker);
 	}
 

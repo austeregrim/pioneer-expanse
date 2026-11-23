@@ -378,6 +378,9 @@ function StationProfiles.CategorizeEquipment(equip)
 	local ecm = slotType:match("^utility%.ecm") ~= nil
 	local combatScanner = slotType:match("^utility%.scanner%.combat_scanner") ~= nil
 		or slotType:match("^utility%.scanner%.hypercloud") ~= nil
+		or slotType:match("^utility%.scanner%.warrant") ~= nil
+		or slotType:match("^utility%.scanner%.scan_detector") ~= nil
+		or slotType:match("^utility%.scanner%.wake_tracer") ~= nil
 	local surveyScanner = slotType:match("^sensor%.discovery_scanner") ~= nil
 		or slotType:match("^utility%.scanner%.planet") ~= nil
 	local scanner = (slotType:match("^sensor") ~= nil) or (slotType:match("^utility%.scanner") ~= nil)

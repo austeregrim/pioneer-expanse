@@ -92,6 +92,30 @@ Equipment.Register("sensor.radar", SensorType.New {
 	icon_name="equip_radar"
 })
 
+Equipment.Register("sensor.sublight_array_1", SensorType.New {
+	l10n_key="SUBLIGHT_SENSOR_ARRAY_1",
+	price=4500, purchasable=true, tech_level=4,
+	slot = { type="sensor.radar", size=1 },
+	mass=1.4, volume=1.5, capabilities = { radar=1, sublight_sensor=1 },
+	icon_name="equip_radar"
+})
+
+Equipment.Register("sensor.sublight_array_2", SensorType.New {
+	l10n_key="SUBLIGHT_SENSOR_ARRAY_2",
+	price=14000, purchasable=true, tech_level=7,
+	slot = { type="sensor.radar", size=1 },
+	mass=2.0, volume=2.0, capabilities = { radar=2, sublight_sensor=2 },
+	icon_name="equip_radar"
+})
+
+Equipment.Register("sensor.sublight_array_3", SensorType.New {
+	l10n_key="SUBLIGHT_SENSOR_ARRAY_3",
+	price=36000, purchasable=true, tech_level=9,
+	slot = { type="sensor.radar", size=1 },
+	mass=2.8, volume=2.5, capabilities = { radar=3, sublight_sensor=3 },
+	icon_name="equip_radar"
+})
+
 Equipment.Register("sensor.discovery_scanner", SensorType.New {
 	l10n_key="DISCOVERY_SCANNER",
 	price=2500, purchasable=true, tech_level=2,

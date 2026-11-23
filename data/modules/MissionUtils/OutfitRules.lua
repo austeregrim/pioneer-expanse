@@ -136,7 +136,7 @@ OutfitRules.DefaultLaserCooling = {
 
 OutfitRules.DefaultRadar = {
 	slot = "sensor",
-	filter = "sensor.radar",
+	equip = "sensor.radar",
 	limit = 1
 }
 

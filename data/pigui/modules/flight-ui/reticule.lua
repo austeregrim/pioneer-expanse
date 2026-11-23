@@ -462,7 +462,11 @@ local function displayDetailData(target, data, radius, tooltip)
 				or colors.font
 
 			ui.withStyleColors({ Text = color }, function()
-				ui.textShadowed(target.label)
+				local displayLabel = target.label
+				if target:isa("Ship") and player.CanIdentify and not player:CanIdentify(target) then
+					displayLabel = "UNIDENTIFIED"
+				end
+				ui.textShadowed(displayLabel)
 			end)
 		end)
 

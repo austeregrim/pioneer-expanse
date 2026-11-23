@@ -133,6 +133,9 @@ local function displayOnScreenObjects()
 
 		if should_show_label and (not isSCShip or isTargeted or isHovered) then
 			local label = mainBody:GetLabel()
+			if mainBody:IsShip() and player.CanIdentify and not player:CanIdentify(mainBody) then
+				label = isSCShip and "UNIDENTIFIED LIGHT" or "UNIDENTIFIED"
+			end
 			if group.multiple then
 				label = label .. " (" .. #group.bodies .. ")"
 			end
@@ -174,7 +177,11 @@ local function displayOnScreenObjects()
 				ui.icon(getBodyIcon(b, true), small_iconsize, colors.frame)
 				ui.sameLine()
 				ui.alignTextToLineHeight(small_iconsize.y)
-				if ui.selectable(b:GetLabel(), b == navTarget, {}) then
+				local itemLabel = b:GetLabel()
+				if b:IsShip() and player.CanIdentify and not player:CanIdentify(b) then
+					itemLabel = (b:GetFlightState() == "SUPERCRUISE") and "UNIDENTIFIED LIGHT" or "UNIDENTIFIED"
+				end
+				if ui.selectable(itemLabel, b == navTarget, {}) then
 					if b:IsShip() then
 						player:SetCombatTarget(b)
 					else

@@ -7,6 +7,7 @@ local ui = require 'pigui'
 local StationView = require 'pigui.views.station-view'
 local Lang = require 'Lang'
 local Legal = require "Legal"
+local FactionRoles = require "FactionRoles"
 local Event = require 'Event'
 local utils = require "utils"
 local PiGuiFace = require 'pigui.libs.face'
@@ -187,6 +188,13 @@ local function drawRulesAndRegulations()
 		distance = Format.Distance(station.lawEnforcedRange),
 	})
 	ui.text(header)
+	ui.spacing()
+	local xpRequired = Legal.IsTransponderRequired(Game.system)
+	ui.withStyleColors({ Text = xpRequired and ui.theme.colors.accent or ui.theme.colors.fontDim }, function()
+		ui.text("System Transponder Law: " .. (xpRequired
+			and "MANDATORY (Transponder must remain ON in open space and at stations)"
+			or "NOT REQUIRED (Lawless / unregulated airspace)"))
+	end)
 	ui.newLine()
 
 	local lawlessness = Game.system.lawlessness
@@ -259,6 +267,90 @@ local policeTabs = {
 
 			for _, name in ipairs(illegal) do
 				ui.text(name)
+			end
+		end
+	},
+	{
+		name = "Bounty Licences",
+		draw = function()
+			local sys = Game.system
+			local faction = sys and sys.faction
+			local factionName = (faction and faction.name) or "Local Authority"
+			local info = FactionRoles.GetBountyLicenceInfo(factionName)
+			local terms = FactionRoles.GetBountyLicenceTerms(factionName, sys)
+
+			ui.withFont(orbiteer.heading, function()
+				ui.text("Faction Bounty Hunter Licence — " .. factionName)
+			end)
+			ui.spacing()
+			ui.textWrapped("A Bounty Hunter Licence authorizes you to accept faction bounty contracts and access " .. factionName .. " warrant registries via a Warrant Scanner. Licences are valid across all systems controlled by the issuing faction.")
+			ui.spacing()
+
+			if info and info.active then
+				local statusStr = info.deputy and "DEPUTIZED (PERPETUAL)"
+					or (info.perpetual and "ACTIVE (PERPETUAL)"
+					or string.format("ACTIVE (%.0f days remaining)", info.remainingDays or 0))
+				ui.withStyleColors({ Text = Color(100, 225, 165, 255) }, function()
+					ui.text("Status: " .. statusStr)
+				end)
+				if not info.perpetual then
+					ui.spacing()
+					local renewLabel = string.format("Renew Licence (%s, %d days)", Format.Money(terms.fee), terms.termDays)
+					if ui.button(renewLabel, nil) then
+						local ok, err = FactionRoles.PurchaseBountyLicence(factionName, sys)
+						if not ok and err == "INSUFFICIENT_FUNDS" then
+							popup:open()
+						else
+							ui.playSfx("OK")
+						end
+					end
+				end
+			else
+				local statusStr = (info and info.expired) and "EXPIRED" or "NOT HELD"
+				ui.withStyleColors({ Text = Color(255, 185, 55, 255) }, function()
+					ui.text("Status: " .. statusStr)
+				end)
+				ui.spacing()
+				local termStr = terms.perpetual and "Perpetual" or string.format("%d days", terms.termDays)
+				ui.text(string.format("Local Fee: %s   |   Term: %s", Format.Money(terms.fee), termStr))
+				ui.spacing()
+				local buyLabel = string.format("Purchase %s Bounty Licence (%s)", factionName, Format.Money(terms.fee))
+				if ui.button(buyLabel, nil) then
+					local ok, err = FactionRoles.PurchaseBountyLicence(factionName, sys)
+					if not ok and err == "INSUFFICIENT_FUNDS" then
+						popup:open()
+					else
+						ui.playSfx("OK")
+					end
+				end
+			end
+
+			local allLicences = FactionRoles.GetAllLicences()
+			if #allLicences > 0 then
+				ui.spacing()
+				ui.separator()
+				ui.spacing()
+				ui.withFont(orbiteer.heading, function()
+					ui.text("Held & Past Licences:")
+				end)
+				ui.withStyleVars({ CellPadding = widgetSizes.tablePadding }, function()
+					if ui.beginTable("##LicenceTable", 3, { "BordersInnerH" }) then
+						ui.tableSetupColumn("Faction", "WidthStretch")
+						ui.tableSetupColumn("Status", "WidthFixed")
+						ui.tableSetupColumn("Term", "WidthFixed")
+						ui.tableHeadersRow()
+						for _, lic in ipairs(allLicences) do
+							ui.tableNextRow()
+							ui.tableNextColumn()
+							ui.text(lic.factionName)
+							ui.tableNextColumn()
+							ui.text(lic.active and "Active" or "Expired")
+							ui.tableNextColumn()
+							ui.text(lic.perpetual and "Perpetual" or string.format("%.0fd", lic.remainingDays or 0))
+						end
+						ui.endTable()
+					end
+				end)
 			end
 		end
 	}

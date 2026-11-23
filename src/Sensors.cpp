@@ -10,6 +10,7 @@
 #include "Ship.h"
 #include "Space.h"
 #include "ship/SupercruiseController.h"
+#include "ship/Visibility.h"
 
 #include "profiler/Profiler.h"
 
@@ -110,6 +111,9 @@ Sensors::IFF Sensors::CheckIFF(Body *other)
 	//complicated relationship check goes here
 	if (other->IsType(ObjectType::SHIP)) {
 		Ship* ship = static_cast<Ship*>(other);
+		if (!Visibility::CanReadShipIdentity(m_owner, ship) && !ship->IsAIAttacking(m_owner)) {
+			return IFF_UNKNOWN;
+		}
 		Uint8 rel = m_owner->GetRelations(ship);
 		if (rel == 0 || ship->IsAIAttacking(m_owner))
 		{
@@ -158,15 +162,8 @@ void Sensors::Update(float time)
 		}
 	};
 
-	if (ownerInSC) {
-		for (Body *body : Pi::game->GetSpace()->GetBodies()) {
-			if (!body || !body->IsType(ObjectType::SHIP)) continue;
-			registerContact(body);
-		}
-	}
-
-	Space::BodyNearList nearby = Pi::game->GetSpace()->GetBodiesMaybeNear(m_owner, 100000.0f);
-	for (Body *body : nearby) {
+	for (Body *body : Pi::game->GetSpace()->GetBodies()) {
+		if (!body || !body->IsType(ObjectType::SHIP)) continue;
 		registerContact(body);
 	}
 
@@ -177,19 +174,14 @@ void Sensors::Update(float time)
 		if (!it->fresh || !it->body || it->body->IsDead() || (ship && !SupercruiseController::IsShipVisibleToSensors(m_owner, ship))) {
 			m_radarContacts.erase(it++);
 		} else {
-			const bool validFlying = !ownerInSC && ship && (Ship::FLYING == ship->GetFlightState());
-			const bool validSC = ownerInSC && ship && (Ship::SUPERCRUISE == ship->GetFlightState());
-			if (validFlying || validSC) {
-				it->distance = m_owner->GetPositionRelTo(it->body).Length();
-				it->iff = CheckIFF(it->body);
-				it->trail->SetColor(IFFColor(it->iff));
-				if (validFlying)
-					it->trail->Update(time);
-				else
-					it->trail->Reset(FrameId::Invalid);
-			} else {
+			it->distance = m_owner->GetPositionRelTo(it->body).Length();
+			it->iff = CheckIFF(it->body);
+			it->trail->SetColor(IFFColor(it->iff));
+			const bool validFlyingTrail = !ownerInSC && ship && (Ship::FLYING == ship->GetFlightState()) && (it->distance <= 100000.0);
+			if (validFlyingTrail)
+				it->trail->Update(time);
+			else
 				it->trail->Reset(FrameId::Invalid);
-			}
 			it->fresh = false;
 			++it;
 		}

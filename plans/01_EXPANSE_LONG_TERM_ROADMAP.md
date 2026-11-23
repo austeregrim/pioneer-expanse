@@ -70,6 +70,7 @@ graph TD
 | **Plan F** | **[`F_PLAN_FLEET_MANUFACTURERS.md`](./F_PLAN_FLEET_MANUFACTURERS.md)** | Four aerospace corporations (SDA, Aethelgard, Guan-Haber, Frontier), 4-tier modular slot refactor, Fixed/Gimballed/Turreted Class 1–4 mounts & `.gltf` pipeline | Plan 02 | **Queued** |
 | **Plan G** | **[`G_PLAN_EXPLORATION_ALIENS.md`](./G_PLAN_EXPLORATION_ALIENS.md)** | Waveform FSS system scanner, ballistic DSS surface/ring probes, wing escorts, burning-station evacs, and *Hydrazine Swarm* / *Archon Automata* fleets | Plan 03, Plan C, Plan D | **Queued** |
 | **Plan H** | **[`H_PLAN_CAPITAL_SHIPS_AND_EMPIRE_BUILDING.md`](./H_PLAN_CAPITAL_SHIPS_AND_EMPIRE_BUILDING.md)** | Playable/AI Capital Ships & Fleet Carriers, multi-turret fire control, modular player station construction, NPC Station Managers, closed-loop industry & sector sovereignty | Plan A, Plan F, Plan G | **Queued (Endgame)** |
+| **Plan I** | **[`I_PLAN_TRANSPONDER_AND_STEALTH.md`](./I_PLAN_TRANSPONDER_AND_STEALTH.md)** | Transponder on/off switch, dark sub-light running, persistent target locks, police witness cone + occlusion, pirate/police scan rules, sub-light sensor modules | Plan 04 | **Completed** |
 
 ---
 
