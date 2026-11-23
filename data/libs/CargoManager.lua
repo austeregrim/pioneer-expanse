@@ -5,6 +5,18 @@ local ShipDef = require 'ShipDef'
 local Serializer = require 'Serializer'
 
 local utils = require 'utils'
+local lua_type = type
+
+local function resolveCommodity(comm)
+	if lua_type(comm) == "string" then
+		local Commodities = require 'Commodities'
+		comm = Commodities[comm]
+	end
+	if lua_type(comm) ~= "table" or not comm.name then
+		return nil
+	end
+	return comm
+end
 
 --
 -- Class: CargoManager
@@ -96,6 +108,11 @@ end
 ---@param type CommodityType
 ---@param count integer
 function CargoManager:AddCommodity(type, count)
+	type = resolveCommodity(type)
+	if not type then
+		return false
+	end
+
 	-- TODO: use a cargo volume metric with variable mass instead of fixed 1t == 1m^3
 	local required_space = (type.mass or 1) * (count or 1)
 
@@ -144,6 +161,11 @@ end
 ---@param type CommodityType
 ---@param count integer
 function CargoManager:RemoveCommodity(type, count)
+	type = resolveCommodity(type)
+	if not type then
+		return 0
+	end
+
 	local storage = self.commodities[type.name]
 
 	if not storage or storage.count == 0 then
@@ -185,7 +207,8 @@ end
 --   type - CommodityType object of the commodity to query
 ---@param type CommodityType
 function CargoManager:CountCommodity(type)
-	if not self.commodities[type.name] then
+	type = resolveCommodity(type)
+	if not type or not self.commodities[type.name] then
 		return 0
 	end
 

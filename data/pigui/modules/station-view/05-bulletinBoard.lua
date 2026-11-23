@@ -9,6 +9,7 @@ local SpaceStation = require 'SpaceStation'
 
 local StationView = require 'pigui.views.station-view'
 local Table = require 'pigui.libs.table'
+local SortBar = require 'pigui.libs.sort-bar'
 local ChatForm = require 'pigui.libs.chat-form'
 local PiImage = require 'pigui.libs.image'
 
@@ -32,8 +33,6 @@ local widgetSizes = ui.rescaleUI({
 	marketMinWidth = 960,
 	minListWidth = 480,
 	controlSpacing = Vector2(6, 6),
-	filterComboWidth = 128,
-	sortButtonSize = Vector2(24, 24),
 	clearButtonWidth = 64,
 }, Vector2(1920, 1080))
 
@@ -66,16 +65,11 @@ local CATEGORIES = {
 }
 
 local SORT_MODES = {
-	{ id = "TITLE",    label = lui.SORT_TITLE,    defaultAsc = true },
-	{ id = "DISTANCE", label = lui.SORT_DISTANCE, defaultAsc = true },
-	{ id = "DEADLINE", label = lui.SORT_DEADLINE, defaultAsc = true },
-	{ id = "REWARD",   label = lui.SORT_REWARD,   defaultAsc = false },
+	{ id = "TITLE",    label = lui.SORT_TITLE,    defaultDir = 1 },
+	{ id = "DISTANCE", label = lui.SORT_DISTANCE, defaultDir = 1 },
+	{ id = "DEADLINE", label = lui.SORT_DEADLINE, defaultDir = 1 },
+	{ id = "REWARD",   label = lui.SORT_REWARD,   defaultDir = -1 },
 }
-
-local SORT_LABELS = {}
-for i, mode in ipairs(SORT_MODES) do
-	SORT_LABELS[i] = mode.label
-end
 
 local bulletinBoard
 local chatForm
@@ -84,8 +78,8 @@ local activeRef
 local activeAd
 local searchText = ""
 local categoryFilter = "ALL"
-local sortIndex = 1
-local sortAscending = SORT_MODES[1].defaultAsc
+local sortId = "TITLE"
+local sortDir = 1
 
 local images = {}
 
@@ -385,16 +379,16 @@ bulletinBoard = Table.New("BulletinBoardTable", false, {
 		chatForm.resizeFunc()
 	end,
 	sortingFunction = function(s1, s2)
-		local mode = SORT_MODES[sortIndex].id
-		if mode == "DISTANCE" then
-			return compareOptionalNumber(getAdDistanceLy(s1), getAdDistanceLy(s2), sortAscending, s1, s2)
-		elseif mode == "DEADLINE" then
-			return compareOptionalNumber(s1.due, s2.due, sortAscending, s1, s2)
-		elseif mode == "REWARD" then
-			return compareOptionalNumber(s1.reward, s2.reward, sortAscending, s1, s2)
+		local asc = (sortDir > 0)
+		if sortId == "DISTANCE" then
+			return compareOptionalNumber(getAdDistanceLy(s1), getAdDistanceLy(s2), asc, s1, s2)
+		elseif sortId == "DEADLINE" then
+			return compareOptionalNumber(s1.due, s2.due, asc, s1, s2)
+		elseif sortId == "REWARD" then
+			return compareOptionalNumber(s1.reward, s2.reward, asc, s1, s2)
 		end
 
-		return compareByTitle(s1, s2, sortAscending)
+		return compareByTitle(s1, s2, asc)
 	end,
 	iterator = ipairs
 })
@@ -423,14 +417,10 @@ local function renderFilterBar()
 			end
 		end
 
-		local btnPaddingX = ui.theme.styles.ButtonPadding.x * 2
-		local pillsWidth = 0
 		for i, cat in ipairs(CATEGORIES) do
 			if i > 1 then
 				ui.sameLine()
-				pillsWidth = pillsWidth + widgetSizes.controlSpacing.x
 			end
-			pillsWidth = pillsWidth + ui.calcTextSize(cat.label).x + btnPaddingX
 			local selected = (categoryFilter == cat.id)
 			local btnVariant = selected and ui.theme.buttonColors.selected or ui.theme.buttonColors.default
 			if ui.button(cat.label, Vector2(0, 0), btnVariant) then
@@ -441,28 +431,10 @@ local function renderFilterBar()
 			end
 		end
 
-		local sortLabelW = ui.calcTextSize(lui.SORT_BY).x
-		local rightControlsW = sortLabelW + widgetSizes.filterComboWidth + widgetSizes.sortButtonSize.x + widgetSizes.controlSpacing.x * 2
-		local availX = ui.getContentRegion().x
-		if availX - pillsWidth >= rightControlsW + widgetSizes.controlSpacing.x then
-			ui.sameLine(availX - rightControlsW)
-		end
-
-		ui.textColored(colors.fontDim, lui.SORT_BY)
-		ui.sameLine()
-		ui.pushItemWidth(widgetSizes.filterComboWidth)
-		local sortChanged, newSortIdx = ui.combo("##bbsSort", sortIndex - 1, SORT_LABELS)
-		ui.popItemWidth()
-		if sortChanged then
-			sortIndex = newSortIdx + 1
-			sortAscending = SORT_MODES[sortIndex].defaultAsc
-			refresh()
-		end
-
-		ui.sameLine()
-		local dirIcon = sortAscending and icons.chevron_up or icons.chevron_down
-		if ui.iconButton("##bbsSortDir", dirIcon, nil, ui.theme.buttonColors.default, widgetSizes.sortButtonSize) then
-			sortAscending = not sortAscending
+		local newId, newDir, changed = SortBar.draw("BBSSort", SORT_MODES, sortId, sortDir)
+		if changed then
+			sortId = newId
+			sortDir = newDir
 			refresh()
 		end
 	end)

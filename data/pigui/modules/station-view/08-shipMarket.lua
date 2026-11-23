@@ -8,6 +8,7 @@ local ShipDef = require 'ShipDef'
 local Equipment = require 'Equipment'
 local StationView = require 'pigui.views.station-view'
 local Table = require 'pigui.libs.table'
+local SortBar = require 'pigui.libs.sort-bar'
 local PiImage = require 'pigui.libs.image'
 local ModelSpinner = require 'PiGui.Modules.ModelSpinner'
 local EquipSet = require 'EquipSet'
@@ -50,7 +51,16 @@ local manufacturerIcons = {}
 local selectedItem
 local dealership
 local filterMode = "ALL"
+local sortId = "condition"
+local sortDir = 1
 local counts = { total = 0, newCount = 0, usedCount = 0 }
+
+local SHIP_SORT_KEYS = {
+	{ id = "name",      label = l.SHIP,      defaultDir = 1 },
+	{ id = "condition", label = "Condition", defaultDir = 1 },
+	{ id = "price",     label = l.PRICE,     defaultDir = 1 },
+	{ id = "capacity",  label = l.CAPACITY,  defaultDir = -1 },
+}
 
 local shipSellPriceReduction = 0.65
 local equipSellPriceReduction = 0.8
@@ -116,22 +126,36 @@ local function applyFilter()
 	end
 
 	table.sort(sorted, function(a, b)
-		local aUsed = (a.condition == "USED")
-		local bUsed = (b.condition == "USED")
-		if aUsed ~= bUsed then
-			return not aUsed
-		end
 		local pa = advertDataCache[a] and advertDataCache[a].price or 0
 		local pb = advertDataCache[b] and advertDataCache[b].price or 0
-		if pa ~= pb then
-			return pa < pb
-		end
 		local na = ls[a.def.i18n_key] or a.def.name or ""
 		local nb = ls[b.def.i18n_key] or b.def.name or ""
-		if na ~= nb then
-			return na < nb
+		local cmp
+
+		if sortId == "name" then
+			cmp = SortBar.compareValues(na, nb, sortDir)
+		elseif sortId == "price" then
+			cmp = SortBar.compareValues(pa, pb, sortDir)
+		elseif sortId == "capacity" then
+			cmp = SortBar.compareValues(a.def.cargo or 0, b.def.cargo or 0, sortDir)
+		else -- "condition"
+			local aUsed = (a.condition == "USED") and 1 or 0
+			local bUsed = (b.condition == "USED") and 1 or 0
+			cmp = SortBar.compareValues(aUsed, bUsed, sortDir)
 		end
-		return (a.label or "") < (b.label or "")
+		if cmp ~= nil then return cmp end
+
+		if sortId ~= "price" then
+			local cmpPrice = SortBar.compareValues(pa, pb, 1)
+			if cmpPrice ~= nil then return cmpPrice end
+		end
+		if sortId ~= "name" then
+			local cmpName = SortBar.compareValues(na, nb, 1)
+			if cmpName ~= nil then return cmpName end
+		end
+		local cmpLabel = SortBar.compareValues(a.label or "", b.label or "", 1)
+		if cmpLabel ~= nil then return cmpLabel end
+		return false
 	end)
 
 	local filtered = {}
@@ -806,10 +830,20 @@ StationView:registerView({
 		drawDealershipHeader()
 		local region = ui.getContentRegion()
 		local leftWidth = math.floor(region.x * 0.45)
-		shipMarket.style.size = Vector2(leftWidth, region.y)
 
-		ui.withFont(pionillium.body, function()
-			shipMarket:render()
+		ui.child("ShipMarketLeftPane", Vector2(leftWidth, region.y), ui.WindowFlags { 'NoScrollbar', 'NoScrollWithMouse' }, nil, function()
+			local newId, newDir, changed = SortBar.draw("ShipMarketSort", SHIP_SORT_KEYS, sortId, sortDir)
+			if changed then
+				sortId = newId
+				sortDir = newDir
+				applyFilter()
+			end
+			ui.spacing()
+			shipMarket.style.size = Vector2(ui.getContentRegion().x, math.max(100, ui.getContentRegion().y))
+
+			ui.withFont(pionillium.body, function()
+				shipMarket:render()
+			end)
 		end)
 
 		ui.sameLine(0, widgetSizes.itemSpacing.x)

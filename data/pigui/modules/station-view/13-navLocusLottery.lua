@@ -20,6 +20,8 @@ local statusTime = 0
 local statusSubTab = nil
 local selectedTicketIdx = 1
 local childFlags = ui.ChildFlags { 'AlwaysUseWindowPadding', 'Borders' }
+local bannerChildFlags = ui.ChildFlags { 'AlwaysUseWindowPadding', 'Borders', 'AutoResizeY' }
+local bannerWinFlags = ui.WindowFlags { 'NoScrollbar', 'NoScrollWithMouse' }
 
 -- Custom coordinate input fields for single ticket
 local customRing = 42
@@ -49,8 +51,16 @@ local STELLAR_COLORS = {
 	X = Color(235, 85, 255, 255),   -- Black hole accretion anomaly
 }
 
+local function formatCount(val)
+	val = math.floor(tonumber(val) or 0)
+	local str = tostring(math.abs(val))
+	local formatted = str:reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+	if val < 0 then formatted = "-" .. formatted end
+	return formatted
+end
+
 local function formatCr(val)
-	return string.format("%.0f Cr", val)
+	return formatCount(val) .. " Cr"
 end
 
 -- Renders a comprehensive 3D Astrolabe sphere on the PiGui canvas
@@ -281,7 +291,7 @@ local function drawNavLocusLottery()
 	ui.spacing()
 
 	-- Giant Progressive Jackpot Banner with Scheduled Tuesday 18:00 GST Countdown
-	ui.child("##jackpotBanner", Vector2(ui.getContentRegion().x, 68), nil, childFlags, function()
+	ui.child("##jackpotBanner", Vector2(ui.getContentRegion().x, 0), bannerWinFlags, bannerChildFlags, function()
 		ui.withFont(orbiteer.heading, function()
 			ui.textColored(Color(255, 215, 50, 255), string.format("Grand Progressive Jackpot: %s", formatCr(drawState.jackpotPool)))
 		end)
@@ -290,21 +300,33 @@ local function drawNavLocusLottery()
 			drawState.daysRemaining, drawState.hoursRemaining, drawState.minutesRemaining or 0, drawState.secondsRemaining or 0, drawState.drawNumber)
 		ui.textColored(colors.uiPrimaryLight, timeStr)
 
-		ui.sameLine(ui.getContentRegion().x - 240)
-		ui.textColored(colors.fontDim, string.format("Total Won: %s", formatCr(NavLocusLottery.GetTotalWinnings())))
+		local wonText = string.format("Total Won: %s", formatCr(NavLocusLottery.GetTotalWinnings()))
+		local wonW = ui.calcTextSize(wonText).x
+		local timeW = ui.calcTextSize(timeStr).x
+		local bannerAvailW = ui.getContentRegion().x
+		if bannerAvailW > timeW + wonW + 24 then
+			ui.sameLine(bannerAvailW - wonW)
+		end
+		ui.textColored(colors.fontDim, wonText)
 
 		-- Recent winner / rollover status line
 		if drawState.lastWinner then
 			local lw = drawState.lastWinner
+			local winnerMsg
 			if lw.isPlayer then
-				ui.textColored(Color(120, 245, 140, 255), string.format("Cycle #%d Grand Winner (Commander Claimed): %s (%s) in %s [%s]",
-					lw.drawNumber, lw.name, lw.faction, lw.system, formatCr(lw.amount)))
+				winnerMsg = string.format("Cycle #%d Grand Winner (Commander Claimed): %s (%s) in %s [%s]",
+					lw.drawNumber, lw.name, lw.faction, lw.system, formatCr(lw.amount))
 			else
-				ui.textColored(Color(120, 245, 140, 255), string.format("Cycle #%d Grand Winner: %s (%s) in %s [%s]",
-					lw.drawNumber, lw.name, lw.faction, lw.system, formatCr(lw.amount)))
+				winnerMsg = string.format("Cycle #%d Grand Winner: %s (%s) in %s [%s]",
+					lw.drawNumber, lw.name, lw.faction, lw.system, formatCr(lw.amount))
 			end
+			ui.withStyleColors({ Text = Color(120, 245, 140, 255) }, function()
+				ui.textWrapped(winnerMsg)
+			end)
 		else
-			ui.textColored(colors.fontDim, "Cycle Status: Progressive Pool Rollover Active (+75M–150M Cr / week)")
+			ui.withStyleColors({ Text = colors.fontDim }, function()
+				ui.textWrapped("Cycle Status: Progressive Pool Rollover Active (+75M–150M Cr / week)")
+			end)
 		end
 	end)
 
@@ -531,11 +553,11 @@ local function drawNavLocusLottery()
 				ui.text(b.name)
 				ui.textColored(colors.fontDim, b.desc)
 				ui.nextColumn()
-				ui.text(string.format("%s Loci", formatCr(b.count)))
+				ui.text(string.format("%s Loci", formatCount(b.count)))
 				ui.nextColumn()
 				ui.text(formatCr(b.cost))
 				ui.nextColumn()
-				if ui.button(string.format("Purchase %s Cr##BuyB%d", formatCr(b.cost), b.count), Vector2(-1, 34)) then
+				if ui.button(string.format("Purchase %s##BuyB%d", formatCr(b.cost), b.count), Vector2(-1, 34)) then
 					local ok, msg = NavLocusLottery.BuyBatchTickets(b.count)
 					statusMessage = msg
 					statusTime = ui.getTime()
@@ -571,7 +593,7 @@ local function drawNavLocusLottery()
 			if totalRegistered <= #allPoints then
 				ui.textColored(colors.fontDim, string.format("Visualizing all %d registered loci in 3D celestial volume", #allPoints))
 			else
-				ui.textColored(colors.fontDim, string.format("Visualizing %d loci (%s total registered) in 3D celestial volume", #allPoints, formatCr(totalRegistered)))
+				ui.textColored(colors.fontDim, string.format("Visualizing %d loci (%s total registered) in 3D celestial volume", #allPoints, formatCount(totalRegistered)))
 			end
 			ui.separator()
 
@@ -633,7 +655,7 @@ local function drawNavLocusLottery()
 								end
 							elseif t.type == "BATCH" then
 								local label = string.format("[%02d] %s: %s Algorithmic Loci (Cost: %s)",
-									idx, t.id, formatCr(t.count), formatCr(t.cost))
+									idx, t.id, formatCount(t.count), formatCr(t.cost))
 								if ui.button(label .. "##BatchBtn" .. tostring(idx), Vector2(-1, 26)) then
 									selectedTicketIdx = idx
 								end

@@ -6,6 +6,7 @@ local StationView   = require 'pigui.views.station-view'
 local StockExchange = require 'modules.Economy.StockExchange'
 local PlayerState   = require 'PlayerState'
 local Game          = require 'Game'
+local SortBar       = require 'pigui.libs.sort-bar'
 local Color         = _G.Color
 local Vector2       = _G.Vector2
 
@@ -22,6 +23,46 @@ local chartMode = "AREA"        -- "AREA" or "CANDLES"
 local statusMessage = nil
 local statusTime = 0
 local childFlags = ui.ChildFlags { 'AlwaysUseWindowPadding', 'Borders' }
+local summaryChildFlags = ui.ChildFlags { 'AlwaysUseWindowPadding', 'Borders', 'AutoResizeY' }
+local noScrollWinFlags = ui.WindowFlags { 'NoScrollbar', 'NoScrollWithMouse' }
+
+local MEGACORP_SORT_KEYS = {
+	{ id = "ticker", label = "Ticker",  defaultDir = 1 },
+	{ id = "name",   label = "Name",    defaultDir = 1 },
+	{ id = "trend",  label = "30D",     defaultDir = -1 },
+	{ id = "price",  label = "Price",   defaultDir = -1 },
+	{ id = "change", label = "24h Chg", defaultDir = -1 },
+}
+
+local LOCAL_SORT_KEYS = {
+	{ id = "ticker", label = "Ticker",     defaultDir = 1 },
+	{ id = "name",   label = "Enterprise", defaultDir = 1 },
+	{ id = "trend",  label = "30D",        defaultDir = -1 },
+	{ id = "price",  label = "Price",      defaultDir = -1 },
+	{ id = "parent", label = "Parent",     defaultDir = 1 },
+}
+
+local PORTFOLIO_SORT_KEYS = {
+	{ id = "ticker", label = "Ticker",  defaultDir = 1 },
+	{ id = "name",   label = "Holding", defaultDir = 1 },
+	{ id = "trend",  label = "30D",     defaultDir = -1 },
+	{ id = "shares", label = "Shares",  defaultDir = -1 },
+	{ id = "value",  label = "Value",   defaultDir = -1 },
+	{ id = "pnl",    label = "P/L",     defaultDir = -1 },
+}
+
+local megacorpSort  = { id = "ticker", dir = 1 }
+local localSort     = { id = "ticker", dir = 1 }
+local portfolioSort = { id = "value",  dir = -1 }
+
+local function getTrendPct(history)
+	if not history or #history < 2 then return 0 end
+	local sliceCount = math.min(#history, 15)
+	local firstP = history[#history - sliceCount + 1].close
+	local lastP = history[#history].close
+	if not firstP or firstP <= 0 then return 0 end
+	return ((lastP - firstP) / firstP) * 100.0
+end
 
 local function formatCr(val)
 	val = math.floor(val)
@@ -253,7 +294,7 @@ local function drawStockExchange()
 	local plCol = (profitLoss >= 0) and colors.econProfit or colors.econLoss
 	local plSign = (profitLoss >= 0) and "+" or ""
 
-	ui.child("##financialSummary", Vector2(ui.getContentRegion().x, 38), nil, childFlags, function()
+	ui.child("##financialSummary", Vector2(ui.getContentRegion().x, 0), noScrollWinFlags, summaryChildFlags, function()
 		ui.text(string.format("CASH ON HAND: %s", formatMoney(playerCash)))
 		ui.sameLine(nil, 32)
 		ui.text(string.format("PORTFOLIO VALUE: %s", formatMoney(portfolioVal)))
@@ -296,48 +337,88 @@ local function drawStockExchange()
 	-- Tab 1: Galactic Megacorporations (Super High Value & Fractional Shares)
 	if currentTab == "MEGACORPS" then
 		local megacorps = StockExchange.GetMegacorps()
+		local megacorpRows = {}
+		for _, corp in ipairs(megacorps) do
+			local hist = StockExchange.GetStockHistory(corp.ticker)
+			local stats = StockExchange.Get24hStats(corp.ticker)
+			table.insert(megacorpRows, {
+				corp = corp,
+				hist = hist,
+				stats = stats,
+				trendPct = getTrendPct(hist),
+			})
+		end
+		table.sort(megacorpRows, function(a, b)
+			local sid, sdir = megacorpSort.id, megacorpSort.dir
+			local cmp
+			if sid == "name" then
+				cmp = SortBar.compareValues(a.corp.name, b.corp.name, sdir)
+			elseif sid == "trend" then
+				cmp = SortBar.compareValues(a.trendPct, b.trendPct, sdir)
+			elseif sid == "price" then
+				cmp = SortBar.compareValues(a.corp.price, b.corp.price, sdir)
+			elseif sid == "change" then
+				cmp = SortBar.compareValues(a.stats.changePct, b.stats.changePct, sdir)
+			else
+				cmp = SortBar.compareValues(a.corp.ticker, b.corp.ticker, sdir)
+			end
+			if cmp ~= nil then return cmp end
+			local tie = SortBar.compareValues(a.corp.ticker, b.corp.ticker, 1)
+			if tie ~= nil then return tie end
+			return false
+		end)
+
 		local availW = ui.getContentRegion().x
 		local leftW = math.floor(availW * 0.44)
 		local rightW = availW - leftW - 16
 
 		-- Left list with mini sparklines
-		ui.child("##megacorpList", Vector2(leftW, -1), nil, childFlags, function()
-			ui.columns(5, "##megacorpCols", true)
-			ui.text("TICKER") ui.nextColumn()
-			ui.text("CONGLOMERATE") ui.nextColumn()
-			ui.text("TREND (30D)") ui.nextColumn()
-			ui.text("PRICE") ui.nextColumn()
-			ui.text("24H CHG") ui.nextColumn()
+		ui.child("##megacorpList", Vector2(leftW, -1), noScrollWinFlags, childFlags, function()
+			local newId, newDir, changed = SortBar.draw("SortMegacorps", MEGACORP_SORT_KEYS, megacorpSort.id, megacorpSort.dir)
+			if changed then
+				megacorpSort.id = newId
+				megacorpSort.dir = newDir
+			end
 			ui.separator()
 
-			for _, corp in ipairs(megacorps) do
-				local isSel = (selectedTicker == corp.ticker)
-				if ui.selectable(corp.ticker .. "##row", isSel, { "SpanAllColumns" }) then
-					selectedTicker = corp.ticker
+			ui.child("##megacorpRows", Vector2(0, 0), nil, nil, function()
+				ui.columns(5, "##megacorpCols", true)
+				ui.text("TICKER") ui.nextColumn()
+				ui.text("CONGLOMERATE") ui.nextColumn()
+				ui.text("TREND (30D)") ui.nextColumn()
+				ui.text("PRICE") ui.nextColumn()
+				ui.text("24H CHG") ui.nextColumn()
+				ui.separator()
+
+				for _, row in ipairs(megacorpRows) do
+					local corp = row.corp
+					local isSel = (selectedTicker == corp.ticker)
+					if ui.selectable(corp.ticker .. "##row", isSel, { "SpanAllColumns" }) then
+						selectedTicker = corp.ticker
+					end
+					ui.nextColumn()
+
+					ui.text(corp.name)
+					ui.nextColumn()
+
+					-- Mini Sparkline Trendline
+					local sparkPos = ui.getCursorScreenPos()
+					local sparkW, sparkH = 75, 18
+					ui.dummy(Vector2(sparkW, sparkH))
+					drawMiniSparkline(sparkPos, sparkW, sparkH, row.hist)
+					ui.nextColumn()
+
+					ui.text(formatMoney(corp.price))
+					ui.nextColumn()
+
+					local stats = row.stats
+					local chgCol = (stats.changeCr >= 0) and colors.econProfit or colors.econLoss
+					local chgSign = (stats.changeCr >= 0) and "+" or ""
+					ui.textColored(chgCol, string.format("%s%.1f%%", chgSign, stats.changePct))
+					ui.nextColumn()
 				end
-				ui.nextColumn()
-
-				ui.text(corp.name)
-				ui.nextColumn()
-
-				-- Mini Sparkline Trendline
-				local sparkPos = ui.getCursorScreenPos()
-				local sparkW, sparkH = 75, 18
-				ui.dummy(Vector2(sparkW, sparkH))
-				local hist = StockExchange.GetStockHistory(corp.ticker)
-				drawMiniSparkline(sparkPos, sparkW, sparkH, hist)
-				ui.nextColumn()
-
-				ui.text(formatMoney(corp.price))
-				ui.nextColumn()
-
-				local stats = StockExchange.Get24hStats(corp.ticker)
-				local chgCol = (stats.changeCr >= 0) and colors.econProfit or colors.econLoss
-				local chgSign = (stats.changeCr >= 0) and "+" or ""
-				ui.textColored(chgCol, string.format("%s%.1f%%", chgSign, stats.changePct))
-				ui.nextColumn()
-			end
-			ui.columns(1)
+				ui.columns(1)
+			end)
 		end)
 
 		ui.sameLine(nil, 16)
@@ -551,50 +632,86 @@ local function drawStockExchange()
 	elseif currentTab == "LOCAL" then
 		local sysName = Game.system and Game.system.name or "Sol"
 		local localCompanies = StockExchange.GetLocalEnterprises(sysName)
+		local localRows = {}
+		for _, c in ipairs(localCompanies) do
+			local hist = StockExchange.GetStockHistory(c.ticker)
+			table.insert(localRows, {
+				corp = c,
+				hist = hist,
+				trendPct = getTrendPct(hist),
+			})
+		end
+		table.sort(localRows, function(a, b)
+			local sid, sdir = localSort.id, localSort.dir
+			local cmp
+			if sid == "name" then
+				cmp = SortBar.compareValues(a.corp.name, b.corp.name, sdir)
+			elseif sid == "trend" then
+				cmp = SortBar.compareValues(a.trendPct, b.trendPct, sdir)
+			elseif sid == "price" then
+				cmp = SortBar.compareValues(a.corp.price, b.corp.price, sdir)
+			elseif sid == "parent" then
+				cmp = SortBar.compareValues(a.corp.parent, b.corp.parent, sdir)
+			else
+				cmp = SortBar.compareValues(a.corp.ticker, b.corp.ticker, sdir)
+			end
+			if cmp ~= nil then return cmp end
+			local tie = SortBar.compareValues(a.corp.ticker, b.corp.ticker, 1)
+			if tie ~= nil then return tie end
+			return false
+		end)
+
 		local availW = ui.getContentRegion().x
 		local leftW = math.floor(availW * 0.44)
 		local rightW = availW - leftW - 16
 
-		ui.child("##localCompanyList", Vector2(leftW, -1), nil, childFlags, function()
+		ui.child("##localCompanyList", Vector2(leftW, -1), noScrollWinFlags, childFlags, function()
 			ui.textColored(colors.uiPrimaryLight, string.format("Local Enterprises in %s System:", string.upper(sysName)))
-			ui.separator()
-
-			ui.columns(5, "##localCols", true)
-			ui.text("TICKER") ui.nextColumn()
-			ui.text("ENTERPRISE") ui.nextColumn()
-			ui.text("TREND (30D)") ui.nextColumn()
-			ui.text("PRICE") ui.nextColumn()
-			ui.text("PARENT") ui.nextColumn()
-			ui.separator()
-
-			for _, c in ipairs(localCompanies) do
-				local isSel = (selectedTicker == c.ticker)
-				if ui.selectable(c.ticker .. "##localRow", isSel, { "SpanAllColumns" }) then
-					selectedTicker = c.ticker
-				end
-				ui.nextColumn()
-
-				ui.text(c.name)
-				if c.crisisNote then
-					ui.textColored(colors.alertYellow, " " .. c.crisisNote)
-				end
-				ui.nextColumn()
-
-				-- Sparkline
-				local sparkPos = ui.getCursorScreenPos()
-				local sparkW, sparkH = 75, 18
-				ui.dummy(Vector2(sparkW, sparkH))
-				local hist = StockExchange.GetStockHistory(c.ticker)
-				drawMiniSparkline(sparkPos, sparkW, sparkH, hist)
-				ui.nextColumn()
-
-				ui.text(formatMoney(c.price))
-				ui.nextColumn()
-
-				ui.text(c.parent)
-				ui.nextColumn()
+			local newId, newDir, changed = SortBar.draw("SortLocal", LOCAL_SORT_KEYS, localSort.id, localSort.dir)
+			if changed then
+				localSort.id = newId
+				localSort.dir = newDir
 			end
-			ui.columns(1)
+			ui.separator()
+
+			ui.child("##localRows", Vector2(0, 0), nil, nil, function()
+				ui.columns(5, "##localCols", true)
+				ui.text("TICKER") ui.nextColumn()
+				ui.text("ENTERPRISE") ui.nextColumn()
+				ui.text("TREND (30D)") ui.nextColumn()
+				ui.text("PRICE") ui.nextColumn()
+				ui.text("PARENT") ui.nextColumn()
+				ui.separator()
+
+				for _, row in ipairs(localRows) do
+					local c = row.corp
+					local isSel = (selectedTicker == c.ticker)
+					if ui.selectable(c.ticker .. "##localRow", isSel, { "SpanAllColumns" }) then
+						selectedTicker = c.ticker
+					end
+					ui.nextColumn()
+
+					ui.text(c.name)
+					if c.crisisNote then
+						ui.textColored(colors.alertYellow, " " .. c.crisisNote)
+					end
+					ui.nextColumn()
+
+					-- Sparkline
+					local sparkPos = ui.getCursorScreenPos()
+					local sparkW, sparkH = 75, 18
+					ui.dummy(Vector2(sparkW, sparkH))
+					drawMiniSparkline(sparkPos, sparkW, sparkH, row.hist)
+					ui.nextColumn()
+
+					ui.text(formatMoney(c.price))
+					ui.nextColumn()
+
+					ui.text(c.parent)
+					ui.nextColumn()
+				end
+				ui.columns(1)
+			end)
 		end)
 
 		ui.sameLine(nil, 16)
@@ -746,23 +863,54 @@ local function drawStockExchange()
 	-- Tab 3: Player Portfolio & Holdings
 	elseif currentTab == "PORTFOLIO" then
 		local portfolio = StockExchange.GetPlayerPortfolio()
-		local holdingsList = {}
+		local holdingRows = {}
 		for ticker, h in pairs(portfolio) do
 			if h.shares and h.shares > 0.000001 then
-				table.insert(holdingsList, h)
+				local stock = StockExchange.GetStock(h.ticker)
+				local curPrice = stock and stock.price or h.avgBuyPrice
+				local curVal = h.shares * curPrice
+				local pnl = curVal - h.totalInvested
+				local pnlPct = (h.totalInvested > 0) and ((pnl / h.totalInvested) * 100) or 0.0
+				local hist = StockExchange.GetStockHistory(h.ticker)
+				table.insert(holdingRows, {
+					holding = h,
+					stock = stock,
+					hist = hist,
+					trendPct = getTrendPct(hist),
+					curVal = curVal,
+					pnl = pnl,
+					pnlPct = pnlPct,
+					name = h.name or h.ticker,
+				})
 			end
 		end
 
-		-- Sort holdings by total market value descending
-		table.sort(holdingsList, function(a, b)
-			local stockA = StockExchange.GetStock(a.ticker)
-			local valA = (stockA and stockA.price or a.avgBuyPrice) * a.shares
-			local stockB = StockExchange.GetStock(b.ticker)
-			local valB = (stockB and stockB.price or b.avgBuyPrice) * b.shares
-			return valA > valB
+		table.sort(holdingRows, function(a, b)
+			local sid, sdir = portfolioSort.id, portfolioSort.dir
+			local cmp
+			if sid == "ticker" then
+				cmp = SortBar.compareValues(a.holding.ticker, b.holding.ticker, sdir)
+			elseif sid == "name" then
+				cmp = SortBar.compareValues(a.name, b.name, sdir)
+			elseif sid == "trend" then
+				cmp = SortBar.compareValues(a.trendPct, b.trendPct, sdir)
+			elseif sid == "shares" then
+				cmp = SortBar.compareValues(a.holding.shares, b.holding.shares, sdir)
+			elseif sid == "pnl" then
+				cmp = SortBar.compareValues(a.pnlPct, b.pnlPct, sdir)
+				if cmp == nil then
+					cmp = SortBar.compareValues(a.pnl, b.pnl, sdir)
+				end
+			else
+				cmp = SortBar.compareValues(a.curVal, b.curVal, sdir)
+			end
+			if cmp ~= nil then return cmp end
+			local tie = SortBar.compareValues(a.holding.ticker, b.holding.ticker, 1)
+			if tie ~= nil then return tie end
+			return false
 		end)
 
-		if #holdingsList == 0 then
+		if #holdingRows == 0 then
 			ui.child("##emptyPortfolio", Vector2(-1, -1), nil, childFlags, function()
 				ui.withFont(orbiteer.heading, function()
 					ui.textColored(colors.uiPrimaryLight, "NO ACTIVE HOLDINGS IN PORTFOLIO")
@@ -778,67 +926,69 @@ local function drawStockExchange()
 
 			-- Ensure selectedTicker points to an owned holding
 			local selectedHolding = nil
-			for _, h in ipairs(holdingsList) do
-				if h.ticker == selectedTicker then
-					selectedHolding = h
+			for _, row in ipairs(holdingRows) do
+				if row.holding.ticker == selectedTicker then
+					selectedHolding = row.holding
 					break
 				end
 			end
 			if not selectedHolding then
-				selectedHolding = holdingsList[1]
+				selectedHolding = holdingRows[1].holding
 				selectedTicker = selectedHolding.ticker
 			end
 
 			-- Left holdings list with sparklines
-			ui.child("##portfolioList", Vector2(leftW, -1), nil, childFlags, function()
-				ui.textColored(colors.uiPrimaryLight, string.format("Securities & Holdings (%d Positions):", #holdingsList))
-				ui.separator()
-
-				ui.columns(6, "##portfolioCols", true)
-				ui.text("TICKER") ui.nextColumn()
-				ui.text("HOLDING") ui.nextColumn()
-				ui.text("TREND (30D)") ui.nextColumn()
-				ui.text("SHARES") ui.nextColumn()
-				ui.text("MKT VALUE") ui.nextColumn()
-				ui.text("PROFIT/LOSS") ui.nextColumn()
-				ui.separator()
-
-				for _, h in ipairs(holdingsList) do
-					local isSel = (selectedTicker == h.ticker)
-					if ui.selectable(h.ticker .. "##portRow", isSel, { "SpanAllColumns" }) then
-						selectedTicker = h.ticker
-					end
-					ui.nextColumn()
-
-					ui.text(h.name or h.ticker)
-					ui.nextColumn()
-
-					-- Mini Sparkline Trendline
-					local sparkPos = ui.getCursorScreenPos()
-					local sparkW, sparkH = 75, 18
-					ui.dummy(Vector2(sparkW, sparkH))
-					local hist = StockExchange.GetStockHistory(h.ticker)
-					drawMiniSparkline(sparkPos, sparkW, sparkH, hist)
-					ui.nextColumn()
-
-					local shareStr = h.isMegacorp and string.format("%.3f", h.shares) or string.format("%d", math.floor(h.shares))
-					ui.text(shareStr)
-					ui.nextColumn()
-
-					local stock = StockExchange.GetStock(h.ticker)
-					local curPrice = stock and stock.price or h.avgBuyPrice
-					local curVal = h.shares * curPrice
-					ui.text(formatMoney(curVal))
-					ui.nextColumn()
-
-					local pnl = curVal - h.totalInvested
-					local pnlCol = (pnl >= 0) and colors.econProfit or colors.econLoss
-					local pnlSign = (pnl >= 0) and "+" or ""
-					local pnlPct = (h.totalInvested > 0) and ((pnl / h.totalInvested) * 100) or 0.0
-					ui.textColored(pnlCol, string.format("%s%.1f%%", pnlSign, pnlPct))
-					ui.nextColumn()
+			ui.child("##portfolioList", Vector2(leftW, -1), noScrollWinFlags, childFlags, function()
+				ui.textColored(colors.uiPrimaryLight, string.format("Securities & Holdings (%d Positions):", #holdingRows))
+				local newId, newDir, changed = SortBar.draw("SortPortfolio", PORTFOLIO_SORT_KEYS, portfolioSort.id, portfolioSort.dir)
+				if changed then
+					portfolioSort.id = newId
+					portfolioSort.dir = newDir
 				end
-				ui.columns(1)
+				ui.separator()
+
+				ui.child("##portfolioRows", Vector2(0, 0), nil, nil, function()
+					ui.columns(6, "##portfolioCols", true)
+					ui.text("TICKER") ui.nextColumn()
+					ui.text("HOLDING") ui.nextColumn()
+					ui.text("TREND (30D)") ui.nextColumn()
+					ui.text("SHARES") ui.nextColumn()
+					ui.text("MKT VALUE") ui.nextColumn()
+					ui.text("PROFIT/LOSS") ui.nextColumn()
+					ui.separator()
+
+					for _, row in ipairs(holdingRows) do
+						local h = row.holding
+						local isSel = (selectedTicker == h.ticker)
+						if ui.selectable(h.ticker .. "##portRow", isSel, { "SpanAllColumns" }) then
+							selectedTicker = h.ticker
+						end
+						ui.nextColumn()
+
+						ui.text(row.name)
+						ui.nextColumn()
+
+						-- Mini Sparkline Trendline
+						local sparkPos = ui.getCursorScreenPos()
+						local sparkW, sparkH = 75, 18
+						ui.dummy(Vector2(sparkW, sparkH))
+						drawMiniSparkline(sparkPos, sparkW, sparkH, row.hist)
+						ui.nextColumn()
+
+						local shareStr = h.isMegacorp and string.format("%.3f", h.shares) or string.format("%d", math.floor(h.shares))
+						ui.text(shareStr)
+						ui.nextColumn()
+
+						ui.text(formatMoney(row.curVal))
+						ui.nextColumn()
+
+						local pnlCol = (row.pnl >= 0) and colors.econProfit or colors.econLoss
+						local pnlSign = (row.pnl >= 0) and "+" or ""
+						ui.textColored(pnlCol, string.format("%s%.1f%%", pnlSign, row.pnlPct))
+						ui.nextColumn()
+					end
+					ui.columns(1)
+				end)
 			end)
 
 			ui.sameLine(nil, 16)

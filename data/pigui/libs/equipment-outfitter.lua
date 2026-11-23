@@ -20,6 +20,7 @@ local styles = ui.theme.styles
 
 local Module = require 'pigui.libs.module'
 local EquipCard = require 'pigui.libs.equip-card'
+local SortBar = require 'pigui.libs.sort-bar'
 
 local l = Lang.GetResource("ui-core")
 local le = Lang.GetResource("equipment-core")
@@ -485,33 +486,10 @@ function Outfitter:drawSellButton(data)
 	end
 end
 
-function Outfitter:drawSortButton(id, label, state)
-	local variant = state and ui.theme.buttonColors.dark or ui.theme.buttonColors.deselected
-	local sortIcon = ""
-
-	if state then
-		sortIcon = (state > 0 and ui.get_icon_glyph(icons.chevron_up) or ui.get_icon_glyph(icons.chevron_down)) .. " "
-	end
-
-	local clicked = ui.button(sortIcon .. label, Vector2(ui.getContentRegion().x, 0), variant, nil, styles.IconButtonPadding)
-
-	if clicked then
-		state = (not state and 1) or (state > 0 and -1) or nil
-
-		self:message("onSetSort", state and id, state)
-	end
-end
-
 function Outfitter:drawSortRow()
-	if ui.beginTable("sort", #Outfitter.SortKeys) then
-		ui.tableNextRow()
-
-		for i, sort in ipairs(Outfitter.SortKeys) do
-			ui.tableSetColumnIndex(i - 1)
-			self:drawSortButton(sort.id, sort.label, self.sortId == sort.id and self.sortState or nil)
-		end
-
-		ui.endTable()
+	local newId, newState, changed = SortBar.draw("sort", Outfitter.SortKeys, self.sortId, self.sortState, { allowReset = true })
+	if changed then
+		self:message("onSetSort", newId, newState)
 	end
 end
 
@@ -655,9 +633,7 @@ function Outfitter:render()
 				end)
 			end
 
-			ui.withFont(pionillium.details, function()
-				self:drawSortRow()
-			end)
+			self:drawSortRow()
 		end)
 
 

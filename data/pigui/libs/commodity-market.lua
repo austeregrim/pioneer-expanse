@@ -15,9 +15,18 @@ local PiImage = require 'pigui.libs.image'
 
 local ModalWindow = require 'pigui.libs.modal-win'
 local TableWidget = require 'pigui.libs.table'
-local EconView = require 'pigui.modules.system-econ-view'
+local SortBar     = require 'pigui.libs.sort-bar'
+local EconView    = require 'pigui.modules.system-econ-view'
 
 local l = Lang.GetResource("ui-core")
+
+local COMMODITY_SORT_KEYS = {
+	{ id = "name",  label = l.COMMODITY,  defaultDir = 1 },
+	{ id = "buy",   label = l.BUY_PRICE,  defaultDir = 1 },
+	{ id = "sell",  label = l.SELL_PRICE, defaultDir = -1 },
+	{ id = "stock", label = l.IN_STOCK,   defaultDir = -1 },
+	{ id = "hold",  label = l.IN_HOLD,    defaultDir = -1 },
+}
 
 local Vector2 = _G.Vector2
 local Color = _G.Color
@@ -375,6 +384,8 @@ function CommodityMarketWidget.New(id, title, config)
 
 	self.cargoMgr = nil
 	self.station = nil
+	self.sortId = "name"
+	self.sortDir = 1
 
 	self.funcs.getStock = config.getStock
 	self.funcs.getBuyPrice = config.getBuyPrice
@@ -862,6 +873,40 @@ function CommodityMarketWidget:SetSize(size)
 	end
 end
 
+function CommodityMarketWidget:SortItems()
+	if not self.items or #self.items <= 1 then return end
+	local sortId = self.sortId or "name"
+	local sortDir = self.sortDir or 1
+	local values = {}
+	local names = {}
+
+	for _, item in ipairs(self.items) do
+		names[item] = item:GetProperName()
+		if sortId == "name" then
+			values[item] = names[item]
+		elseif sortId == "buy" then
+			local canSellToPlayer = GetStationTradePermissions(self.station, item.name)
+			values[item] = canSellToPlayer and self.funcs.getBuyPrice(self, item) or nil
+		elseif sortId == "sell" then
+			local _, canBuyFromPlayer = GetStationTradePermissions(self.station, item.name)
+			values[item] = canBuyFromPlayer and self.funcs.getSellPrice(self, item) or nil
+		elseif sortId == "stock" then
+			local canSellToPlayer = GetStationTradePermissions(self.station, item.name)
+			values[item] = canSellToPlayer and self.funcs.getStock(self, item) or nil
+		elseif sortId == "hold" then
+			values[item] = self.cargoMgr and self.cargoMgr:CountCommodity(item) or 0
+		end
+	end
+
+	table.sort(self.items, function(a, b)
+		local cmp = SortBar.compareValues(values[a], values[b], sortDir)
+		if cmp ~= nil then return cmp end
+		local tie = SortBar.compareValues(names[a], names[b], 1)
+		if tie ~= nil then return tie end
+		return false
+	end)
+end
+
 function CommodityMarketWidget:Refresh()
 	---@type CargoManager
 	self.cargoMgr = Game.player:GetComponent('CargoManager')
@@ -876,7 +921,7 @@ function CommodityMarketWidget:Refresh()
 		end
 	end
 
-	table.sort(self.items, self.funcs.sortingFunction)
+	self:SortItems()
 end
 
 function CommodityMarketWidget:DrawMarketKey()
@@ -922,10 +967,21 @@ function CommodityMarketWidget:Render(size)
 
 	local remainingHeight = ui.getContentRegion().y
 	self:SetSize(Vector2(fullSize.x, remainingHeight))
+	local leftWidth = self.style.size.x
 
 	ui.withStyleVars({ItemSpacing = self.style.itemSpacing}, function()
-		ui.withFont(pionillium.body, function()
-			TableWidget.render(self)
+		ui.child("MarketListPane##" .. self.id, Vector2(leftWidth, remainingHeight), ui.WindowFlags { 'NoScrollbar', 'NoScrollWithMouse' }, nil, function()
+			local newId, newDir, changed = SortBar.draw("CommSort##" .. self.id, COMMODITY_SORT_KEYS, self.sortId, self.sortDir)
+			if changed then
+				self.sortId = newId
+				self.sortDir = newDir
+				self:SortItems()
+			end
+			ui.spacing()
+			self.style.size = Vector2(ui.getContentRegion().x, math.max(100, ui.getContentRegion().y))
+			ui.withFont(pionillium.body, function()
+				TableWidget.render(self)
+			end)
 		end)
 		ui.sameLine(0, self.style.widgetSizes.windowGutter)
 		self:TradeMenu()

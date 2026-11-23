@@ -30,7 +30,8 @@ local Lang = require 'Lang'
 local l = Lang.GetResource("ui-core")
 local Vector2 = _G.Vector2
 
-local rescaleVector = ui.rescaleUI(Vector2(1, 1), Vector2(1920, 1080), true)
+local rescaleVector = ui.rescaleUI(Vector2(1, 1), Vector2(1920, 1080), true, nil, true)
+local uniformScale = math.min(rescaleVector.x, rescaleVector.y)
 local widgetSizes = ui.rescaleUI({
 	itemSpacing = Vector2(4, 4),
 	faceSize = Vector2(440, 420),
@@ -202,7 +203,7 @@ local function drawCivilAdministrationSection(station)
 	ui.spacing()
 
 	local availWidth = ui.getContentRegion().x
-	local col0Width = math.max(380 * rescaleVector.x, math.floor(availWidth * 0.50))
+	local col0Width = math.floor(availWidth * 0.50)
 	ui.columns(2, "LobbyCivilTaxCols", false)
 	ui.setColumnWidth(0, col0Width)
 
@@ -241,13 +242,14 @@ local function drawCivilAdministrationSection(station)
 		ui.spacing()
 		if resInfo.isResident and not resInfo.canChange then
 			ui.textColored(colors.fontDim, string.format("90-Day Residency Commitment: %d / %d Days", resInfo.termDaysTotal - resInfo.remainingDays, resInfo.termDaysTotal))
-			local gaugePos = ui.getCursorScreenPos()
-			local gaugeHeight = 14 * rescaleVector.y
+			local gaugeHeight = math.max(math.ceil(18 * uniformScale), pionillium.details.size + 6)
 			local gaugeWidth = ui.getContentRegion().x
+			local gaugePos = ui.getCursorScreenPos()
+			gaugePos.y = gaugePos.y + gaugeHeight * 0.5
+			ui.dummy(Vector2(gaugeWidth, gaugeHeight))
 			ui.gauge(gaugePos, resInfo.progress * 100, '', "%d%% Term Elapsed",
 				0, 100, icons.station or icons.info, false, colors.gaugeEquipmentMarket, '',
 				gaugeWidth, gaugeHeight, pionillium.details)
-			ui.dummy(Vector2(0, gaugeHeight + 4 * rescaleVector.y))
 		end
 
 		ui.spacing()
@@ -256,12 +258,14 @@ local function drawCivilAdministrationSection(station)
 			ui.textColored(isPrison and colors.alertRed or colors.fontDim, isPrison and "HIGH-SECURITY CORRECTIONAL FACILITY" or "RESIDENCY PRIVILEGES & INCENTIVES")
 		end)
 
+		local actionBtnH = math.max(ui.getFrameHeight() + 6, math.ceil(30 * uniformScale))
+
 		if isPrison then
 			ui.bulletText("Incarceration Jurisdiction: Station strictly serves penal and judicial functions.")
 			ui.bulletText("Civil Status Suspended: Commercial residency and tax domicile are strictly prohibited.")
 			ui.bulletText("Starport Flight Clearance: Granted only to discharged pilots or verified couriers.")
 			ui.spacing()
-			local actionBtnSize = Vector2(ui.getContentRegion().x, 30 * rescaleVector.y)
+			local actionBtnSize = Vector2(ui.getContentRegion().x, actionBtnH)
 			ui.withStyleColors({ Button = ui.theme.buttonColors.disabled.normal, Text = colors.fontDim }, function()
 				ui.button("CIVIL RESIDENCY PROHIBITED AT CORRECTIONAL FACILITY##lobbyRes", actionBtnSize)
 			end)
@@ -273,7 +277,7 @@ local function drawCivilAdministrationSection(station)
 			ui.spacing()
 			if station then
 				local isCurrentHome = (resInfo.isResident and resInfo.homeStationName == station.label)
-				local actionBtnSize = Vector2(ui.getContentRegion().x, 30 * rescaleVector.y)
+				local actionBtnSize = Vector2(ui.getContentRegion().x, actionBtnH)
 				if isCurrentHome then
 					ui.withStyleColors({ Button = ui.theme.buttonColors.disabled.normal, Text = colors.fontDim }, function()
 						ui.button("CURRENT REGISTERED HOME STATION##lobbyRes", actionBtnSize)
@@ -313,7 +317,9 @@ local function drawCivilAdministrationSection(station)
 			ui.textColored(colors.uiPrimaryLight, "QUARTERLY TAX ASSESSMENT")
 		end)
 		ui.withFont(pionillium.details, function()
-			ui.textColored(colors.fontDim, "Quarterly Cycle: Profits report at quarter end (Mar/Jun/Sep/Dec) and remain payable until end of the following quarter.")
+			ui.withStyleColors({ Text = colors.fontDim }, function()
+				ui.textWrapped("Quarterly Cycle: Profits report at quarter end (Mar/Jun/Sep/Dec) and remain payable until end of the following quarter.")
+			end)
 		end)
 		ui.spacing()
 
@@ -369,7 +375,7 @@ local function drawCivilAdministrationSection(station)
 		local curPos = ui.getCursorScreenPos()
 		local colW = ui.getContentRegion().x
 		ui.addLine(curPos, Vector2(curPos.x + colW, curPos.y), colors.border or colors.fontDim, 1.0)
-		ui.dummy(Vector2(0, 4 * rescaleVector.y))
+		ui.dummy(Vector2(0, math.ceil(4 * uniformScale)))
 
 		ui.withFont(orbiteer.heading, function()
 			local balColor = (reportedDue > 0 and (assess.isDelinquent and colors.alertRed or colors.alertYellow)) or (colors.econProfit or colors.uiPrimaryLight)
@@ -391,7 +397,7 @@ local function drawCivilAdministrationSection(station)
 		end)
 
 		ui.spacing()
-		local payBtnSize = Vector2(ui.getContentRegion().x, 30 * rescaleVector.y)
+		local payBtnSize = Vector2(ui.getContentRegion().x, math.max(ui.getFrameHeight() + 6, math.ceil(30 * uniformScale)))
 		if reportedDue > 0 then
 			local canAfford = playerMoney >= reportedDue
 			local payBtnLabel = string.format("PAY REPORTED TAXES (%s)##lobbyPayTax", Format.Money(reportedDue))
@@ -438,7 +444,7 @@ local function drawCivilAdministrationSection(station)
 	end)
 	ui.spacing()
 
-	local mgrColW = math.max(380 * rescaleVector.x, math.floor(availWidth * 0.62))
+	local mgrColW = math.floor(availWidth * 0.62)
 	ui.columns(2, "LobbyManagerCols", false)
 	ui.setColumnWidth(0, mgrColW)
 
@@ -471,7 +477,7 @@ local function drawCivilAdministrationSection(station)
 	ui.nextColumn()
 
 	ui.group(function()
-		local mgrBtnSize = Vector2(ui.getContentRegion().x, 32 * rescaleVector.y)
+		local mgrBtnSize = Vector2(ui.getContentRegion().x, math.max(ui.getFrameHeight() + 6, math.ceil(32 * uniformScale)))
 		if mgr.hired then
 			if ui.button("DISMISS FINANCIAL MANAGER##lobbyDismissMgr", mgrBtnSize) then
 				local ok, msg = TaxAuthority.DismissManager()
@@ -587,14 +593,17 @@ local function drawPlayerInfo()
 						ui.icon(icons.comms, Vector2(lineH), colors.uiPrimaryLight)
 						ui.sameLine()
 						ui.textColored(colors.uiPrimaryLight, "PORT-OPS // TRAFFIC-CTRL")
-						ui.sameLine()
 						local rightText = "STARPORT FLIGHT OPERATIONS // TELEMETRY LINK"
-						local avail = ui.getContentRegion().x
 						local rw = ui.calcTextSize(rightText).x
-						if avail > rw then
+						ui.sameLine()
+						local avail = ui.getContentRegion().x
+						if avail > rw + 8 then
 							ui.addCursorPos(Vector2(avail - rw, 0))
+							ui.textColored(colors.fontDim, rightText)
+						else
+							ui.newLine()
+							ui.textColored(colors.fontDim, rightText)
 						end
-						ui.textColored(colors.fontDim, rightText)
 					end)
 					ui.separator()
 					ui.spacing()

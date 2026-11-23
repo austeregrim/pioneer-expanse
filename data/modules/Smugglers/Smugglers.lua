@@ -83,9 +83,10 @@ local function spawnSmugglers(system)
 				local cargoMgr = ship:GetComponent("CargoManager")
 				if cargoMgr then
 					local comm = illegalList[Engine.rand:Integer(1, #illegalList)]
-					local amt = math.min(cargoMgr:GetFreeSpace(), Engine.rand:Integer(2, 8))
+					local maxCount = math.floor(cargoMgr:GetFreeSpace() / (comm.mass or 1))
+					local amt = math.min(maxCount, Engine.rand:Integer(2, 8))
 					if amt > 0 then
-						cargoMgr:AddCommodity(comm.name, amt)
+						cargoMgr:AddCommodity(comm, amt)
 					end
 				end
 
