@@ -199,6 +199,11 @@ local function onShipDocked(player, station)
 		local m = missions[i]
 		if m.status == "COMPLETED" and m.returnStation == station.path then
 			PlayerState.AddMoney(m.reward)
+			local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
+			if okTax and TaxAuthority and TaxAuthority.RecordCartographyIncome then
+				local isHome = TaxAuthority.IsHomeStation and TaxAuthority.IsHomeStation(station) or false
+				TaxAuthority.RecordCartographyIncome(m.reward, isHome)
+			end
 			Comms.ImportantMessage(string.format(
 				"Universal Cartographics: %s survey bonus of %s credited! Visit the Universal Cartographics tab to sell your collected system data.",
 				m.targetName, Format.Money(m.reward)

@@ -62,6 +62,7 @@ bool Ship::AITimeStep(float timeStep)
 
 		if (m_flightState == SUPERCRUISE && m_supercruise &&
 			(m_supercruise->IsBeingInterdicted() || m_supercruise->IsInterdicting())) {
+			m_supercruise->ResetIdleAITimer();
 			if (m_supercruise->IsBeingInterdicted()) {
 				if (m_supercruise->IsSubmittingToInterdiction()) {
 					m_supercruise->SetThrottle(0.0);
@@ -83,6 +84,19 @@ bool Ship::AITimeStep(float timeStep)
 			return false;
 		}
 
+		// Keep kinematics synced and cleanly disengage if an NPC ship remains in Supercruise without orders
+		if (m_flightState == SUPERCRUISE && m_supercruise) {
+			m_supercruise->SetThrottle(0.0);
+			m_supercruise->TimeStepUpdate(timeStep, vector3d(0.0));
+			m_supercruise->AdvanceIdleAITimer(timeStep);
+			if (m_supercruise->GetIdleAITimer() >= 3.0f &&
+				(m_supercruise->GetSpeed() <= SupercruiseController::SAFE_DISENGAGE_SPEED || m_supercruise->GetIdleAITimer() >= 6.0f)) {
+				m_supercruise->NormalDrop("FSD IDLE DISENGAGE");
+			}
+			m_gunManager->SetAllGroupsFiring(false);
+			return false;
+		}
+
 		// If NPC ship is in active flight with no active command, engage flight assist braking
 		// rather than dead-stick coasting into planetary surfaces or station hulls
 		if (m_flightState == FLYING && m_propulsion && GetVelocity().Length() > 2.0) {
@@ -93,6 +107,10 @@ bool Ship::AITimeStep(float timeStep)
 		}
 		m_gunManager->SetAllGroupsFiring(false);
 		return true;
+	}
+
+	if (m_supercruise) {
+		m_supercruise->ResetIdleAITimer();
 	}
 
 	if (!IsType(ObjectType::PLAYER) && m_flightState == SUPERCRUISE && m_supercruise &&

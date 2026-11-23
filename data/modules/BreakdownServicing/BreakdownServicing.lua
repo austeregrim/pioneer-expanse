@@ -167,6 +167,10 @@ local onChat = function (form, ref, option)
 			-- Say thanks
 			form:SetMessage(ad.response)
 			PlayerState.AddMoney(-price)
+			local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
+			if okTax and TaxAuthority and TaxAuthority.RecordOperatingExpense then
+				TaxAuthority.RecordOperatingExpense(price, "MAINTENANCE", "Flagship Hyperdrive Service")
+			end
 			service_history.lastdate = Game.time
 			service_history.service_period = ad.strength * oneyear
 			service_history.company = ad.title

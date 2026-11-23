@@ -65,6 +65,19 @@ function StarSystem:IsCommodityLegal(name) end
 ---@return StarSystem[]
 function StarSystem:GetNearbySystems(range, filter) end
 
+---@param range number distance from this system to search, in light years
+---@param inhabitableOnly boolean? if true, omit procedural unexplored systems that cannot have stations
+---@param maxResults integer? optional cap on returned systems (sorted nearest-first)
+---@return SystemPath[] paths
+---@return number[] dists
+function StarSystem:GetNearbySystemPaths(range, inhabitableOnly, maxResults) end
+
+---@param dest StarSystem|SystemPath
+---@param maxJumpRangeLy number
+---@return SystemPath[] hops
+---@return number[] hopDists
+function StarSystem:FindJumpRoute(dest, maxJumpRangeLy) end
+
 --- Calculate the distance between this and another system
 ---@param other StarSystem|SystemPath
 ---@return number dist distance between the two systems in light years

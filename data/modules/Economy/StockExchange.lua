@@ -630,8 +630,14 @@ function StockExchange.SellShares(stock, count)
 	PlayerState.AddMoney(proceeds)
 
 	local fractionSold = math.min(1.0, count / h.shares)
+	local costBasisSold = (h.totalInvested or 0) * fractionSold
 	h.totalInvested = math.max(0.0, h.totalInvested * (1.0 - fractionSold))
 	h.shares = h.shares - count
+
+	local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
+	if okTax and TaxAuthority and TaxAuthority.RecordOperationsIncome then
+		TaxAuthority.RecordOperationsIncome("INVESTMENT_GAINS", proceeds, costBasisSold, stock.ticker)
+	end
 
 	if h.shares < 0.000001 then
 		playerPortfolio[stock.ticker] = nil
@@ -822,6 +828,11 @@ function StockExchange.OnMacroTick(deltaDays, activeCrises)
 		if dividendPayout > 0 then
 			PlayerState.AddMoney(dividendPayout)
 			totalDividendsCollected = totalDividendsCollected + dividendPayout
+
+			local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
+			if okTax and TaxAuthority and TaxAuthority.RecordOperationsIncome then
+				TaxAuthority.RecordOperationsIncome("INVESTMENT_DIVIDEND", dividendPayout, 0, "Portfolio Dividends")
+			end
 
 			local okFlightLog, FlightLog = pcall(require, 'modules.FlightLog.FlightLog')
 			local okFormat, Format = pcall(require, 'Format')

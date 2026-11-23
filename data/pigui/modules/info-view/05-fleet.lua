@@ -3,6 +3,7 @@
 
 local ui          = require 'pigui'
 local Game        = require 'Game'
+local Engine      = require 'Engine'
 local Lang        = require 'Lang'
 local Format      = require 'Format'
 local ShipDef     = require 'ShipDef'
@@ -50,6 +51,7 @@ local STATUS_COLOR_MAP = {
 	MINING      = colors.uiPrimaryLight,
 	PATROLLING  = colors.combatTarget,
 	ESCORTING   = colors.hyperspaceInfo,
+	SCANNING    = colors.alertYellow,
 }
 
 local function formatTelemetryDist(d)
@@ -89,7 +91,15 @@ local function drawFleetHeaderBar(ships)
 	ui.child("##FleetCommandTopBar", Vector2(-1, ui.rescaleUI(66, Vector2(1920, 1080))), nil, childFlags, function()
 		ui.withFont(orbiteer.heading, function()
 			ui.textColored(colors.uiPrimaryLight, "FLEET COMMAND & AUTONOMOUS OPERATIONS")
-			if statusMsg then
+			local activeScans = PlayerFleet.GetActiveScanCount and PlayerFleet.GetActiveScanCount() or 0
+			if activeScans > 0 then
+				local dotCount = (math.floor((Engine.time or 0) * 3) % 4)
+				local dots = string.rep(".", dotCount)
+				ui.sameLine(0, ui.rescaleUI(24, Vector2(1920, 1080)))
+				ui.withFont(pionillium.body, function()
+					ui.textColored(colors.alertYellow, string.format("• Scanning trade markets (%d active)%s", activeScans, dots))
+				end)
+			elseif statusMsg then
 				ui.sameLine(0, ui.rescaleUI(24, Vector2(1920, 1080)))
 				ui.withFont(pionillium.body, function()
 					ui.textColored(colors.econProfit, "• " .. statusMsg)
@@ -130,11 +140,13 @@ local function drawFleetRoster(ships, customWidth)
 				selectedUid = entry.uid
 			end
 
-			ui.textColored(orderCol, string.format("  %s | %s | Hull %.0f%% | Capt: %s",
+			local statusTag = (entry.status == "SCANNING") and " | [SCANNING]" or ""
+			ui.textColored(entry.status == "SCANNING" and colors.alertYellow or orderCol, string.format("  %s | %s | Hull %.0f%% | Capt: %s%s",
 				def and def.name or entry.shipId,
 				entry.locationName or "Unknown",
 				entry.hullPercent or 100,
-				entry.captain and entry.captain.name or "Uncrewed"
+				entry.captain and entry.captain.name or "Uncrewed",
+				statusTag
 			))
 			if entry.order ~= "IDLE" and (entry.orderProgress or 0) > 0 then
 				ui.progressBar(entry.orderProgress, Vector2(-1, ui.rescaleUI(10, Vector2(1920, 1080))), "")
@@ -253,8 +265,13 @@ local function drawCommandDeck(entry)
 		end
 		if entry.order ~= "IDLE" then
 			local etaRem = math.max(0, (entry.orderEta or 0) - Game.time)
-			local barText = (etaRem > 0 and ("ETA: " .. Format.Duration(etaRem)))
-				or tostring(entry.status or "IN FLIGHT")
+			local barText
+			if entry.status == "SCANNING" then
+				barText = string.format("Scanning Markets... (%d%%)", math.floor((entry.orderProgress or 0) * 100))
+			else
+				barText = (etaRem > 0 and ("ETA: " .. Format.Duration(etaRem)))
+					or tostring(entry.status or "IN FLIGHT")
+			end
 			ui.progressBar(entry.orderProgress or 0, Vector2(-1, ui.rescaleUI(18, Vector2(1920, 1080))), barText)
 		end
 
@@ -294,6 +311,25 @@ local function drawCommandDeck(entry)
 			if ui.button(sellBtnText, Vector2(0, 0), entry.order == "SELL_CARGO" and ui.theme.buttonColors.selected or nil) then
 				local _, msg = PlayerFleet.OrderSellCargo(entry.uid)
 				statusMsg = msg
+			end
+		end
+
+		if hasCaptain and PlayerFleet.TRADE_RANGE_PRESETS then
+			ui.spacing()
+			ui.textColored(colors.fontDim, "Auto-Trade Radius:")
+			local curTradeRange = PlayerFleet.GetTradeRange and PlayerFleet.GetTradeRange(entry) or 20
+			for _, preset in ipairs(PlayerFleet.TRADE_RANGE_PRESETS) do
+				ui.sameLine()
+				local isPreset = (curTradeRange == preset.rangeLy)
+				if ui.button(preset.label .. "##trade_rng_" .. preset.rangeLy, Vector2(0, 0), isPreset and ui.theme.buttonColors.selected or nil) then
+					local _, msg = PlayerFleet.SetTradeRange(entry.uid, preset.rangeLy)
+					statusMsg = msg
+				end
+			end
+			local shipMaxJump = PlayerFleet.GetShipHyperspaceRange(entry)
+			if shipMaxJump > 40 then
+				ui.sameLine()
+				ui.textColored(colors.fontDim, string.format("(Ship max jump: %d ly; trade scan capped at selected radius)", shipMaxJump))
 			end
 		end
 
@@ -354,11 +390,24 @@ local function drawCommandDeck(entry)
 		end
 
 		ui.spacing()
-		ui.text(string.format("Ship Condition: Hull %.0f%%  |  Fuel %.0f%%", entry.hullPercent or 100, entry.fuel or 100))
-		ui.text(string.format("Stats: %d Runs  |  %d Missions  |  %dt Hauled",
+		local minEquipInteg, below80Count = PlayerFleet.GetLowestEquipmentIntegrity(entry)
+		local equipPct = math.floor((minEquipInteg or 1.0) * 100 + 0.5)
+		local equipCol = (equipPct < 40 and colors.alertRed)
+			or (equipPct < 80 and colors.alertYellow)
+			or colors.font
+		ui.text(string.format("Ship Condition: Hull %.0f%%  |  Fuel %.0f%%  |  ", entry.hullPercent or 100, entry.fuel or 100))
+		ui.sameLine(0, 0)
+		ui.textColored(equipCol, string.format("Equip: %d%%", equipPct))
+		if (below80Count or 0) > 0 then
+			ui.sameLine(0, 0)
+			ui.textColored(colors.alertYellow, string.format(" (%d need service)", below80Count))
+		end
+		ui.text(string.format("Stats: %d Runs  |  %d Missions  |  %dt Hauled  |  Maint: %s  |  Tax: %s",
 			(entry.stats and entry.stats.runsCompleted) or 0,
 			(entry.stats and entry.stats.missionsDone) or 0,
-			(entry.stats and entry.stats.cargoHauled) or 0
+			(entry.stats and entry.stats.cargoHauled) or 0,
+			Format.Money((entry.stats and entry.stats.maintenancePaid) or 0, false),
+			Format.Money((entry.stats and entry.stats.taxesGenerated) or 0, false)
 		))
 		local shipNet = (entry.stats and entry.stats.netProfit) or 0
 		ui.text("Vessel Lifetime Net: ")
@@ -441,4 +490,13 @@ InfoView:registerView({
 	debugReload = function()
 		package.reimport()
 	end
+})
+
+ui.registerModule("game", {
+	id = "fleet-trade-scanner",
+	draw = function()
+		if PlayerFleet.HasActiveScans and PlayerFleet.HasActiveScans() then
+			PlayerFleet.StepBackgroundScans(5)
+		end
+	end,
 })

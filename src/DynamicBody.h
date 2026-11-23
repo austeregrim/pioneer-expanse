@@ -51,6 +51,7 @@ public:
 	vector3d GetAtmosForce() const { return m_atmosForce; }
 	vector3d GetGravityForce() const { return m_gravityForce; }
 	void UpdateInterpTransform(double alpha) override;
+	void SnapInterpTransform();
 
 	void PostLoadFixup(Space *space) override;
 

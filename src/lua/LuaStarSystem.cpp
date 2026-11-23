@@ -21,6 +21,10 @@
 
 #include "profiler/Profiler.h"
 
+#include <algorithm>
+#include <cmath>
+#include <vector>
+
 /*
  * Class: StarSystem
  *
@@ -177,6 +181,21 @@ static int l_starsystem_is_commodity_legal(lua_State *l)
 	return 1;
 }
 
+static inline float sectorMinDistSqr(const vector3f &originFullPos, int sx, int sy, int sz)
+{
+	const float minX = float(sx) * Sector::SIZE;
+	const float maxX = minX + Sector::SIZE;
+	const float minY = float(sy) * Sector::SIZE;
+	const float maxY = minY + Sector::SIZE;
+	const float minZ = float(sz) * Sector::SIZE;
+	const float maxZ = minZ + Sector::SIZE;
+
+	const float dx = (originFullPos.x < minX) ? (minX - originFullPos.x) : ((originFullPos.x > maxX) ? (originFullPos.x - maxX) : 0.0f);
+	const float dy = (originFullPos.y < minY) ? (minY - originFullPos.y) : ((originFullPos.y > maxY) ? (originFullPos.y - maxY) : 0.0f);
+	const float dz = (originFullPos.z < minZ) ? (minZ - originFullPos.z) : ((originFullPos.z > maxZ) ? (originFullPos.z - maxZ) : 0.0f);
+	return dx * dx + dy * dy + dz * dz;
+}
+
 /*
  * Method: GetNearbySystems
  *
@@ -214,6 +233,10 @@ static int l_starsystem_get_nearby_systems(lua_State *l)
 	}
 
 	lua_newtable(l);
+	if (dist_ly <= 0.0) {
+		LUA_DEBUG_END(l, 1);
+		return 1;
+	}
 
 	const SystemPath &here = s->GetPath();
 
@@ -222,6 +245,14 @@ static int l_starsystem_get_nearby_systems(lua_State *l)
 	const int here_z = here.sectorZ;
 	const Uint32 here_idx = here.systemIndex;
 	RefCountedPtr<const Sector> here_sec = s->m_galaxy->GetSector(here);
+	if (here_idx >= here_sec->m_systems.size()) {
+		LUA_DEBUG_END(l, 1);
+		return 1;
+	}
+
+	const vector3f here_pos = here_sec->m_systems[here_idx].GetFullPosition();
+	const float dist_sqr = float(dist_ly * dist_ly);
+	const float sec_dist_sqr = float((dist_ly + 0.01) * (dist_ly + 0.01));
 
 	const int diff_sec = int(ceil(dist_ly / Sector::SIZE));
 
@@ -229,13 +260,16 @@ static int l_starsystem_get_nearby_systems(lua_State *l)
 	for (int x = here_x - diff_sec; x <= here_x + diff_sec; x++) {
 		for (int y = here_y - diff_sec; y <= here_y + diff_sec; y++) {
 			for (int z = here_z - diff_sec; z <= here_z + diff_sec; z++) {
+				if (sectorMinDistSqr(here_pos, x, y, z) > sec_dist_sqr)
+					continue;
+
 				RefCountedPtr<const Sector> sec = s->m_galaxy->GetSector(SystemPath(x, y, z));
 
 				for (unsigned int idx = 0; idx < sec->m_systems.size(); idx++) {
 					if (x == here_x && y == here_y && z == here_z && idx == here_idx)
 						continue;
 
-					if (Sector::DistanceBetween(here_sec, here_idx, sec, idx) > dist_ly)
+					if (Sector::DistanceBetweenSqr(here_sec, here_idx, sec, idx) > dist_sqr)
 						continue;
 
 					RefCountedPtr<StarSystem> sys = s->m_galaxy->GetStarSystem(SystemPath(x, y, z, idx));
@@ -261,6 +295,291 @@ static int l_starsystem_get_nearby_systems(lua_State *l)
 	LUA_DEBUG_END(l, 1);
 
 	return 1;
+}
+
+/*
+ * Method: GetNearbySystemPaths
+ *
+ * Get sorted <SystemPath> entries and distances for nearby systems without
+ * generating full <StarSystem> objects.
+ *
+ * > paths, dists = system:GetNearbySystemPaths(range [, inhabitableOnly [, maxResults]])
+ */
+static int l_starsystem_get_nearby_system_paths(lua_State *l)
+{
+	PROFILE_SCOPED()
+	LUA_DEBUG_START(l);
+
+	const StarSystem *s = LuaObject<StarSystem>::CheckFromLua(1);
+	double dist_ly = luaL_checknumber(l, 2);
+	dist_ly = std::min(dist_ly, 120.0);
+
+	const bool inhabitableOnly = (lua_gettop(l) >= 3) ? (lua_toboolean(l, 3) != 0) : false;
+	const lua_Integer maxResultsRaw = luaL_optinteger(l, 4, 0);
+	const size_t maxResults = (maxResultsRaw > 0) ? size_t(maxResultsRaw) : 0;
+
+	if (dist_ly <= 0.0) {
+		lua_newtable(l);
+		lua_newtable(l);
+		LUA_DEBUG_END(l, 2);
+		return 2;
+	}
+
+	const SystemPath &here = s->GetPath();
+	const int here_x = here.sectorX;
+	const int here_y = here.sectorY;
+	const int here_z = here.sectorZ;
+	const Uint32 here_idx = here.systemIndex;
+	RefCountedPtr<const Sector> here_sec = s->m_galaxy->GetSector(here);
+	if (here_idx >= here_sec->m_systems.size()) {
+		lua_newtable(l);
+		lua_newtable(l);
+		LUA_DEBUG_END(l, 2);
+		return 2;
+	}
+
+	const vector3f here_pos = here_sec->m_systems[here_idx].GetFullPosition();
+	const float dist_sqr = float(dist_ly * dist_ly);
+	const float sec_dist_sqr = float((dist_ly + 0.01) * (dist_ly + 0.01));
+	const int diff_sec = int(ceil(dist_ly / Sector::SIZE));
+
+	struct NearbyPathEntry {
+		SystemPath path;
+		float distSqr;
+	};
+	std::vector<NearbyPathEntry> entries;
+	entries.reserve(maxResults > 0 ? std::min<size_t>(maxResults * 2, 512) : 128);
+
+	for (int x = here_x - diff_sec; x <= here_x + diff_sec; x++) {
+		for (int y = here_y - diff_sec; y <= here_y + diff_sec; y++) {
+			for (int z = here_z - diff_sec; z <= here_z + diff_sec; z++) {
+				if (sectorMinDistSqr(here_pos, x, y, z) > sec_dist_sqr)
+					continue;
+
+				RefCountedPtr<const Sector> sec = s->m_galaxy->GetSector(SystemPath(x, y, z));
+				for (unsigned int idx = 0; idx < sec->m_systems.size(); idx++) {
+					if (x == here_x && y == here_y && z == here_z && idx == here_idx)
+						continue;
+
+					const Sector::System &secSys = sec->m_systems[idx];
+					if (inhabitableOnly && secSys.GetExplored() != StarSystem::eEXPLORED_AT_START && secSys.GetCustomSystem() == nullptr)
+						continue;
+
+					const float dSqr = Sector::DistanceBetweenSqr(here_sec, here_idx, sec, idx);
+					if (dSqr > dist_sqr)
+						continue;
+
+					entries.push_back({ secSys.GetPath(), dSqr });
+				}
+			}
+		}
+	}
+
+	if (maxResults > 0 && entries.size() > maxResults) {
+		std::partial_sort(entries.begin(), entries.begin() + maxResults, entries.end(),
+			[](const NearbyPathEntry &a, const NearbyPathEntry &b) { return a.distSqr < b.distSqr; });
+		entries.resize(maxResults);
+	} else {
+		std::sort(entries.begin(), entries.end(),
+			[](const NearbyPathEntry &a, const NearbyPathEntry &b) { return a.distSqr < b.distSqr; });
+	}
+
+	lua_createtable(l, int(entries.size()), 0);
+	lua_createtable(l, int(entries.size()), 0);
+	for (size_t i = 0; i < entries.size(); ++i) {
+		const lua_Integer luaIdx = lua_Integer(i + 1);
+		SystemPath p = entries[i].path;
+		lua_pushinteger(l, luaIdx);
+		LuaObject<SystemPath>::PushToLua(&p);
+		lua_rawset(l, -4);
+
+		lua_pushinteger(l, luaIdx);
+		lua_pushnumber(l, std::sqrt(double(entries[i].distSqr)));
+		lua_rawset(l, -3);
+	}
+
+	LUA_DEBUG_END(l, 2);
+	return 2;
+}
+
+/*
+ * Method: FindJumpRoute
+ *
+ * Compute a greedy corridor-bounded multi-hop jump route using Sector data only.
+ *
+ * > hops, hopDists = system:FindJumpRoute(dest, maxJumpRangeLy)
+ */
+static int l_starsystem_find_jump_route(lua_State *l)
+{
+	PROFILE_SCOPED()
+	LUA_DEBUG_START(l);
+
+	const StarSystem *s = LuaObject<StarSystem>::CheckFromLua(1);
+	const SystemPath srcPath = s->GetPath();
+
+	const SystemPath *dstPtr = LuaObject<SystemPath>::GetFromLua(2);
+	if (!dstPtr) {
+		StarSystem *s2 = LuaObject<StarSystem>::CheckFromLua(2);
+		dstPtr = &(s2->GetPath());
+	}
+
+	if (!srcPath.HasValidSystem() || !dstPtr->HasValidSystem()) {
+		return luaL_error(l, "StarSystem:FindJumpRoute() requires valid system paths");
+	}
+
+	const SystemPath srcSys = srcPath.SystemOnly();
+	const SystemPath dstSys = dstPtr->SystemOnly();
+	if (srcSys.IsSameSystem(dstSys)) {
+		lua_newtable(l);
+		lua_newtable(l);
+		LUA_DEBUG_END(l, 2);
+		return 2;
+	}
+
+	const double effRange = std::max(1.5, luaL_optnumber(l, 3, 8.0));
+	RefCountedPtr<const Sector> srcSec = s->m_galaxy->GetSector(srcSys);
+	RefCountedPtr<const Sector> dstSec = s->m_galaxy->GetSector(dstSys);
+	if (srcSys.systemIndex >= srcSec->m_systems.size() || dstSys.systemIndex >= dstSec->m_systems.size()) {
+		lua_newtable(l);
+		lua_newtable(l);
+		LUA_DEBUG_END(l, 2);
+		return 2;
+	}
+
+	const float directDist = Sector::DistanceBetween(srcSec, srcSys.systemIndex, dstSec, dstSys.systemIndex);
+	std::vector<SystemPath> hops;
+	std::vector<float> hopDists;
+
+	if (double(directDist) <= effRange) {
+		hops.push_back(dstSys);
+		hopDists.push_back(directDist);
+	} else {
+		std::vector<SystemPath> visited;
+		visited.push_back(srcSys);
+		auto isVisited = [&visited](const SystemPath &p) {
+			for (const SystemPath &v : visited) {
+				if (v.IsSameSystem(p)) return true;
+			}
+			return false;
+		};
+
+		SystemPath curSys = srcSys;
+		RefCountedPtr<const Sector> curSec = srcSec;
+		Uint32 curIdx = srcSys.systemIndex;
+		vector3f curPos = curSec->m_systems[curIdx].GetFullPosition();
+		const vector3f dstPos = dstSec->m_systems[dstSys.systemIndex].GetFullPosition();
+		const float effRangeF = float(effRange);
+		const float effRangeSqr = effRangeF * effRangeF;
+
+		for (int step = 0; step < 16; ++step) {
+			const vector3f vec = dstPos - curPos;
+			const float dToDest = vec.Length();
+			if (dToDest <= effRangeF) {
+				hops.push_back(dstSys);
+				hopDists.push_back(dToDest);
+				break;
+			}
+
+			const vector3f dir = (dToDest > 1e-6f) ? (vec / dToDest) : vector3f(1.0f, 0.0f, 0.0f);
+			const float curRemSqr = dToDest * dToDest;
+
+			bool found = false;
+			SystemPath bestNext;
+			RefCountedPtr<const Sector> bestSec;
+			Uint32 bestIdx = 0;
+			vector3f bestPos;
+			float bestRemSqr = curRemSqr;
+			float bestHopDist = 0.0f;
+
+			auto searchAround = [&](const vector3f &center, float radius) {
+				const int minSX = int(floor((center.x - radius) / Sector::SIZE));
+				const int maxSX = int(floor((center.x + radius) / Sector::SIZE));
+				const int minSY = int(floor((center.y - radius) / Sector::SIZE));
+				const int maxSY = int(floor((center.y + radius) / Sector::SIZE));
+				const int minSZ = int(floor((center.z - radius) / Sector::SIZE));
+				const int maxSZ = int(floor((center.z + radius) / Sector::SIZE));
+				const float secRadSqr = (radius + 0.01f) * (radius + 0.01f);
+
+				for (int x = minSX; x <= maxSX; ++x) {
+					for (int y = minSY; y <= maxSY; ++y) {
+						for (int z = minSZ; z <= maxSZ; ++z) {
+							if (sectorMinDistSqr(center, x, y, z) > secRadSqr)
+								continue;
+							RefCountedPtr<const Sector> sec = s->m_galaxy->GetSector(SystemPath(x, y, z));
+							for (unsigned int idx = 0; idx < sec->m_systems.size(); ++idx) {
+								const SystemPath candPath(x, y, z, idx);
+								if (isVisited(candPath))
+									continue;
+								const float hopDistSqr = Sector::DistanceBetweenSqr(curSec, curIdx, sec, idx);
+								if (hopDistSqr > effRangeSqr)
+									continue;
+								const vector3f candPos = sec->m_systems[idx].GetFullPosition();
+								const float remSqr = (candPos - dstPos).LengthSqr();
+								if (remSqr < bestRemSqr) {
+									found = true;
+									bestRemSqr = remSqr;
+									bestNext = candPath;
+									bestSec = sec;
+									bestIdx = idx;
+									bestPos = candPos;
+									bestHopDist = std::sqrt(hopDistSqr);
+								}
+							}
+						}
+					}
+				}
+			};
+
+			const vector3f idealPos = curPos + dir * (effRangeF * 0.90f);
+			searchAround(idealPos, 16.0f);
+			if (!found) {
+				searchAround(idealPos, 28.0f);
+			}
+			if (!found && effRangeF > 32.0f) {
+				const vector3f midPos = curPos + dir * (effRangeF * 0.50f);
+				searchAround(midPos, 24.0f);
+			}
+			if (!found && effRangeF <= 32.0f) {
+				searchAround(curPos, effRangeF);
+			}
+
+			if (!found)
+				break;
+
+			visited.push_back(bestNext);
+			hops.push_back(bestNext);
+			hopDists.push_back(bestHopDist);
+			curSys = bestNext;
+			curSec = bestSec;
+			curIdx = bestIdx;
+			curPos = bestPos;
+		}
+
+		if (hops.empty()) {
+			hops.push_back(dstSys);
+			hopDists.push_back(directDist);
+		} else if (!hops.back().IsSameSystem(dstSys)) {
+			hops.push_back(dstSys);
+			hopDists.push_back(Sector::DistanceBetween(curSec, curIdx, dstSec, dstSys.systemIndex));
+		}
+	}
+
+	lua_createtable(l, int(hops.size()), 0);
+	lua_createtable(l, int(hopDists.size()), 0);
+	for (size_t i = 0; i < hops.size(); ++i) {
+		const lua_Integer luaIdx = lua_Integer(i + 1);
+		SystemPath p = hops[i];
+		lua_pushinteger(l, luaIdx);
+		LuaObject<SystemPath>::PushToLua(&p);
+		lua_rawset(l, -4);
+
+		lua_pushinteger(l, luaIdx);
+		lua_pushnumber(l, double(hopDists[i]));
+		lua_rawset(l, -3);
+	}
+
+	LUA_DEBUG_END(l, 2);
+	return 2;
 }
 
 static int l_starsystem_get_stars(lua_State *l)
@@ -607,6 +926,8 @@ void LuaObject<StarSystem>::RegisterClass()
 		{ "IsCommodityLegal", l_starsystem_is_commodity_legal },
 
 		{ "GetNearbySystems", l_starsystem_get_nearby_systems },
+		{ "GetNearbySystemPaths", l_starsystem_get_nearby_system_paths },
+		{ "FindJumpRoute", l_starsystem_find_jump_route },
 
 		{ "DistanceTo", l_starsystem_distance_to },
 

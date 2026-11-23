@@ -682,11 +682,40 @@ Flow.populateShippingLanes = function(routes_variants, local_routes, hyper_route
 				Trader.addHyperdriveFuel(ship, hj_route.fuel)
 				Trader.addCargo(ship, 'import')
 
+				-- Loaded cargo reduces vertical thrust-to-weight; verify destination acceptability after loading
+				if not Trader.isStarportAcceptableForShip(toBody, ship) then
+					local fallbackPort = nil
+					for _, p in ipairs(portOrder) do
+						if Trader.isStarportAcceptableForShip(p, ship) then
+							fallbackPort = p
+							break
+						end
+					end
+					if fallbackPort then
+						toBody = fallbackPort
+						Core.ships[ship].starport = toBody
+					else
+						toBody = nil
+					end
+				end
+
 				local baseFrac = 0.08 + 0.84 * ((idx - 0.5) / math.max(1, need))
 				local jitter = Engine.rand:Number(-0.04, 0.04)
 				local tRatio = math.clamp(baseFrac + jitter, 0.08, 0.92)
-				Space.PutShipOnRoute(ship, toBody, tRatio)
-				ship:AIDockWith(toBody)
+				if toBody then
+					Space.PutShipOnRoute(ship, toBody, tRatio)
+					ship:AIDockWith(toBody)
+				else
+					local stars = Game.system and Game.system:GetStars()
+					local starBody = stars and stars[1] and stars[1].body
+					Core.ships[ship].status = 'outbound'
+					Core.ships[ship].starport = nil
+					if starBody and starBody:exists() then
+						Space.PutShipOnRoute(ship, starBody, tRatio)
+						ship:AIFlyTo(starBody)
+					end
+					Trader.assignTask(ship, Game.time + Engine.rand:Number(12, 24), 'hyperjumpAtDistance')
+				end
 			elseif rec then
 				ShipRegistry.ReleaseLive(rec.label)
 			end
@@ -981,9 +1010,70 @@ Flow.processHangars = function()
 	end
 end
 
+Flow.recoverIdleTraders = function()
+	if not Core.ships or not Game.system then return end
+	local stars = Game.system:GetStars()
+	local primaryStar = stars and stars[1] and stars[1].body
+	local snapshot = {}
+	for ship, trader in pairs(Core.ships) do
+		table.insert(snapshot, { ship = ship, trader = trader })
+	end
+	for _, entry in ipairs(snapshot) do
+		local ship, trader = entry.ship, entry.trader
+		if type(ship) ~= 'userdata' or not ship:exists() then
+			Core.ships[ship] = nil
+		elseif ship ~= Game.player and trader.fnc == nil and ship.GetCurrentAICommand then
+			local fs = ship:GetFlightState()
+			if fs ~= 'DOCKED' and fs ~= 'DOCKING' and fs ~= 'UNDOCKING' and fs ~= 'HYPERSPACE' and ship:GetCurrentAICommand() == 'CMD_NONE' then
+				if trader.status == 'inbound' then
+					if trader.assignment and trader.assignment.type == 'mining' then
+						Trader.assignTask(ship, Game.time + Engine.rand:Number(10, 25), 'doReturnFromMining')
+					else
+						local port = trader.starport
+						if not (port and port:exists() and Trader.isStarportAcceptableForShip(port, ship)) then
+							port = Trader.getNearestStarport(ship, port)
+						end
+						if port and port:exists() and Trader.isStarportAcceptableForShip(port, ship) then
+							trader.starport = port
+							ship:AIDockWith(port)
+						else
+							trader.status = 'outbound'
+							trader.starport = nil
+						end
+					end
+				elseif trader.status == 'departing' then
+					if trader.assignment and trader.assignment.type == 'mining' and trader.assignment.site and trader.assignment.site:exists() then
+						trader.status = 'inbound'
+						ship:AIFlyTo(trader.assignment.site)
+						Trader.assignTask(ship, Game.time + Engine.rand:Number(60, 120), 'doReturnFromMining')
+					elseif trader.assignment and trader.assignment.type == 'interstation' and trader.assignment.to and trader.assignment.to:exists()
+						and Trader.isStarportAcceptableForShip(trader.assignment.to, ship) then
+						trader.status = 'inbound'
+						trader.starport = trader.assignment.to
+						ship:AIDockWith(trader.assignment.to)
+					else
+						trader.status = 'outbound'
+						trader.starport = nil
+					end
+				elseif trader.status == 'orbit' then
+					Trader.assignTask(ship, Game.time + Engine.rand:Number(10, 25), 'doRedock')
+				end
+
+				if trader.status == 'outbound' and trader.fnc == nil then
+					if primaryStar and primaryStar:exists() and ship:DistanceTo(primaryStar) > 1.0e8 then
+						ship:AIFlyTo(primaryStar)
+					end
+					Trader.assignTask(ship, Game.time + Engine.rand:Number(10, 20), 'hyperjumpAtDistance')
+				end
+			end
+		end
+	end
+end
+
 Flow.run = function()
 	if not Core.params or not Core.params.ship_names or #Core.params.ship_names == 0 then return end
 	Flow.cleanTradeShipsTable()
+	Flow.recoverIdleTraders()
 	Flow.processHangars()
 	local inFlight, docked, clouds = Flow.countActiveShips()
 	local _, maxInFlight = Flow.getTrafficTargets()

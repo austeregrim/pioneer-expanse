@@ -541,7 +541,9 @@ local function drawPreinstalledEquipment(shipData, isUsed)
 	for _, pair in ipairs(shipData.equip) do
 		local slotId, inst, isAftermarket = pair[1], pair[2], pair[3]
 		local name = inst:GetName()
-		local integPct = math.floor(((rawget(inst, "integrity") or 1) * 100) + 0.5)
+		local rawInteg = rawget(inst, "integrity") or 1
+		local integPct = math.floor((rawInteg * 100) + 0.5)
+		local isModuleNew = (rawInteg >= 0.999) and (rawget(inst, "isUsed") ~= true)
 		local slotTag = slotId and ("[" .. slotId .. "]") or "[LOOSE]"
 		local badge = isAftermarket and "[AFTERMARKET]" or "[STOCK]"
 		local col = isAftermarket and (colors.econProfit or colors.compareBetter) or colors.font
@@ -550,7 +552,8 @@ local function drawPreinstalledEquipment(shipData, isUsed)
 			ui.textColored(col, string.format("• %s  %s", badge, name))
 			ui.sameLine()
 			if isUsed then
-				ui.textColored(colors.fontDim, string.format("%s  (%d%% cond.)", slotTag, integPct))
+				local condStr = isModuleNew and "New - 100%" or string.format("%d%% cond.", integPct)
+				ui.textColored(colors.fontDim, string.format("%s  (%s)", slotTag, condStr))
 			else
 				ui.textColored(colors.fontDim, slotTag)
 			end

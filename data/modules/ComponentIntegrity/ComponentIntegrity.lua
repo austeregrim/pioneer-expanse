@@ -15,6 +15,7 @@ local ComponentIntegrity = {}
 ComponentIntegrity.STANDARD_GRAVITY = 9.80665
 ComponentIntegrity.GRAVITY_BASE_RATE = 0.01 / (100.0 * 3600.0)
 ComponentIntegrity.PASSIVE_WEAR_FLOOR = 0.15
+ComponentIntegrity.REPAIR_THRESHOLD = 0.90
 
 local function clamp(v, lo, hi)
 	if v < lo then return lo end
@@ -123,13 +124,14 @@ function ComponentIntegrity.ComputeHyperjumpWear(durationSeconds, isHyperdrive, 
 end
 
 --- Compute station drydock repair cost for an installed module.
+--- Servicing is only available once integrity drops below REPAIR_THRESHOLD (90%).
 function ComponentIntegrity.GetModuleRepairCost(equip)
 	if not equip then return 0 end
 	local integrity = clamp(rawget(equip, "integrity") or 1.0, 0.0, 1.0)
-	local missing = 1.0 - integrity
-	if missing < 0.001 then
+	if integrity >= ComponentIntegrity.REPAIR_THRESHOLD then
 		return 0
 	end
+	local missing = 1.0 - integrity
 	local basePrice = equip.price or 500
 	return math.max(10, math.ceil(basePrice * missing * 0.35))
 end

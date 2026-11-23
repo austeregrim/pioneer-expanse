@@ -279,6 +279,13 @@ void DynamicBody::UpdateInterpTransform(double alpha)
 		m_interpOrient = GetOrient();
 }
 
+void DynamicBody::SnapInterpTransform()
+{
+	m_oldPos = GetPosition();
+	m_oldAngDisplacement = vector3d(0.0);
+	UpdateInterpTransform(1.0);
+}
+
 void DynamicBody::SetMassDistributionFromModel()
 {
 	CollMesh *m = GetCollMesh();

@@ -2,6 +2,7 @@
 // Licensed under the terms of the GPL v3. See licenses/GPL-3.txt
 
 #include "SupercruiseController.h"
+#include "ship/OrbitalDockingGeometry.h"
 #include "Frame.h"
 #include "Game.h"
 #include "HyperspaceCloud.h"
@@ -10,6 +11,7 @@
 #include "Pi.h"
 #include "Planet.h"
 #include "Player.h"
+#include "PlayerShipController.h"
 #include "SectorView.h"
 #include "Ship.h"
 #include "ShipType.h"
@@ -530,6 +532,9 @@ void SupercruiseController::EnterSupercruise()
 {
 	m_charging = false;
 	m_chargeCountdown = 0.0f;
+	m_idleAITimer = 0.0f;
+	if (m_ship)
+		m_ship->ResetLaunchLockTimeout();
 
 	// Ensure we are in an orbital parent frame, never a rotating surface frame or station frame
 	while (Frame *f = Frame::GetFrame(m_ship->GetFrame())) {
@@ -576,6 +581,8 @@ void SupercruiseController::EnterSupercruiseImmediate(double initialSpeed)
 	m_chargeCountdown = 0.0f;
 	m_cooldown = 0.0f;
 	m_entryFlashTimer = 0.0f;
+	m_idleAITimer = 0.0f;
+	m_ship->ResetLaunchLockTimeout();
 
 	while (Frame *f = Frame::GetFrame(m_ship->GetFrame())) {
 		const bool isStationFrame = f->GetBody() && f->GetBody()->IsType(ObjectType::SPACESTATION);
@@ -618,6 +625,7 @@ void SupercruiseController::EnterSupercruiseOnHyperspaceExit()
 	m_slowDownWarning = false;
 	m_cooldown = HYPERJUMP_COOLDOWN;
 	m_entryFlashTimer = 0.0f;
+	m_idleAITimer = 0.0f;
 
 	m_ship->SetFlightState(Ship::SUPERCRUISE);
 	ClearSupercruiseLock();
@@ -648,6 +656,7 @@ void SupercruiseController::DropIntoRing(Planet *planet, const std::string &reas
 	m_slowDownWarning = false;
 	m_ringDropPlanet = nullptr;
 	m_ringImmersionPlanet = nullptr;
+	m_idleAITimer = 0.0f;
 
 	if (planet && planet->GetSystemBody()) {
 		const SystemBody *sb = planet->GetSystemBody();
@@ -732,54 +741,37 @@ void SupercruiseController::SafeDisengage()
 	m_slowDownWarning = false;
 	m_ringDropPlanet = nullptr;
 	m_ringImmersionPlanet = nullptr;
+	m_idleAITimer = 0.0f;
 
 	bool exitAtCurrentPosition = false;
 
 	if (target && target->IsType(ObjectType::SPACESTATION)) {
 		SpaceStation *station = static_cast<SpaceStation *>(target);
 		if (!station->IsGroundStation()) {
-			// Orbital Station Drop-In: switch to station frame, 12 km out (or current position if already closer)
+			// Orbital Station Drop-In: switch to station frame, 12 km out (or keep if closer)
+			// preserving the ship's exact Supercruise approach vector and orientation
 			m_ship->SwitchToFrame(station->GetFrame());
-			const vector3d relToShip = m_ship->GetPosition() - station->GetPosition();
-			const double currentDist = relToShip.Length();
-			vector3d fromStation = relToShip.NormalizedSafe();
-			if (fromStation.LengthSqr() < 0.1)
-				fromStation = vector3d(0.0, 0.0, 1.0);
+			const double minClearDist = station->GetClipRadius() + m_ship->GetClipRadius() + 250.0;
+			const SupercruiseDropResult drop = ComputeOrbitalStationDropIn(
+				station->GetPosition(), m_ship->GetPosition(), m_ship->GetOrient(),
+				12000.0, minClearDist);
 
-			const double safeDropDist = 12000.0;
-			if (currentDist > safeDropDist) {
-				m_ship->SetPosition(station->GetPosition() + fromStation * safeDropDist);
-
-				vector3d up = m_ship->GetOrient().VectorY();
-				vector3d x = up.Cross(fromStation).NormalizedSafe();
-				if (x.LengthSqr() < 0.1)
-					x = vector3d(1.0, 0.0, 0.0).Cross(fromStation).NormalizedSafe();
-				vector3d y = fromStation.Cross(x).Normalized();
-				m_ship->SetOrient(matrix3x3d::FromVectors(x, y, fromStation));
-			} else {
-				const double minClearDist = station->GetClipRadius() + m_ship->GetClipRadius() + 250.0;
-				if (currentDist < minClearDist)
-					m_ship->SetPosition(station->GetPosition() + fromStation * minClearDist);
-			}
-
+			m_ship->SetPosition(drop.position);
+			m_ship->SetOrient(drop.orient);
 			m_ship->SetVelocity(station->GetVelocity());
 			m_ship->SetAngVelocity(vector3d(0.0));
 		} else {
-			// Surface Starport Glide Drop-In: switch to planet rotating frame, 10 km altitude & 8 km out
-			// (or exit at current position if already closer to the starport)
+			// Surface Starport Glide Drop-In: switch to planet rotating frame, ~12.8 km out
+			// preserving the ship's Supercruise approach glide angle & roll (lifted above terrain horizon only if needed)
 			m_ship->SwitchToFrame(station->GetFrame());
 			const vector3d stPos = station->GetPosition();
 			const vector3d upDir = stPos.NormalizedSafe();
-			const vector3d shipRel = m_ship->GetPosition() - stPos;
-			vector3d horiz = (shipRel - upDir * shipRel.Dot(upDir)).NormalizedSafe();
-			if (horiz.LengthSqr() < 0.1)
-				horiz = station->GetOrient().VectorZ();
+			const SupercruiseDropResult drop = ComputeSurfaceStationDropIn(
+				stPos, upDir, m_ship->GetPosition(), m_ship->GetOrient(),
+				12800.0, 0.25);
 
-			const vector3d safeDropOffset = upDir * 10000.0 + horiz * 8000.0;
-			const double safeDropDist = safeDropOffset.Length();
-			const bool closerThanSafeExit = (shipRel.Length() <= safeDropDist);
-			vector3d dropPos = closerThanSafeExit ? m_ship->GetPosition() : (stPos + safeDropOffset);
-
+			vector3d dropPos = drop.position;
+			bool adjustedForExclusion = false;
 			if (Frame *stFrame = Frame::GetFrame(station->GetFrame())) {
 				if (Body *astro = stFrame->GetBody()) {
 					if (astro->IsType(ObjectType::TERRAINBODY)) {
@@ -787,21 +779,17 @@ void SupercruiseController::SafeDisengage()
 						const double minR = GetExclusionZoneRadiusAtDir(astro, dropUnit);
 						if (dropPos.Length() < minR) {
 							dropPos = dropUnit * (minR + 10.0);
+							adjustedForExclusion = true;
 						}
 					}
 				}
 			}
 			m_ship->SetPosition(dropPos);
-
-			if (!closerThanSafeExit) {
-				const vector3d z = (dropPos - stPos).NormalizedSafe();
-				if (z.LengthSqr() > 0.1) {
-					vector3d x = upDir.Cross(z).NormalizedSafe();
-					if (x.LengthSqr() < 0.1)
-						x = vector3d(1.0, 0.0, 0.0).Cross(z).NormalizedSafe();
-					const vector3d y = z.Cross(x).Normalized();
-					m_ship->SetOrient(matrix3x3d::FromVectors(x, y, z));
-				}
+			if (adjustedForExclusion) {
+				const vector3d toStDir = (stPos - dropPos).NormalizedSafe();
+				m_ship->SetOrient(BuildDropOrientPreservingUp(toStDir, drop.orient.VectorY()));
+			} else {
+				m_ship->SetOrient(drop.orient);
 			}
 
 			m_ship->SetVelocity(vector3d(0.0));
@@ -878,6 +866,7 @@ void SupercruiseController::SafeDisengage()
 		m_ship->SetVelocity(vector3d(0.0));
 		m_ship->SetAngVelocity(vector3d(0.0));
 	}
+	m_ship->SnapInterpTransform();
 	m_ship->ClearThrusterState();
 	m_ship->CalcExternalForce();
 	m_trailPositions.clear();
@@ -886,6 +875,11 @@ void SupercruiseController::SafeDisengage()
 	Sound::BodyMakeNoise(m_ship, "Hyperdrive_Abort", 1.0f);
 
 	if (dockAfterDrop && target && target->IsType(ObjectType::SPACESTATION)) {
+		if (m_ship->IsType(ObjectType::PLAYER)) {
+			if (PlayerShipController *psc = static_cast<Player *>(m_ship)->GetPlayerController()) {
+				psc->SetFlightControlState(CONTROL_AUTOPILOT);
+			}
+		}
 		m_ship->AIDock(static_cast<SpaceStation *>(target));
 		ShowStatusMessage("SAFE DISENGAGE COMPLETE — AUTO-DOCKING ENGAGED", 5.0f);
 	} else {
@@ -925,6 +919,7 @@ void SupercruiseController::NormalDrop(const std::string &reason)
 	m_slowDownWarning = false;
 	m_ringDropPlanet = nullptr;
 	m_ringImmersionPlanet = nullptr;
+	m_idleAITimer = 0.0f;
 
 	m_ship->SetFlightState(Ship::FLYING);
 	EnsureShipAboveTerrainAndSyncFrame();
@@ -953,6 +948,7 @@ void SupercruiseController::EmergencyDrop(const std::string &reason)
 	m_slowDownWarning = false;
 	m_ringDropPlanet = nullptr;
 	m_ringImmersionPlanet = nullptr;
+	m_idleAITimer = 0.0f;
 
 	m_ship->SetFlightState(Ship::FLYING);
 	EnsureShipAboveTerrainAndSyncFrame();
@@ -1002,6 +998,7 @@ void SupercruiseController::Reset()
 	m_heatSpike = 0.0;
 	m_statusMessage.clear();
 	m_statusMessageTimer = 0.0f;
+	m_idleAITimer = 0.0f;
 }
 
 void SupercruiseController::OnEnterHyperspace()
@@ -1020,6 +1017,7 @@ void SupercruiseController::OnEnterHyperspace()
 	m_slowDownWarning = false;
 	m_ringDropPlanet = nullptr;
 	m_ringImmersionPlanet = nullptr;
+	m_idleAITimer = 0.0f;
 }
 
 void SupercruiseController::ResetFuelScoopState()
@@ -1708,8 +1706,20 @@ void SupercruiseController::StaticUpdate(float timeStep)
 		} else {
 			m_throttle = 0.75;
 			if (m_safeDisengageReady) {
-				SafeDisengage();
-				return;
+				bool alignedForDrop = true;
+				Body *activeTarget = GetActiveTarget();
+				if (activeTarget && activeTarget->IsType(ObjectType::SPACESTATION)) {
+					vector3d targetRel;
+					if (GetActiveTargetPosRelToShip(targetRel)) {
+						const vector3d fwd = -m_ship->GetOrient().VectorZ();
+						const double alignDot = fwd.Dot(targetRel.NormalizedSafe());
+						alignedForDrop = (alignDot >= 0.985) || (m_targetDistance <= 25000.0);
+					}
+				}
+				if (alignedForDrop) {
+					SafeDisengage();
+					return;
+				}
 			}
 		}
 	}
@@ -1725,15 +1735,15 @@ void SupercruiseController::StaticUpdate(float timeStep)
 
 	// The 6-Second Rule: when approaching a stationary/sublight target, regulate the speed envelope
 	// along v = d / 6.0 so ETA holds steady at 0:06 all the way down to Safe Disengage.
-	if (hasTarget && !targetIsSCShip && m_targetDistance < 500.0 * LIGHT_SPEED) {
-		double targetExclR = 0.0;
-		if (activeTarget && activeTarget->IsType(ObjectType::TERRAINBODY)) {
-			const double maxTargetExclR = GetExclusionZoneRadius(activeTarget);
-			targetExclR = (m_targetDistance <= maxTargetExclR * 3.0 + 250000.0)
-				? GetExclusionZoneRadiusAtDir(activeTarget, m_ship->GetPositionRelTo(activeTarget).NormalizedSafe())
-				: maxTargetExclR;
-		}
-		const double effectiveDist = std::max(0.0, m_targetDistance - targetExclR);
+	double targetExclR = 0.0;
+	if (hasTarget && !targetIsSCShip && activeTarget && activeTarget->IsType(ObjectType::TERRAINBODY)) {
+		const double maxTargetExclR = GetExclusionZoneRadius(activeTarget);
+		targetExclR = (m_targetDistance <= maxTargetExclR * 3.0 + 250000.0)
+			? GetExclusionZoneRadiusAtDir(activeTarget, m_ship->GetPositionRelTo(activeTarget).NormalizedSafe())
+			: maxTargetExclR;
+	}
+	const double effectiveDist = std::max(0.0, m_targetDistance - targetExclR);
+	if (hasTarget && !targetIsSCShip && effectiveDist < 500.0 * LIGHT_SPEED) {
 
 		const Body *blocker = GetTargetObscuredBy(targetRel, activeTarget);
 		const bool isOccluded = (blocker != nullptr);

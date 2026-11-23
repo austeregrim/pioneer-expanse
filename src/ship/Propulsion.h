@@ -134,6 +134,7 @@ public:
 
 	void BeginAISequentialThrusters();
 	void EndAISequentialThrusters();
+	void SuspendAISequentialThrusters();
 
 private:
 	// Ship turn angle above which linear thrust is blocked. For angles above this the ship will finish rotating first before firing main thrusters.

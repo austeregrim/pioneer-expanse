@@ -32,6 +32,21 @@ local onGameStart = function ()
 end
 Event.Register("onGameStart", onGameStart)
 
+local function divertOutbound(ship, trader)
+	if not ship or not ship:exists() or not trader then return end
+	trader.status = 'outbound'
+	trader.starport = nil
+	trader.assignment = nil
+	local stars = Game.system and Game.system:GetStars()
+	local primaryStar = stars and stars[1] and stars[1].body
+	if primaryStar and primaryStar:exists() and ship:DistanceTo(primaryStar) > 1.0e8 then
+		ship:AIFlyTo(primaryStar)
+	else
+		ship:CancelAI()
+	end
+	Trader.assignTask(ship, Game.time + Engine.rand:Number(12, 24), 'hyperjumpAtDistance')
+end
+
 local onShipEnterSystem = function (ship)
 	-- clearing the cache of ships that attacked traders, but are no longer relevant
 	Core.attackers.clean()
@@ -56,15 +71,20 @@ local onShipEnterSystem = function (ship)
 	elseif Core.ships[ship] ~= nil then
 		local trader = Core.ships[ship]
 		Core.log:add(ship, 'Entered '..Game.system.name..' from '..trader.from_path:GetStarSystem().name)
-		if trader.route then
-			ship:AIDockWith(trader.route.to)
-			Core.ships[ship]['starport'] = trader.route.to
+		local destPort = trader.route and trader.route.to
+		if destPort and destPort:exists() and Trader.isStarportAcceptableForShip(destPort, ship) then
+			ship:AIDockWith(destPort)
+			Core.ships[ship]['starport'] = destPort
 			Core.ships[ship]['status'] = 'inbound'
 		else
-			-- starport == nil happens if player has followed ship to empty system, or
-			-- no suitable port found (e.g. all stations atmospheric for ship without atmoshield)
-			Trader.getSystemAndJump(ship)
-			-- if we couldn't reach any systems wait for player to attack
+			local altPort = Core.params and Trader.getNearestStarport(ship, nil)
+			if altPort and altPort:exists() and Trader.isStarportAcceptableForShip(altPort, ship) then
+				ship:AIDockWith(altPort)
+				Core.ships[ship]['starport'] = altPort
+				Core.ships[ship]['status'] = 'inbound'
+			elseif Trader.getSystemAndJump(ship) ~= 'OK' then
+				divertOutbound(ship, trader)
+			end
 		end
 	end
 end
@@ -269,21 +289,36 @@ local onAICompleted = function (ship, ai_error)
 			Trader.assignTask(ship, Game.time + 2, 'hyperjumpAtDistance')
 		end
 	elseif trader.status == 'orbit' then
-		if ai_error == 'NONE' then
-			trader.ts_error = "wait_redock"
-			Trader.assignTask(ship, Game.time + Engine.rand:Number(45, 75), 'doRedock')
-		end
-		-- XXX if ORBIT_IMPOSSIBLE asteroid? get parent of parent and attempt orbit?
+		trader.ts_error = "wait_redock"
+		Trader.assignTask(ship, Game.time + Engine.rand:Number(45, 75), 'doRedock')
 	elseif trader.status == 'inbound' then
-		if ai_error == 'REFUSED_PERM' then
+		if trader.assignment and trader.assignment.type == 'mining' then
+			if trader.fnc ~= 'doReturnFromMining' then
+				Trader.assignTask(ship, Game.time + Engine.rand:Number(30, 60), 'doReturnFromMining')
+			end
+		elseif ai_error == 'REFUSED_PERM' or ai_error == 'GRAV_TOO_HIGH' or ai_error == 'PRESS_TOO_HIGH' or ai_error == 'ORBIT_IMPOSSIBLE' then
 			local altPort = Trader.getNearestStarport(ship, trader.starport)
-			if altPort and altPort ~= trader.starport then
+			if altPort and altPort ~= trader.starport and altPort:exists() and Trader.isStarportAcceptableForShip(altPort, ship) then
 				trader.starport = altPort
 				ship:AIDockWith(altPort)
-			else
+			elseif ai_error == 'REFUSED_PERM' and trader.starport and trader.starport:exists() then
 				Trader.doOrbit(ship)
 				trader.ts_error = "refused_perm"
 				Trader.assignTask(ship, Game.time + Engine.rand:Number(45, 75), 'doRedock')
+			else
+				divertOutbound(ship, trader)
+			end
+		elseif not ship:GetDockedWith() and ship:GetFlightState() ~= 'DOCKED' and ship:GetFlightState() ~= 'DOCKING' then
+			if trader.starport and trader.starport:exists() and Trader.isStarportAcceptableForShip(trader.starport, ship) then
+				ship:AIDockWith(trader.starport)
+			else
+				local altPort = Trader.getNearestStarport(ship, trader.starport)
+				if altPort and altPort ~= trader.starport and altPort:exists() and Trader.isStarportAcceptableForShip(altPort, ship) then
+					trader.starport = altPort
+					ship:AIDockWith(altPort)
+				else
+					divertOutbound(ship, trader)
+				end
 			end
 		end
 	end

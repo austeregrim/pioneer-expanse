@@ -339,7 +339,7 @@ local onShipDocked = function (ship, station)
 				PlayerState.AddMoney(mission.reward)
 				local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
 				if okTax and TaxAuthority and TaxAuthority.RecordBBSIncome then
-					TaxAuthority.RecordBBSIncome(mission.reward, true) -- military/combat: tax-exempt!
+					TaxAuthority.RecordBBSIncome(mission.reward, false)
 				end
 				Character.persistent.player.reputation = Character.persistent.player.reputation + 8
 				mission:Remove()

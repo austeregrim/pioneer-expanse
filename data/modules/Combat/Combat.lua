@@ -435,7 +435,7 @@ local finishMission = function (ref, mission)
 		PlayerState.AddMoney(mission.reward)
 		local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
 		if okTax and TaxAuthority and TaxAuthority.RecordBBSIncome then
-			TaxAuthority.RecordBBSIncome(mission.reward, true) -- military/combat: tax-exempt!
+			TaxAuthority.RecordBBSIncome(mission.reward, false)
 		end
 		FactionStanding.ApplyMissionOutcome(mission.factionName, standingDelta, nil, "Combat contract completed")
 		if mission.bonus > 0 then
@@ -444,7 +444,7 @@ local finishMission = function (ref, mission)
 			Comms.ImportantMessage(addition, mission.client.name)
 			PlayerState.AddMoney(bonus)
 			if okTax and TaxAuthority and TaxAuthority.RecordBBSIncome then
-				TaxAuthority.RecordBBSIncome(bonus, true)
+				TaxAuthority.RecordBBSIncome(bonus, false)
 			end
 		end
 	end

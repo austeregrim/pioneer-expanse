@@ -33,6 +33,8 @@ local FactionStanding = require 'FactionStanding'
 local Ship            = require 'Ship'
 local ShipDealerships = require 'ShipDealerships'
 local Insurance       = require 'modules.Insurance.Insurance'
+local ComponentIntegrity = require 'modules.ComponentIntegrity.ComponentIntegrity'
+local TaxAuthority    = require 'modules.Economy.TaxAuthority'
 local SystemPath      = package.core['SystemPath']
 
 local CAPTAIN_SIGNING_BONUS = 1500
@@ -46,8 +48,40 @@ local EQUIP_SELL_RATIO      = 0.80
 local AU_IN_METERS          = 1.495978707e11
 local LIGHT_SPEED_MPS       = 299792458.0
 
+-- Hyperdrive math constants matching data/modules/Equipment/Types.lua
+local HYPER_RANGE_EXP    = 1.6
+local HYPER_MASS_EXP     = 1.2
+local HYPER_FUEL_EXP     = 0.9
+local HYPER_FUEL_EXP_INV = 1.0 / 0.9
+
+local MAINTENANCE_INTEGRITY_THRESHOLD = 0.80
+local MAINTENANCE_HULL_THRESHOLD      = 80
+local MAX_CATCHUP_PHASES              = 64
+
+local DEFAULT_TRADE_RANGE_LY         = 20
+local MAX_TRADE_RANGE_LY             = 40
+local TRADE_SCAN_SLICE_MS            = 4.5
+local TRADE_SCAN_MAX_CANDIDATES      = 200
+local TRADE_SCAN_CATCHUP_CANDIDATES  = 64
+local TRADE_SCAN_CATCHUP_MARKETS     = 14
+local MARKET_CACHE_MAX_ENTRIES       = 1500
+
+local TRADE_CANDIDATE_COMMS = {
+	"metal_alloys", "precious_metals", "computers", "robots", "medicines",
+	"consumer_goods", "plastics", "grain", "fruit_and_veg", "textiles",
+	"mining_machinery", "industrial_machinery", "liquor", "metal_ore"
+}
+
 ---@class PlayerFleet
 local PlayerFleet = {}
+
+PlayerFleet.TRADE_RANGE_PRESETS = {
+	{ label = "Local", rangeLy = 0 },
+	{ label = "12 ly", rangeLy = 12 },
+	{ label = "20 ly", rangeLy = 20 },
+	{ label = "30 ly", rangeLy = 30 },
+	{ label = "40 ly", rangeLy = 40 },
+}
 
 -- Persistent state serialized into savefiles
 local fleetState = {
@@ -61,6 +95,23 @@ local fleetState = {
 local tickTimerActive = false
 local liveOrderRuntime = {}
 local soldDepartingShips = {}
+local lastPlayerJumpFrom = nil
+local lastPlayerJumpStart = nil
+local activeTradeScans = {}
+local systemMarketCache = {}
+local systemMarketCacheCount = 0
+
+-- Helper declaration for hyperdrive default lookup during normalization
+local function getDefaultHyperFuelForEquip(equipList, fuelPercent)
+	for _, eq in ipairs(equipList or {}) do
+		local proto = Equipment.Get(eq.id)
+		if proto and proto.capabilities and proto.capabilities.hyperclass and proto.capabilities.hyperclass > 0 then
+			local resv = proto.fuel_resv_size or 1
+			return resv * math.clamp((fuelPercent or 100) / 100, 0, 1)
+		end
+	end
+	return 0
+end
 
 local function normalizeFleetState(data)
 	local s = (type(data) == "table") and data or {}
@@ -74,18 +125,47 @@ local function normalizeFleetState(data)
 			entry.liveShip = nil
 		end
 		if type(entry.cargo) ~= "table" then entry.cargo = {} end
+		if type(entry.cargoCostBasis) ~= "table" then entry.cargoCostBasis = {} end
 		if type(entry.equip) ~= "table" then entry.equip = {} end
 		if type(entry.crew) ~= "table" then entry.crew = {} end
 		if type(entry.orderParams) ~= "table" then
-			entry.orderParams = { maxJumps = 12, autoSell = true }
+			entry.orderParams = { maxJumps = 12, autoSell = true, tradeRangeLy = DEFAULT_TRADE_RANGE_LY }
 		else
 			entry.orderParams.pendingRoute = nil
+			entry.orderParams.isInitialAutoTradeStart = nil
+			entry.orderParams.noStationsAbort = nil
+			if type(entry.orderParams.tradeRangeLy) ~= "number" then
+				entry.orderParams.tradeRangeLy = DEFAULT_TRADE_RANGE_LY
+			else
+				entry.orderParams.tradeRangeLy = math.clamp(entry.orderParams.tradeRangeLy, 0, MAX_TRADE_RANGE_LY)
+			end
+			if entry.order == "AUTO_TRADE" and entry.orderParams.tradeState == "SCANNING" then
+				entry.orderParams.tradeState = "SEEKING"
+				entry.orderParams.nextSeekTime = 0
+				if entry.status == "SCANNING" then
+					entry.status = "DOCKED"
+				end
+			end
 		end
 		if entry.transit ~= nil and type(entry.transit) ~= "table" then
 			entry.transit = nil
 		end
 		if type(entry.stats) ~= "table" then
-			entry.stats = { netProfit = 0, runsCompleted = 0, bountiesEarned = 0, missionsDone = 0, cargoHauled = 0 }
+			entry.stats = {
+				netProfit = 0, runsCompleted = 0, bountiesEarned = 0,
+				missionsDone = 0, cargoHauled = 0, maintenancePaid = 0, taxesGenerated = 0,
+			}
+		else
+			entry.stats.netProfit = entry.stats.netProfit or 0
+			entry.stats.runsCompleted = entry.stats.runsCompleted or 0
+			entry.stats.bountiesEarned = entry.stats.bountiesEarned or 0
+			entry.stats.missionsDone = entry.stats.missionsDone or 0
+			entry.stats.cargoHauled = entry.stats.cargoHauled or 0
+			entry.stats.maintenancePaid = entry.stats.maintenancePaid or 0
+			entry.stats.taxesGenerated = entry.stats.taxesGenerated or 0
+		end
+		if type(entry.hyperFuel) ~= "number" then
+			entry.hyperFuel = getDefaultHyperFuelForEquip(entry.equip, entry.fuel)
 		end
 		for _, member in ipairs(entry.crew) do
 			member.available = false
@@ -105,16 +185,22 @@ local tickDockTransit
 local tickSellCargoTransit
 local tickAutoTrade
 local tickAutoMine
+local tickPatrol
 local tickMissionOrder
+local getSystemCommodityPrice
+local getOrScanSystemMarket
+local maintainFleetShipAtStation
+local applyOOSHyperjumpWear
+local applyOperationalFlightWear
 
 -- ============================================================================
 -- Helpers & Logging
 -- ============================================================================
 
-local function addLog(shipName, message, deltaCredits)
+local function addLog(shipName, message, deltaCredits, eventTime)
 	fleetState.logs = fleetState.logs or {}
 	table.insert(fleetState.logs, 1, {
-		time = Game.time or 0,
+		time = eventTime or Game.time or 0,
 		shipName = shipName or "Fleet Command",
 		message = message,
 		delta = deltaCredits or 0,
@@ -218,14 +304,15 @@ local function findNearestStationPath(refPath, preferPath)
 	local st = findBestStationInSystem(sys, preferPath)
 	if st then return st end
 	if sys then
-		local okN, near = pcall(function()
-			return sys:GetNearbySystems(18, function(s) return #s:GetStationPaths() > 0 end)
+		local okN, nearPaths = pcall(function()
+			return sys:GetNearbySystemPaths(18, true, 32)
 		end)
-		if okN and near and #near > 0 then
-			table.sort(near, function(a, b) return sys:DistanceTo(a) < sys:DistanceTo(b) end)
-			for _, ns in ipairs(near) do
-				local nst = findBestStationInSystem(ns)
-				if nst then return nst end
+		if okN and nearPaths then
+			for _, np in ipairs(nearPaths) do
+				local mkt = getOrScanSystemMarket(np)
+				if mkt and mkt.hasStations and mkt.stationPaths and mkt.stationPaths[1] then
+					return mkt.stationPaths[1]
+				end
 			end
 		end
 	end
@@ -328,20 +415,18 @@ local function systemDistLy(a, b)
 end
 
 local function getEffectiveJumpRange(entry, liveShip)
-	local baseRange = PlayerFleet.GetShipHyperspaceRange(entry)
+	local maxRange, curRange = PlayerFleet.GetShipHyperspaceRangeExact(entry)
+	local eff = math.max(curRange or 0, maxRange or 0)
 	if liveShip and liveShip:exists() then
 		local okD, drive = pcall(function() return liveShip:GetInstalledHyperdrive() end)
 		if okD and drive and drive.GetRange then
-			local okR, curRange, maxRange = pcall(function() return drive:GetRange(liveShip) end)
-			if okR and (curRange or maxRange) then
-				local r = math.max(curRange or 0, maxRange or 0)
-				if r > 0 then
-					return math.max(1.0, math.min(baseRange > 0 and baseRange or r, r) * 0.94)
-				end
+			local okR, lCur, lMax = pcall(function() return drive:GetRange(liveShip) end)
+			if okR and (lCur or lMax) then
+				eff = math.max(lCur or 0, lMax or 0)
 			end
 		end
 	end
-	return baseRange
+	return math.max(1.0, eff * 0.96)
 end
 
 local function findJumpRoute(fromSysPath, destSysPath, maxRangeLy)
@@ -357,70 +442,102 @@ local function findJumpRoute(fromSysPath, destSysPath, maxRangeLy)
 		return { dstSysOnly }, { directDist }
 	end
 
-	-- Greedy best-first starpath finder up to 16 hops
-	local hops = {}
-	local hopDists = {}
-	local visited = { srcSysOnly }
-	local curSysPath = srcSysOnly
-
-	local function isVisited(p)
-		for _, v in ipairs(visited) do
-			if sameSystem(v, p) then return true end
+	local curSys = srcSysOnly:GetStarSystem()
+	if curSys and curSys.FindJumpRoute then
+		local okR, hops, hopDists = pcall(function()
+			return curSys:FindJumpRoute(dstSysOnly, effRange)
+		end)
+		if okR and type(hops) == "table" and #hops > 0 then
+			return hops, hopDists or {}
 		end
-		return false
 	end
 
-	for _ = 1, 16 do
-		local curSys = curSysPath:GetStarSystem()
-		if not curSys then break end
-		local dToDest = systemDistLy(curSysPath, dstSysOnly)
-		if dToDest <= effRange then
-			table.insert(hops, dstSysOnly)
-			table.insert(hopDists, dToDest)
-			return hops, hopDists
-		end
-
-		local bestNext = nil
-		local bestScore = dToDest
-		local bestHopDist = 0
-		local okN, near = pcall(function() return curSys:GetNearbySystems(effRange) end)
-		if okN and near then
-			for _, ns in ipairs(near) do
-				local np = ns.path:SystemOnly()
-				if not isVisited(np) then
-					local rem = systemDistLy(np, dstSysOnly)
-					if rem < bestScore then
-						bestScore = rem
-						bestNext = np
-						bestHopDist = systemDistLy(curSysPath, np)
-					end
-				end
-			end
-		end
-
-		if not bestNext then break end
-		table.insert(visited, bestNext)
-		table.insert(hops, bestNext)
-		table.insert(hopDists, bestHopDist)
-		curSysPath = bestNext
-	end
-
-	-- Fallback if a wide sparse gap exists beyond single-jump sector neighbors
-	if #hops == 0 then
-		return { dstSysOnly }, { directDist }
-	end
-	local lastPath = hops[#hops]
-	if not sameSystem(lastPath, dstSysOnly) then
-		table.insert(hops, dstSysOnly)
-		table.insert(hopDists, systemDistLy(lastPath, dstSysOnly))
-	end
-	return hops, hopDists
+	return { dstSysOnly }, { directDist }
 end
 
-local function computeJumpDurationSec(entry, distLy)
-	local _, hclass = PlayerFleet.HasHyperdrive(entry)
-	local base = 32 + (math.max(1.0, distLy or 5.0) ^ 1.2) * (12 / math.max(1.0, (hclass or 1) * 0.7))
-	return math.clamp(math.floor(base / getSkillMultiplier(entry, "navigation", 0.25)), 32, 160)
+local function getInstalledHyperdriveInfo(entry)
+	for _, eq in ipairs(entry.equip or {}) do
+		local proto = Equipment.Get(eq.id)
+		if proto and proto.capabilities and proto.capabilities.hyperclass and proto.capabilities.hyperclass > 0 then
+			return proto, eq, proto.capabilities.hyperclass
+		end
+	end
+	return nil, nil, 0
+end
+
+local function computeEntryMasses(entry, liveShip)
+	if liveShip and liveShip:exists() then
+		local sm = liveShip.staticMass or 0
+		local fm = liveShip.fuelMassLeft or 0
+		if sm > 0 then
+			return sm, fm
+		end
+	end
+	local def = ShipDef[entry.shipId]
+	local hullMass = (def and def.hullMass) or 20
+	local equipMass = 0
+	local hyperFuelMass = 0
+	for _, eq in ipairs(entry.equip or {}) do
+		local proto = Equipment.Get(eq.id)
+		if proto and proto.mass then
+			equipMass = equipMass + (proto.mass * (eq.count or 1))
+		end
+	end
+	local driveProto = getInstalledHyperdriveInfo(entry)
+	if driveProto then
+		local resv = driveProto.fuel_resv_size or 1
+		local stored = (type(entry.hyperFuel) == "number") and entry.hyperFuel or resv
+		hyperFuelMass = math.clamp(stored, 0, resv)
+	end
+	local cargoMass = PlayerFleet.GetCargoUsed(entry)
+	local tankCap = (def and def.fuelTankMass) or 10
+	local fuelMassLeft = tankCap * math.clamp((entry.fuel or 100) / 100, 0, 1)
+	return (hullMass + equipMass + hyperFuelMass + cargoMass), fuelMassLeft
+end
+
+local function computeHyperdriveEfficiency(driveProto, totalMass)
+	local hclass = (driveProto and driveProto.capabilities and driveProto.capabilities.hyperclass) or 1
+	local factorEff = (driveProto and driveProto.factor_eff) or 55
+	return factorEff / (math.max(1, totalMass) ^ (3 / 5)) * (1 + hclass) / hclass
+end
+
+local function computeJumpFuelUse(entry, distLy, liveShip)
+	local d = math.max(0.01, tonumber(distLy) or 1.0)
+	if liveShip and liveShip:exists() then
+		local okD, drive = pcall(function() return liveShip:GetInstalledHyperdrive() end)
+		if okD and drive and drive.GetFuelUse then
+			local okF, fuelUse = pcall(function() return drive:GetFuelUse(liveShip, d) end)
+			if okF and type(fuelUse) == "number" and fuelUse >= 0 then
+				return fuelUse
+			end
+		end
+	end
+	local driveProto = getInstalledHyperdriveInfo(entry)
+	if not driveProto then return 0 end
+	local staticMass, fuelMassLeft = computeEntryMasses(entry, nil)
+	local eff = computeHyperdriveEfficiency(driveProto, staticMass + fuelMassLeft)
+	return (d ^ HYPER_FUEL_EXP) / eff
+end
+
+-- Exact parity with HyperdriveType:GetDuration in data/modules/Equipment/Types.lua
+local function computeJumpDurationSec(entry, distLy, liveShip)
+	local d = math.max(0.01, tonumber(distLy) or 1.0)
+	if liveShip and liveShip:exists() then
+		local okD, drive = pcall(function() return liveShip:GetInstalledHyperdrive() end)
+		if okD and drive and drive.GetDuration then
+			local okT, dur = pcall(function() return drive:GetDuration(liveShip, d) end)
+			if okT and type(dur) == "number" and dur > 0 then
+				return math.max(60, math.floor(dur))
+			end
+		end
+	end
+	local driveProto = getInstalledHyperdriveInfo(entry)
+	local hclass = (driveProto and driveProto.capabilities and driveProto.capabilities.hyperclass) or 1
+	local factorTime = (driveProto and driveProto.factor_time) or 1.0
+	local staticMass, fuelMassLeft = computeEntryMasses(entry, nil)
+	local totalMass = math.max(1, staticMass + fuelMassLeft)
+	local dur = 86400 * 0.36 * ((d ^ HYPER_RANGE_EXP) * (totalMass ^ HYPER_MASS_EXP)) / (425 * (hclass ^ 2) * factorTime)
+	return math.max(60, math.floor(dur))
 end
 
 local function computeOOSSupercruiseDurationSec(entry, destPath)
@@ -467,6 +584,31 @@ function PlayerFleet.GetTotalProfit()
 	return fleetState.totalProfit or 0
 end
 
+function PlayerFleet.GetTradeRange(entry)
+	if not entry or type(entry.orderParams) ~= "table" or type(entry.orderParams.tradeRangeLy) ~= "number" then
+		return DEFAULT_TRADE_RANGE_LY
+	end
+	return math.clamp(entry.orderParams.tradeRangeLy, 0, MAX_TRADE_RANGE_LY)
+end
+
+function PlayerFleet.SetTradeRange(uid, rangeLy)
+	local _, entry = findShipIndex(uid)
+	if not entry then return false, "Vessel not found." end
+	local clamped = math.clamp(math.floor((tonumber(rangeLy) or DEFAULT_TRADE_RANGE_LY) + 0.5), 0, MAX_TRADE_RANGE_LY)
+	entry.orderParams = entry.orderParams or { maxJumps = 12, autoSell = true }
+	entry.orderParams.tradeRangeLy = clamped
+	activeTradeScans[uid] = nil
+	if entry.order == "AUTO_TRADE" and (entry.orderParams.tradeState == "SCANNING" or entry.status == "SCANNING") then
+		entry.orderParams.tradeState = "SEEKING"
+		entry.orderParams.nextSeekTime = 0
+		entry.status = "TRADING"
+		entry.orderProgress = 0
+		entry.orderPhase = string.format("[SCANNING] Re-plotting trade markets within %d ly...", clamped)
+	end
+	local label = (clamped == 0) and "Local System Only" or string.format("%d ly", clamped)
+	return true, string.format("%s Auto-Trade radius set to %s.", entry.shipName, label)
+end
+
 function PlayerFleet.GetShipsAtStation(stationPath)
 	local res = {}
 	if not stationPath then return res end
@@ -494,25 +636,36 @@ function PlayerFleet.GetCargoFree(entry)
 end
 
 function PlayerFleet.HasHyperdrive(entry)
-	for _, eq in ipairs(entry.equip or {}) do
-		local proto = Equipment.Get(eq.id)
-		if proto and proto.capabilities and proto.capabilities.hyperclass and proto.capabilities.hyperclass > 0 then
-			return true, proto.capabilities.hyperclass
+	local driveProto, _, hclass = getInstalledHyperdriveInfo(entry)
+	return driveProto ~= nil, hclass
+end
+
+function PlayerFleet.GetShipHyperspaceRangeExact(entry)
+	if not entry then return 0, 0 end
+	if entry.liveShip and entry.liveShip:exists() then
+		local okD, drive = pcall(function() return entry.liveShip:GetInstalledHyperdrive() end)
+		if okD and drive and drive.GetRange then
+			local okR, curRange, maxRange = pcall(function() return drive:GetRange(entry.liveShip) end)
+			if okR and (maxRange or curRange) then
+				return math.max(0, maxRange or curRange or 0), math.max(0, curRange or 0)
+			end
 		end
 	end
-	return false, 0
+	local driveProto = getInstalledHyperdriveInfo(entry)
+	if not driveProto then return 0, 0 end
+	local resv = driveProto.fuel_resv_size or 1
+	local stored = math.clamp((type(entry.hyperFuel) == "number") and entry.hyperFuel or resv, 0, resv)
+	local staticMass, fuelMassLeft = computeEntryMasses(entry, nil)
+	local effCur = computeHyperdriveEfficiency(driveProto, staticMass + fuelMassLeft)
+	local effMax = computeHyperdriveEfficiency(driveProto, staticMass + fuelMassLeft + math.max(0, resv - stored))
+	local curRange = (stored > 0) and ((stored * effCur) ^ HYPER_FUEL_EXP_INV) or 0
+	local maxRange = (resv > 0) and ((resv * effMax) ^ HYPER_FUEL_EXP_INV) or 0
+	return maxRange, curRange
 end
 
 function PlayerFleet.GetShipHyperspaceRange(entry)
-	local hasDrive, hclass = PlayerFleet.HasHyperdrive(entry)
-	if not hasDrive then return 0 end
-	local def = ShipDef[entry.shipId]
-	local fuel = math.max(0, (entry.fuel or 0) / 100)
-	local baseRange = 6 + hclass * 4.5
-	if def and def.hullMass and def.hullMass > 150 then
-		baseRange = baseRange * 0.85
-	end
-	return math.floor(baseRange * (0.4 + 0.6 * fuel))
+	local maxRange, curRange = PlayerFleet.GetShipHyperspaceRangeExact(entry)
+	return math.floor(maxRange), curRange
 end
 
 function PlayerFleet.GetShipCombatScore(entry)
@@ -607,11 +760,13 @@ local function applyEquipListToShip(ship, equipList)
 			if item.count and inst.SetCount then
 				inst:SetCount(item.count)
 			end
+			if item.integrity ~= nil then
+				inst.integrity = math.clamp(item.integrity, 0, 1)
+			end
 			if item.subsidized then
 				inst.price = 0
 				inst.insuranceSubsidized = true
 			else
-				if item.integrity ~= nil then inst.integrity = item.integrity end
 				if item.isUsed then inst.isUsed = true end
 				if item.usedPrice ~= nil then inst.price = item.usedPrice end
 			end
@@ -633,6 +788,7 @@ local function applyEquipListToShip(ship, equipList)
 			end
 		end
 	end
+	pcall(function() ComponentIntegrity.SyncShipSubsystems(ship) end)
 end
 
 local function packCargoFromShip(ship)
@@ -666,8 +822,9 @@ local function fillShipHyperdriveFuel(ship, entry)
 	if okD and drive and drive.SetFuel and drive.GetMaxFuel then
 		local maxFuel = drive:GetMaxFuel() or 0
 		if maxFuel > 0 then
-			local frac = math.clamp((tonumber(entry and entry.fuel) or 100) / 100, 0.35, 1.0)
-			pcall(function() drive:SetFuel(ship, maxFuel * frac) end)
+			local stored = (entry and type(entry.hyperFuel) == "number") and entry.hyperFuel or maxFuel
+			stored = math.clamp(stored, 0, maxFuel)
+			pcall(function() drive:SetFuel(ship, stored) end)
 		end
 	end
 end
@@ -747,6 +904,16 @@ local function createFleetEntryFromShip(ship, stationPath, customName)
 		or (ship.shipName and ship.shipName ~= "" and ship.shipName)
 		or string.format("%s [%s]", def.name, label)
 
+	local equipList = packEquipFromShip(ship)
+	local initHyperFuel = getDefaultHyperFuelForEquip(equipList, ship.fuel)
+	local okD, drive = pcall(function() return ship:GetInstalledHyperdrive() end)
+	if okD and drive and drive.GetFuel then
+		local okF, df = pcall(function() return drive:GetFuel() end)
+		if okF and type(df) == "number" then
+			initHyperFuel = math.max(0, df)
+		end
+	end
+
 	local entry = {
 		uid = uid,
 		shipName = name,
@@ -758,9 +925,11 @@ local function createFleetEntryFromShip(ship, stationPath, customName)
 		hullPercent = math.clamp(ship.hullPercent or 100, 1, 100),
 		shieldPercent = 100,
 		fuel = math.clamp(ship.fuel or 100, 0, 100),
+		hyperFuel = initHyperFuel,
 		cargoCap = ship.cargo_cap or def.cargo,
-		equip = packEquipFromShip(ship),
+		equip = equipList,
 		cargo = packCargoFromShip(ship),
+		cargoCostBasis = {},
 		locationPath = stationPath,
 		locationName = formatPathName(stationPath),
 		status = "DOCKED",
@@ -769,7 +938,7 @@ local function createFleetEntryFromShip(ship, stationPath, customName)
 		order = "IDLE",
 		orderTargetPath = nil,
 		orderTargetName = nil,
-		orderParams = { maxJumps = 12, autoSell = true },
+		orderParams = { maxJumps = 12, autoSell = true, tradeRangeLy = DEFAULT_TRADE_RANGE_LY },
 		orderProgress = 0,
 		orderEta = 0,
 		orderPhase = "Docked on standby",
@@ -781,12 +950,14 @@ local function createFleetEntryFromShip(ship, stationPath, customName)
 			bountiesEarned = 0,
 			missionsDone = 0,
 			cargoHauled = 0,
+			maintenancePaid = 0,
+			taxesGenerated = 0,
 		},
 	}
 	return entry
 end
 
--- Sync hull, fuel, and cargo from an active liveShip back into its FleetEntry
+-- Sync hull, fuel, hyperdrive fuel, cargo, and equipment integrity from liveShip back into FleetEntry
 local function syncFromLiveShip(entry)
 	local s = entry.liveShip
 	if not s or not s:exists() then
@@ -796,14 +967,168 @@ local function syncFromLiveShip(entry)
 	entry.hullPercent = math.clamp(s.hullPercent or entry.hullPercent or 100, 1, 100)
 	entry.fuel = math.clamp(s.fuel or entry.fuel or 100, 0, 100)
 	entry.cargo = packCargoFromShip(s)
+	entry.equip = packEquipFromShip(s)
+	local okD, drive = pcall(function() return s:GetInstalledHyperdrive() end)
+	if okD and drive and drive.GetFuel then
+		local okF, f = pcall(function() return drive:GetFuel() end)
+		if okF and type(f) == "number" then
+			entry.hyperFuel = math.max(0, f)
+		end
+	end
 end
 
 local function despawnLiveShip(entry)
 	if entry.liveShip and entry.liveShip:exists() then
 		syncFromLiveShip(entry)
-		-- Remove cleanly by letting Pioneer clean docked/out-of-range bodies, or vanish if docked
 	end
 	entry.liveShip = nil
+end
+
+local function adjustEntryCargoCostBasis(entry, commodityName, deltaCount, unitPrice)
+	if not entry or not commodityName or not deltaCount or deltaCount == 0 then return 0 end
+	entry.cargoCostBasis = entry.cargoCostBasis or {}
+	local item = entry.cargoCostBasis[commodityName]
+	if deltaCount > 0 then
+		local p = tonumber(unitPrice) or 0
+		if not item or (item.count or 0) <= 0 then
+			entry.cargoCostBasis[commodityName] = { count = deltaCount, avgPrice = p }
+		else
+			local totalCost = (item.count * item.avgPrice) + (deltaCount * p)
+			local newCount = item.count + deltaCount
+			item.count = newCount
+			item.avgPrice = totalCost / newCount
+		end
+		return p
+	else
+		local take = math.abs(deltaCount)
+		local avg = (item and item.avgPrice) or 0
+		if item then
+			item.count = math.max(0, (item.count or 0) - take)
+			if item.count <= 0 then
+				entry.cargoCostBasis[commodityName] = nil
+			end
+		end
+		return avg * take, avg
+	end
+end
+
+function PlayerFleet.GetLowestEquipmentIntegrity(entry)
+	local minInteg = 1.0
+	local below80Count = 0
+	local repairCostBelow80 = 0
+	local repairCostAll = 0
+	local repairThreshold = ComponentIntegrity.REPAIR_THRESHOLD or 0.90
+	for _, eq in ipairs((entry and entry.equip) or {}) do
+		local integ = math.clamp((type(eq.integrity) == "number") and eq.integrity or 1.0, 0.0, 1.0)
+		if integ < minInteg then
+			minInteg = integ
+		end
+		local proto = Equipment.Get(eq.id)
+		local price = eq.usedPrice or (proto and proto.price) or 500
+		if integ < repairThreshold then
+			local cost = ComponentIntegrity.GetModuleRepairCost({ integrity = integ, price = price })
+			repairCostAll = repairCostAll + cost
+			if integ < MAINTENANCE_INTEGRITY_THRESHOLD then
+				below80Count = below80Count + 1
+				repairCostBelow80 = repairCostBelow80 + cost
+			end
+		end
+	end
+	return minInteg, below80Count, repairCostBelow80, repairCostAll
+end
+
+local function applyEquipmentWear(entry, wearFn)
+	if not entry or not entry.equip or not wearFn then return end
+	local changed = false
+	for _, eq in ipairs(entry.equip) do
+		local cur = math.clamp((type(eq.integrity) == "number") and eq.integrity or 1.0, 0.0, 1.0)
+		if cur > ComponentIntegrity.PASSIVE_WEAR_FLOOR then
+			local proto = Equipment.Get(eq.id)
+			local loss = tonumber(wearFn(proto, eq)) or 0
+			if loss > 0 then
+				local nxt = math.max(ComponentIntegrity.PASSIVE_WEAR_FLOOR, cur - loss)
+				if nxt ~= cur then
+					eq.integrity = nxt
+					changed = true
+				end
+			end
+		end
+	end
+	if changed and entry.liveShip and entry.liveShip:exists() then
+		local equipSet = entry.liveShip:GetComponent('EquipSet')
+		if equipSet then
+			for key, liveEq in pairs(equipSet:GetInstalledEquipment()) do
+				local slotId = type(key) == "string" and key or nil
+				for _, savedEq in ipairs(entry.equip) do
+					if savedEq.id == liveEq.id and (not savedEq.slotId or savedEq.slotId == slotId) then
+						liveEq.integrity = savedEq.integrity or 1.0
+						equipSet:NotifyListeners('modify', liveEq)
+						break
+					end
+				end
+			end
+			pcall(function() ComponentIntegrity.SyncShipSubsystems(entry.liveShip) end)
+		end
+	end
+end
+
+applyOOSHyperjumpWear = function(entry, jumpDurationSec)
+	applyEquipmentWear(entry, function(proto, eq)
+		local slotType = (proto and proto.slot and proto.slot.type) or ""
+		local isHd = slotType:match("^hyperdrive") ~= nil
+		return ComponentIntegrity.ComputeHyperjumpWear(jumpDurationSec or 3600, isHd, eq.id)
+	end)
+end
+
+applyOperationalFlightWear = function(entry, destPath, legType)
+	local engSkill = (entry and entry.captain and entry.captain.engineering) or 18
+	local engFactor = math.clamp(1.15 - (engSkill / 100), 0.70, 1.10)
+	local surfaceGEarth = 0
+	if destPath then
+		local okSb, sbody = pcall(function() return destPath:GetSystemBody() end)
+		if okSb and sbody and sbody.type == "STARPORT_SURFACE" and sbody.parent and sbody.parent.gravity then
+			surfaceGEarth = (sbody.parent.gravity or 0) / ComponentIntegrity.STANDARD_GRAVITY
+		end
+	end
+
+	applyEquipmentWear(entry, function(proto, eq)
+		local cat = ComponentIntegrity.ClassifyEquipment(proto or eq, eq.slotId)
+		local baseLoss = 0.004
+		if legType == "COMBAT" then
+			if cat == "weapon" or cat == "shields" then
+				baseLoss = Engine.rand:Number(0.035, 0.065)
+			elseif cat == "thrusters" or cat == "sensors" then
+				baseLoss = Engine.rand:Number(0.020, 0.030)
+			else
+				baseLoss = 0.012
+			end
+		elseif legType == "MINING" then
+			if cat == "weapon" or cat == "utility" or cat == "scoop" then
+				baseLoss = Engine.rand:Number(0.022, 0.032)
+			elseif cat == "thrusters" or cat == "shields" then
+				baseLoss = Engine.rand:Number(0.015, 0.022)
+			else
+				baseLoss = 0.008
+			end
+		else
+			if cat == "thrusters" then
+				baseLoss = 0.010
+			elseif cat == "shields" or cat == "utility" or cat == "hyperdrive" then
+				baseLoss = 0.005
+			else
+				baseLoss = 0.003
+			end
+		end
+		local gravLoss = (surfaceGEarth >= 0.05) and ComponentIntegrity.ComputeGravityWear(surfaceGEarth, 300, cat, false) or 0
+		return (baseLoss + gravLoss) * engFactor
+	end)
+
+	if legType == "MINING" then
+		local chip = Engine.rand:Integer(0, 2)
+		if chip > 0 then
+			entry.hullPercent = math.max(30, (entry.hullPercent or 100) - chip)
+		end
+	end
 end
 
 -- ============================================================================
@@ -978,6 +1303,8 @@ function PlayerFleet.BuyShipToHangar(sos, advertData)
 	local uid = fleetState.nextUid or 1
 	fleetState.nextUid = uid + 1
 
+	local equipList = buildDefaultEquipForAdvert(def, advertData.equip)
+	local initHyperFuel = getDefaultHyperFuelForEquip(equipList, 100)
 	local label = sos.label or Ship.MakeRandomLabel()
 	local entry = {
 		uid = uid,
@@ -989,9 +1316,11 @@ function PlayerFleet.BuyShipToHangar(sos, advertData)
 		hullPercent = sos.hullPercent or 100,
 		shieldPercent = 100,
 		fuel = 100,
+		hyperFuel = initHyperFuel,
 		cargoCap = def.cargo,
-		equip = buildDefaultEquipForAdvert(def, advertData.equip),
+		equip = equipList,
 		cargo = {},
+		cargoCostBasis = {},
 		locationPath = station.path,
 		locationName = formatPathName(station.path),
 		status = "DOCKED",
@@ -1000,7 +1329,7 @@ function PlayerFleet.BuyShipToHangar(sos, advertData)
 		order = "IDLE",
 		orderTargetPath = nil,
 		orderTargetName = nil,
-		orderParams = { maxJumps = 12, autoSell = true },
+		orderParams = { maxJumps = 12, autoSell = true, tradeRangeLy = DEFAULT_TRADE_RANGE_LY },
 		orderProgress = 0,
 		orderEta = 0,
 		orderPhase = "Docked at " .. station.label,
@@ -1012,6 +1341,8 @@ function PlayerFleet.BuyShipToHangar(sos, advertData)
 			bountiesEarned = 0,
 			missionsDone = 0,
 			cargoHauled = 0,
+			maintenancePaid = 0,
+			taxesGenerated = 0,
 		},
 	}
 
@@ -1115,6 +1446,7 @@ function PlayerFleet.SwapWithFlagship(uid)
 
 	local oldLive = (entry.liveShip and entry.liveShip:exists()) and entry.liveShip or nil
 	entry.liveShip = nil
+	activeTradeScans[uid] = nil
 
 	-- Apply target fleet ship onto Game.player
 	clearShipCargo(player)
@@ -1166,6 +1498,7 @@ function PlayerFleet.SellShip(uid)
 
 	local soldLive = (entry.liveShip and entry.liveShip:exists()) and entry.liveShip or nil
 	entry.liveShip = nil
+	activeTradeScans[uid] = nil
 	if soldLive then
 		pcall(function()
 			soldLive:SetShipName("Sold Vessel")
@@ -1218,32 +1551,116 @@ function PlayerFleet.RepairShip(uid)
 
 	PlayerState.AddMoney(-cost)
 	entry.hullPercent = 100
+	entry.stats.maintenancePaid = (entry.stats.maintenancePaid or 0) + cost
 	if entry.liveShip and entry.liveShip:exists() then
 		entry.liveShip:SetHullPercent(100)
 	end
+	TaxAuthority.RecordOperatingExpense(cost, "FLEET_MAINTENANCE", entry.shipName)
 	addLog(entry.shipName, string.format("Hull repaired to 100%% at %s.", entry.locationName), -cost)
 	return true, string.format("Repaired %s for %s.", entry.shipName, Format.Money(cost, false))
+end
+
+function PlayerFleet.ServiceEquipment(uid)
+	local _, entry = findShipIndex(uid)
+	if not entry then return false, "Vessel not found." end
+	if entry.status ~= "DOCKED" then return false, "Vessel must be docked for component servicing." end
+
+	local _, _, _, totalCost = PlayerFleet.GetLowestEquipmentIntegrity(entry)
+	if totalCost <= 0 then
+		return false, "All ship components are at nominal integrity (90%+)."
+	end
+	if PlayerState.GetMoney() < totalCost then
+		return false, string.format("Insufficient credits (%s needed).", Format.Money(totalCost, false))
+	end
+
+	local repairThreshold = ComponentIntegrity.REPAIR_THRESHOLD or 0.90
+	local repairedCount = 0
+	for _, eq in ipairs(entry.equip or {}) do
+		local integ = math.clamp((type(eq.integrity) == "number") and eq.integrity or 1.0, 0.0, 1.0)
+		if integ < repairThreshold then
+			eq.integrity = 1.0
+			repairedCount = repairedCount + 1
+		end
+	end
+
+	if entry.liveShip and entry.liveShip:exists() then
+		local equipSet = entry.liveShip:GetComponent('EquipSet')
+		if equipSet then
+			for _, liveEq in pairs(equipSet:GetInstalledEquipment()) do
+				local liveInteg = math.clamp((type(rawget(liveEq, "integrity")) == "number") and rawget(liveEq, "integrity") or 1.0, 0.0, 1.0)
+				if liveInteg < repairThreshold then
+					liveEq.integrity = 1.0
+					equipSet:NotifyListeners('modify', liveEq)
+				end
+			end
+		end
+		pcall(function() ComponentIntegrity.SyncShipSubsystems(entry.liveShip) end)
+	end
+
+	PlayerState.AddMoney(-totalCost)
+	entry.stats.maintenancePaid = (entry.stats.maintenancePaid or 0) + totalCost
+	TaxAuthority.RecordOperatingExpense(totalCost, "FLEET_MAINTENANCE", entry.shipName)
+	addLog(entry.shipName, string.format("Serviced %d worn component(s) to 100%% at %s.", repairedCount, entry.locationName or "station"), -totalCost)
+
+	local okFlightLog, FlightLog = pcall(require, 'modules.FlightLog.FlightLog')
+	if okFlightLog and FlightLog and FlightLog.RecordTransaction then
+		FlightLog.RecordTransaction({
+			category = "MAINTENANCE",
+			title = string.format("Fleet Component Overhaul: %s (%s)", entry.shipName, Format.Money(-totalCost)),
+			amount = -totalCost,
+			details = {
+				{ "Vessel", entry.shipName },
+				{ "Location", entry.locationName or "Starport Hangar" },
+				{ "Components Restored", tostring(repairedCount) },
+				{ "Service Fee", Format.Money(totalCost) },
+			},
+			note = string.format("Restored %d worn component(s) on %s to 100%% integrity.", repairedCount, entry.shipName),
+		})
+	end
+
+	return true, string.format("Serviced %d component(s) on %s for %s.", repairedCount, entry.shipName, Format.Money(totalCost, false))
 end
 
 function PlayerFleet.RefuelShip(uid)
 	local _, entry = findShipIndex(uid)
 	if not entry then return false, "Vessel not found." end
 	if entry.status ~= "DOCKED" then return false, "Vessel must be docked to refuel." end
-	local fuel = entry.fuel or 0
-	if fuel >= 100 then return false, "Fuel tanks are already full." end
 
-	local cost = math.max(20, math.ceil((100 - fuel) * 2.5))
+	local fuel = entry.fuel or 0
+	local driveProto = getInstalledHyperdriveInfo(entry)
+	local maxHyper = driveProto and (driveProto.fuel_resv_size or 1) or 0
+	local curHyper = driveProto and math.clamp((type(entry.hyperFuel) == "number") and entry.hyperFuel or maxHyper, 0, maxHyper) or 0
+	local missingHyper = math.max(0, maxHyper - curHyper)
+
+	if fuel >= 100 and missingHyper <= 0.05 then
+		return false, "Fuel and hyperdrive tanks are already full."
+	end
+
+	local propCost = (fuel < 100) and math.ceil((100 - fuel) * 2.5) or 0
+	local hyperCost = 0
+	if missingHyper > 0.05 and driveProto and driveProto.fuel then
+		local sys = (entry.locationPath and entry.locationPath:GetStarSystem()) or Game.system
+		local unitP = sys and getSystemCommodityPrice(sys, driveProto.fuel) or (driveProto.fuel.price or 15)
+		hyperCost = math.ceil(missingHyper * unitP)
+	end
+	local cost = math.max(20, propCost + hyperCost)
+
 	if PlayerState.GetMoney() < cost then
 		return false, string.format("Insufficient credits (%s needed).", Format.Money(cost, false))
 	end
 
 	PlayerState.AddMoney(-cost)
 	entry.fuel = 100
+	if driveProto then
+		entry.hyperFuel = maxHyper
+	end
+	entry.stats.maintenancePaid = (entry.stats.maintenancePaid or 0) + cost
 	if entry.liveShip and entry.liveShip:exists() then
 		entry.liveShip:SetFuelPercent(100)
 		fillShipHyperdriveFuel(entry.liveShip, entry)
 	end
-	addLog(entry.shipName, "Refueled propellant tanks to 100%.", -cost)
+	TaxAuthority.RecordOperatingExpense(cost, "FLEET_FUEL", entry.shipName)
+	addLog(entry.shipName, "Refueled propellant & hyperdrive tanks to 100%.", -cost)
 	return true, string.format("Refueled %s for %s.", entry.shipName, Format.Money(cost, false))
 end
 
@@ -1284,6 +1701,8 @@ function PlayerFleet.TransferCargo(uid, commodityName, amount, toFlagship)
 		if moveCount <= 0 then return false, "No cargo or insufficient space on flagship." end
 
 		if cargoMgr:AddCommodity(comm, moveCount) then
+			local _, unitBasis = adjustEntryCargoCostBasis(entry, commodityName, -moveCount)
+			TaxAuthority.AdjustCommodityCostBasis(commodityName, moveCount, unitBasis or 0)
 			entry.cargo[commodityName] = avail - moveCount
 			if entry.cargo[commodityName] <= 0 then entry.cargo[commodityName] = nil end
 			if entry.liveShip and entry.liveShip:exists() then applyCargoToShip(entry.liveShip, entry.cargo) end
@@ -1296,8 +1715,11 @@ function PlayerFleet.TransferCargo(uid, commodityName, amount, toFlagship)
 		local moveCount = math.min(amount, avail, maxBySpace)
 		if moveCount <= 0 then return false, "No cargo or insufficient space on hangar ship." end
 
+		local unitBasis = TaxAuthority.GetCommodityCostBasis(commodityName) or 0
 		local removed = cargoMgr:RemoveCommodity(comm, moveCount)
 		if removed > 0 then
+			TaxAuthority.AdjustCommodityCostBasis(commodityName, -removed, unitBasis)
+			adjustEntryCargoCostBasis(entry, commodityName, removed, unitBasis)
 			entry.cargo[commodityName] = (entry.cargo[commodityName] or 0) + removed
 			if entry.liveShip and entry.liveShip:exists() then applyCargoToShip(entry.liveShip, entry.cargo) end
 			return true, string.format("Transferred %dt %s to %s.", removed, comm:GetName(), entry.shipName)
@@ -1425,6 +1847,7 @@ function PlayerFleet.HireInstantCaptain(uid)
 	end
 
 	PlayerState.AddMoney(-CAPTAIN_SIGNING_BONUS)
+	TaxAuthority.RecordOperatingExpense(CAPTAIN_SIGNING_BONUS, "FLEET_CREW", "[FLEET] " .. entry.shipName)
 
 	local cap = Character.New({
 		title       = "Captain",
@@ -1448,7 +1871,7 @@ end
 -- Trade Route, Ring Mining, Patrol & Transit Simulation Engines (Phases A3-A4)
 -- ============================================================================
 
-local function getSystemCommodityPrice(sys, comm)
+getSystemCommodityPrice = function(sys, comm)
 	local ok, price = pcall(function()
 		return Economy.GetMarketPrice(comm.price, sys:GetCommodityBasePriceAlterations(comm.name))
 	end)
@@ -1456,109 +1879,445 @@ local function getSystemCommodityPrice(sys, comm)
 	return math.max(1, math.floor(comm.price or 10))
 end
 
-local function findBestTradeRoute(entry)
-	local curPath = entry.locationPath
-	local curSys = curPath and curPath:GetStarSystem() or Game.system
-	if not curSys then return nil end
+maintainFleetShipAtStation = function(entry, stationPath, simTime, silentComms)
+	if not entry or not stationPath then return 0 end
+	local stSys = stationPath:GetStarSystem()
+	local locName = formatPathName(stationPath)
 
-	local range = PlayerFleet.GetShipHyperspaceRange(entry)
-	local maxOrderRange = entry.orderParams.maxJumps or 12
-	local searchRange = (range > 0) and math.max(range, math.min(18, maxOrderRange)) or 0
+	local damaged = {}
+	for _, eq in ipairs(entry.equip or {}) do
+		local integ = math.clamp((type(eq.integrity) == "number") and eq.integrity or 1.0, 0.0, 1.0)
+		if integ < MAINTENANCE_INTEGRITY_THRESHOLD then
+			local proto = Equipment.Get(eq.id)
+			local price = eq.usedPrice or (proto and proto.price) or 500
+			local cost = ComponentIntegrity.GetModuleRepairCost({ integrity = integ, price = price })
+			if cost > 0 then
+				table.insert(damaged, {
+					eq = eq,
+					integ = integ,
+					cost = cost,
+					name = (proto and proto.GetName and proto:GetName()) or eq.id,
+				})
+			end
+		end
+	end
+	table.sort(damaged, function(a, b) return a.integ < b.integ end)
 
-	local systems = { curSys }
-	if searchRange > 1 then
-		local ok, near = pcall(function()
-			return curSys:GetNearbySystems(searchRange, function(s) return #s:GetStationPaths() > 0 end)
-		end)
-		if ok and near then
-			for _, s in ipairs(near) do
-				if s.path ~= curSys.path then
-					table.insert(systems, s)
-				end
+	local equipSpent = 0
+	local repairedCount = 0
+	local deferredCount = 0
+	for _, item in ipairs(damaged) do
+		if PlayerState.GetMoney() >= item.cost then
+			PlayerState.AddMoney(-item.cost)
+			item.eq.integrity = 1.0
+			equipSpent = equipSpent + item.cost
+			repairedCount = repairedCount + 1
+		else
+			deferredCount = deferredCount + 1
+		end
+	end
+
+	local hullSpent = 0
+	local hull = entry.hullPercent or 100
+	if hull < MAINTENANCE_HULL_THRESHOLD then
+		local def = ShipDef[entry.shipId]
+		local hullCost = math.max(25, math.ceil(((def and def.basePrice) or 10000) * 0.001 * (100 - hull)))
+		if PlayerState.GetMoney() >= hullCost then
+			PlayerState.AddMoney(-hullCost)
+			entry.hullPercent = 100
+			hullSpent = hullCost
+		else
+			deferredCount = deferredCount + 1
+		end
+	end
+
+	local fuelSpent = 0
+	local fuelPct = entry.fuel or 100
+	if fuelPct < 95 then
+		local def = ShipDef[entry.shipId]
+		local tankCap = (def and def.fuelTankMass) or 10
+		local missingTons = math.max(0.5, tankCap * ((100 - fuelPct) / 100))
+		local hydroPrice = (stSys and Commodities.hydrogen) and getSystemCommodityPrice(stSys, Commodities.hydrogen)
+			or (Commodities.hydrogen and Commodities.hydrogen.price or 10)
+		local fCost = math.max(10, math.ceil(missingTons * hydroPrice))
+		if PlayerState.GetMoney() >= fCost then
+			PlayerState.AddMoney(-fCost)
+			entry.fuel = 100
+			fuelSpent = fuelSpent + fCost
+		else
+			deferredCount = deferredCount + 1
+		end
+	end
+
+	local driveProto = getInstalledHyperdriveInfo(entry)
+	if driveProto then
+		local maxHyper = driveProto.fuel_resv_size or 1
+		local curHyper = math.clamp((type(entry.hyperFuel) == "number") and entry.hyperFuel or maxHyper, 0, maxHyper)
+		local missingHyper = maxHyper - curHyper
+		if missingHyper > 0.05 then
+			local fComm = driveProto.fuel or Commodities.hydrogen
+			local unitP = (stSys and fComm) and getSystemCommodityPrice(stSys, fComm) or (fComm and fComm.price or 15)
+			local hCost = math.max(5, math.ceil(missingHyper * unitP))
+			if PlayerState.GetMoney() >= hCost then
+				PlayerState.AddMoney(-hCost)
+				entry.hyperFuel = maxHyper
+				fuelSpent = fuelSpent + hCost
+			else
+				deferredCount = deferredCount + 1
 			end
 		end
 	end
 
-	-- Collect all reachable stations with their star systems
-	local stationNodes = {}
-	for _, sys in ipairs(systems) do
-		local okSt, stPaths = pcall(function() return sys:GetStationPaths() end)
-		if okSt and stPaths then
-			for _, sp in ipairs(stPaths) do
-				table.insert(stationNodes, { sys = sys, path = sp })
-			end
-		end
-	end
-	if #stationNodes < 2 then
-		return nil
-	end
-
-	local bestRoute = nil
-	local bestMargin = 10 -- Minimum profit per ton
-
-	local candidateComms = {
-		"metal_alloys", "precious_metals", "computers", "robots", "medicines",
-		"consumer_goods", "plastics", "grain", "fruit_and_veg", "textiles",
-		"mining_machinery", "industrial_machinery", "liquor", "metal_ore"
-	}
-
-	-- Prefer buying at or near curPath to reduce deadhead flights
-	local buyNode = stationNodes[1]
-	for _, node in ipairs(stationNodes) do
-		if samePath(node.path, curPath) then
-			buyNode = node
-			break
-		end
-	end
-
-	for _, cname in ipairs(candidateComms) do
-		local comm = Commodities[cname]
-		if comm and comm.price and comm.price > 0 then
-			local buyPrice = getSystemCommodityPrice(buyNode.sys, comm)
-			for _, sellNode in ipairs(stationNodes) do
-				if not sameSystem(buyNode.sys.path, sellNode.sys.path) or not samePath(buyNode.path, sellNode.path) then
-					local sellPrice = getSystemCommodityPrice(sellNode.sys, comm)
-					local margin = sellPrice - buyPrice
-					if margin > bestMargin then
-						local dist = buyNode.sys:DistanceTo(sellNode.sys)
-						bestMargin = margin
-						bestRoute = {
-							buyPath = buyNode.path,
-							sellPath = sellNode.path,
-							buySys = buyNode.sys,
-							sellSys = sellNode.sys,
-							comm = comm,
-							buyPrice = buyPrice,
-							sellPrice = math.max(sellPrice, buyPrice + 15),
-							distLy = dist,
-						}
+	if entry.liveShip and entry.liveShip:exists() then
+		if repairedCount > 0 then
+			local equipSet = entry.liveShip:GetComponent('EquipSet')
+			if equipSet then
+				for key, liveEq in pairs(equipSet:GetInstalledEquipment()) do
+					local slotId = type(key) == "string" and key or nil
+					for _, savedEq in ipairs(entry.equip or {}) do
+						if savedEq.id == liveEq.id and (not savedEq.slotId or savedEq.slotId == slotId) then
+							liveEq.integrity = savedEq.integrity or 1.0
+							equipSet:NotifyListeners('modify', liveEq)
+							break
+						end
 					end
 				end
 			end
+			pcall(function() ComponentIntegrity.SyncShipSubsystems(entry.liveShip) end)
+		end
+		if hullSpent > 0 then
+			entry.liveShip:SetHullPercent(entry.hullPercent or 100)
+		end
+		if fuelSpent > 0 then
+			entry.liveShip:SetFuelPercent(entry.fuel or 100)
+			fillShipHyperdriveFuel(entry.liveShip, entry)
 		end
 	end
 
-	if not bestRoute then
-		-- Pick any decent staple trade if local market spread is flat
-		local destNode = stationNodes[#stationNodes]
-		if samePath(destNode.path, buyNode.path) and #stationNodes > 1 then
-			destNode = stationNodes[1]
+	local totalMaintCost = equipSpent + hullSpent + fuelSpent
+	if totalMaintCost > 0 then
+		entry.stats.netProfit = (entry.stats.netProfit or 0) - totalMaintCost
+		fleetState.totalProfit = (fleetState.totalProfit or 0) - totalMaintCost
+		entry.stats.maintenancePaid = (entry.stats.maintenancePaid or 0) + totalMaintCost
+		local expCat = (equipSpent + hullSpent > 0) and "FLEET_MAINTENANCE" or "FLEET_FUEL"
+		TaxAuthority.RecordOperatingExpense(totalMaintCost, expCat, "[FLEET] " .. entry.shipName)
+
+		local parts = {}
+		if repairedCount > 0 then
+			table.insert(parts, string.format("%d component(s) <80%% serviced (%s)", repairedCount, Format.Money(equipSpent, false)))
 		end
-		local comm = Commodities.consumer_goods or Commodities.metal_alloys
-		local buyP = getSystemCommodityPrice(buyNode.sys, comm)
-		bestRoute = {
-			buyPath = buyNode.path,
-			sellPath = destNode.path,
-			buySys = buyNode.sys,
-			sellSys = destNode.sys,
-			comm = comm,
-			buyPrice = buyP,
-			sellPrice = math.ceil(buyP * 1.18),
-			distLy = buyNode.sys:DistanceTo(destNode.sys),
-		}
+		if hullSpent > 0 then
+			table.insert(parts, string.format("hull repaired (%s)", Format.Money(hullSpent, false)))
+		end
+		if fuelSpent > 0 then
+			table.insert(parts, string.format("refueled (%s)", Format.Money(fuelSpent, false)))
+		end
+		local summaryMsg = string.format("Station maintenance at %s: %s.", locName, table.concat(parts, ", "))
+		addLog(entry.shipName, summaryMsg, -totalMaintCost, simTime)
+
+		if (equipSpent + hullSpent > 0) or totalMaintCost >= 50 then
+			local okFlightLog, FlightLog = pcall(require, 'modules.FlightLog.FlightLog')
+			if okFlightLog and FlightLog and FlightLog.RecordTransaction then
+				FlightLog.RecordTransaction({
+					category = "MAINTENANCE",
+					title = string.format("Fleet Service: %s (%s)", entry.shipName, Format.Money(-totalMaintCost)),
+					amount = -totalMaintCost,
+					details = {
+						{ "Vessel", entry.shipName },
+						{ "Service Port", locName },
+						{ "Components Overhauled (<80%)", string.format("%d (%s)", repairedCount, Format.Money(equipSpent)) },
+						{ "Hull Restoration", Format.Money(hullSpent) },
+						{ "Propellant & Hyperfuel", Format.Money(fuelSpent) },
+						{ "Total Service Cost", Format.Money(totalMaintCost) },
+					},
+					note = summaryMsg,
+				})
+			end
+		end
+		if not silentComms and (repairedCount > 0 or hullSpent > 0) then
+			Comms.Message(string.format("%s: %s", entry.shipName, summaryMsg), entry.captain and entry.captain.name or "Fleet Engineering")
+		end
 	end
 
-	return bestRoute
+	if deferredCount > 0 then
+		addLog(entry.shipName, string.format("Deferred %d maintenance item(s) at %s due to insufficient funds.", deferredCount, locName), 0, simTime)
+	end
+	return totalMaintCost
+end
+
+local function sysPathKey(path)
+	if not path then return "" end
+	return string.format("%d,%d,%d,%d", path.sectorX, path.sectorY, path.sectorZ, path.systemIndex or 0)
+end
+
+getOrScanSystemMarket = function(sysPath)
+	if not sysPath then return nil end
+	local okSysOnly, sysOnly = pcall(function() return sysPath:SystemOnly() end)
+	if not okSysOnly or not sysOnly then return nil end
+	local key = sysPathKey(sysOnly)
+	local cached = systemMarketCache[key]
+	if cached ~= nil then
+		return cached
+	end
+
+	local okSys, sys = pcall(function() return sysOnly:GetStarSystem() end)
+	if not okSys or not sys then return nil end
+
+	if systemMarketCacheCount >= MARKET_CACHE_MAX_ENTRIES then
+		systemMarketCache = {}
+		systemMarketCacheCount = 0
+	end
+
+	local numStations = sys.numberOfStations or 0
+	if numStations <= 0 then
+		local rec = { hasStations = false, sysPath = sysOnly }
+		systemMarketCache[key] = rec
+		systemMarketCacheCount = systemMarketCacheCount + 1
+		return rec
+	end
+
+	local okSt, stPaths = pcall(function() return sys:GetStationPaths() end)
+	if not okSt or not stPaths or #stPaths == 0 then
+		local rec = { hasStations = false, sysPath = sysOnly }
+		systemMarketCache[key] = rec
+		systemMarketCacheCount = systemMarketCacheCount + 1
+		return rec
+	end
+
+	local prices = {}
+	local legal = {}
+	for _, cname in ipairs(TRADE_CANDIDATE_COMMS) do
+		local comm = Commodities[cname]
+		if comm and comm.price and comm.price > 0 then
+			prices[cname] = getSystemCommodityPrice(sys, comm)
+			local okL, isLeg = pcall(function() return sys:IsCommodityLegal(cname) end)
+			legal[cname] = (not okL) or (isLeg ~= false)
+		end
+	end
+
+	local rec = {
+		hasStations = true,
+		sysPath = sysOnly,
+		stationPaths = stPaths,
+		prices = prices,
+		legal = legal,
+	}
+	systemMarketCache[key] = rec
+	systemMarketCacheCount = systemMarketCacheCount + 1
+	return rec
+end
+
+local function computeAutoTradeSearchRange(entry)
+	local shipRange = PlayerFleet.GetShipHyperspaceRange(entry)
+	if shipRange <= 0 then
+		return 0, 0
+	end
+	local configuredRange = PlayerFleet.GetTradeRange(entry)
+	if configuredRange <= 0 then
+		return 0, shipRange
+	end
+	local maxReach = math.min(MAX_TRADE_RANGE_LY, math.max(shipRange, math.min(configuredRange, shipRange * 2)))
+	return math.min(configuredRange, maxReach), shipRange
+end
+
+local function evaluateSellMarket(scan, sellMarket, distLy)
+	if not scan.buyMarket or not scan.buyMarket.hasStations then return end
+	if not sellMarket or not sellMarket.hasStations then return end
+	if sameSystem(scan.buyMarket.sysPath, sellMarket.sysPath) then return end
+
+	local jumpSec = (distLy > 0.01) and computeJumpDurationSec(scan.entry, distLy) or 0
+	local tripWeight = math.max(1.0, (jumpSec + 180.0) / 600.0)
+	local sellPath = sellMarket.stationPaths[1]
+
+	for _, cname in ipairs(TRADE_CANDIDATE_COMMS) do
+		local comm = Commodities[cname]
+		local buyPrice = scan.buyMarket.prices[cname]
+		local sellPrice = sellMarket.prices[cname]
+		local buyLegal = scan.buyMarket.legal[cname] ~= false
+		local sellLegal = sellMarket.legal[cname] ~= false
+		if comm and buyPrice and sellPrice and buyLegal and sellLegal then
+			local margin = sellPrice - buyPrice
+			if margin > 10 then
+				local score = margin / tripWeight
+				if score > scan.bestAnyScore then
+					scan.bestAnyScore = score
+					scan.bestAny = {
+						buyPath = scan.buyPath,
+						sellPath = sellPath,
+						buySysPath = scan.buyMarket.sysPath,
+						sellSysPath = sellMarket.sysPath,
+						comm = comm,
+						buyPrice = buyPrice,
+						sellPrice = math.max(sellPrice, buyPrice + 11),
+						distLy = distLy,
+					}
+				end
+				if buyPrice <= scan.budgetCap and score > scan.bestAffordableScore then
+					scan.bestAffordableScore = score
+					scan.bestAffordable = {
+						buyPath = scan.buyPath,
+						sellPath = sellPath,
+						buySysPath = scan.buyMarket.sysPath,
+						sellSysPath = sellMarket.sysPath,
+						comm = comm,
+						buyPrice = buyPrice,
+						sellPrice = math.max(sellPrice, buyPrice + 11),
+						distLy = distLy,
+					}
+				end
+			end
+		end
+	end
+end
+
+local function finalizeTradeScan(scan)
+	local best = scan.bestAffordable or scan.bestAny
+	if best then
+		return best
+	end
+
+	if scan.buyMarket and scan.buyMarket.hasStations and scan.buyPath then
+		local destPath = nil
+		local destSysPath = nil
+		local distLy = 0
+		if scan.shipRange > 0 and scan.firstNeighborMarket and scan.firstNeighborMarket.stationPaths[1] then
+			destPath = scan.firstNeighborMarket.stationPaths[1]
+			destSysPath = scan.firstNeighborMarket.sysPath
+			distLy = scan.firstNeighborDist or 0
+		elseif #(scan.buyMarket.stationPaths or {}) >= 2 then
+			for _, sp in ipairs(scan.buyMarket.stationPaths) do
+				if not samePath(sp, scan.buyPath) then
+					destPath = sp
+					destSysPath = scan.buyMarket.sysPath
+					break
+				end
+			end
+		end
+		if destPath then
+			local comm = Commodities.consumer_goods or Commodities.metal_alloys
+			if comm then
+				local buyP = scan.buyMarket.prices[comm.name] or math.max(1, math.floor(comm.price or 10))
+				return {
+					buyPath = scan.buyPath,
+					sellPath = destPath,
+					buySysPath = scan.buyMarket.sysPath,
+					sellSysPath = destSysPath,
+					comm = comm,
+					buyPrice = buyP,
+					sellPrice = math.ceil(buyP * 1.18),
+					distLy = distLy,
+				}
+			end
+		end
+	end
+	return nil
+end
+
+local function createTradeScanState(entry, isCatchUp, silentComms)
+	local curPath = entry.locationPath
+	local curSys = curPath and curPath:GetStarSystem() or Game.system
+	local searchRange, shipRange = computeAutoTradeSearchRange(entry)
+
+	local buyMarket = curSys and getOrScanSystemMarket(curSys.path) or nil
+	local buyPath = nil
+	if buyMarket and buyMarket.hasStations and buyMarket.stationPaths then
+		for _, sp in ipairs(buyMarket.stationPaths) do
+			if samePath(sp, curPath) then
+				buyPath = sp
+				break
+			end
+		end
+		if not buyPath then
+			buyPath = buyMarket.stationPaths[1]
+		end
+	end
+
+	local candPaths = {}
+	local candDists = {}
+	local maxCandidates = isCatchUp and TRADE_SCAN_CATCHUP_CANDIDATES or TRADE_SCAN_MAX_CANDIDATES
+	if curSys and searchRange > 1 then
+		local okN, paths, dists = pcall(function()
+			return curSys:GetNearbySystemPaths(searchRange, true, maxCandidates)
+		end)
+		if okN and paths then
+			candPaths = paths
+			candDists = dists or {}
+		end
+	end
+
+	local maxMarkets = isCatchUp and TRADE_SCAN_CATCHUP_MARKETS or math.clamp(math.floor(14 + searchRange * 0.6), 16, 36)
+	return {
+		entry = entry,
+		uid = entry.uid,
+		curPath = curPath,
+		searchRange = searchRange,
+		shipRange = shipRange,
+		buyMarket = buyMarket,
+		buyPath = buyPath,
+		candPaths = candPaths,
+		candDists = candDists,
+		index = 1,
+		total = #candPaths,
+		marketsFound = 0,
+		maxMarkets = maxMarkets,
+		budgetCap = math.max(0, PlayerState.GetMoney() - 1000),
+		bestAny = nil,
+		bestAnyScore = 0,
+		bestAffordable = nil,
+		bestAffordableScore = 0,
+		firstNeighborMarket = nil,
+		firstNeighborDist = 0,
+		silentComms = silentComms,
+	}
+end
+
+local function stepTradeScanState(scan, budgetMs)
+	local deadline = (budgetMs and budgetMs > 0) and (Engine.nowTime + budgetMs / 1000.0) or nil
+	while scan.index <= scan.total and scan.marketsFound < scan.maxMarkets do
+		local np = scan.candPaths[scan.index]
+		local dist = scan.candDists[scan.index] or 0
+		scan.index = scan.index + 1
+
+		local mkt = getOrScanSystemMarket(np)
+		if mkt and mkt.hasStations then
+			if not scan.buyMarket or not scan.buyMarket.hasStations then
+				scan.buyMarket = mkt
+				scan.buyPath = mkt.stationPaths[1]
+			else
+				scan.marketsFound = scan.marketsFound + 1
+				if not scan.firstNeighborMarket then
+					scan.firstNeighborMarket = mkt
+					scan.firstNeighborDist = dist
+				end
+				evaluateSellMarket(scan, mkt, dist)
+			end
+		end
+
+		if deadline and Engine.nowTime >= deadline then
+			return false, nil
+		end
+	end
+
+	local route = finalizeTradeScan(scan)
+	return true, route
+end
+
+local function updateScanProgressDisplay(entry, scan)
+	entry.status = "SCANNING"
+	local fracByIdx = (scan.total > 0) and ((scan.index - 1) / scan.total) or 1
+	local fracByMkt = (scan.maxMarkets > 0) and (scan.marketsFound / scan.maxMarkets) or 1
+	entry.orderProgress = math.clamp(math.max(fracByIdx, fracByMkt), 0.02, 0.99)
+	entry.orderEta = 0
+	entry.orderPhase = string.format(
+		"[SCANNING] Evaluating trade markets within %d ly (%d/%d systems, %d markets)...",
+		scan.searchRange, math.min(scan.index - 1, scan.total), scan.total, scan.marketsFound
+	)
+end
+
+local function findBestTradeRouteSync(entry, isCatchUp)
+	local scan = createTradeScanState(entry, isCatchUp, true)
+	local _, route = stepTradeScanState(scan, nil)
+	return route
 end
 
 local function findNearestRingBody(curPath)
@@ -1580,11 +2339,14 @@ local function findNearestRingBody(curPath)
 	local bp, sb = searchSys(sys)
 	if bp then return bp, sb end
 
-	local okN, near = pcall(function() return sys:GetNearbySystems(15) end)
-	if okN and near then
-		for _, ns in ipairs(near) do
-			bp, sb = searchSys(ns)
-			if bp then return bp, sb end
+	local okN, nearPaths = pcall(function() return sys:GetNearbySystemPaths(15, false, 48) end)
+	if okN and nearPaths then
+		for _, np in ipairs(nearPaths) do
+			local okS, ns = pcall(function() return np:GetStarSystem() end)
+			if okS and ns then
+				bp, sb = searchSys(ns)
+				if bp then return bp, sb end
+			end
 		end
 	end
 	return nil, nil
@@ -1713,55 +2475,68 @@ local function spawnShipInArrivalCloud(entry, fromSysPath)
 	return nil
 end
 
-local function convertInSystemToOOS(entry)
+local function convertInSystemToOOS(entry, simNow)
 	local t = entry and entry.transit
 	if not t then return end
+	local now = simNow or Game.time
 	if t.state == "UNDOCKING" or t.state == "DEPARTING" or t.state == "IN_SYSTEM_FLIGHT" then
 		local curSys = t.fromSysPath or entry.locationPath
 		if curSys and sameSystem(t.destPath, curSys) then
 			local scDur, distMeters = computeOOSSupercruiseDurationSec(entry, t.destPath)
 			local doneFrac = math.clamp(entry.orderProgress or 0.1, 0.05, 0.92)
 			t.state = "OOS_SUPERCRUISE"
-			t.phaseStartTime = Game.time - (scDur * doneFrac)
-			t.phaseEndTime = Game.time + (scDur * (1.0 - doneFrac))
+			t.phaseStartTime = now - (scDur * doneFrac)
+			t.phaseEndTime = now + (scDur * (1.0 - doneFrac))
 			t.oosTotalDist = distMeters
 			entry.status = (doneFrac > 0.88) and "DOCKING" or "SUPERCRUISE"
 			entry.orderEta = t.phaseEndTime
 		else
-			local hops, hopDists = findJumpRoute(curSys, t.destPath, PlayerFleet.GetShipHyperspaceRange(entry))
+			local maxR = PlayerFleet.GetShipHyperspaceRangeExact(entry)
+			local hops, hopDists = findJumpRoute(curSys, t.destPath, math.max(1.5, maxR * 0.96))
 			t.jumpRoute = hops
 			t.jumpDists = hopDists
 			t.jumpIndex = 1
 			t.fromSysPath = curSys and curSys:SystemOnly() or nil
 			t.hopSysPath = hops[1] or (t.destPath and t.destPath:SystemOnly())
 			t.hopDistLy = hopDists[1] or systemDistLy(t.fromSysPath, t.hopSysPath)
+			local _, _, hclass = getInstalledHyperdriveInfo(entry)
+			local warmup = math.floor(5 + math.max(1, hclass) * 1.5)
 			local jDur = computeJumpDurationSec(entry, t.hopDistLy)
 			t.state = "HYPERSPACE"
-			t.phaseStartTime = Game.time
-			t.phaseEndTime = Game.time + jDur
+			t.phaseStartTime = now
+			t.phaseEndTime = now + warmup + jDur
+			t.actualJumpDuration = jDur
+			t.actualJumpFuel = computeJumpFuelUse(entry, t.hopDistLy)
+			t.wearAppliedForHop = false
 			entry.status = "HYPERSPACE"
 			entry.orderEta = t.phaseEndTime
 		end
 	elseif t.state == "CLEARING_MASS_LOCK" or t.state == "HYPERJUMP_COUNTDOWN" then
+		local _, _, hclass = getInstalledHyperdriveInfo(entry)
+		local warmup = math.floor(5 + math.max(1, hclass) * 1.5)
 		local jDur = computeJumpDurationSec(entry, t.hopDistLy or 6)
 		t.state = "HYPERSPACE"
-		t.phaseStartTime = Game.time
-		t.phaseEndTime = Game.time + jDur
+		t.phaseStartTime = now
+		t.phaseEndTime = now + warmup + jDur
+		t.actualJumpDuration = jDur
+		t.actualJumpFuel = computeJumpFuelUse(entry, t.hopDistLy or 6)
+		t.wearAppliedForHop = false
 		entry.status = "HYPERSPACE"
 		entry.orderEta = t.phaseEndTime
 	end
 	t.cmdIssued = false
 end
 
-local function startFleetTransit(entry, destPath, destName, purpose)
+local function startFleetTransit(entry, destPath, destName, purpose, simNow, isCatchUp)
 	if not entry or not destPath then return end
+	local now = simNow or Game.time
 	local cleanDestName = destName or formatPathName(destPath)
 	local t = {
 		destPath = destPath,
 		destName = cleanDestName,
 		purpose = purpose or "TRANSIT",
 		state = "UNDOCKING",
-		phaseStartTime = Game.time,
+		phaseStartTime = now,
 		phaseEndTime = nil,
 		jumpRoute = nil,
 		jumpDists = nil,
@@ -1776,6 +2551,7 @@ local function startFleetTransit(entry, destPath, destName, purpose)
 		departStationPath = nil,
 		departCompleted = false,
 		undockRetryAt = 0,
+		refuelResume = nil,
 	}
 	entry.transit = t
 	entry.orderTargetPath = destPath
@@ -1783,7 +2559,7 @@ local function startFleetTransit(entry, destPath, destName, purpose)
 	entry.orderProgress = 0
 	entry.orderEta = 0
 
-	local inPlayerSystem = Game.system and not Game.InHyperspace() and entry.locationPath and sameSystem(entry.locationPath, Game.system.path)
+	local inPlayerSystem = (not isCatchUp) and Game.system and not Game.InHyperspace() and entry.locationPath and sameSystem(entry.locationPath, Game.system.path)
 	if inPlayerSystem then
 		local live = spawnOrUpdateLiveFleetShip(entry, false, true)
 		if live and live:exists() then
@@ -1792,7 +2568,7 @@ local function startFleetTransit(entry, destPath, destName, purpose)
 				local destBody = Space.GetBody(destPath.bodyIndex)
 				if destBody and live:GetDockedWith() == destBody then
 					t.state = "IN_SYSTEM_FLIGHT"
-					updateFleetTransit(entry)
+					updateFleetTransit(entry, now, isCatchUp)
 					return
 				end
 			end
@@ -1805,7 +2581,7 @@ local function startFleetTransit(entry, destPath, destName, purpose)
 					entry.orderPhase = string.format("[UNDOCKING] Launching from %s -> %s", formatPathName(entry.locationPath), cleanDestName)
 				else
 					local waitSec = math.clamp((port and port.GetLaunchWaitTime and port:GetLaunchWaitTime()) or 4, 2, 6)
-					t.undockRetryAt = Game.time + waitSec
+					t.undockRetryAt = now + waitSec
 					entry.orderPhase = string.format("[ATC HOLD] Awaiting departure clearance at %s", formatPathName(entry.locationPath))
 				end
 			elseif fs == "UNDOCKING" then
@@ -1826,67 +2602,75 @@ local function startFleetTransit(entry, destPath, destName, purpose)
 				else
 					t.state = "CLEARING_MASS_LOCK"
 				end
-				updateFleetTransit(entry)
+				updateFleetTransit(entry, now, isCatchUp)
 			end
 			return
 		end
 	end
 
-	-- Out-of-System (OOS) departure or fallback when not in current system
+	-- Out-of-System (OOS) departure or fallback when not live in current system
 	if entry.locationPath and sameSystem(entry.locationPath, destPath) then
 		local scDur, distMeters = computeOOSSupercruiseDurationSec(entry, destPath)
 		t.state = "OOS_SUPERCRUISE"
-		t.phaseStartTime = Game.time
-		t.phaseEndTime = Game.time + scDur
+		t.phaseStartTime = now
+		t.phaseEndTime = now + scDur
 		t.oosTotalDist = distMeters
 		entry.status = "SUPERCRUISE"
 		entry.orderEta = t.phaseEndTime
 		entry.orderPhase = string.format("[SUPERCRUISE] %s -> %s | %s rem", formatSystemName(destPath), cleanDestName, formatDistanceMeters(distMeters))
 	else
-		local hops, hopDists = findJumpRoute(entry.locationPath, destPath, PlayerFleet.GetShipHyperspaceRange(entry))
+		local maxR = PlayerFleet.GetShipHyperspaceRangeExact(entry)
+		local hops, hopDists = findJumpRoute(entry.locationPath, destPath, math.max(1.5, maxR * 0.96))
 		t.jumpRoute = hops
 		t.jumpDists = hopDists
 		t.jumpIndex = 1
 		t.fromSysPath = entry.locationPath and entry.locationPath:SystemOnly() or nil
 		t.hopSysPath = hops[1] or destPath:SystemOnly()
 		t.hopDistLy = hopDists[1] or systemDistLy(t.fromSysPath, t.hopSysPath)
-		local jDur = 22 + computeJumpDurationSec(entry, t.hopDistLy)
+		local _, _, hclass = getInstalledHyperdriveInfo(entry)
+		local warmup = math.floor(5 + math.max(1, hclass) * 1.5)
+		local jDur = computeJumpDurationSec(entry, t.hopDistLy)
 		t.state = "HYPERSPACE"
-		t.phaseStartTime = Game.time
-		t.phaseEndTime = Game.time + jDur
+		t.phaseStartTime = now
+		t.phaseEndTime = now + warmup + jDur
+		t.actualJumpDuration = jDur
+		t.actualJumpFuel = computeJumpFuelUse(entry, t.hopDistLy)
+		t.wearAppliedForHop = false
 		entry.status = "HYPERSPACE"
 		entry.orderEta = t.phaseEndTime
 		entry.orderPhase = string.format("[HYPERSPACE] Departing -> %s (%.1f ly)", formatSystemName(t.hopSysPath), t.hopDistLy or 0)
 	end
 end
 
-updateFleetTransit = function(entry)
+updateFleetTransit = function(entry, simNow, isCatchUp, silentComms)
 	if not entry then return false end
+	local now = simNow or Game.time
+	local allowLive = (not isCatchUp) and Game.system and not Game.InHyperspace()
 	local t = entry.transit
 	if not t then
 		-- Recover gracefully from old savefiles loaded mid-order
 		local fallbackDest = entry.orderTargetPath or entry.locationPath
 		if not fallbackDest then return false end
-		startFleetTransit(entry, fallbackDest, entry.orderTargetName or formatPathName(fallbackDest), entry.order or "TRANSIT")
+		startFleetTransit(entry, fallbackDest, entry.orderTargetName or formatPathName(fallbackDest), entry.order or "TRANSIT", now, isCatchUp)
 		t = entry.transit
 		if not t then return false end
 	end
 
-	local inCurrentSys = Game.system and not Game.InHyperspace() and t.destPath and sameSystem(t.destPath, Game.system.path)
+	local inCurrentSys = allowLive and t.destPath and sameSystem(t.destPath, Game.system.path)
 
 	if t.state == "UNDOCKING" then
-		local originInCurrentSys = Game.system and not Game.InHyperspace() and (
+		local originInCurrentSys = allowLive and (
 			(entry.liveShip and entry.liveShip:exists()) or
 			(entry.locationPath and sameSystem(entry.locationPath, Game.system.path))
 		)
 		if not originInCurrentSys then
-			convertInSystemToOOS(entry)
-			return updateFleetTransit(entry)
+			convertInSystemToOOS(entry, now)
+			return updateFleetTransit(entry, now, isCatchUp, silentComms)
 		end
 
 		local live = spawnOrUpdateLiveFleetShip(entry, false, true)
 		if not live or not live:exists() then
-			convertInSystemToOOS(entry)
+			convertInSystemToOOS(entry, now)
 			return false
 		end
 
@@ -1897,14 +2681,14 @@ updateFleetTransit = function(entry)
 				t.departStationPath = port.path
 			end
 			local launched = false
-			if Game.time >= (t.undockRetryAt or 0) then
+			if now >= (t.undockRetryAt or 0) then
 				launched, port = tryUndockWithATC(live)
 				if port and port.path then
 					t.departStationPath = port.path
 				end
 				if not launched then
 					local waitSec = math.clamp((port and port.GetLaunchWaitTime and port:GetLaunchWaitTime()) or 4, 2, 6)
-					t.undockRetryAt = Game.time + waitSec
+					t.undockRetryAt = now + waitSec
 				end
 			end
 			entry.status = "UNDOCKING"
@@ -1925,7 +2709,7 @@ updateFleetTransit = function(entry)
 			t.state = "DEPARTING"
 			t.departCompleted = false
 			t.cmdIssued = true
-			t.phaseStartTime = Game.time
+			t.phaseStartTime = now
 			local departSt = resolveStationByPath(t.departStationPath) or resolveStationByPath(entry.locationPath)
 			if departSt and departSt:exists() and getShipAICommand(live) ~= "CMD_DEPART" then
 				pcall(function() live:AIDepart(departSt) end)
@@ -1938,18 +2722,18 @@ updateFleetTransit = function(entry)
 	end
 
 	if t.state == "DEPARTING" then
-		local originInCurrentSys = Game.system and not Game.InHyperspace() and (
+		local originInCurrentSys = allowLive and (
 			(entry.liveShip and entry.liveShip:exists()) or
 			(entry.locationPath and sameSystem(entry.locationPath, Game.system.path))
 		)
 		if not originInCurrentSys then
-			convertInSystemToOOS(entry)
-			return updateFleetTransit(entry)
+			convertInSystemToOOS(entry, now)
+			return updateFleetTransit(entry, now, isCatchUp, silentComms)
 		end
 
 		local live = entry.liveShip
 		if not live or not live:exists() then
-			convertInSystemToOOS(entry)
+			convertInSystemToOOS(entry, now)
 			return false
 		end
 
@@ -1971,7 +2755,7 @@ updateFleetTransit = function(entry)
 
 		if not t.departCompleted then
 			local departSt = resolveStationByPath(t.departStationPath) or resolveStationByPath(entry.locationPath)
-			if departSt and departSt:exists() and live:DistanceTo(departSt) < 1200 and (Game.time - (t.phaseStartTime or Game.time)) < 120 then
+			if departSt and departSt:exists() and live:DistanceTo(departSt) < 1200 and (now - (t.phaseStartTime or now)) < 120 then
 				pcall(function() live:AIDepart(departSt) end)
 				entry.status = "DEPARTING"
 				entry.orderProgress = 0.08
@@ -1983,7 +2767,7 @@ updateFleetTransit = function(entry)
 		-- Departure corridor cleared; proceed with navigation
 		t.cmdIssued = false
 		t.departCompleted = false
-		t.phaseStartTime = Game.time
+		t.phaseStartTime = now
 		t.initialDist = nil
 		t.aiRetryAt = 0
 		t.state = inCurrentSys and "IN_SYSTEM_FLIGHT" or "CLEARING_MASS_LOCK"
@@ -1991,8 +2775,8 @@ updateFleetTransit = function(entry)
 
 	if t.state == "IN_SYSTEM_FLIGHT" then
 		if not inCurrentSys then
-			convertInSystemToOOS(entry)
-			return updateFleetTransit(entry)
+			convertInSystemToOOS(entry, now)
+			return updateFleetTransit(entry, now, isCatchUp, silentComms)
 		end
 
 		local live = entry.liveShip
@@ -2000,7 +2784,7 @@ updateFleetTransit = function(entry)
 			live = spawnShipOnRouteInSystem(entry, t) or spawnOrUpdateLiveFleetShip(entry, false, true)
 		end
 		if not live or not live:exists() then
-			convertInSystemToOOS(entry)
+			convertInSystemToOOS(entry, now)
 			return false
 		end
 
@@ -2039,6 +2823,15 @@ updateFleetTransit = function(entry)
 			if dockedAt == destBody then
 				entry.locationPath = t.destPath
 				entry.locationName = formatPathName(t.destPath)
+				applyOperationalFlightWear(entry, t.destPath, "TRANSIT")
+				if t.purpose == "REFUEL_DIVERT" and t.refuelResume then
+					maintainFleetShipAtStation(entry, t.destPath, now, silentComms)
+					local res = t.refuelResume
+					t.refuelResume = nil
+					addLog(entry.shipName, string.format("Completed refuel stop at %s; resuming %s.", entry.locationName, res.destName or "route"), 0, now)
+					startFleetTransit(entry, res.destPath, res.destName, res.purpose, now, isCatchUp)
+					return false
+				end
 				entry.status = "DOCKED"
 				entry.orderProgress = 1.0
 				entry.orderPhase = "Docked at " .. t.destName
@@ -2053,7 +2846,7 @@ updateFleetTransit = function(entry)
 					entry.orderPhase = string.format("[UNDOCKING] Launching for %s", t.destName)
 				else
 					local waitSec = math.clamp((port and port.GetLaunchWaitTime and port:GetLaunchWaitTime()) or 4, 2, 6)
-					t.undockRetryAt = Game.time + waitSec
+					t.undockRetryAt = now + waitSec
 					entry.orderPhase = string.format("[ATC HOLD] Awaiting departure clearance for %s", t.destName)
 				end
 				return false
@@ -2067,7 +2860,7 @@ updateFleetTransit = function(entry)
 			end
 			local fs = live.flightState
 			local aiCmd = getShipAICommand(live)
-			if fs ~= "DOCKING" and aiCmd ~= "CMD_DOCK" and Game.time >= (t.aiRetryAt or 0) then
+			if fs ~= "DOCKING" and aiCmd ~= "CMD_DOCK" and now >= (t.aiRetryAt or 0) then
 				local okCmd = pcall(function() live:AIDockWith(destBody) end)
 				if okCmd then
 					t.cmdIssued = true
@@ -2078,7 +2871,7 @@ updateFleetTransit = function(entry)
 			local spd = (okV and vel and vel.length) and vel:length() or 0
 			entry.status = (fs == "SUPERCRUISE" and "SUPERCRUISE") or (fs == "DOCKING" and "DOCKING") or "FLYING"
 			entry.orderProgress = math.clamp(0.08 + 0.90 * (1.0 - (dist / math.max(1000, t.initialDist))), 0.08, 0.98)
-			if Game.time < (t.aiRetryAt or 0) and t.holdReason then
+			if now < (t.aiRetryAt or 0) and t.holdReason then
 				entry.orderPhase = string.format("[HOLDING] %s at %s; holding orbit (%s)", t.holdReason, t.destName, formatDistanceMeters(dist))
 			else
 				entry.orderPhase = string.format("[%s] -> %s | %s rem (%.0f m/s)", entry.status, t.destName, formatDistanceMeters(dist), spd)
@@ -2092,6 +2885,7 @@ updateFleetTransit = function(entry)
 				pcall(function() live:AIEnterLowOrbit(destBody) end)
 				entry.locationPath = t.destPath
 				entry.locationName = formatPathName(t.destPath)
+				applyOperationalFlightWear(entry, t.destPath, "TRANSIT")
 				entry.orderProgress = 1.0
 				entry.orderPhase = "Arrived in orbit at " .. t.destName
 				return true
@@ -2100,7 +2894,7 @@ updateFleetTransit = function(entry)
 				t.initialDist = math.max(arriveRadius + 1000, dist)
 			end
 			local aiCmd = getShipAICommand(live)
-			if aiCmd ~= "CMD_FLYTO" and Game.time >= (t.aiRetryAt or 0) then
+			if aiCmd ~= "CMD_FLYTO" and now >= (t.aiRetryAt or 0) then
 				local okCmd = pcall(function() live:AIFlyTo(destBody) end)
 				if okCmd then t.cmdIssued = true end
 			end
@@ -2115,13 +2909,13 @@ updateFleetTransit = function(entry)
 	end
 
 	if t.state == "CLEARING_MASS_LOCK" then
-		if not Game.system or Game.InHyperspace() then
-			convertInSystemToOOS(entry)
+		if not allowLive then
+			convertInSystemToOOS(entry, now)
 			return false
 		end
 		local live = entry.liveShip
 		if not live or not live:exists() then
-			convertInSystemToOOS(entry)
+			convertInSystemToOOS(entry, now)
 			return false
 		end
 
@@ -2154,13 +2948,13 @@ updateFleetTransit = function(entry)
 		if nearSt and nearSt:exists() and live:DistanceTo(nearSt) < getStationHyperjumpClearanceMeters(nearSt) then
 			allowed = false
 		end
-		if (Game.time - (t.phaseStartTime or Game.time)) < 3 then
+		if (now - (t.phaseStartTime or now)) < 3 then
 			allowed = false
 		end
 
 		if not allowed then
 			local aiCmd = getShipAICommand(live)
-			if (aiCmd == nil or aiCmd == "CMD_NONE") and Game.time >= (t.aiRetryAt or 0) then
+			if (aiCmd == nil or aiCmd == "CMD_NONE") and now >= (t.aiRetryAt or 0) then
 				local stars = Game.system:GetStars()
 				local starBody = stars and stars[1] and stars[1].body or nil
 				local farTarget = nil
@@ -2193,23 +2987,27 @@ updateFleetTransit = function(entry)
 
 		t.state = "HYPERJUMP_COUNTDOWN"
 		t.cmdIssued = false
-		t.phaseStartTime = Game.time
+		t.phaseStartTime = now
 		t.jumpRetryAt = 0
 		-- Fall through to charge hyperdrive immediately
 	end
 
 	if t.state == "HYPERJUMP_COUNTDOWN" then
-		if not Game.system or Game.InHyperspace() then
-			convertInSystemToOOS(entry)
+		if not allowLive then
+			convertInSystemToOOS(entry, now)
 			return false
 		end
 		local live = entry.liveShip
 		if not live or not live:exists() then
 			-- Ship finished countdown or entered hyperspace between ticks
-			local jDur = computeJumpDurationSec(entry, t.hopDistLy or 6)
+			local jDur = (t.scheduledJumpDuration and t.scheduledJumpDuration > 0) and t.scheduledJumpDuration
+				or computeJumpDurationSec(entry, t.hopDistLy or 6)
 			t.state = "HYPERSPACE"
-			t.phaseStartTime = Game.time
-			t.phaseEndTime = Game.time + jDur
+			t.phaseStartTime = now
+			t.phaseEndTime = now + jDur
+			t.actualJumpDuration = jDur
+			t.actualJumpFuel = t.scheduledJumpFuel or computeJumpFuelUse(entry, t.hopDistLy or 6)
+			t.wearAppliedForHop = false
 			entry.liveShip = nil
 			entry.status = "HYPERSPACE"
 			entry.orderEta = t.phaseEndTime
@@ -2227,43 +3025,122 @@ updateFleetTransit = function(entry)
 			t.hopDistLy = hopDists[1] or systemDistLy(t.fromSysPath, t.hopSysPath)
 		end
 
+		local _, _, hclass = getInstalledHyperdriveInfo(entry)
 		local fs = live.flightState
 		if fs == "JUMPING" or t.cmdIssued then
 			entry.status = "JUMPING"
 			entry.orderProgress = 0.13
 			entry.orderPhase = string.format("[JUMPING] Charging FSD -> %s (%.1f ly)", formatSystemName(t.hopSysPath), t.hopDistLy or 0)
-			-- Fallback safety if JUMPING exceeded 25s
-			if (Game.time - (t.phaseStartTime or Game.time)) > 28 then
-				local jDur = computeJumpDurationSec(entry, t.hopDistLy or 6)
+			-- Safety fallback exceeding max real warmup (5 + 7*1.5 = 15.5s)
+			if (now - (t.phaseStartTime or now)) > math.max(35, 20 + hclass * 2) then
+				local jDur = (t.scheduledJumpDuration and t.scheduledJumpDuration > 0) and t.scheduledJumpDuration
+					or computeJumpDurationSec(entry, t.hopDistLy or 6, live)
 				t.state = "HYPERSPACE"
-				t.phaseStartTime = Game.time
-				t.phaseEndTime = Game.time + jDur
+				t.phaseStartTime = now
+				t.phaseEndTime = now + jDur
+				t.actualJumpDuration = jDur
+				t.actualJumpFuel = t.scheduledJumpFuel or computeJumpFuelUse(entry, t.hopDistLy or 6, live)
+				t.wearAppliedForHop = false
 				entry.status = "HYPERSPACE"
 				entry.orderEta = t.phaseEndTime
 			end
 			return false
 		end
 
-		live:SetFuelPercent(100)
-		fillShipHyperdriveFuel(live, entry)
-		local okJ, jStatus = pcall(function() return live:HyperjumpTo(t.hopSysPath, false) end)
+		local okD, drive = pcall(function() return live:GetInstalledHyperdrive() end)
+		if not okD or not drive then
+			addLog(entry.shipName, "Aborting jump: no hyperdrive installed.", 0, now)
+			entry.transit = nil
+			entry.order = "IDLE"
+			entry.status = "FLYING"
+			entry.orderPhase = "Jump aborted (no hyperdrive)"
+			return false
+		end
+
+		local jDist, jFuelNeeded = drive:CheckDestination(live, t.hopSysPath)
+		local curR, maxR = drive:GetRange(live)
+		if jDist and (not jFuelNeeded or drive:GetFuel() < jFuelNeeded) then
+			if maxR and jDist <= maxR * 0.99 then
+				-- Try pulling hyperdrive propellant from cargo hold first
+				local cargoMgr = live:GetComponent('CargoManager')
+				if cargoMgr and drive.fuel then
+					local availCargo = cargoMgr:CountCommodity(drive.fuel) or 0
+					if availCargo > 0 then
+						local needTons = math.min(availCargo, math.ceil(math.max(1, (drive:GetMaxFuel() or 0) - drive:GetFuel())))
+						if needTons > 0 then
+							cargoMgr:RemoveCommodity(drive.fuel, needTons)
+							drive:SetFuel(live, math.min(drive:GetMaxFuel() or 0, drive:GetFuel() + needTons))
+							syncFromLiveShip(entry)
+							jDist, jFuelNeeded = drive:CheckDestination(live, t.hopSysPath)
+						end
+					end
+				end
+				-- If still insufficient fuel, divert to nearest station to refuel
+				if not jFuelNeeded or drive:GetFuel() < jFuelNeeded then
+					local divSt = findBestStationInSystem(Game.system, entry.locationPath)
+					if divSt then
+						t.refuelResume = t.refuelResume or { destPath = t.destPath, destName = t.destName, purpose = t.purpose }
+						t.destPath = divSt
+						t.destName = formatPathName(divSt) .. " [Refuel]"
+						t.purpose = "REFUEL_DIVERT"
+						t.state = "IN_SYSTEM_FLIGHT"
+						t.cmdIssued = false
+						t.initialDist = nil
+						t.aiRetryAt = 0
+						addLog(entry.shipName, string.format("Low hyperfuel: diverting to %s to refuel before jumping.", formatPathName(divSt)), 0, now)
+						return false
+					end
+				end
+			else
+				-- Hop exceeds max capacity range: replot multi-hop route within maxR
+				local hops, hopDists = findJumpRoute(Game.system.path:SystemOnly(), t.destPath:SystemOnly(), math.max(1.5, (maxR or 2) * 0.95))
+				t.jumpRoute = hops
+				t.jumpDists = hopDists
+				t.jumpIndex = 1
+				t.fromSysPath = Game.system.path:SystemOnly()
+				t.hopSysPath = hops[1] or t.destPath:SystemOnly()
+				t.hopDistLy = hopDists[1] or systemDistLy(t.fromSysPath, t.hopSysPath)
+			end
+		end
+
+		local okJ, jStatus, jFuelUse, jDuration = pcall(function() return live:HyperjumpTo(t.hopSysPath, false) end)
 		if okJ and (jStatus == "OK" or jStatus == "DRIVE_ACTIVE") then
+			t.scheduledJumpDuration = jDuration
+			t.scheduledJumpFuel = jFuelUse
 			t.cmdIssued = true
 			entry.status = "JUMPING"
 			entry.orderProgress = 0.13
 			entry.orderPhase = string.format("[JUMPING] Charging FSD -> %s (%.1f ly)", formatSystemName(t.hopSysPath), t.hopDistLy or 0)
 			return false
+		elseif okJ and (jStatus == "INSUFFICIENT_FUEL" or jStatus == "SAFETY_LOCKOUT") then
+			local divSt = findBestStationInSystem(Game.system, entry.locationPath)
+			if divSt then
+				t.refuelResume = t.refuelResume or { destPath = t.destPath, destName = t.destName, purpose = t.purpose }
+				t.destPath = divSt
+				t.destName = formatPathName(divSt) .. (jStatus == "SAFETY_LOCKOUT" and " [Drive Service]" or " [Refuel]")
+				t.purpose = "REFUEL_DIVERT"
+				t.state = "IN_SYSTEM_FLIGHT"
+				t.cmdIssued = false
+				t.initialDist = nil
+				t.aiRetryAt = 0
+				addLog(entry.shipName, string.format("Diverting to %s (%s).", formatPathName(divSt), tostring(jStatus)), 0, now)
+				return false
+			end
 		end
 
-		-- If obstructed/out-of-range or retry after waiting 12s, advance cleanly after warmup
+		-- If obstructed/aligning, wait before fallback
 		entry.status = "JUMPING"
 		entry.orderProgress = 0.11
 		entry.orderPhase = string.format("[JUMPING] Aligning FSD vector -> %s", formatSystemName(t.hopSysPath))
-		if (Game.time - (t.phaseStartTime or Game.time)) >= 12 then
-			local jDur = computeJumpDurationSec(entry, t.hopDistLy or 6)
+		if (now - (t.phaseStartTime or now)) >= 12 then
+			local jDur = (t.scheduledJumpDuration and t.scheduledJumpDuration > 0) and t.scheduledJumpDuration
+				or computeJumpDurationSec(entry, t.hopDistLy or 6, live)
 			t.state = "HYPERSPACE"
-			t.phaseStartTime = Game.time
-			t.phaseEndTime = Game.time + jDur
+			t.phaseStartTime = now
+			t.phaseEndTime = now + jDur
+			t.actualJumpDuration = jDur
+			t.actualJumpFuel = t.scheduledJumpFuel or computeJumpFuelUse(entry, t.hopDistLy or 6, live)
+			t.wearAppliedForHop = false
 			entry.liveShip = nil
 			entry.status = "HYPERSPACE"
 			entry.orderEta = t.phaseEndTime
@@ -2272,22 +3149,40 @@ updateFleetTransit = function(entry)
 	end
 
 	if t.state == "HYPERSPACE" then
-		local dur = math.max(10, (t.phaseEndTime or (Game.time + 60)) - (t.phaseStartTime or Game.time))
-		local frac = math.clamp((Game.time - (t.phaseStartTime or Game.time)) / dur, 0.0, 1.0)
-		local rem = math.max(0, (t.phaseEndTime or Game.time) - Game.time)
+		local dur = math.max(10, (t.phaseEndTime or (now + 60)) - (t.phaseStartTime or now))
+		local frac = math.clamp((now - (t.phaseStartTime or now)) / dur, 0.0, 1.0)
+		local rem = math.max(0, (t.phaseEndTime or now) - now)
 		local hopName = formatSystemName(t.hopSysPath or t.destPath)
 
 		entry.status = "HYPERSPACE"
-		entry.orderEta = t.phaseEndTime or Game.time
+		entry.orderEta = t.phaseEndTime or now
 		entry.orderProgress = math.clamp(0.15 + 0.45 * frac, 0.15, 0.60)
 		entry.orderPhase = string.format("[HYPERSPACE] Jumping -> %s (%.1f ly) | %s rem", hopName, t.hopDistLy or 0, Format.Duration(rem))
 
-		if Game.time < (t.phaseEndTime or 0) then
+		if now < (t.phaseEndTime or 0) then
 			return false
 		end
 
-		-- Hop jump completed
-		entry.fuel = math.max(8, (entry.fuel or 100) - math.clamp(math.floor((t.hopDistLy or 6) * 1.4), 5, 16))
+		-- Hop jump completed at exact phaseEndTime
+		local hopEnd = t.phaseEndTime or now
+		local _, _, hclass = getInstalledHyperdriveInfo(entry)
+		local warmupSec = math.floor(5 + math.max(1, hclass) * 1.5)
+		local actualDur = t.actualJumpDuration or math.max(60, (hopEnd - (t.phaseStartTime or hopEnd)) - warmupSec)
+		local hopFuelUsed = t.actualJumpFuel or computeJumpFuelUse(entry, t.hopDistLy or 6)
+
+		if not t.wearAppliedForHop then
+			if type(entry.hyperFuel) == "number" then
+				entry.hyperFuel = math.max(0, entry.hyperFuel - hopFuelUsed)
+			end
+			entry.fuel = math.max(5, (entry.fuel or 100) - 3)
+			applyOOSHyperjumpWear(entry, actualDur)
+		end
+		t.actualJumpDuration = nil
+		t.actualJumpFuel = nil
+		t.wearAppliedForHop = nil
+		t.scheduledJumpDuration = nil
+		t.scheduledJumpFuel = nil
+
 		entry.locationPath = t.hopSysPath or t.destPath:SystemOnly()
 		entry.locationName = formatPathName(entry.locationPath)
 		t.jumpIndex = (t.jumpIndex or 1) + 1
@@ -2297,7 +3192,8 @@ updateFleetTransit = function(entry)
 			local nextHop = t.jumpRoute and t.jumpRoute[t.jumpIndex] or nil
 			local nextDist = t.jumpDists and t.jumpDists[t.jumpIndex] or nil
 			if not nextHop then
-				local hops, hopDists = findJumpRoute(entry.locationPath, t.destPath, PlayerFleet.GetShipHyperspaceRange(entry))
+				local maxR = PlayerFleet.GetShipHyperspaceRangeExact(entry)
+				local hops, hopDists = findJumpRoute(entry.locationPath, t.destPath, math.max(1.5, maxR * 0.96))
 				t.jumpRoute = hops
 				t.jumpDists = hopDists
 				t.jumpIndex = 1
@@ -2308,29 +3204,85 @@ updateFleetTransit = function(entry)
 			t.hopSysPath = nextHop
 			t.hopDistLy = nextDist or systemDistLy(t.fromSysPath, nextHop)
 
-			if Game.system and not Game.InHyperspace() and sameSystem(entry.locationPath, Game.system.path) then
+			-- Check hyperfuel sufficiency for the next hop; scoop or pay intermediate station refuel if needed
+			local stopoverDelay = 0
+			local nextHopFuel = computeJumpFuelUse(entry, t.hopDistLy)
+			local driveProto = getInstalledHyperdriveInfo(entry)
+			local maxHyper = driveProto and (driveProto.fuel_resv_size or 1) or 0
+			if driveProto and (entry.hyperFuel or 0) < nextHopFuel then
+				local hasScoop = false
+				for _, eq in ipairs(entry.equip or {}) do
+					if eq.id and string.find(eq.id, "fuel_scoop", 1, true) then
+						hasScoop = true
+						break
+					end
+				end
+				if hasScoop then
+					entry.hyperFuel = maxHyper
+					stopoverDelay = 90
+					addLog(entry.shipName, string.format("Scooped hydrogen in %s en route to %s.", entry.locationName, formatSystemName(nextHop)), 0, hopEnd)
+				else
+					local midSys = entry.locationPath:GetStarSystem()
+					local midStations = midSys and midSys:GetStationPaths() or nil
+					local fComm = driveProto.fuel or Commodities.hydrogen
+					local unitP = (midSys and fComm) and getSystemCommodityPrice(midSys, fComm) or (fComm and fComm.price or 15)
+					local needTons = math.max(0.5, maxHyper - (entry.hyperFuel or 0))
+					if midStations and #midStations > 0 then
+						local fCost = math.max(10, math.ceil(needTons * unitP))
+						if PlayerState.GetMoney() >= fCost then
+							PlayerState.AddMoney(-fCost)
+							entry.hyperFuel = maxHyper
+							entry.fuel = 100
+							entry.stats.maintenancePaid = (entry.stats.maintenancePaid or 0) + fCost
+							entry.stats.netProfit = (entry.stats.netProfit or 0) - fCost
+							fleetState.totalProfit = (fleetState.totalProfit or 0) - fCost
+							TaxAuthority.RecordOperatingExpense(fCost, "FLEET_FUEL", "[FLEET] " .. entry.shipName)
+							addLog(entry.shipName, string.format("Refueled hyperdrive at transit port in %s.", entry.locationName), -fCost, hopEnd)
+						end
+						stopoverDelay = 180
+					else
+						local emgCost = math.max(25, math.ceil(needTons * unitP * 2))
+						if PlayerState.GetMoney() >= emgCost then
+							PlayerState.AddMoney(-emgCost)
+							entry.stats.maintenancePaid = (entry.stats.maintenancePaid or 0) + emgCost
+							entry.stats.netProfit = (entry.stats.netProfit or 0) - emgCost
+							fleetState.totalProfit = (fleetState.totalProfit or 0) - emgCost
+							TaxAuthority.RecordOperatingExpense(emgCost, "FLEET_FUEL", "[FLEET] " .. entry.shipName)
+						end
+						entry.hyperFuel = maxHyper
+						stopoverDelay = 300
+						addLog(entry.shipName, string.format("Emergency reserve hyperfuel synth in uninhabited %s.", entry.locationName), -emgCost, hopEnd)
+					end
+				end
+			end
+
+			if allowLive and sameSystem(entry.locationPath, Game.system.path) then
 				spawnShipInArrivalCloud(entry, t.fromSysPath)
 				t.state = "CLEARING_MASS_LOCK"
 				t.cmdIssued = false
-				t.phaseStartTime = Game.time
+				t.phaseStartTime = hopEnd
 				entry.status = "HYPERSPACE"
 				entry.orderPhase = string.format("[ARRIVING] Transit hop %s -> jumping to %s", entry.locationName, formatSystemName(nextHop))
 				return false
 			end
 
-			t.phaseStartTime = Game.time
-			t.phaseEndTime = Game.time + 12 + computeJumpDurationSec(entry, t.hopDistLy)
+			local nextJumpDur = computeJumpDurationSec(entry, t.hopDistLy)
+			t.phaseStartTime = hopEnd + stopoverDelay
+			t.phaseEndTime = t.phaseStartTime + warmupSec + nextJumpDur
+			t.actualJumpDuration = nextJumpDur
+			t.actualJumpFuel = computeJumpFuelUse(entry, t.hopDistLy)
+			t.wearAppliedForHop = false
 			entry.orderEta = t.phaseEndTime
 			return false
 		end
 
 		-- Arrived in final destination system!
-		if Game.system and not Game.InHyperspace() and sameSystem(t.destPath, Game.system.path) then
+		if allowLive and sameSystem(t.destPath, Game.system.path) then
 			local arrivedShip = spawnShipInArrivalCloud(entry, t.fromSysPath)
 			t.state = "IN_SYSTEM_FLIGHT"
 			t.cmdIssued = false
 			t.initialDist = nil
-			t.phaseStartTime = Game.time
+			t.phaseStartTime = hopEnd
 			if arrivedShip then
 				entry.status = "HYPERSPACE"
 				entry.orderPhase = string.format("[ARRIVING] Emerging from hyperspace -> %s", t.destName)
@@ -2343,8 +3295,8 @@ updateFleetTransit = function(entry)
 		-- Destination system is still OOS -> simulate in-system Supercruise across orbital distance
 		local scDur, distMeters = computeOOSSupercruiseDurationSec(entry, t.destPath)
 		t.state = "OOS_SUPERCRUISE"
-		t.phaseStartTime = Game.time
-		t.phaseEndTime = Game.time + scDur
+		t.phaseStartTime = hopEnd
+		t.phaseEndTime = hopEnd + scDur
 		t.oosTotalDist = distMeters
 		entry.status = "SUPERCRUISE"
 		entry.orderEta = t.phaseEndTime
@@ -2352,31 +3304,42 @@ updateFleetTransit = function(entry)
 	end
 
 	if t.state == "OOS_SUPERCRUISE" then
-		-- If player entered the destination system mid-Supercruise, materialize live ship on route!
+		-- If player is now live in the destination system mid-Supercruise, materialize ship on route!
 		if inCurrentSys then
 			local live = spawnShipOnRouteInSystem(entry, t) or spawnOrUpdateLiveFleetShip(entry, false, true)
 			t.state = "IN_SYSTEM_FLIGHT"
 			t.cmdIssued = false
 			t.initialDist = nil
 			if live and live:exists() then
-				return updateFleetTransit(entry)
+				return updateFleetTransit(entry, now, isCatchUp, silentComms)
 			end
 		end
 
-		local dur = math.max(10, (t.phaseEndTime or (Game.time + 60)) - (t.phaseStartTime or Game.time))
-		local frac = math.clamp((Game.time - (t.phaseStartTime or Game.time)) / dur, 0.0, 1.0)
+		local dur = math.max(10, (t.phaseEndTime or (now + 60)) - (t.phaseStartTime or now))
+		local frac = math.clamp((now - (t.phaseStartTime or now)) / dur, 0.0, 1.0)
 		local remDist = (t.oosTotalDist or 1.2e11) * (1.0 - frac)
-		local remTime = math.max(0, (t.phaseEndTime or Game.time) - Game.time)
+		local remTime = math.max(0, (t.phaseEndTime or now) - now)
 
 		entry.status = (frac > 0.88) and "DOCKING" or "SUPERCRUISE"
-		entry.orderEta = t.phaseEndTime or Game.time
+		entry.orderEta = t.phaseEndTime or now
 		entry.orderProgress = math.clamp(0.60 + 0.39 * frac, 0.60, 0.99)
 		entry.orderPhase = string.format("[%s] %s -> %s | %s rem (%s)",
 			entry.status, formatSystemName(t.destPath), t.destName, formatDistanceMeters(remDist), Format.Duration(remTime))
 
-		if Game.time >= (t.phaseEndTime or 0) then
+		if now >= (t.phaseEndTime or 0) then
+			local arrTime = t.phaseEndTime or now
 			entry.locationPath = t.destPath
 			entry.locationName = formatPathName(t.destPath)
+			entry.fuel = math.max(5, (entry.fuel or 100) - 2)
+			applyOperationalFlightWear(entry, t.destPath, "TRANSIT")
+			if t.purpose == "REFUEL_DIVERT" and t.refuelResume then
+				maintainFleetShipAtStation(entry, t.destPath, arrTime, silentComms)
+				local res = t.refuelResume
+				t.refuelResume = nil
+				addLog(entry.shipName, string.format("Completed refuel stop at %s; resuming %s.", entry.locationName, res.destName or "route"), 0, arrTime)
+				startFleetTransit(entry, res.destPath, res.destName, res.purpose, arrTime, isCatchUp)
+				return false
+			end
 			entry.orderProgress = 1.0
 			return true
 		end
@@ -2555,20 +3518,24 @@ function PlayerFleet.OrderFerry(uid, destStationPath)
 			return false, string.format("Remote ferry without a Captain requires %s courier pilot fee.", Format.Money(fee, false))
 		end
 		PlayerState.AddMoney(-fee)
+		TaxAuthority.RecordOperatingExpense(fee, "FLEET_FEES", "[FLEET] " .. entry.shipName)
 		addLog(entry.shipName, string.format("Hired delivery courier (%s) to ferry ship to %s.", Format.Money(fee, false), formatPathName(destStationPath)), -fee)
 	end
 
 	entry.order = "DOCK"
 	entry.missionRef = nil
+	activeTradeScans[uid] = nil
 	startFleetTransit(entry, destStationPath, formatPathName(destStationPath), "DOCK")
 
 	return true, string.format("%s launching for %s.", entry.shipName, entry.orderTargetName)
 end
 
-local function liquidateCargoAtCurrentStation(entry)
+local function liquidateCargoAtCurrentStation(entry, simNow, silentComms)
+	local now = simNow or Game.time
 	local stPath = entry.locationPath
 	local sys = (stPath and stPath:GetStarSystem()) or Game.system
 	local totalSale = 0
+	local totalCostBasis = 0
 	local totalTons = 0
 
 	for cname, qty in pairs(entry.cargo or {}) do
@@ -2580,6 +3547,8 @@ local function liquidateCargoAtCurrentStation(entry)
 			elseif comm and comm.price then
 				unitPrice = comm.price
 			end
+			local legBasis = adjustEntryCargoCostBasis(entry, cname, -qty)
+			totalCostBasis = totalCostBasis + legBasis
 			totalSale = totalSale + unitPrice * qty
 			totalTons = totalTons + qty
 			entry.cargo[cname] = nil
@@ -2591,15 +3560,25 @@ local function liquidateCargoAtCurrentStation(entry)
 
 	if totalSale > 0 then
 		PlayerState.AddMoney(totalSale)
+		local _, tax = TaxAuthority.RecordOperationsIncome("FLEET_CARGO", totalSale, totalCostBasis, "[FLEET] " .. entry.shipName, now)
+		entry.stats.taxesGenerated = (entry.stats.taxesGenerated or 0) + (tax or 0)
 		fleetState.totalProfit = (fleetState.totalProfit or 0) + totalSale
 		entry.stats.netProfit = (entry.stats.netProfit or 0) + totalSale
 		entry.stats.cargoHauled = (entry.stats.cargoHauled or 0) + totalTons
 		entry.stats.runsCompleted = (entry.stats.runsCompleted or 0) + 1
 		local locStr = entry.locationName or (stPath and formatPathName(stPath)) or "Station"
-		addLog(entry.shipName, string.format("Liquidated %dt cargo hold at %s (+%s).", totalTons, locStr, Format.Money(totalSale, false)), totalSale)
-		Comms.ImportantMessage(string.format("%s liquidated %dt cargo hold at %s (+%s)", entry.shipName, totalTons, locStr, Format.Money(totalSale, false)), entry.captain and entry.captain.name or "Fleet Operations")
+		local taxNote = (tax and tax > 0) and string.format(" | Tax %s", Format.Money(tax, false)) or ""
+		addLog(entry.shipName, string.format("Liquidated %dt cargo hold at %s (+%s%s).", totalTons, locStr, Format.Money(totalSale, false), taxNote), totalSale, now)
+		if not silentComms then
+			Comms.ImportantMessage(string.format("%s liquidated %dt cargo hold at %s (+%s)", entry.shipName, totalTons, locStr, Format.Money(totalSale, false)), entry.captain and entry.captain.name or "Fleet Operations")
+		end
 		PlayerFleet.AwardCaptainXP(entry, "navigation")
 	end
+
+	if stPath then
+		maintainFleetShipAtStation(entry, stPath, now, silentComms)
+	end
+
 	entry.order = "IDLE"
 	entry.status = "DOCKED"
 	entry.orderProgress = 0
@@ -2638,6 +3617,7 @@ function PlayerFleet.OrderSellCargo(uid)
 
 	entry.order = "SELL_CARGO"
 	entry.status = "TRANSIT"
+	activeTradeScans[uid] = nil
 	entry.orderTargetPath = destStation
 	entry.orderTargetName = formatPathName(destStation)
 	entry.orderPhase = "Flying to " .. entry.orderTargetName .. " to liquidate cargo"
@@ -2651,6 +3631,7 @@ function PlayerFleet.IssueOrder(uid, orderType, params)
 	if not entry then return false, "Vessel not found." end
 
 	params = params or {}
+	activeTradeScans[uid] = nil
 
 	if orderType == "IDLE" then
 		entry.order = "IDLE"
@@ -2712,23 +3693,39 @@ function PlayerFleet.IssueOrder(uid, orderType, params)
 		if (entry.cargoCap or 0) <= 0 then
 			return false, "Vessel has no cargo hold capacity for trading."
 		end
-		local route = findBestTradeRoute(entry)
-		if not route then
-			return false, "No reachable trade stations within hyperspace range."
-		end
 		entry.order = "AUTO_TRADE"
-		entry.status = "TRADING"
+		entry.status = "SCANNING"
 		entry.orderParams.maxJumps = params.maxJumps or entry.orderParams.maxJumps or 12
+		if params.tradeRangeLy ~= nil then
+			entry.orderParams.tradeRangeLy = math.clamp(math.floor(params.tradeRangeLy + 0.5), 0, MAX_TRADE_RANGE_LY)
+		else
+			entry.orderParams.tradeRangeLy = PlayerFleet.GetTradeRange(entry)
+		end
 		entry.orderParams.tradeState = "SEEKING"
 		entry.orderParams.pendingBuyPath = nil
 		entry.orderParams.pendingRoute = nil
 		entry.orderParams.activeTrade = nil
 		entry.orderParams.nextSeekTime = 0
+		entry.orderParams.isInitialAutoTradeStart = true
+		entry.orderParams.noStationsAbort = nil
 		entry.orderProgress = 0
 		entry.orderEta = 0
-		entry.orderPhase = "Preparing Auto-Trade departure..."
-		addLog(entry.shipName, string.format("Started Autonomous Trading (Captain %s).", entry.captain.name), 0)
+		entry.orderPhase = "[SCANNING] Initializing market scan..."
 		tickAutoTrade(entry)
+		entry.orderParams.isInitialAutoTradeStart = nil
+		if entry.orderParams.noStationsAbort then
+			entry.orderParams.noStationsAbort = nil
+			entry.order = "IDLE"
+			entry.status = "DOCKED"
+			entry.orderProgress = 0
+			entry.orderEta = 0
+			entry.orderPhase = "Docked on standby"
+			return false, "No reachable trade stations within operating range."
+		end
+		addLog(entry.shipName, string.format("Started Autonomous Trading (Captain %s).", entry.captain.name), 0)
+		if activeTradeScans[entry.uid] then
+			return true, string.format("%s scanning sector trade markets (within %d ly)...", entry.shipName, PlayerFleet.GetTradeRange(entry))
+		end
 		return true, string.format("%s began Autonomous Trade operations.", entry.shipName)
 
 	elseif orderType == "AUTO_MINE" then
@@ -2757,10 +3754,11 @@ function PlayerFleet.IssueOrder(uid, orderType, params)
 		return true, string.format("%s launching to mine %s rings.", entry.shipName, ringBody.name)
 
 	elseif orderType == "PATROL" then
-		local dur = calcDuration(75, entry.captain, "piloting")
+		local dur = calcDuration(1800, entry.captain, "piloting")
 		liveOrderRuntime[entry.uid] = {}
 		entry.order = "PATROL"
 		entry.status = "PATROLLING"
+		entry.orderParams.patrolState = "PATROLLING"
 		entry.orderParams.startTime = Game.time
 		entry.orderParams.patrolWaypointAt = 0
 		entry.orderEta = Game.time + dur
@@ -2911,6 +3909,7 @@ function PlayerFleet.AssignMission(uid, mission)
 	entry.order = "MISSION"
 	entry.status = "MISSION"
 	entry.missionRef = mission
+	activeTradeScans[uid] = nil
 	entry.orderParams.missionStage = "OUTBOUND"
 	entry.orderParams.missionDestPath = destPath
 	entry.orderParams.missionReturnPath = retPath
@@ -2921,7 +3920,8 @@ function PlayerFleet.AssignMission(uid, mission)
 	return true, string.format("%s launching for '%s' mission -> %s.", entry.shipName, mission:GetTypeDescription(), formatPathName(destPath))
 end
 
-local function completeFleetMission(entry)
+local function completeFleetMission(entry, simNow, silentComms)
+	local now = simNow or Game.time
 	entry.transit = nil
 	local mission = entry.missionRef
 	if not mission then
@@ -2954,16 +3954,20 @@ local function completeFleetMission(entry)
 
 	if not stillActive or mission.status == "FAILED" then
 		entry.orderPhase = "Docked (contract expired before completion)"
-		addLog(entry.shipName, "Mission contract expired before completion.", 0)
+		addLog(entry.shipName, "Mission contract expired before completion.", 0, now)
+		if dockedPath then maintainFleetShipAtStation(entry, dockedPath, now, silentComms) end
 		return
 	end
 
-	if mission.due and Game.time > mission.due then
+	if mission.due and now > mission.due then
 		entry.orderPhase = "Docked (missed deadline)"
-		addLog(entry.shipName, string.format("Missed deadline on %s contract.", mission:GetTypeDescription()), 0)
-		Comms.ImportantMessage(string.format("%s: Missed contract deadline at %s.", entry.shipName, entry.locationName), entry.captain and entry.captain.name or entry.shipName)
+		addLog(entry.shipName, string.format("Missed deadline on %s contract.", mission:GetTypeDescription()), 0, now)
+		if not silentComms then
+			Comms.ImportantMessage(string.format("%s: Missed contract deadline at %s.", entry.shipName, entry.locationName), entry.captain and entry.captain.name or entry.shipName)
+		end
 		mission.status = "FAILED"
 		mission:Remove()
+		if dockedPath then maintainFleetShipAtStation(entry, dockedPath, now, silentComms) end
 		return
 	end
 
@@ -2984,11 +3988,16 @@ local function completeFleetMission(entry)
 	if mission.type == "Combat" or mission.type == "Assassination" then
 		local dmg = math.max(0, Engine.rand:Integer(0, 14) - math.floor(PlayerFleet.GetShipCombatScore(entry) / 15))
 		entry.hullPercent = math.max(25, (entry.hullPercent or 100) - dmg)
+		applyOperationalFlightWear(entry, dockedPath, "COMBAT")
 	end
 
 	local reward = mission.reward or 0
+	local tax = 0
 	if reward > 0 then
 		PlayerState.AddMoney(reward)
+		local _, assessed = TaxAuthority.RecordOperationsIncome("FLEET_MISSION", reward, 0, "[FLEET] " .. entry.shipName, now)
+		tax = assessed or 0
+		entry.stats.taxesGenerated = (entry.stats.taxesGenerated or 0) + tax
 	end
 	fleetState.totalProfit = (fleetState.totalProfit or 0) + reward
 	entry.stats.netProfit = (entry.stats.netProfit or 0) + reward
@@ -3009,32 +4018,164 @@ local function completeFleetMission(entry)
 	local farOff = SystemPath.New(99999, 99999, 99999)
 	mission.status = "COMPLETED"
 	mission.complete = false
-	mission.due = Game.time + 1e12
+	mission.due = now + 1e12
 	mission.location = farOff
 	if mission.domicile then mission.domicile = farOff end
 	if mission.station then mission.station = farOff end
 	if mission.backstation then mission.backstation = farOff end
 	mission:Remove()
 
+	if dockedPath then
+		maintainFleetShipAtStation(entry, dockedPath, now, silentComms)
+	end
+
 	local primarySkill = (mission.type == "Combat" or mission.type == "Assassination") and "piloting" or "navigation"
 	PlayerFleet.AwardCaptainXP(entry, primarySkill)
 
-	local msg = string.format("Completed '%s' at %s (+%s).", mission:GetTypeDescription(), entry.locationName, Format.Money(reward, false))
+	local taxNote = (tax > 0) and string.format(" | Tax %s", Format.Money(tax, false)) or ""
+	local msg = string.format("Completed '%s' at %s (+%s%s).", mission:GetTypeDescription(), entry.locationName, Format.Money(reward, false), taxNote)
 	entry.orderPhase = "Contract completed. Docked at " .. entry.locationName
-	addLog(entry.shipName, msg, reward)
-	Comms.ImportantMessage(entry.shipName .. ": " .. msg, entry.captain and entry.captain.name or "Fleet Command")
+	addLog(entry.shipName, msg, reward, now)
+	if not silentComms then
+		Comms.ImportantMessage(entry.shipName .. ": " .. msg, entry.captain and entry.captain.name or "Fleet Command")
+	end
 end
 
 -- ============================================================================
 -- Periodic Autonomous Simulation Loop (OOS & Background Cycles)
 -- ============================================================================
 
-tickAutoTrade = function(entry)
+local function applyTradeRouteDecision(entry, route, now, isCatchUp, silentComms)
+	local p = entry.orderParams
+	if not route then
+		entry.status = "DOCKED"
+		entry.orderProgress = 0
+		entry.orderEta = 0
+		entry.orderPhase = "No profitable route found; waiting"
+		p.tradeState = "SEEKING"
+		p.nextSeekTime = now + (isCatchUp and 120 or 20)
+		return
+	end
+
+	-- If ship is not currently docked at route.buyPath, fly there first
+	if not samePath(entry.locationPath, route.buyPath) then
+		p.tradeState = "TO_BUY"
+		p.pendingBuyPath = route.buyPath
+		startFleetTransit(entry, route.buyPath, formatPathName(route.buyPath) .. " [Buy " .. route.comm:GetName() .. "]", "TRADE_BUY", now, isCatchUp)
+		return
+	end
+
+	local freeCap = PlayerFleet.GetCargoFree(entry)
+	local unitMass = (route.comm.mass or 1)
+	local maxUnitsBySpace = math.floor(freeCap / unitMass)
+	local budgetCap = math.max(0, PlayerState.GetMoney() - 1000)
+	local maxUnitsByCash = math.floor(budgetCap / math.max(1, route.buyPrice))
+	local buyQty = math.min(maxUnitsBySpace, maxUnitsByCash)
+
+	if buyQty < 1 then
+		entry.status = "DOCKED"
+		entry.orderProgress = 0
+		entry.orderEta = 0
+		entry.orderPhase = "Awaiting trade capital (" .. Format.Money(route.buyPrice, false) .. "/t needed)"
+		p.tradeState = "SEEKING"
+		p.nextSeekTime = now + (isCatchUp and 120 or 15)
+		return
+	end
+
+	local totalSpend = buyQty * route.buyPrice
+	PlayerState.AddMoney(-totalSpend)
+	local cname = route.comm.name
+	entry.cargo[cname] = (entry.cargo[cname] or 0) + buyQty
+	adjustEntryCargoCostBasis(entry, cname, buyQty, route.buyPrice)
+	if entry.liveShip and entry.liveShip:exists() then
+		applyCargoToShip(entry.liveShip, entry.cargo)
+	end
+	entry.stats.netProfit = (entry.stats.netProfit or 0) - totalSpend
+	fleetState.totalProfit = (fleetState.totalProfit or 0) - totalSpend
+
+	p.tradeState = "TO_SELL"
+	p.activeTrade = {
+		commName = cname,
+		commDisplay = route.comm:GetName(),
+		qty = buyQty,
+		buyPrice = route.buyPrice,
+		sellPrice = route.sellPrice,
+		sellPath = route.sellPath,
+		sellPathName = formatPathName(route.sellPath),
+		spent = totalSpend,
+	}
+	addLog(entry.shipName, string.format("Bought %dt %s @ %s/t at %s", buyQty, p.activeTrade.commDisplay, Format.Money(route.buyPrice, false), formatPathName(route.buyPath)), -totalSpend, now)
+	startFleetTransit(entry, route.sellPath, p.activeTrade.sellPathName .. " [Sell " .. p.activeTrade.commDisplay .. "]", "TRADE_SELL", now, isCatchUp)
+end
+
+function PlayerFleet.HasActiveScans()
+	return next(activeTradeScans) ~= nil
+end
+
+function PlayerFleet.GetActiveScanCount()
+	local count = 0
+	for _ in pairs(activeTradeScans) do
+		count = count + 1
+	end
+	return count
+end
+
+function PlayerFleet.StepBackgroundScans(budgetMs)
+	if not Game.player or next(activeTradeScans) == nil then return end
+	local totalBudget = math.max(1.0, tonumber(budgetMs) or TRADE_SCAN_SLICE_MS)
+	local uids = {}
+	for uid in pairs(activeTradeScans) do
+		table.insert(uids, uid)
+	end
+	local perScanBudget = totalBudget / math.max(1, #uids)
+	local now = Game.time
+	for _, uid in ipairs(uids) do
+		local scan = activeTradeScans[uid]
+		local entry = PlayerFleet.GetShipByUid(uid)
+		if not scan or not entry or entry.status == "DESTROYED" or entry.order ~= "AUTO_TRADE" or (entry.orderParams and entry.orderParams.tradeState ~= "SCANNING") then
+			activeTradeScans[uid] = nil
+		else
+			local done, route = stepTradeScanState(scan, perScanBudget)
+			if done then
+				activeTradeScans[uid] = nil
+				applyTradeRouteDecision(entry, route, now, false, scan.silentComms)
+			else
+				updateScanProgressDisplay(entry, scan)
+			end
+		end
+	end
+end
+
+tickAutoTrade = function(entry, simNow, isCatchUp, silentComms)
+	local now = simNow or Game.time
 	local p = entry.orderParams
 	local state = p.tradeState or "SEEKING"
 
+	if state == "SCANNING" then
+		if isCatchUp then
+			activeTradeScans[entry.uid] = nil
+			state = "SEEKING"
+			p.tradeState = "SEEKING"
+		else
+			local scan = activeTradeScans[entry.uid]
+			if scan then
+				local done, route = stepTradeScanState(scan, TRADE_SCAN_SLICE_MS)
+				if done then
+					activeTradeScans[entry.uid] = nil
+					applyTradeRouteDecision(entry, route, now, false, silentComms)
+				else
+					updateScanProgressDisplay(entry, scan)
+				end
+				return
+			else
+				state = "SEEKING"
+				p.tradeState = "SEEKING"
+			end
+		end
+	end
+
 	if state == "SEEKING" then
-		if p.nextSeekTime and Game.time < p.nextSeekTime then
+		if p.nextSeekTime and p.nextSeekTime > 0 and now < p.nextSeekTime then
 			entry.status = "DOCKED"
 			entry.orderProgress = 0
 			return
@@ -3048,71 +4189,48 @@ tickAutoTrade = function(entry)
 				local sys = (entry.locationPath and entry.locationPath:GetStarSystem()) or Game.system
 				local sellP = getSystemCommodityPrice(sys, Commodities[firstComm])
 				local rev = sellP * firstQty
+				local basis = adjustEntryCargoCostBasis(entry, firstComm, -firstQty)
 				entry.cargo[firstComm] = nil
 				if entry.liveShip and entry.liveShip:exists() then
 					applyCargoToShip(entry.liveShip, entry.cargo)
 				end
 				PlayerState.AddMoney(rev)
+				local _, tax = TaxAuthority.RecordOperationsIncome("FLEET_CARGO", rev, basis, "[FLEET] " .. entry.shipName, now)
+				entry.stats.taxesGenerated = (entry.stats.taxesGenerated or 0) + (tax or 0)
 				entry.stats.netProfit = (entry.stats.netProfit or 0) + rev
 				fleetState.totalProfit = (fleetState.totalProfit or 0) + rev
-				addLog(entry.shipName, string.format("Liquidated %dt %s hold.", firstQty, Commodities[firstComm]:GetName()), rev)
+				local taxNote = (tax and tax > 0) and string.format(" (Tax %s)", Format.Money(tax, false)) or ""
+				addLog(entry.shipName, string.format("Liquidated %dt %s hold%s.", firstQty, Commodities[firstComm]:GetName(), taxNote), rev, now)
+				if entry.locationPath then
+					maintainFleetShipAtStation(entry, entry.locationPath, now, silentComms)
+				end
 			end
 			return
 		end
 
-		local route = findBestTradeRoute(entry)
-		if not route then
-			entry.orderPhase = "No profitable route found; waiting"
-			p.nextSeekTime = Game.time + 20
+		if isCatchUp then
+			local route = findBestTradeRouteSync(entry, true)
+			applyTradeRouteDecision(entry, route, now, true, silentComms)
 			return
 		end
 
-		-- If ship is not currently docked at route.buyPath, fly there first
-		if not samePath(entry.locationPath, route.buyPath) then
-			p.tradeState = "TO_BUY"
-			p.pendingBuyPath = route.buyPath
-			startFleetTransit(entry, route.buyPath, formatPathName(route.buyPath) .. " [Buy " .. route.comm:GetName() .. "]", "TRADE_BUY")
-			return
+		local scan = createTradeScanState(entry, false, silentComms)
+		activeTradeScans[entry.uid] = scan
+		p.tradeState = "SCANNING"
+		local done, route = stepTradeScanState(scan, TRADE_SCAN_SLICE_MS)
+		if done then
+			activeTradeScans[entry.uid] = nil
+			if not route and scan.marketsFound == 0 and (not scan.buyMarket or #(scan.buyMarket.stationPaths or {}) < 2) and p.isInitialAutoTradeStart then
+				p.noStationsAbort = true
+				return
+			end
+			applyTradeRouteDecision(entry, route, now, false, silentComms)
+		else
+			updateScanProgressDisplay(entry, scan)
 		end
-
-		local unitMass = (route.comm.mass or 1)
-		local maxUnitsBySpace = math.floor(freeCap / unitMass)
-		local budgetCap = math.max(0, PlayerState.GetMoney() - 1000)
-		local maxUnitsByCash = math.floor(budgetCap / math.max(1, route.buyPrice))
-		local buyQty = math.min(maxUnitsBySpace, maxUnitsByCash)
-
-		if buyQty < 1 then
-			entry.orderPhase = "Awaiting trade capital (" .. Format.Money(route.buyPrice, false) .. "/t needed)"
-			p.nextSeekTime = Game.time + 15
-			return
-		end
-
-		local totalSpend = buyQty * route.buyPrice
-		PlayerState.AddMoney(-totalSpend)
-		local cname = route.comm.name
-		entry.cargo[cname] = (entry.cargo[cname] or 0) + buyQty
-		if entry.liveShip and entry.liveShip:exists() then
-			applyCargoToShip(entry.liveShip, entry.cargo)
-		end
-		entry.stats.netProfit = (entry.stats.netProfit or 0) - totalSpend
-		fleetState.totalProfit = (fleetState.totalProfit or 0) - totalSpend
-
-		p.tradeState = "TO_SELL"
-		p.activeTrade = {
-			commName = cname,
-			commDisplay = route.comm:GetName(),
-			qty = buyQty,
-			buyPrice = route.buyPrice,
-			sellPrice = route.sellPrice,
-			sellPath = route.sellPath,
-			sellPathName = formatPathName(route.sellPath),
-			spent = totalSpend,
-		}
-		addLog(entry.shipName, string.format("Bought %dt %s @ %s/t at %s", buyQty, p.activeTrade.commDisplay, Format.Money(route.buyPrice, false), formatPathName(route.buyPath)), -totalSpend)
-		startFleetTransit(entry, route.sellPath, p.activeTrade.sellPathName .. " [Sell " .. p.activeTrade.commDisplay .. "]", "TRADE_SELL")
 
 	elseif state == "TO_BUY" then
-		local arrived = updateFleetTransit(entry)
+		local arrived = updateFleetTransit(entry, now, isCatchUp, silentComms)
 		if arrived then
 			entry.transit = nil
 			entry.status = "DOCKED"
@@ -3120,14 +4238,17 @@ tickAutoTrade = function(entry)
 				entry.locationPath = p.pendingBuyPath
 				entry.locationName = formatPathName(entry.locationPath)
 			end
+			if entry.locationPath then
+				maintainFleetShipAtStation(entry, entry.locationPath, now, silentComms)
+			end
 			p.pendingBuyPath = nil
 			p.tradeState = "SEEKING"
 			p.nextSeekTime = 0
-			tickAutoTrade(entry)
+			tickAutoTrade(entry, now, isCatchUp, silentComms)
 		end
 
 	elseif state == "TO_SELL" or state == "TRANSIT" then
-		local arrived = updateFleetTransit(entry)
+		local arrived = updateFleetTransit(entry, now, isCatchUp, silentComms)
 		if not arrived then return end
 
 		entry.transit = nil
@@ -3137,6 +4258,8 @@ tickAutoTrade = function(entry)
 		if tr then
 			local sellQty = math.min(tr.qty, entry.cargo[tr.commName] or tr.qty)
 			local gross = sellQty * tr.sellPrice
+			local basisSum = adjustEntryCargoCostBasis(entry, tr.commName, -sellQty)
+			local costBasis = (tr.spent and tr.spent > 0) and tr.spent or basisSum
 			entry.cargo[tr.commName] = (entry.cargo[tr.commName] or sellQty) - sellQty
 			if (entry.cargo[tr.commName] or 0) <= 0 then entry.cargo[tr.commName] = nil end
 			if entry.liveShip and entry.liveShip:exists() then
@@ -3144,7 +4267,10 @@ tickAutoTrade = function(entry)
 			end
 
 			PlayerState.AddMoney(gross)
-			local legNet = gross - (tr.spent or 0)
+			local _, tax = TaxAuthority.RecordOperationsIncome("FLEET_TRADE", gross, costBasis, "[FLEET] " .. entry.shipName, now)
+			entry.stats.taxesGenerated = (entry.stats.taxesGenerated or 0) + (tax or 0)
+
+			local legNet = gross - costBasis
 			entry.stats.netProfit = (entry.stats.netProfit or 0) + gross
 			fleetState.totalProfit = (fleetState.totalProfit or 0) + gross
 			entry.stats.runsCompleted = (entry.stats.runsCompleted or 0) + 1
@@ -3152,50 +4278,57 @@ tickAutoTrade = function(entry)
 			entry.locationPath = tr.sellPath
 			entry.locationName = tr.sellPathName
 
-			addLog(entry.shipName, string.format("Sold %dt %s at %s (Net +%s).", sellQty, tr.commDisplay, tr.sellPathName, Format.Money(legNet, false)), gross)
-			if legNet >= 500 then
+			local taxNote = (tax and tax > 0) and string.format(", Tax %s", Format.Money(tax, false)) or ""
+			addLog(entry.shipName, string.format("Sold %dt %s at %s (Net %s%s).", sellQty, tr.commDisplay, tr.sellPathName, Format.Money(legNet, false), taxNote), gross, now)
+			if not silentComms and legNet >= 500 then
 				Comms.Message(string.format("%s completed trade at %s (Net profit: %s)", entry.shipName, tr.sellPathName, Format.Money(legNet, false)), entry.captain and entry.captain.name or "Fleet Trade")
 			end
 			PlayerFleet.AwardCaptainXP(entry, "navigation")
+
+			maintainFleetShipAtStation(entry, tr.sellPath, now, silentComms)
+		elseif entry.locationPath then
+			maintainFleetShipAtStation(entry, entry.locationPath, now, silentComms)
 		end
 
+		local inLiveSys = (not isCatchUp) and Game.system and not Game.InHyperspace() and entry.locationPath and sameSystem(entry.locationPath, Game.system.path)
 		p.tradeState = "SEEKING"
 		p.activeTrade = nil
-		p.nextSeekTime = Game.time + 6
+		p.nextSeekTime = now + (inLiveSys and 10 or 45)
 		entry.orderProgress = 0
 		entry.orderEta = 0
 		entry.orderPhase = "Unloaded at " .. (entry.locationName or "station") .. "; plotting next trade route..."
 	end
 end
 
-tickAutoMine = function(entry)
+tickAutoMine = function(entry, simNow, isCatchUp, silentComms)
+	local now = simNow or Game.time
 	local p = entry.orderParams
 	local state = p.mineState or "TO_RING"
 
 	if state == "TO_RING" then
-		local arrived = updateFleetTransit(entry)
+		local arrived = updateFleetTransit(entry, now, isCatchUp, silentComms)
 		if not arrived then return end
 
 		entry.transit = nil
-		local dur = calcDuration(48, entry.captain, "sensors")
+		local dur = calcDuration(1200, entry.captain, "sensors")
 		p.mineState = "MINING"
-		p.startTime = Game.time
-		entry.orderEta = Game.time + dur
+		p.startTime = now
+		entry.orderEta = now + dur
 		entry.status = "MINING"
 		entry.orderProgress = 0
 		entry.orderPhase = string.format("[MINING] Extracting ore in %s rings", p.ringBodyName or "planetary")
 
 	elseif state == "MINING" then
-		if entry.liveShip and entry.liveShip:exists() then
+		if (not isCatchUp) and entry.liveShip and entry.liveShip:exists() then
 			syncFromLiveShip(entry)
 		end
-		local startT = p.startTime or Game.time
-		local endT = entry.orderEta or (startT + 48)
-		local frac = math.clamp((Game.time - startT) / math.max(1, endT - startT), 0, 1)
+		local startT = p.startTime or now
+		local endT = entry.orderEta or (startT + 1200)
+		local frac = math.clamp((now - startT) / math.max(1, endT - startT), 0, 1)
 		entry.status = "MINING"
 		entry.orderProgress = frac
 		entry.orderPhase = string.format("[MINING] Extracting ore in %s rings (%d%%)", p.ringBodyName or "planetary", math.floor(frac * 100))
-		if Game.time < endT then return end
+		if now < endT then return end
 
 		local freeCap = PlayerFleet.GetCargoFree(entry)
 		local comm = selectMineCommodity({ ringType = p.ringType, ringReserve = p.ringReserve })
@@ -3206,7 +4339,8 @@ tickAutoMine = function(entry)
 		if comm and rawYield > 0 and freeCap >= (comm.mass or 1) then
 			local units = math.min(rawYield, math.floor(freeCap / (comm.mass or 1)))
 			entry.cargo[comm.name] = (entry.cargo[comm.name] or 0) + units
-			if entry.liveShip and entry.liveShip:exists() then
+			adjustEntryCargoCostBasis(entry, comm.name, units, 0)
+			if (not isCatchUp) and entry.liveShip and entry.liveShip:exists() then
 				applyCargoToShip(entry.liveShip, entry.cargo)
 			end
 			p.minedComm = comm.name
@@ -3214,20 +4348,22 @@ tickAutoMine = function(entry)
 			p.minedUnits = units
 		end
 
+		applyOperationalFlightWear(entry, p.ringPath or entry.locationPath, "MINING")
+
 		local destSt = findNearestStationPath(p.ringPath or entry.locationPath, p.homePath or entry.locationPath)
 		if not destSt then
 			entry.orderPhase = "Hold full; no nearby ore refinery station found"
 			p.mineState = "RESUPPLY_PAUSE"
-			p.pauseUntil = Game.time + 20
+			p.pauseUntil = now + (isCatchUp and 120 or 20)
 			return
 		end
 
 		p.mineState = "RETURNING"
 		p.sellStationPath = destSt
-		startFleetTransit(entry, destSt, formatPathName(destSt) .. " [Sell Ore]", "MINE_RETURN")
+		startFleetTransit(entry, destSt, formatPathName(destSt) .. " [Sell Ore]", "MINE_RETURN", now, isCatchUp)
 
 	elseif state == "RETURNING" then
-		local arrived = updateFleetTransit(entry)
+		local arrived = updateFleetTransit(entry, now, isCatchUp, silentComms)
 		if not arrived then return end
 
 		entry.transit = nil
@@ -3242,6 +4378,7 @@ tickAutoMine = function(entry)
 			local comm = Commodities[cname]
 			if comm and qty > 0 then
 				local unitPrice = getSystemCommodityPrice(sys, comm)
+				adjustEntryCargoCostBasis(entry, cname, -qty)
 				totalSale = totalSale + unitPrice * qty
 				totalTons = totalTons + qty
 				entry.cargo[cname] = nil
@@ -3253,40 +4390,69 @@ tickAutoMine = function(entry)
 
 		if totalSale > 0 then
 			PlayerState.AddMoney(totalSale)
+			local _, tax = TaxAuthority.RecordOperationsIncome("FLEET_MINE", totalSale, 0, "[FLEET] " .. entry.shipName, now)
+			entry.stats.taxesGenerated = (entry.stats.taxesGenerated or 0) + (tax or 0)
 			entry.stats.netProfit = (entry.stats.netProfit or 0) + totalSale
 			fleetState.totalProfit = (fleetState.totalProfit or 0) + totalSale
 			entry.stats.cargoHauled = (entry.stats.cargoHauled or 0) + totalTons
 			entry.stats.runsCompleted = (entry.stats.runsCompleted or 0) + 1
 			entry.locationPath = stPath
 			entry.locationName = formatPathName(stPath)
-			addLog(entry.shipName, string.format("Sold %dt ring ore at %s (+%s).", totalTons, entry.locationName, Format.Money(totalSale, false)), totalSale)
-			Comms.Message(string.format("%s sold %dt mined ore (+%s)", entry.shipName, totalTons, Format.Money(totalSale, false)), entry.captain and entry.captain.name or "Fleet Mining")
+			local taxNote = (tax and tax > 0) and string.format(", Tax %s", Format.Money(tax, false)) or ""
+			addLog(entry.shipName, string.format("Sold %dt ring ore at %s (+%s%s).", totalTons, entry.locationName, Format.Money(totalSale, false), taxNote), totalSale, now)
+			if not silentComms then
+				Comms.Message(string.format("%s sold %dt mined ore (+%s)", entry.shipName, totalTons, Format.Money(totalSale, false)), entry.captain and entry.captain.name or "Fleet Mining")
+			end
 			PlayerFleet.AwardCaptainXP(entry, "engineering")
 		end
 
+		if stPath then
+			maintainFleetShipAtStation(entry, stPath, now, silentComms)
+		end
+
+		local inLiveSys = (not isCatchUp) and Game.system and not Game.InHyperspace() and stPath and sameSystem(stPath, Game.system.path)
 		p.mineState = "RESUPPLY_PAUSE"
-		p.pauseUntil = Game.time + 8
+		p.pauseUntil = now + (inLiveSys and 12 or 60)
 		entry.orderProgress = 0
 		entry.orderEta = 0
 		entry.orderPhase = "Refueling at " .. (entry.locationName or "station") .. " before next mining sortie"
 
 	elseif state == "RESUPPLY_PAUSE" then
-		if Game.time >= (p.pauseUntil or 0) then
+		if now >= (p.pauseUntil or 0) then
 			p.mineState = "TO_RING"
 			if p.ringPath then
-				startFleetTransit(entry, p.ringPath, (p.ringBodyName or "Planetary") .. " Rings", "MINE_OUT")
+				startFleetTransit(entry, p.ringPath, (p.ringBodyName or "Planetary") .. " Rings", "MINE_OUT", now, isCatchUp)
 			end
 		end
 	end
 end
 
-local function tickPatrol(entry)
+tickPatrol = function(entry, simNow, isCatchUp, silentComms)
+	local now = simNow or Game.time
 	local p = entry.orderParams
-	local startT = p.startTime or Game.time
+	local startT = p.startTime or now
 	local rt = liveOrderRuntime[entry.uid] or {}
 	liveOrderRuntime[entry.uid] = rt
 
-	if Game.system and not Game.InHyperspace() and sameSystem(entry.locationPath, Game.system.path) then
+	if p.patrolState == "MAINTENANCE_DOCK" then
+		local arrived = updateFleetTransit(entry, now, isCatchUp, silentComms)
+		if not arrived then return end
+
+		entry.transit = nil
+		entry.status = "DOCKED"
+		if entry.locationPath then
+			maintainFleetShipAtStation(entry, entry.locationPath, now, silentComms)
+		end
+		p.patrolState = "PATROLLING"
+		local nextDur = calcDuration(1800, entry.captain, "piloting")
+		p.startTime = now
+		entry.orderEta = now + nextDur
+		entry.orderProgress = 0
+		entry.orderPhase = "Resuming security patrol in " .. formatSystemName(entry.locationPath)
+		return
+	end
+
+	if (not isCatchUp) and Game.system and not Game.InHyperspace() and sameSystem(entry.locationPath, Game.system.path) then
 		local live = spawnOrUpdateLiveFleetShip(entry, false, true)
 		if live and live:exists() then
 			syncFromLiveShip(entry)
@@ -3331,7 +4497,7 @@ local function tickPatrol(entry)
 					end
 				end
 				-- Keep moving between system patrol points so patrol ships fly shipping lanes
-				if Game.time >= (p.patrolWaypointAt or 0) or aiCmd == nil or aiCmd == "CMD_NONE" then
+				if now >= (p.patrolWaypointAt or 0) or aiCmd == nil or aiCmd == "CMD_NONE" then
 					local stPaths = Game.system:GetStationPaths()
 					local farStations = {}
 					for _, sp in ipairs(stPaths or {}) do
@@ -3352,24 +4518,29 @@ local function tickPatrol(entry)
 						end
 					end
 					rt.patrolTarget = nil
-					p.patrolWaypointAt = Game.time + 35
+					p.patrolWaypointAt = now + 35
 				end
 				entry.orderPhase = "[PATROLLING] Sweeping shipping lanes near " .. (p.patrolWaypointName or Game.system.name)
 			end
 		end
 	end
 
-	if Game.time < (entry.orderEta or 0) then
-		entry.orderProgress = math.clamp((Game.time - startT) / math.max(1, (entry.orderEta or startT + 1) - startT), 0, 1)
+	if now < (entry.orderEta or 0) then
+		entry.orderProgress = math.clamp((now - startT) / math.max(1, (entry.orderEta or startT + 1) - startT), 0, 1)
+		entry.status = "PATROLLING"
+		entry.orderPhase = "Patrolling shipping lanes in " .. formatSystemName(entry.locationPath)
 		return
 	end
 
 	-- Resolve patrol sweep encounter
+	local sweepEnd = entry.orderEta or now
 	local combat = PlayerFleet.GetShipCombatScore(entry)
 	local successChance = math.clamp(0.45 + (combat / 140), 0.45, 0.94)
 	if Engine.rand:Number(0, 1) < successChance then
 		local bounty = Engine.rand:Integer(800, 2600) + combat * 18
 		PlayerState.AddMoney(bounty)
+		local _, tax = TaxAuthority.RecordOperationsIncome("FLEET_PATROL", bounty, 0, "[FLEET] " .. entry.shipName, sweepEnd)
+		entry.stats.taxesGenerated = (entry.stats.taxesGenerated or 0) + (tax or 0)
 		entry.stats.bountiesEarned = (entry.stats.bountiesEarned or 0) + bounty
 		entry.stats.netProfit = (entry.stats.netProfit or 0) + bounty
 		fleetState.totalProfit = (fleetState.totalProfit or 0) + bounty
@@ -3377,32 +4548,54 @@ local function tickPatrol(entry)
 		if entry.captain then
 			entry.captain.killcount = (entry.captain.killcount or 0) + 1
 		end
-		addLog(entry.shipName, string.format("Neutralized pirate contact; bounty awarded (+%s).", Format.Money(bounty, false)), bounty)
-		Comms.Message(string.format("%s patrol bounty collected (+%s).", entry.shipName, Format.Money(bounty, false)), entry.captain and entry.captain.name or "Security Patrol")
+		local taxNote = (tax and tax > 0) and string.format(" | Tax %s", Format.Money(tax, false)) or ""
+		addLog(entry.shipName, string.format("Neutralized pirate contact; bounty awarded (+%s%s).", Format.Money(bounty, false), taxNote), bounty, sweepEnd)
+		if not silentComms then
+			Comms.Message(string.format("%s patrol bounty collected (+%s).", entry.shipName, Format.Money(bounty, false)), entry.captain and entry.captain.name or "Security Patrol")
+		end
 		PlayerFleet.AwardCaptainXP(entry, "piloting")
 
 		local hullChip = math.max(0, Engine.rand:Integer(0, 6) - math.floor(combat / 25))
 		entry.hullPercent = math.max(30, (entry.hullPercent or 100) - hullChip)
+		applyOperationalFlightWear(entry, entry.locationPath, "COMBAT")
 	else
 		entry.hullPercent = math.max(30, (entry.hullPercent or 100) - Engine.rand:Integer(2, 5))
-		addLog(entry.shipName, "Completed shipping lane sweep — all sectors clear.", 0)
+		applyOperationalFlightWear(entry, entry.locationPath, "TRANSIT")
+		addLog(entry.shipName, "Completed shipping lane sweep — all sectors clear.", 0, sweepEnd)
+	end
+	entry.fuel = math.max(10, (entry.fuel or 100) - 4)
+
+	-- Return to nearest station for service when hull < 80%, fuel < 30%, or any equipment < 80%
+	local minEquipInteg = PlayerFleet.GetLowestEquipmentIntegrity(entry)
+	if (entry.hullPercent or 100) < MAINTENANCE_HULL_THRESHOLD or (entry.fuel or 100) < 30 or minEquipInteg < MAINTENANCE_INTEGRITY_THRESHOLD then
+		local maintSt = findNearestStationPath(entry.locationPath, nil)
+		if maintSt then
+			p.patrolState = "MAINTENANCE_DOCK"
+			addLog(entry.shipName, string.format("Returning to %s for scheduled patrol maintenance.", formatPathName(maintSt)), 0, sweepEnd)
+			startFleetTransit(entry, maintSt, formatPathName(maintSt) .. " [Maintenance]", "PATROL_MAINT", sweepEnd, isCatchUp)
+			return
+		end
 	end
 
-	local nextDur = calcDuration(85, entry.captain, "piloting")
-	p.startTime = Game.time
-	entry.orderEta = Game.time + nextDur
+	local nextDur = calcDuration(1800, entry.captain, "piloting")
+	p.startTime = sweepEnd
+	entry.orderEta = sweepEnd + nextDur
 	entry.orderProgress = 0
 	entry.orderPhase = "Patrolling shipping lanes in " .. formatSystemName(entry.locationPath)
 end
 
-tickDockTransit = function(entry)
-	local arrived = updateFleetTransit(entry)
+tickDockTransit = function(entry, simNow, isCatchUp, silentComms)
+	local now = simNow or Game.time
+	local arrived = updateFleetTransit(entry, now, isCatchUp, silentComms)
 	if not arrived then return end
 
 	local destPath = (entry.transit and entry.transit.destPath) or entry.orderTargetPath or entry.locationPath
 	entry.transit = nil
 	entry.locationPath = destPath
 	entry.locationName = formatPathName(destPath)
+	if destPath then
+		maintainFleetShipAtStation(entry, destPath, now, silentComms)
+	end
 	entry.order = "IDLE"
 	entry.status = "DOCKED"
 	entry.orderProgress = 0
@@ -3410,28 +4603,32 @@ tickDockTransit = function(entry)
 	entry.orderPhase = "Docked at " .. entry.locationName
 	entry.stats.runsCompleted = (entry.stats.runsCompleted or 0) + 1
 
-	addLog(entry.shipName, string.format("Arrived and docked at %s.", entry.locationName), 0)
-	Comms.ImportantMessage(string.format("%s arrived and docked at %s.", entry.shipName, entry.locationName), entry.captain and entry.captain.name or "Fleet Flight Control")
+	addLog(entry.shipName, string.format("Arrived and docked at %s.", entry.locationName), 0, now)
+	if not silentComms then
+		Comms.ImportantMessage(string.format("%s arrived and docked at %s.", entry.shipName, entry.locationName), entry.captain and entry.captain.name or "Fleet Flight Control")
+	end
 	PlayerFleet.AwardCaptainXP(entry, "navigation")
 end
 
-tickSellCargoTransit = function(entry)
-	local arrived = updateFleetTransit(entry)
+tickSellCargoTransit = function(entry, simNow, isCatchUp, silentComms)
+	local now = simNow or Game.time
+	local arrived = updateFleetTransit(entry, now, isCatchUp, silentComms)
 	if not arrived then return end
 
 	local destPath = (entry.transit and entry.transit.destPath) or entry.orderTargetPath or entry.locationPath
 	entry.transit = nil
 	entry.locationPath = destPath
 	entry.locationName = formatPathName(destPath)
-	liquidateCargoAtCurrentStation(entry)
+	liquidateCargoAtCurrentStation(entry, now, silentComms)
 end
 
-tickMissionOrder = function(entry)
+tickMissionOrder = function(entry, simNow, isCatchUp, silentComms)
+	local now = simNow or Game.time
 	local p = entry.orderParams
 	local stage = p.missionStage or "OUTBOUND"
 
 	if stage == "OUTBOUND" then
-		local arrived = updateFleetTransit(entry)
+		local arrived = updateFleetTransit(entry, now, isCatchUp, silentComms)
 		if not arrived then return end
 
 		local m = entry.missionRef
@@ -3440,13 +4637,14 @@ tickMissionOrder = function(entry)
 			if m.type == "CargoRun" and m.pickup and m.cargotype and (m.amount or 0) > 0 then
 				local cname = m.cargotype.name
 				entry.cargo[cname] = (entry.cargo[cname] or 0) + (m.amount or 0)
-				if entry.liveShip and entry.liveShip:exists() then
+				if (not isCatchUp) and entry.liveShip and entry.liveShip:exists() then
 					applyCargoToShip(entry.liveShip, entry.cargo)
 				end
 			end
+			local siteDur = 60
 			p.missionStage = "ON_SITE"
-			p.siteStartTime = Game.time
-			p.siteEndTime = Game.time + 18
+			p.siteStartTime = now
+			p.siteEndTime = now + siteDur
 			entry.transit = nil
 			entry.orderProgress = 0
 			entry.orderEta = p.siteEndTime
@@ -3454,27 +4652,34 @@ tickMissionOrder = function(entry)
 			return
 		end
 
-		completeFleetMission(entry)
+		completeFleetMission(entry, now, silentComms)
 
 	elseif stage == "ON_SITE" then
-		local startT = p.siteStartTime or Game.time
-		local endT = p.siteEndTime or (startT + 18)
-		local frac = math.clamp((Game.time - startT) / math.max(1, endT - startT), 0, 1)
+		local startT = p.siteStartTime or now
+		local endT = p.siteEndTime or (startT + 60)
+		local frac = math.clamp((now - startT) / math.max(1, endT - startT), 0, 1)
 		entry.orderProgress = frac
-		if Game.time < endT then return end
+		if now < endT then return end
+
+		local m = entry.missionRef
+		if m and (m.type == "Combat" or m.type == "Assassination") then
+			applyOperationalFlightWear(entry, entry.locationPath, "COMBAT")
+		elseif m and m.type == "Scout" then
+			applyOperationalFlightWear(entry, entry.locationPath, "TRANSIT")
+		end
 
 		local retPath = p.missionReturnPath
 		if retPath then
 			p.missionStage = "RETURN"
-			startFleetTransit(entry, retPath, formatPathName(retPath) .. " [Mission Return]", "MISSION_RETURN")
+			startFleetTransit(entry, retPath, formatPathName(retPath) .. " [Mission Return]", "MISSION_RETURN", endT, isCatchUp)
 		else
-			completeFleetMission(entry)
+			completeFleetMission(entry, endT, silentComms)
 		end
 
 	elseif stage == "RETURN" then
-		local arrived = updateFleetTransit(entry)
+		local arrived = updateFleetTransit(entry, now, isCatchUp, silentComms)
 		if not arrived then return end
-		completeFleetMission(entry)
+		completeFleetMission(entry, now, silentComms)
 	end
 end
 
@@ -3488,31 +4693,127 @@ local function findEntryByLiveShip(ship)
 	return nil
 end
 
+local function findEntryByShipOrLabel(ship)
+	if not ship then return nil end
+	local byPtr = findEntryByLiveShip(ship)
+	if byPtr then return byPtr end
+	local sLabel = ship.label
+	local sName = ship.shipName
+	for _, entry in ipairs(fleetState.ships or {}) do
+		if entry.status ~= "DESTROYED" and entry.label == sLabel and sName == ("[FLEET] " .. entry.shipName) then
+			return entry
+		end
+	end
+	return nil
+end
+
+local function advanceFleetEntryAtTime(entry, simNow, isCatchUp, silentComms)
+	if entry.order == "FOLLOW" then
+		if not isCatchUp then
+			updateEscortAI(entry)
+		end
+	elseif entry.order == "DOCK" then
+		tickDockTransit(entry, simNow, isCatchUp, silentComms)
+	elseif entry.order == "SELL_CARGO" then
+		tickSellCargoTransit(entry, simNow, isCatchUp, silentComms)
+	elseif entry.order == "AUTO_TRADE" then
+		tickAutoTrade(entry, simNow, isCatchUp, silentComms)
+	elseif entry.order == "AUTO_MINE" then
+		tickAutoMine(entry, simNow, isCatchUp, silentComms)
+	elseif entry.order == "PATROL" then
+		tickPatrol(entry, simNow, isCatchUp, silentComms)
+	elseif entry.order == "MISSION" then
+		tickMissionOrder(entry, simNow, isCatchUp, silentComms)
+	elseif (not isCatchUp) and entry.order == "IDLE" and entry.status == "DOCKED" then
+		-- Ensure docked ships in the player's system physically sit in a free bay if available
+		if Game.system and not Game.InHyperspace() and entry.locationPath and sameSystem(entry.locationPath, Game.system.path) and (not entry.liveShip or not entry.liveShip:exists()) then
+			spawnOrUpdateLiveFleetShip(entry, false, false)
+		end
+	end
+end
+
+local function getNextOOSEventTime(entry)
+	if not entry or entry.status == "DESTROYED" then return nil end
+	local t = entry.transit
+	if t then
+		if t.state == "HYPERSPACE" or t.state == "OOS_SUPERCRUISE" then
+			return t.phaseEndTime
+		end
+		return nil
+	end
+	local ord = entry.order
+	local p = entry.orderParams or {}
+	if ord == "AUTO_TRADE" then
+		if (p.tradeState or "SEEKING") == "SEEKING" and p.nextSeekTime and p.nextSeekTime > 0 then
+			return p.nextSeekTime
+		end
+	elseif ord == "AUTO_MINE" then
+		if p.mineState == "MINING" then
+			return entry.orderEta
+		elseif p.mineState == "RESUPPLY_PAUSE" then
+			return p.pauseUntil
+		end
+	elseif ord == "PATROL" then
+		if p.patrolState ~= "MAINTENANCE_DOCK" then
+			return entry.orderEta
+		end
+	elseif ord == "MISSION" then
+		if p.missionStage == "ON_SITE" then
+			return p.siteEndTime
+		end
+	end
+	return nil
+end
+
+local function reanchorFutureTimers(entry, shiftSec)
+	if not shiftSec or shiftSec <= 0 then return end
+	local t = entry.transit
+	if t then
+		if t.phaseStartTime then t.phaseStartTime = t.phaseStartTime + shiftSec end
+		if t.phaseEndTime then t.phaseEndTime = t.phaseEndTime + shiftSec end
+	end
+	if entry.orderEta and entry.orderEta > 0 then entry.orderEta = entry.orderEta + shiftSec end
+	local p = entry.orderParams
+	if p then
+		if p.nextSeekTime and p.nextSeekTime > 0 then p.nextSeekTime = p.nextSeekTime + shiftSec end
+		if p.startTime and p.startTime > 0 then p.startTime = p.startTime + shiftSec end
+		if p.pauseUntil and p.pauseUntil > 0 then p.pauseUntil = p.pauseUntil + shiftSec end
+		if p.siteStartTime and p.siteStartTime > 0 then p.siteStartTime = p.siteStartTime + shiftSec end
+		if p.siteEndTime and p.siteEndTime > 0 then p.siteEndTime = p.siteEndTime + shiftSec end
+	end
+end
+
+local function catchUpEntryToTime(entry, targetTime, silentComms)
+	if not entry or entry.status == "DESTROYED" then return end
+	local lastT = -1
+	local lastProcessed = nil
+	local steps = 0
+	while steps < MAX_CATCHUP_PHASES do
+		local nextT = getNextOOSEventTime(entry)
+		if not nextT or nextT <= 0 or nextT > targetTime or nextT <= lastT then
+			break
+		end
+		lastT = nextT
+		lastProcessed = nextT
+		steps = steps + 1
+		local useSilent = silentComms or ((targetTime - nextT) > 30)
+		advanceFleetEntryAtTime(entry, nextT, true, useSilent)
+	end
+	if steps >= MAX_CATCHUP_PHASES and lastProcessed and lastProcessed < targetTime then
+		local rem = getNextOOSEventTime(entry)
+		if rem and rem < targetTime then
+			reanchorFutureTimers(entry, targetTime - rem)
+		end
+	end
+end
+
 local function fleetSimulationStep()
 	if not Game.system or Game.InHyperspace() then return end
 
 	for _, entry in ipairs(fleetState.ships or {}) do
 		if entry.status ~= "DESTROYED" then
-			if entry.order == "FOLLOW" then
-				updateEscortAI(entry)
-			elseif entry.order == "DOCK" then
-				tickDockTransit(entry)
-			elseif entry.order == "SELL_CARGO" then
-				tickSellCargoTransit(entry)
-			elseif entry.order == "AUTO_TRADE" then
-				tickAutoTrade(entry)
-			elseif entry.order == "AUTO_MINE" then
-				tickAutoMine(entry)
-			elseif entry.order == "PATROL" then
-				tickPatrol(entry)
-			elseif entry.order == "MISSION" then
-				tickMissionOrder(entry)
-			elseif entry.order == "IDLE" and entry.status == "DOCKED" then
-				-- Ensure docked ships in the player's system physically sit in a free bay if available
-				if entry.locationPath and sameSystem(entry.locationPath, Game.system.path) and (not entry.liveShip or not entry.liveShip:exists()) then
-					spawnOrUpdateLiveFleetShip(entry, false, false)
-				end
-			end
+			catchUpEntryToTime(entry, Game.time, false)
+			advanceFleetEntryAtTime(entry, Game.time, false, false)
 		end
 	end
 end
@@ -3538,6 +4839,11 @@ Event.Register("onGameStart", function()
 	tickTimerActive = false
 	liveOrderRuntime = {}
 	soldDepartingShips = {}
+	lastPlayerJumpFrom = nil
+	lastPlayerJumpStart = nil
+	activeTradeScans = {}
+	systemMarketCache = {}
+	systemMarketCacheCount = 0
 	ensureTickLoop()
 	if Game.system and not Game.InHyperspace() then
 		for _, entry in ipairs(fleetState.ships or {}) do
@@ -3556,39 +4862,98 @@ Event.Register("onGameEnd", function()
 	tickTimerActive = false
 	liveOrderRuntime = {}
 	soldDepartingShips = {}
+	lastPlayerJumpFrom = nil
+	lastPlayerJumpStart = nil
+	activeTradeScans = {}
+	systemMarketCache = {}
+	systemMarketCacheCount = 0
 end)
+
+local function collectFleetTotalsSnapshot()
+	local runs, missions, net, tax, maint = 0, 0, 0, 0, 0
+	for _, entry in ipairs(fleetState.ships or {}) do
+		local st = entry.stats or {}
+		runs = runs + (st.runsCompleted or 0)
+		missions = missions + (st.missionsDone or 0)
+		net = net + (st.netProfit or 0)
+		tax = tax + (st.taxesGenerated or 0)
+		maint = maint + (st.maintenancePaid or 0)
+	end
+	return runs, missions, net, tax, maint
+end
 
 Event.Register("onEnterSystem", function(player)
 	if not player or not player:IsPlayer() then return end
 	ensureTickLoop()
 
+	local elapsedJumpSec = lastPlayerJumpStart and math.max(0, Game.time - lastPlayerJumpStart) or 0
+	local jumpDistLy = lastPlayerJumpFrom and systemDistLy(lastPlayerJumpFrom, Game.system.path) or 5.0
+	local r0, m0, n0, t0, maint0 = collectFleetTotalsSnapshot()
+
 	for _, entry in ipairs(fleetState.ships or {}) do
-		entry.liveShip = nil
-		if entry.order == "FOLLOW" and entry.captain then
-			local hasDrive = PlayerFleet.HasHyperdrive(entry)
-			if hasDrive then
-				entry.fuel = math.max(10, (entry.fuel or 100) - 12)
-				entry.locationPath = Game.system.path
-				entry.locationName = Game.system.name .. " (Escort)"
-				updateEscortAI(entry)
-			else
-				entry.order = "IDLE"
-				entry.status = "DOCKED"
-				entry.orderPhase = "Stranded without hyperdrive at " .. (entry.locationName or "previous system")
-				Comms.ImportantMessage(entry.shipName .. " has no hyperdrive and could not follow across hyperspace!", entry.captain.name)
+		if entry.status ~= "DESTROYED" then
+			-- Preserve an already-attached cloud ship if onShipEnterSystem fired immediately prior
+			if entry.liveShip and not entry.liveShip:exists() then
+				entry.liveShip = nil
 			end
-		elseif entry.order == "PATROL" and sameSystem(entry.locationPath, Game.system.path) then
-			spawnOrUpdateLiveFleetShip(entry, false, true)
-		elseif entry.transit then
-			updateFleetTransit(entry)
-		elseif entry.status == "DOCKED" and entry.locationPath and sameSystem(entry.locationPath, Game.system.path) then
-			spawnOrUpdateLiveFleetShip(entry, false, false)
+
+			if entry.order == "FOLLOW" and entry.captain then
+				local hasDrive = PlayerFleet.HasHyperdrive(entry)
+				if hasDrive then
+					local jumpFuel = computeJumpFuelUse(entry, jumpDistLy)
+					if type(entry.hyperFuel) == "number" then
+						entry.hyperFuel = math.max(0, entry.hyperFuel - jumpFuel)
+					end
+					entry.fuel = math.max(8, (entry.fuel or 100) - 4)
+					local escortDur = math.max(60, (elapsedJumpSec > 0) and elapsedJumpSec or computeJumpDurationSec(entry, jumpDistLy))
+					applyOOSHyperjumpWear(entry, escortDur)
+					entry.locationPath = Game.system.path
+					entry.locationName = Game.system.name .. " (Escort)"
+					updateEscortAI(entry)
+				else
+					entry.order = "IDLE"
+					entry.status = "DOCKED"
+					entry.orderPhase = "Stranded without hyperdrive at " .. (entry.locationName or "previous system")
+					Comms.ImportantMessage(entry.shipName .. " has no hyperdrive and could not follow across hyperspace!", entry.captain.name)
+				end
+			else
+				if entry.liveShip and entry.liveShip:exists() then
+					syncFromLiveShip(entry)
+				else
+					catchUpEntryToTime(entry, Game.time, true)
+				end
+
+				if entry.order == "PATROL" and entry.locationPath and sameSystem(entry.locationPath, Game.system.path) and (not entry.transit) then
+					spawnOrUpdateLiveFleetShip(entry, false, true)
+				elseif entry.transit then
+					updateFleetTransit(entry, Game.time, false, true)
+				elseif entry.status == "DOCKED" and entry.locationPath and sameSystem(entry.locationPath, Game.system.path) then
+					spawnOrUpdateLiveFleetShip(entry, false, false)
+				end
+			end
 		end
 	end
+
+	local r1, m1, n1, t1, maint1 = collectFleetTotalsSnapshot()
+	local dRuns = (r1 - r0) + (m1 - m0)
+	local dNet = n1 - n0
+	local dTax = t1 - t0
+	local dMaint = maint1 - maint0
+	if elapsedJumpSec >= 300 and (dRuns > 0 or dMaint > 0 or dTax > 0) then
+		Comms.ImportantMessage(string.format(
+			"Fleet Ops Digest (%s): %d completed ops | Net %s | Maint %s | Tax +%s",
+			Format.Duration(elapsedJumpSec), dRuns, Format.Money(dNet, false), Format.Money(dMaint, false), Format.Money(dTax, false)
+		), "Fleet Operations")
+	end
+
+	lastPlayerJumpFrom = nil
+	lastPlayerJumpStart = nil
 end)
 
 Event.Register("onLeaveSystem", function(ship)
 	if ship and ship:IsPlayer() then
+		lastPlayerJumpFrom = Game.system and Game.system.path and Game.system.path:SystemOnly() or nil
+		lastPlayerJumpStart = Game.time
 		liveOrderRuntime = {}
 		soldDepartingShips = {}
 		for _, entry in ipairs(fleetState.ships or {}) do
@@ -3596,7 +4961,7 @@ Event.Register("onLeaveSystem", function(ship)
 				syncFromLiveShip(entry)
 			end
 			if entry.transit then
-				convertInSystemToOOS(entry)
+				convertInSystemToOOS(entry, Game.time)
 			end
 			entry.liveShip = nil
 		end
@@ -3640,6 +5005,7 @@ Event.Register("onShipUndocked", function(ship, starport)
 		if rt then
 			rt.patrolTarget = nil
 		end
+		entry.orderParams.patrolWaypointAt = 0
 		entry.status = "DEPARTING"
 		entry.orderPhase = "[DEPARTING] Clearing station corridor for security patrol"
 	end
@@ -3649,6 +5015,11 @@ Event.Register("onShipDocked", function(ship, starport)
 	local entry = findEntryByLiveShip(ship)
 	if not entry then return end
 	liveOrderRuntime[entry.uid] = nil
+	-- Guard against free NPC propellant reset in StationRefuelling before fleet accounting syncs
+	local preDockFuel = entry.fuel
+	if preDockFuel and preDockFuel < 95 and (ship.fuel or 100) >= 99.9 then
+		pcall(function() ship:SetFuelPercent(preDockFuel) end)
+	end
 	syncFromLiveShip(entry)
 	if starport and starport.path then
 		entry.locationPath = starport.path
@@ -3659,6 +5030,8 @@ Event.Register("onShipDocked", function(ship, starport)
 		tickAutoTrade(entry)
 	elseif entry.order == "AUTO_MINE" then
 		tickAutoMine(entry)
+	elseif entry.order == "PATROL" then
+		tickPatrol(entry)
 	elseif entry.order == "MISSION" then
 		tickMissionOrder(entry)
 	elseif entry.order == "DOCK" then
@@ -3666,7 +5039,14 @@ Event.Register("onShipDocked", function(ship, starport)
 	elseif entry.order == "SELL_CARGO" then
 		tickSellCargoTransit(entry)
 	elseif entry.order == "FOLLOW" then
+		if starport and starport.path then
+			maintainFleetShipAtStation(entry, starport.path, Game.time, false)
+		end
 		entry.orderPhase = "Docked on escort standby at " .. (starport and starport.label or "station")
+	elseif entry.order == "IDLE" then
+		if starport and starport.path then
+			maintainFleetShipAtStation(entry, starport.path, Game.time, false)
+		end
 	end
 end)
 
@@ -3677,22 +5057,41 @@ Event.Register("onShipLeaveSystem", function(ship)
 	entry.liveShip = nil
 	if entry.transit and (entry.transit.state == "HYPERJUMP_COUNTDOWN" or entry.transit.state == "CLEARING_MASS_LOCK") then
 		local t = entry.transit
-		local jDur = computeJumpDurationSec(entry, t.hopDistLy or 6)
+		local jDur = (t.scheduledJumpDuration and t.scheduledJumpDuration > 0) and t.scheduledJumpDuration
+			or computeJumpDurationSec(entry, t.hopDistLy or 6, ship)
 		t.state = "HYPERSPACE"
 		t.cmdIssued = false
 		t.phaseStartTime = Game.time
 		t.phaseEndTime = Game.time + jDur
+		t.actualJumpDuration = jDur
+		t.actualJumpFuel = t.scheduledJumpFuel or computeJumpFuelUse(entry, t.hopDistLy or 6, ship)
+		t.wearAppliedForHop = false
 		entry.status = "HYPERSPACE"
 		entry.orderEta = t.phaseEndTime
 	end
 end)
 
 Event.Register("onShipEnterSystem", function(ship)
-	local entry = findEntryByLiveShip(ship)
+	local entry = findEntryByShipOrLabel(ship)
 	if not entry then return end
+	entry.liveShip = ship
+	if Game.system and Game.system.path then
+		entry.locationPath = Game.system.path
+		entry.locationName = formatPathName(Game.system.path)
+	end
+	if not ship:hasprop('nextJumpDuration') then
+		syncFromLiveShip(entry)
+	end
 	if entry.transit then
-		entry.transit.cmdIssued = false
-		updateFleetTransit(entry)
+		local t = entry.transit
+		t.cmdIssued = false
+		t.wearAppliedForHop = true
+		if t.destPath and Game.system and sameSystem(t.destPath, Game.system.path) then
+			t.state = "IN_SYSTEM_FLIGHT"
+		else
+			t.state = "CLEARING_MASS_LOCK"
+		end
+		updateFleetTransit(entry, Game.time, false, true)
 	end
 end)
 
@@ -3801,6 +5200,7 @@ end)
 Event.Register("onShipDestroyed", function(ship, attacker)
 	for i, entry in ipairs(fleetState.ships or {}) do
 		if entry.liveShip == ship then
+			activeTradeScans[entry.uid] = nil
 			entry.liveShip = nil
 			entry.transit = nil
 			local salvagePayout = entry.isCharterStarter and 0 or math.floor((ShipDef[entry.shipId] and ShipDef[entry.shipId].basePrice or 10000) * 0.5)

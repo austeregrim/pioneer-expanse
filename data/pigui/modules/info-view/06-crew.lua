@@ -135,6 +135,7 @@ local crewTasks = {
 		elseif not (target and target:isa('SpaceStation')) then
 			return (l.YOU_MUST_FIRST_SELECT_A_SUITABLE_NAVIGATION_TARGET_COMMANDER)
 		else
+			Game.player:SetFlightControlState("CONTROL_AUTOPILOT")
 			Game.player:AIDockWith(target)
 			return (l.PILOT_SEAT_IS_NOW_OCCUPIED_BY_NAME:interp({name = crewMember.name}))
 		end

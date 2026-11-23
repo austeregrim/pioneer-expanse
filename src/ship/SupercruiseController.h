@@ -162,6 +162,11 @@ public:
 	float GetStatusMessageTimer() const { return m_statusMessageTimer; }
 	void ShowStatusMessage(const std::string &msg, float duration = 4.0f);
 
+	// Idle-command watchdog timer for NPC Supercruise traffic
+	float GetIdleAITimer() const { return m_idleAITimer; }
+	void ResetIdleAITimer() { m_idleAITimer = 0.0f; }
+	void AdvanceIdleAITimer(float dt) { m_idleAITimer += dt; }
+
 	// Compute exclusion zone radius (in meters) from body center
 	static double GetExclusionZoneRadius(const Body *body);
 	static double GetExclusionZoneRadiusAtDir(const Body *body, const vector3d &unitDirInBodyFrame);
@@ -236,5 +241,6 @@ private:
 	double m_fuelScoopProximity = 0.0;
 	double m_fuelScoopAccum = 0.0;
 	float m_fuelScoopDispatchTimer = 0.0f;
+	float m_idleAITimer = 0.0f;
 };
 

@@ -88,6 +88,14 @@ void Propulsion::EndAISequentialThrusters()
 	m_aiRollActive = false;
 }
 
+void Propulsion::SuspendAISequentialThrusters()
+{
+	m_aiSequentialThrusters = false;
+	m_aiPitchActive = false;
+	m_aiYawActive = false;
+	m_aiRollActive = false;
+}
+
 void Propulsion::Init(DynamicBody *b, SceneGraph::Model *m, const int tank_mass, const double effExVel, const float lin_Thrust[], const float ang_Thrust)
 {
 	m_fuelTankMass = tank_mass;

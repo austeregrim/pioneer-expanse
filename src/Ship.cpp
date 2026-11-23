@@ -2018,7 +2018,7 @@ void Ship::StaticUpdate(const float timeStep)
 	if (m_flightState == FLYING)
 		m_launchLockTimeout -= timeStep;
 	if (m_launchLockTimeout < 0) m_launchLockTimeout = 0;
-	if (m_flightState == JUMPING || m_flightState == HYPERSPACE)
+	if (m_flightState == JUMPING || m_flightState == HYPERSPACE || m_flightState == SUPERCRUISE)
 		m_launchLockTimeout = 0;
 
 	// lasers

@@ -261,9 +261,13 @@ local function drawFleetShipDetail(entry, station)
 		local combatScore = PlayerFleet.GetShipCombatScore(entry)
 		local sellVal = PlayerFleet.ComputeShipValue(entry)
 		local curOrder = entry.order or "IDLE"
+		local minEquipInteg, below80Count, _, repairCostAll = PlayerFleet.GetLowestEquipmentIntegrity(entry)
+		local equipPct = math.floor((minEquipInteg or 1.0) * 100 + 0.5)
 
 		ui.columns(2, "##HangarSpecs", false)
 		ui.text(string.format("Hull Integrity: %.0f%%", entry.hullPercent or 100))
+		local eqCol = (equipPct < 40 and colors.alertRed) or (equipPct < 80 and colors.alertYellow) or colors.font
+		ui.textColored(eqCol, string.format("Components Integrity: %d%%%s", equipPct, (below80Count > 0) and (" (" .. below80Count .. " <80%)") or ""))
 		ui.text(string.format("Propellant Fuel: %.0f%%", entry.fuel or 100))
 		ui.text(string.format("Cargo Hold: %dt / %dt", PlayerFleet.GetCargoUsed(entry), entry.cargoCap or 0))
 		ui.text(string.format("Hyperdrive Range: %s", hyperRange > 0 and (hyperRange .. " ly") or "None"))
@@ -273,6 +277,9 @@ local function drawFleetShipDetail(entry, station)
 		ui.text(string.format("Combat Rating Score: %d   |   Completed Runs: %d", combatScore, (entry.stats and entry.stats.runsCompleted) or 0))
 		ui.text(string.format("Est. Liquidation Value: %s   |   Net Earnings: %s",
 			Format.Money(sellVal, false), Format.Money((entry.stats and entry.stats.netProfit) or 0, false)))
+		ui.text(string.format("Lifetime Maintenance: %s   |   Tax Accrued: %s",
+			Format.Money((entry.stats and entry.stats.maintenancePaid) or 0, false),
+			Format.Money((entry.stats and entry.stats.taxesGenerated) or 0, false)))
 		ui.columns(1)
 
 		ui.textColored(colors.alertYellow, "Order Status: " .. (entry.orderPhase or "Standby"))
@@ -291,6 +298,13 @@ local function drawFleetShipDetail(entry, station)
 			if ui.button("Repair Hull", Vector2(0, 0)) then
 				local _, msg = PlayerFleet.RepairShip(entry.uid)
 				setStatus(msg)
+			end
+			if (repairCostAll or 0) > 0 then
+				ui.sameLine()
+				if ui.button("Service Equip (" .. Format.Money(repairCostAll, false) .. ")", Vector2(0, 0)) then
+					local _, msg = PlayerFleet.ServiceEquipment(entry.uid)
+					setStatus(msg)
+				end
 			end
 			ui.sameLine()
 			if ui.button("Refuel 100%", Vector2(0, 0)) then

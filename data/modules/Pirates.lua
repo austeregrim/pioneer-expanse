@@ -337,18 +337,14 @@ local onPlayerUndocked = function (player)
 end
 
 local onAICompleted = function (ship, error)
-	if pirates[ship] and error == 'NONE' then
+	if not pirates[ship] then return end
+	if error == 'NONE' then
 		ship:SetFuelPercent()
-		pirates[ship].status = pirateIsInterested(Game.player) and 'LURK' or 'ORBIT'
-		pirates[ship].target = nil
-		pirates[ship].warned = false
-		pirates[ship].planet = assignSupercruisePatrol(ship, pirates[ship].planet)
-	elseif pirates[ship] and (pirates[ship].status == 'ATTACK' or pirates[ship].status == 'INTERDICT_PLAYER') then
-		pirates[ship].status = 'ORBIT'
-		pirates[ship].target = nil
-		pirates[ship].warned = false
-		pirates[ship].planet = assignSupercruisePatrol(ship, pirates[ship].planet)
 	end
+	pirates[ship].status = pirateIsInterested(Game.player) and 'LURK' or 'ORBIT'
+	pirates[ship].target = nil
+	pirates[ship].warned = false
+	pirates[ship].planet = assignSupercruisePatrol(ship, pirates[ship].planet)
 end
 
 local loaded_data
@@ -456,23 +452,29 @@ local onGameStart = function ()
 			end
 		end
 
-		-- Stalk and interdict passing FTL (>= 1c) Supercruise trade traffic for remaining idle pirates
+		-- Recover any commandless patrol/lurk pirate and stalk passing FTL (>= 1c) Supercruise trade traffic
 		for p, s in pairs(pirates) do
-			if p:exists() and s.status ~= 'ATTACK' and s.status ~= 'INTERDICT_PLAYER' then
-				if not playerInSC and s.status == 'LURK' and p:DistanceTo(Game.player) < 100000 and p:GetFlightState() == Game.player:GetFlightState() then
-					p:AIKill(Game.player)
-					s.status = 'ATTACK'
-					s.target = Game.player
-				elseif p:GetFlightState() == "SUPERCRUISE" then
-					for _, victim in ipairs(allShips) do
-						if victim ~= p and victim ~= Game.player and not pirates[victim] and victim.shipId ~= policeId then
-							local victimSpeed = (victim.GetSupercruiseSpeed and victim:GetSupercruiseSpeed()) or 0
-							if victim:GetFlightState() == "SUPERCRUISE" and victimSpeed >= LIGHT_SPEED and not (victim.IsWanted and victim:IsWanted()) then
-								if p:DistanceTo(victim) < 1.8e10 then
-									p:AIKill(victim)
-									s.status = 'ATTACK'
-									s.target = victim
-									break
+			if p:exists() and (p:GetFlightState() == "SUPERCRUISE" or p:GetFlightState() == "FLYING") then
+				if s.status ~= 'ATTACK' and s.status ~= 'INTERDICT_PLAYER' and p.GetCurrentAICommand and p:GetCurrentAICommand() == "CMD_NONE" then
+					s.status = pirateIsInterested(Game.player) and 'LURK' or 'ORBIT'
+					s.target = nil
+					s.planet = assignSupercruisePatrol(p, s.planet)
+				elseif s.status ~= 'ATTACK' and s.status ~= 'INTERDICT_PLAYER' then
+					if not playerInSC and s.status == 'LURK' and p:DistanceTo(Game.player) < 100000 and p:GetFlightState() == Game.player:GetFlightState() then
+						p:AIKill(Game.player)
+						s.status = 'ATTACK'
+						s.target = Game.player
+					elseif p:GetFlightState() == "SUPERCRUISE" then
+						for _, victim in ipairs(allShips) do
+							if victim ~= p and victim ~= Game.player and not pirates[victim] and victim.shipId ~= policeId then
+								local victimSpeed = (victim.GetSupercruiseSpeed and victim:GetSupercruiseSpeed()) or 0
+								if victim:GetFlightState() == "SUPERCRUISE" and victimSpeed >= LIGHT_SPEED and not (victim.IsWanted and victim:IsWanted()) then
+									if p:DistanceTo(victim) < 1.8e10 then
+										p:AIKill(victim)
+										s.status = 'ATTACK'
+										s.target = victim
+										break
+									end
 								end
 							end
 						end

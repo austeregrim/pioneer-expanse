@@ -954,8 +954,12 @@ void PlayerShipController::SetFlightControlState(FlightControlState s)
 		}
 	}
 
-	if (m_flightControlState == s)
+	if (m_flightControlState == s) {
+		if (s != CONTROL_AUTOPILOT && m_ship && m_ship->AIIsActive()) {
+			m_ship->AIClearInstructions();
+		}
 		return;
+	}
 
 	m_flightControlState = s;
 	m_ship->AIClearInstructions();

@@ -43,6 +43,10 @@ local onPlayerDocked = function(player, station)
 			Comms.Message(l.WELCOME_ABOARD_STATION_FEE_DEDUCTED:interp({station = station.label,fee = Format.Money(fee)}))
 		end
 		PlayerState.AddMoney(-fee)
+		local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
+		if okTax and TaxAuthority and TaxAuthority.RecordOperatingExpense then
+			TaxAuthority.RecordOperatingExpense(fee, "FUEL", "Flagship Refuelling")
+		end
 	end
 end
 

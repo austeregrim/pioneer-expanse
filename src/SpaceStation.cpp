@@ -165,6 +165,25 @@ static float calculate_max_offset_squared(float portMaxShipSize, float shipBboxR
 	return maxOffset * maxOffset;
 }
 
+static int getDockStagePriority(DockStage stage)
+{
+	switch (stage) {
+	case DockStage::DOCKED:
+		return 5;
+	case DockStage::HANGAR_STOWING:
+	case DockStage::HANGAR_UNSTOWING:
+		return 4;
+	default:
+		if (SpaceStationType::IsUndockStage(stage))
+			return 3;
+		if (SpaceStationType::IsDockStage(stage) && stage != DockStage::CLEARANCE_GRANTED)
+			return 2;
+		if (stage == DockStage::CLEARANCE_GRANTED)
+			return 1;
+		return 0;
+	}
+}
+
 void SpaceStation::PostLoadFixup(Space *space)
 {
 	ModelBody::PostLoadFixup(space);
@@ -179,6 +198,34 @@ void SpaceStation::PostLoadFixup(Space *space)
 		const float bboxRad = vector2f(float(bbox.max.x), float(bbox.max.z)).Length();
 		sd.maxOffset = calculate_max_offset_squared(pPort->maxShipSize, bboxRad);
 		ComputeHangarBayGeometry(int(i), sd.ship, sd.hangarHalfX, sd.hangarHalfZ, sd.hangarDepth);
+	}
+
+	// Deduplicate any ship occupying multiple docking slots (e.g., stale CLEARANCE_GRANTED + DOCKED)
+	for (Uint32 i = 0; i < m_shipDocking.size(); i++) {
+		Ship *s = m_shipDocking[i].ship;
+		if (!s) continue;
+
+		Uint32 bestBay = i;
+		int bestPri = getDockStagePriority(m_shipDocking[i].stage);
+		for (Uint32 j = i + 1; j < m_shipDocking.size(); j++) {
+			if (m_shipDocking[j].ship != s) continue;
+			const int pri = getDockStagePriority(m_shipDocking[j].stage);
+			if (pri > bestPri) {
+				bestPri = pri;
+				bestBay = j;
+			}
+		}
+
+		for (Uint32 j = i; j < m_shipDocking.size(); j++) {
+			if (j != bestBay && m_shipDocking[j].ship == s) {
+				m_shipDocking[j].ship = nullptr;
+				m_shipDocking[j].stage = DockStage::NONE;
+				m_shipDocking[j].stagePos = 0.0;
+				m_shipDocking[j].fromPos = vector3d::Zero;
+				m_shipDocking[j].maxOffset = 0;
+				LockPort(j, false);
+			}
+		}
 	}
 }
 
@@ -279,10 +326,18 @@ void SpaceStation::NotifyRemoved(const Body *const removedBody)
 
 int SpaceStation::GetMyDockingPort(const Ship *s) const
 {
+	int bestBay = -1;
+	int bestPri = -1;
 	for (Uint32 i = 0; i < m_shipDocking.size(); i++) {
-		if (s == m_shipDocking[i].ship) return i;
+		if (s == m_shipDocking[i].ship) {
+			const int pri = getDockStagePriority(m_shipDocking[i].stage);
+			if (pri > bestPri) {
+				bestPri = pri;
+				bestBay = int(i);
+			}
+		}
 	}
-	return -1;
+	return bestBay;
 }
 
 int SpaceStation::NumShipsDocked() const
@@ -392,7 +447,19 @@ int SpaceStation::GetFreeDockingPort(const Ship *s) const
 
 void SpaceStation::SetDocked(Ship *ship, const int bay)
 {
-	assert(m_shipDocking.size() > Uint32(bay));
+	assert(ship && m_shipDocking.size() > Uint32(bay));
+	// Clear any prior clearance or stale bay assignment held by this ship
+	for (Uint32 i = 0; i < m_shipDocking.size(); i++) {
+		if (i != Uint32(bay) && m_shipDocking[i].ship == ship) {
+			m_shipDocking[i].ship = nullptr;
+			m_shipDocking[i].fromPos = vector3d::Zero;
+			m_shipDocking[i].stagePos = 0.0;
+			m_shipDocking[i].maxOffset = 0;
+			LockPort(i, false);
+			SwitchToStage(i, DockStage::NONE);
+		}
+	}
+
 	m_shipDocking[bay].ship = ship;
 	m_shipDocking[bay].fromPos = vector3d::Zero;
 	m_shipDocking[bay].fromRot = Quaterniond(1.0, 0.0, 0.0, 0.0);
@@ -918,6 +985,20 @@ void SpaceStation::NotifyCorridorCleared(const Ship *ship)
 
 bool SpaceStation::LaunchShip(Ship *ship, const int bay)
 {
+	if (!ship || bay < 0 || Uint32(bay) >= m_shipDocking.size()) return false;
+
+	// Clear any stale duplicate CLEARANCE_GRANTED entry left over from an earlier approach
+	for (Uint32 i = 0; i < m_shipDocking.size(); i++) {
+		if (i != Uint32(bay) && m_shipDocking[i].ship == ship && m_shipDocking[i].stage == DockStage::CLEARANCE_GRANTED) {
+			m_shipDocking[i].ship = nullptr;
+			m_shipDocking[i].stagePos = 0.0;
+			m_shipDocking[i].fromPos = vector3d::Zero;
+			m_shipDocking[i].maxOffset = 0;
+			LockPort(i, false);
+			SwitchToStage(i, DockStage::NONE);
+		}
+	}
+
 	if (!CanLaunch(ship)) return false;
 
 	m_corridorShip = ship;
@@ -1070,7 +1151,11 @@ bool SpaceStation::BeginOrbitalDockingSequence(Ship *s)
 	if (!s || IsGroundStation() || s->IsDead()) return false;
 	if (s->GetFlightState() != Ship::FLYING) return false;
 	if (s->ManualDocking()) return false;
-	if (s->GetAICommand() && s->GetAICommand()->GetType() == AICommand::CMD_DEPART) return false;
+	const AICommand *cmd = s->GetAICommand();
+	if (!cmd || cmd->GetType() != AICommand::CMD_DOCK ||
+		static_cast<const AICmdDock *>(cmd)->GetTarget() != this) {
+		return false;
+	}
 
 	int bay = -1;
 	for (Uint32 i = 0; i < m_shipDocking.size(); i++) {
@@ -1111,6 +1196,9 @@ bool SpaceStation::OnCollision(Body *b, Uint32 flags, double relVel)
 
 	s->RecordCollision(this, surface, relVel);
 
+	if (!(flags & (SceneGraph::CollisionGeometry::DOCKING | SceneGraph::CollisionGeometry::ENTRANCE)))
+		return true;
+
 	// Entrance / mail slot airlock is an open doorway with NO physical barrier.
 	// If an inbound autopilot ship with CLEARANCE_GRANTED reaches the entrance trigger,
 	// transition it into the interior docking sequence; never bounce or damage any ship on ENTRANCE.
@@ -1118,6 +1206,9 @@ bool SpaceStation::OnCollision(Body *b, Uint32 flags, double relVel)
 		BeginOrbitalDockingSequence(s);
 		return false;
 	}
+
+	// docking is in progress
+	if (s->GetFlightState() == Ship::DOCKING) return false;
 
 	bool touchOrbitalPad = (flags & SceneGraph::CollisionGeometry::DOCKING) && !IsGroundStation();
 
@@ -1129,7 +1220,9 @@ bool SpaceStation::OnCollision(Body *b, Uint32 flags, double relVel)
 		}
 	}
 
-	bool bayUnavailable = bay == -1 || IsPortLocked(bay) || m_shipDocking[bay].stage == DockStage::NONE;
+	bool bayUnavailable = bay == -1 || IsPortLocked(bay) ||
+		m_shipDocking[bay].stage != DockStage::CLEARANCE_GRANTED ||
+		s->GetFlightState() != Ship::FLYING;
 	if (bayUnavailable) {
 		return DoShipDamage(s, flags, relVel);
 	}
@@ -1158,9 +1251,6 @@ bool SpaceStation::OnCollision(Body *b, Uint32 flags, double relVel)
 			return DoShipDamage(s, flags, relVel);
 		}
 	}
-
-	// docking is in progress
-	if (s->GetFlightState() == Ship::DOCKING) return false;
 
 	// launch docking
 	// set up a control structure

@@ -50,6 +50,8 @@ local taxStatusBanner = nil
 local taxBannerColor = colors.uiPrimaryLight
 local residencyStatusBanner = nil
 local residencyBannerColor = colors.uiPrimaryLight
+local managerStatusBanner = nil
+local managerBannerColor = colors.uiPrimaryLight
 
 local popupMsg = ''
 local popup = ModalWindow.New('lobbyPopup', function(self)
@@ -183,7 +185,11 @@ end
 local function drawCivilAdministrationSection(station)
 	local resInfo = TaxAuthority.GetResidencyInfo()
 	local assess = TaxAuthority.GetTaxAssessment()
+	local mgr = TaxAuthority.GetManagerInfo(station)
 	local playerMoney = PlayerState.GetMoney()
+
+	local okPenal, PenalSystem = pcall(require, 'modules.Penal.PenalSystem')
+	local isPrison = okPenal and PenalSystem and PenalSystem.IsPrisonStation(station)
 
 	ui.spacing()
 	ui.separator()
@@ -245,8 +251,6 @@ local function drawCivilAdministrationSection(station)
 		end
 
 		ui.spacing()
-		local okPenal, PenalSystem = pcall(require, 'modules.Penal.PenalSystem')
-		local isPrison = okPenal and PenalSystem and PenalSystem.IsPrisonStation(station)
 
 		ui.withFont(orbiteer.medlarge, function()
 			ui.textColored(isPrison and colors.alertRed or colors.fontDim, isPrison and "HIGH-SECURITY CORRECTIONAL FACILITY" or "RESIDENCY PRIVILEGES & INCENTIVES")
@@ -303,35 +307,64 @@ local function drawCivilAdministrationSection(station)
 
 	ui.nextColumn()
 
-	-- Right Column: Full Tax Assessment Ledger & Single Payment Button
+	-- Right Column: Quarterly Tax Statements, Current Quarter Accrual & Payment
 	ui.group(function()
 		ui.withFont(orbiteer.medlarge, function()
-			ui.textColored(colors.uiPrimaryLight, "CONSOLIDATED TAX ASSESSMENT")
+			ui.textColored(colors.uiPrimaryLight, "QUARTERLY TAX ASSESSMENT")
+		end)
+		ui.withFont(pionillium.details, function()
+			ui.textColored(colors.fontDim, "Quarterly Cycle: Profits report at quarter end (Mar/Jun/Sep/Dec) and remain payable until end of the following quarter.")
 		end)
 		ui.spacing()
 
 		local dueStatusStr
-		local dueColor = colors.fontDim
+		local reportedDue = assess.reportedTaxDue or assess.accruedTax or 0
 		if assess.isDelinquent then
 			dueStatusStr = "DELINQUENT - 5% LATE PENALTY APPLIED"
-			dueColor = colors.alertRed
-		elseif assess.daysUntilDue > 0 then
-			dueStatusStr = string.format("Filing Due in %d Days", assess.daysUntilDue)
-			dueColor = colors.fontDim
+		elseif reportedDue > 0 and assess.earliestDueLabel then
+			dueStatusStr = string.format("Due by %s (%d days grace remaining)", assess.earliestDueLabel, assess.daysUntilDue or 0)
+		elseif (assess.currentQuarterTax or 0) > 0 then
+			dueStatusStr = string.format("Accruing %s (Reports %s)", assess.currentQuarterLabel or "Current Qtr", assess.currentQuarterReportLabel or "Quarter End")
 		else
-			dueStatusStr = "No Assessment Pending"
+			dueStatusStr = "No Reported Taxes Pending"
 		end
 
-		textTable.draw({
+		local curAccrualStr = string.format("%s (Reports %s, Due %s)",
+			Format.Money(assess.currentQuarterTax or 0),
+			assess.currentQuarterReportLabel or "Quarter End",
+			assess.currentQuarterDueLabel or "Next Quarter End")
+
+		local taxRows = {
 			{ "Your Liquid Capital", Format.Money(playerMoney) },
-			{ "Assessment Filing Status", dueStatusStr },
-			{ "Trade Net Capital Gains Tax", Format.Money(assess.breakdown.tradeProfitTax) },
-			{ "Civilian BBS Contracts Tax", Format.Money(assess.breakdown.bbsJobsTax) },
-			{ "Cartographic Survey Data Tax", Format.Money(assess.breakdown.cartographyTax) },
-			{ "Combat & Bounty Earnings", string.format("%s (0%% Tax-Exempt)", Format.Money(assess.breakdown.exemptIncome)) },
-			{ "Lottery Windfall Tax Withheld", string.format("%s (30%% Withheld)", Format.Money(assess.breakdown.windfallTaxWithheld)) },
-			{ "Total Taxes Paid to Date", Format.Money(assess.stats.totalTaxPaid) },
-		})
+			{ "Quarterly Filing Status", dueStatusStr },
+			{ string.format("Current Quarter (%s)", assess.currentQuarterLabel or "Accruing"), curAccrualStr },
+			{ "Flagship Trade Net Profit Tax", Format.Money(assess.breakdown.tradeProfitTax or 0) },
+			{ "Autonomous Fleet Operations Tax", Format.Money(assess.breakdown.fleetOperationsTax or 0) },
+		}
+		if (assess.breakdown.stationOperationsTax or 0) > 0 then
+			table.insert(taxRows, { "Station & Industrial Ops Tax", Format.Money(assess.breakdown.stationOperationsTax or 0) })
+		end
+		table.insert(taxRows, { "Contracts, Missions & Bounties Tax", Format.Money(assess.breakdown.bbsJobsTax or 0) })
+		table.insert(taxRows, { "Cartographic Survey Tax", Format.Money(assess.breakdown.cartographyTax or 0) })
+		table.insert(taxRows, { "Equities & Dividends Tax", Format.Money(assess.breakdown.investmentTax or 0) })
+		table.insert(taxRows, { "Lottery Windfall Tax Withheld", string.format("%s (30%% Withheld)", Format.Money(assess.breakdown.windfallTaxWithheld or 0)) })
+		table.insert(taxRows, { "Deductible Operating Expenses", string.format("%s (Pool: %s)", Format.Money(assess.breakdown.operatingExpensesDeducted or 0), Format.Money(assess.deductibleExpensePool or 0)) })
+		table.insert(taxRows, { "Total Taxes Paid to Date", Format.Money(assess.stats.totalTaxPaid or 0) })
+		textTable.draw(taxRows)
+
+		if assess.statements and #assess.statements > 0 then
+			ui.spacing()
+			ui.withFont(pionillium.details, function()
+				ui.textColored(colors.uiPrimaryLight, "REPORTED QUARTERLY STATEMENTS DUE:")
+				for _, stmt in ipairs(assess.statements) do
+					local sCol = stmt.isDelinquent and colors.alertRed or colors.alertYellow
+					local deadlineText = stmt.isDelinquent
+						and string.format("DELINQUENT (+%s penalty)", Format.Money(stmt.penalty or 0))
+						or string.format("Payable until %s (%dd left)", stmt.dueLabel or "Next Qtr End", stmt.daysUntilDue or 0)
+					ui.textColored(sCol, string.format("• %s: %s  —  %s", stmt.label, Format.Money(stmt.tax or 0), deadlineText))
+				end
+			end)
+		end
 
 		local curPos = ui.getCursorScreenPos()
 		local colW = ui.getContentRegion().x
@@ -339,14 +372,19 @@ local function drawCivilAdministrationSection(station)
 		ui.dummy(Vector2(0, 6 * rescaleVector.y))
 
 		ui.withFont(orbiteer.large, function()
-			local balColor = (assess.accruedTax > 0 and (assess.isDelinquent and colors.alertRed or colors.alertYellow)) or (colors.econProfit or colors.uiPrimaryLight)
-			ui.textColored(balColor, string.format("OUTSTANDING TAX BALANCE: %s", Format.Money(assess.accruedTax)))
+			local balColor = (reportedDue > 0 and (assess.isDelinquent and colors.alertRed or colors.alertYellow)) or (colors.econProfit or colors.uiPrimaryLight)
+			ui.textColored(balColor, string.format("REPORTED TAX DUE: %s", Format.Money(reportedDue)))
 		end)
 
 		ui.withFont(pionillium.body, function()
-			if assess.accruedTax > 0 then
+			if (resInfo.effectiveRate or 0) <= 0 then
+				ui.textColored(colors.fontDim, "Jurisdiction rate is 0.0% (Anarchy/Lawless). Register at a lawful port for civil coverage.")
+			elseif reportedDue > 0 then
 				local statusColor = assess.isDelinquent and colors.alertRed or colors.alertYellow
 				ui.textColored(statusColor, string.format("Status: %s", dueStatusStr))
+			elseif (assess.currentQuarterTax or 0) > 0 then
+				ui.textColored(colors.econProfit or colors.uiPrimaryLight,
+					string.format("Status: No Reported Balance Due (%s reported %s)", Format.Money(assess.currentQuarterTax), assess.currentQuarterReportLabel or "at quarter end"))
 			else
 				ui.textColored(colors.econProfit or colors.uiPrimaryLight, "Status: Account in Good Standing")
 			end
@@ -354,9 +392,9 @@ local function drawCivilAdministrationSection(station)
 
 		ui.spacing()
 		local payBtnSize = Vector2(ui.getContentRegion().x, 38 * rescaleVector.y)
-		if assess.accruedTax > 0 then
-			local canAfford = playerMoney >= assess.accruedTax
-			local payBtnLabel = string.format("PAY ALL TAXES (%s)##lobbyPayTax", Format.Money(assess.accruedTax))
+		if reportedDue > 0 then
+			local canAfford = playerMoney >= reportedDue
+			local payBtnLabel = string.format("PAY REPORTED TAXES (%s)##lobbyPayTax", Format.Money(reportedDue))
 
 			if canAfford then
 				ui.withStyleColors({ Button = colors.uiPrimaryLight, Text = colors.background or colors.font }, function()
@@ -379,7 +417,7 @@ local function drawCivilAdministrationSection(station)
 			end
 		else
 			ui.withStyleColors({ Button = ui.theme.buttonColors.disabled.normal, Text = colors.fontDim }, function()
-				ui.button("ALL ASSESSMENTS SETTLED##lobbyPayTax", payBtnSize)
+				ui.button("NO REPORTED TAXES DUE##lobbyPayTax", payBtnSize)
 			end)
 		end
 
@@ -390,6 +428,85 @@ local function drawCivilAdministrationSection(station)
 	end)
 
 	ui.columns(1, "LobbyCivilTaxEnd", false)
+
+	-- Financial Manager Section (Automated Quarterly Tax Settlement)
+	ui.spacing()
+	ui.separator()
+	ui.spacing()
+	ui.withFont(orbiteer.medlarge, function()
+		ui.textColored(colors.uiPrimaryLight, "FINANCIAL MANAGEMENT & AUTOMATED TAX FILING")
+	end)
+	ui.spacing()
+
+	local mgrColW = math.max(380 * rescaleVector.x, math.floor(availWidth * 0.62))
+	ui.columns(2, "LobbyManagerCols", false)
+	ui.setColumnWidth(0, mgrColW)
+
+	ui.group(function()
+		if mgr.hired then
+			local mRows = {
+				{ "Retained Financial Manager", string.format("%s — %s", mgr.name or "Officer", mgr.title or "Fiduciary Officer") },
+				{ "Mandate Status", "ACTIVE — Auto-Paying Reported Quarterly Taxes" },
+				{ "Retaining Office", mgr.hiredStation or "Registered Agency" },
+				{ "Quarterly Retainer", string.format("%s / quarter (tax-deductible)", Format.Money(mgr.quarterlyFee or 1500)) },
+				{ "Taxes Auto-Settled", string.format("%s (%d quarterly statement(s))", Format.Money(mgr.totalTaxesSettled or 0), mgr.statementsSettled or 0) },
+			}
+			if mgr.lastPaymentNote and mgr.lastPaymentNote ~= "" then
+				table.insert(mRows, { "Latest Ledger Note", mgr.lastPaymentNote })
+			end
+			textTable.draw(mRows)
+		else
+			ui.withFont(pionillium.body, function()
+				ui.textWrapped("Retain a bonded Financial Manager to monitor quarterly tax statements and automatically settle reported assessments on your behalf—preventing late penalties during multi-month deep-space voyages.")
+			end)
+			ui.spacing()
+			textTable.draw({
+				{ "Available Fiduciary Officer", string.format("%s — %s", mgr.candidateName or "Elena Vance", mgr.candidateTitle or "Senior Tax & Fiduciary Officer") },
+				{ "Onboarding Fee", string.format("%s (tax-deductible operating expense)", Format.Money(mgr.hireFee or 2500)) },
+				{ "Quarterly Retainer", string.format("%s / quarter (auto-billed at quarter close)", Format.Money(mgr.quarterlyFee or 1500)) },
+			})
+		end
+	end)
+
+	ui.nextColumn()
+
+	ui.group(function()
+		local mgrBtnSize = Vector2(ui.getContentRegion().x, 38 * rescaleVector.y)
+		if mgr.hired then
+			if ui.button("DISMISS FINANCIAL MANAGER##lobbyDismissMgr", mgrBtnSize) then
+				local ok, msg = TaxAuthority.DismissManager()
+				managerStatusBanner = msg
+				managerBannerColor = ok and colors.alertYellow or colors.alertRed
+			end
+		elseif isPrison then
+			ui.withStyleColors({ Button = ui.theme.buttonColors.disabled.normal, Text = colors.fontDim }, function()
+				ui.button("FIDUCIARY CONTRACTING UNAVAILABLE AT PRISON##lobbyHireMgr", mgrBtnSize)
+			end)
+		else
+			local hireFee = mgr.hireFee or 2500
+			if playerMoney >= hireFee then
+				ui.withStyleColors({ Button = colors.uiPrimaryLight, Text = colors.background or colors.font }, function()
+					if ui.button(string.format("HIRE FINANCIAL MANAGER (%s)##lobbyHireMgr", Format.Money(hireFee)), mgrBtnSize) then
+						local ok, msg = TaxAuthority.HireManager(station)
+						managerStatusBanner = msg
+						managerBannerColor = ok and (colors.econProfit or colors.uiPrimaryLight) or colors.alertRed
+						if ok then ui.playSfx("OK") end
+					end
+				end)
+			else
+				ui.withStyleColors({ Button = ui.theme.buttonColors.disabled.normal, Text = colors.alertRed }, function()
+					ui.button(string.format("INSUFFICIENT FUNDS TO HIRE (%s)##lobbyHireMgr", Format.Money(hireFee)), mgrBtnSize)
+				end)
+			end
+		end
+
+		if managerStatusBanner then
+			ui.spacing()
+			ui.textColored(managerBannerColor, managerStatusBanner)
+		end
+	end)
+
+	ui.columns(1, "LobbyManagerEnd", false)
 end
 
 local function drawPlayerInfo()
@@ -521,6 +638,8 @@ StationView:registerView({
 	draw = drawPlayerInfo,
 	refresh = function()
 		taxStatusBanner = nil
+		residencyStatusBanner = nil
+		managerStatusBanner = nil
 		local station = Game.player:GetDockedWith()
 		shipDef = ShipDef[Game.player.shipId]
 

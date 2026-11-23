@@ -80,6 +80,10 @@ local scheduleWages = function (crewMember)
 
 		if PlayerState.GetMoney() > contract.wage then
 			PlayerState.AddMoney(0 - contract.wage)
+			local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
+			if okTax and TaxAuthority and TaxAuthority.RecordOperatingExpense then
+				TaxAuthority.RecordOperatingExpense(contract.wage, "CREW_WAGES", crewMember.name)
+			end
 			-- Being paid can make awkward crew like you more
 			if not crewMember:TestRoll('playerRelationship') then
 				crewMember.playerRelationship = crewMember.playerRelationship + 1
@@ -92,7 +96,13 @@ local scheduleWages = function (crewMember)
 
 		-- Attempt to pay off any arrears
 		local arrears = math.min(PlayerState.GetMoney(),contract.outstanding)
-		PlayerState.AddMoney(0 - arrears)
+		if arrears > 0 then
+			PlayerState.AddMoney(0 - arrears)
+			local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
+			if okTax and TaxAuthority and TaxAuthority.RecordOperatingExpense then
+				TaxAuthority.RecordOperatingExpense(arrears, "CREW_WAGES", crewMember.name)
+			end
+		end
 		contract.outstanding = contract.outstanding - arrears
 
 		-- The crew gain experience each week, and might get better

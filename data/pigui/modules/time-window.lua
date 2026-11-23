@@ -21,6 +21,15 @@ local function displayTimeWindow()
 	-- HACK: Don't display the time window if we're in a bespoke view
 	if Game.CurrentView() == nil or Game.CurrentView() == "WorldView" and not ui.shouldDrawUI() then return end
 
+	-- Avoid duplicating the clock when a long hyperspace jump shows the centered red clock
+	if Game.InHyperspace() and Game.CurrentView() == "WorldView" then
+		local dur = Game.GetHyperspaceDuration and Game.GetHyperspaceDuration() or 0
+		local prog = Game.GetHyperspaceProgress and Game.GetHyperspaceProgress() or 0
+		if dur >= 4.0 * 86400.0 and (prog / 100000.0) >= 0.55 then
+			return
+		end
+	end
+
 	local year, month_num, day, hour, minute, second = Game.GetDateTime()
 	local month = lc[months[month_num]]
 	local date = string.format("%04i %s %i - %02i:%02i:%02i", year, month, day, hour, minute, second)

@@ -40,6 +40,10 @@ local onChat = function (form, ref, option)
 		else
 			cargoMgr:RemoveCommodity(ad.commodity, max)
 			PlayerState.AddMoney(ad.price * max)
+			local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
+			if okTax and TaxAuthority and TaxAuthority.RecordCommoditySale then
+				TaxAuthority.RecordCommoditySale(ad.commodity.name, max, ad.price)
+			end
 			ad.amount = ad.amount - max
 			form:SetMessage(ad.message .. "\n\n" .. string.interp(l.AMOUNT, {amount = ad.amount}))
 		end
@@ -49,6 +53,10 @@ local onChat = function (form, ref, option)
 		else
 			cargoMgr:RemoveCommodity(ad.commodity, option)
 			PlayerState.AddMoney(ad.price * option)
+			local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
+			if okTax and TaxAuthority and TaxAuthority.RecordCommoditySale then
+				TaxAuthority.RecordCommoditySale(ad.commodity.name, option, ad.price)
+			end
 			ad.amount = ad.amount - option
 			form:SetMessage(ad.message .. "\n\n" .. string.interp(l.AMOUNT, {amount = ad.amount}))
 		end

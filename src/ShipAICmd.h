@@ -86,6 +86,7 @@ public:
 	virtual void PostLoadFixup(Space *space);
 
 	virtual void OnDeleted(const Body *body);
+	SpaceStation *GetTarget() const { return m_target; }
 
 private:
 	enum EDockingStates {

@@ -16,6 +16,7 @@ local lc = Lang.GetResource("core");
 local colors = ui.theme.colors
 
 local player = nil
+local lastDockedTime = -10
 local icons = ui.theme.icons
 
 local mainButtonSize = ui.theme.styles.MainButtonSize
@@ -128,7 +129,7 @@ local function button_undock()
 					StationView:SwitchTo("insurance")
 				end
 			end
-		elseif ui.mainMenuButton(icons.autopilot_undock, lui.HUD_BUTTON_UNDOCK) or (ui.noModifierHeld() and ui.isKeyReleased(ui.keys.f5)) then
+		elseif ui.mainMenuButton(icons.autopilot_undock, lui.HUD_BUTTON_UNDOCK) or (ui.noModifierHeld() and ui.isKeyReleased(ui.keys.f5) and (Game.time - lastDockedTime >= 0.75)) then
 			Game.SetTimeAcceleration("1x")
 			AutoSave.Save()
 			player:Undock()
@@ -327,6 +328,12 @@ local function displayAutoPilotWindow()
 end
 
 ui.registerModule("world-view", { id = "autopilot-window", draw = displayAutoPilotWindow, debugReload = function() package.reimport() end })
-Event.Register("onGameStart", speed_limiter.reset)
+Event.Register("onGameStart", function()
+	lastDockedTime = -10
+	speed_limiter.reset()
+end)
+Event.Register("onPlayerDocked", function()
+	lastDockedTime = Game.time
+end)
 
 return {}

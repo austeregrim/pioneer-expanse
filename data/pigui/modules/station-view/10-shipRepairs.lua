@@ -79,9 +79,18 @@ local popup = ModalWindow.New('ChiefMechanicPopup', function(self)
 	end
 end)
 
+local function recordTaxOperatingExpense(amount, category)
+	if not amount or amount <= 0 then return end
+	local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
+	if okTax and TaxAuthority and TaxAuthority.RecordOperatingExpense then
+		TaxAuthority.RecordOperatingExpense(amount, category, "Flagship")
+	end
+end
+
 local tryRepair = function (damage, price)
 	if PlayerState.GetMoney() >= price then
 		PlayerState.AddMoney(-price)
+		recordTaxOperatingExpense(price, "MAINTENANCE")
 		Game.player:SetHullPercent(Game.player:GetHullPercent() + damage)
 		ui.playSfx("Repairing_Ship")
 
@@ -146,6 +155,7 @@ local refuelInternalTank = function (delta)
 	Game.player:SetFuelPercent(fuel)
 
 	if total > 0 then
+		recordTaxOperatingExpense(total, "FUEL")
 		local okFlightLog, FlightLog = pcall(require, 'modules.FlightLog.FlightLog')
 		if okFlightLog and FlightLog and FlightLog.RecordTransaction then
 			FlightLog.RecordTransaction({
@@ -190,6 +200,7 @@ local refuelHyperdrive = function (mass)
 	station:AddCommodityStock(hyperdrive_fuel, -math.round(mass))
 
 	if total > 0 then
+		recordTaxOperatingExpense(total, "FUEL")
 		local okFlightLog, FlightLog = pcall(require, 'modules.FlightLog.FlightLog')
 		if okFlightLog and FlightLog and FlightLog.RecordTransaction then
 			FlightLog.RecordTransaction({
@@ -393,7 +404,7 @@ local function drawShipRepair()
 
 			ui.withFont(pionillium.body, function()
 				if #damagedMods == 0 then
-					ui.textColored(colors.fontDim, "All ship components operating at nominal integrity (100%).")
+					ui.textColored(colors.fontDim, "All ship components operating at nominal integrity (90%+ — servicing available below 90%).")
 				else
 					local totalModCost = 0
 					for _, mod in ipairs(damagedMods) do
@@ -402,6 +413,7 @@ local function drawShipRepair()
 					if ui.button("REPAIR ALL COMPONENTS (" .. Format.Money(totalModCost) .. ")", Vector2(310 * rescaleVector.x, 30 * rescaleVector.y)) then
 						if PlayerState.GetMoney() >= totalModCost then
 							PlayerState.AddMoney(-totalModCost)
+							recordTaxOperatingExpense(totalModCost, "MAINTENANCE")
 							local equipSet = Game.player:GetComponent("EquipSet")
 							local servicedHD = false
 							for _, mod in ipairs(damagedMods) do
@@ -447,7 +459,7 @@ local function drawShipRepair()
 							ui.tableNextColumn()
 							ui.text(mod.name)
 							ui.tableNextColumn()
-							local pct = math.floor(mod.integrity * 100 + 0.5)
+							local pct = math.floor(mod.integrity * 100)
 							local statusCol = mod.disabled and Color(255, 75, 65, 255)
 								or (mod.integrity < 0.75 and Color(255, 190, 50, 255) or colors.white)
 							local statusText = mod.disabled and "0% OFFLINE" or string.format("%d%%", pct)
@@ -456,6 +468,7 @@ local function drawShipRepair()
 							if ui.button("REPAIR " .. Format.Money(mod.cost) .. "##repair_mod_" .. idx, Vector2(132 * rescaleVector.x, 24 * rescaleVector.y)) then
 								if PlayerState.GetMoney() >= mod.cost then
 									PlayerState.AddMoney(-mod.cost)
+									recordTaxOperatingExpense(mod.cost, "MAINTENANCE")
 									mod.equip.integrity = 1.0
 									local equipSet = Game.player:GetComponent("EquipSet")
 									if equipSet then equipSet:NotifyListeners("modify", mod.equip) end

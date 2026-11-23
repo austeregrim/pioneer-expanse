@@ -436,6 +436,10 @@ local onPlayerDocked = function (player, station)
 					Comms.ImportantMessage(msg, mission.client.name)
 					Character.persistent.player.reputation = Character.persistent.player.reputation + reputation
 					PlayerState.AddMoney(mission.reward)
+					local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
+					if okTax and TaxAuthority and TaxAuthority.RecordBBSIncome then
+						TaxAuthority.RecordBBSIncome(mission.reward, false)
+					end
 					FactionStanding.ApplyMissionOutcome(mission.factionName, 3, mission.destFactionName, "Missing person contract completed")
 				else
 					msg = string.interp(l["FAILUREMSG_" .. Engine.rand:Integer(1, MissionUtils.getNumberOfFlavours(l, "FAILUREMSG"))], { wanted = mission.wanted.name })

@@ -561,20 +561,23 @@ local function buildUsedShipEquipment(def, config, profile, hullPercent, rand)
 		end
 	end
 
-	-- 4. Convert to plain serializable list with used valuation & integrity
+	-- 4. Convert to plain serializable list with used valuation & integrity (new or 90%-100%)
 	local equipList = {}
-	local integrityMin = math.max(0.68, (hullPercent / 100) * 0.86)
-	local integrityMax = math.min(0.98, (hullPercent / 100) * 1.04)
 
 	local function finalizeItem(entry)
-		local integ = utils.round(rand:Number(integrityMin, integrityMax), 0.01)
-		local discount = entry.aftermarket and rand:Number(0.60, 0.78) or rand:Number(0.68, 0.85)
+		local newChance = entry.aftermarket and 0.45 or 0.30
+		local isNewModule = rand:Number() < newChance
+		local integ = isNewModule and 1.0 or utils.round(rand:Number(0.90, 1.00), 0.01)
+		local discount = isNewModule
+			and (entry.aftermarket and rand:Number(0.88, 0.96) or rand:Number(0.90, 0.98))
+			or  (entry.aftermarket and rand:Number(0.70, 0.86) or rand:Number(0.76, 0.92))
 		local usedPrice = math.max(10, math.floor((entry.retailPrice or 0) * discount))
 		table.insert(equipList, {
 			slotId = entry.slotId,
 			id = entry.id,
 			count = entry.count,
 			aftermarket = entry.aftermarket,
+			isNew = isNewModule,
 			integrity = integ,
 			usedPrice = usedPrice,
 		})
@@ -791,10 +794,11 @@ function ShipDealerships.ComputeListingOffer(sos)
 				local retailP = math.floor(inst.price or 0)
 				local itemPrice = retailP
 				if isUsed then
-					itemPrice = math.floor(item.usedPrice or (retailP * 0.72))
+					local integ = (type(item.integrity) == "number") and item.integrity or 0.95
+					itemPrice = math.floor(item.usedPrice or (retailP * 0.78))
 					inst.price = itemPrice
-					inst.integrity = item.integrity or 0.85
-					inst.isUsed = true
+					inst.integrity = integ
+					inst.isUsed = not (item.isNew or (integ >= 0.999))
 				end
 
 				table.insert(equip, { item.slotId, inst, item.aftermarket == true })
@@ -805,7 +809,7 @@ function ShipDealerships.ComputeListingOffer(sos)
 					table.insert(aftermarketItems, {
 						name = inst:GetName(),
 						slotId = item.slotId,
-						integrity = item.integrity or 0.85,
+						integrity = (type(item.integrity) == "number") and item.integrity or 0.95,
 						price = itemPrice,
 					})
 				end

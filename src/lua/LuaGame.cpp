@@ -612,6 +612,24 @@ static int l_game_get_hyperspace_travelled_percentage(lua_State *l)
 	return 1;
 }
 
+static int l_game_get_hyperspace_progress(lua_State *l)
+{
+	LuaPush(l, Pi::game ? double(Pi::game->GetHyperspaceProgress()) : 0.0);
+	return 1;
+}
+
+static int l_game_get_hyperspace_duration(lua_State *l)
+{
+	LuaPush(l, Pi::game ? Pi::game->GetHyperspaceDuration() : 0.0);
+	return 1;
+}
+
+static int l_game_get_hyperspace_end_time(lua_State *l)
+{
+	LuaPush(l, Pi::game ? Pi::game->GetHyperspaceEndTime() : 0.0);
+	return 1;
+}
+
 static int l_game_get_hyperspace_flash_alpha(lua_State *l)
 {
 	LuaPush(l, Pi::game ? Pi::game->GetHyperspaceFlashAlpha() : 0.0f);
@@ -763,6 +781,9 @@ void LuaGame::Register()
 		{ "GetTimeAcceleration", l_game_get_time_acceleration },
 		{ "GetRequestedTimeAcceleration", l_game_get_requested_time_acceleration },
 		{ "GetHyperspaceTravelledPercentage", l_game_get_hyperspace_travelled_percentage },
+		{ "GetHyperspaceProgress", l_game_get_hyperspace_progress },
+		{ "GetHyperspaceDuration", l_game_get_hyperspace_duration },
+		{ "GetHyperspaceEndTime", l_game_get_hyperspace_end_time },
 		{ "GetHyperspaceFlashAlpha", l_game_get_hyperspace_flash_alpha },
 
 		{ "SetWorldCamType", l_game_set_world_cam_type },

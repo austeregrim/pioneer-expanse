@@ -222,16 +222,8 @@ local jumpToSystem = function (ship, target_path)
 end
 
 Trader.getSystemAndJump = function (ship)
-	-- attention all coders: trade_ships[ship].starport may be nil
-	if Core.ships[ship].starport then
-		local body = Space.GetBody(Core.ships[ship].starport.path:GetSystemBody().parent.index)
-		local port = Core.ships[ship].starport
-		return jumpToSystem(ship, getSystem(ship))
-	end
-end
-
-local function isAtmo(starport)
-	return starport.type ~= 'STARPORT_ORBITAL' and starport.path:GetSystemBody().parent.hasAtmosphere
+	if not Core.ships[ship] then return nil end
+	return jumpToSystem(ship, getSystem(ship))
 end
 
 local function canAtmo(ship)
@@ -241,11 +233,19 @@ end
 local THRUSTER_UP = Engine.GetEnumValue('ShipTypeThruster', 'UP')
 
 Trader.isStarportAcceptableForShip = function(starport, ship)
-	if not isAtmo(starport) then return true end
-	if not canAtmo(ship) then return false end
+	if not starport or not starport:exists() then return false end
+	if starport.type == 'STARPORT_ORBITAL' then return true end
+	local sbody = starport.path and starport.path:GetSystemBody()
+	local parent = sbody and sbody.parent
+	if not parent then return false end
 	local bellyThrust = ship:GetThrusterAcceleration(THRUSTER_UP)
-	local portGravity = starport.path:GetSystemBody().parent.gravity
-	return bellyThrust > portGravity
+	if bellyThrust <= (parent.gravity or 0) * 1.05 then return false end
+	if parent.hasAtmosphere then
+		if not canAtmo(ship) then return false end
+		local pressLimit = ship.GetAtmosphericPressureLimit and ship:GetAtmosphericPressureLimit() or 1.0
+		if (parent.surfacePressure or 0) > pressLimit * 0.98 then return false end
+	end
+	return true
 end
 
 Trader.getNearestStarport = function(ship, current)

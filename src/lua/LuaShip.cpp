@@ -456,7 +456,7 @@ static int l_ship_set_docked_with(lua_State *l)
 	int port = station->GetFreeDockingPort(ship); // pass in the ship to get a port we fit into
 	if (port < 0) {
 		lua_pushboolean(l, false);
-		return 0;
+		return 1;
 	}
 
 	ship->SetFrame(station->GetFrame());
@@ -1162,6 +1162,13 @@ static int l_ship_get_shields_percent(lua_State *l)
 		lua_pushnil(l);
 	else
 		lua_pushnumber(l, shields);
+	return 1;
+}
+
+static int l_ship_get_atmospheric_pressure_limit(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushnumber(l, double(s->GetAtmosphericPressureLimit()));
 	return 1;
 }
 
@@ -2242,6 +2249,7 @@ void LuaObject<Ship>::RegisterClass()
 		{ "GetGunTemperature", l_ship_get_gun_temperature },
 		{ "GetHullPercent", l_ship_get_hull_percent },
 		{ "GetShieldsPercent", l_ship_get_shields_percent },
+		{ "GetAtmosphericPressureLimit", l_ship_get_atmospheric_pressure_limit },
 
 		{ "GetFlightControlState", l_ship_get_flight_control_state },
 		{ "SetFlightControlState", l_ship_set_flight_control_state },

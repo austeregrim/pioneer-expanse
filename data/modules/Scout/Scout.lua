@@ -742,7 +742,12 @@ local onPlayerDocked = function (player, station)
 				-- You get some of the reward if you're back late with the data
 				Comms.ImportantMessage((flavour.failmsg), mission.client.name)
 				Character.persistent.player.reputation = Character.persistent.player.reputation - 1
-				PlayerState.AddMoney(mission.reward * mission_failed_reward)
+				local latePayout = mission.reward * mission_failed_reward
+				PlayerState.AddMoney(latePayout)
+				local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
+				if okTax and TaxAuthority and TaxAuthority.RecordBBSIncome then
+					TaxAuthority.RecordBBSIncome(latePayout, false)
+				end
 				if not flavour.covert then
 					FactionStanding.Adjust(mission.factionName, -1, "Survey delivered late")
 				end
@@ -760,6 +765,10 @@ local onPlayerDocked = function (player, station)
 				Comms.ImportantMessage((flavour.successmsg), mission.client.name)
 				Character.persistent.player.reputation = Character.persistent.player.reputation + 1
 				PlayerState.AddMoney(mission.reward)
+				local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
+				if okTax and TaxAuthority and TaxAuthority.RecordBBSIncome then
+					TaxAuthority.RecordBBSIncome(mission.reward, false)
+				end
 				if not flavour.covert then
 					FactionStanding.ApplyMissionOutcome(mission.factionName, flavour.useFaction and 5 or 3, nil, "Survey contract completed")
 				end

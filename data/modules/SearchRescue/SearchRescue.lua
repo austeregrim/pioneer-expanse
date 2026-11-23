@@ -1427,7 +1427,12 @@ local closeMission = function (mission)
 		else
 			local destroyedtxt = string.interp(l.ACCIDENT_DESTROYED_TARGET, {shiplabel = mission.shiplabel})
 			Comms.ImportantMessage(destroyedtxt)
-			PlayerState.AddMoney(mission.reward/2)
+			local partialReward = mission.reward/2
+			PlayerState.AddMoney(partialReward)
+			local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
+			if okTax and TaxAuthority and TaxAuthority.RecordBBSIncome then
+				TaxAuthority.RecordBBSIncome(partialReward, false)
+			end
 			Character.persistent.player.reputation = Character.persistent.player.reputation + delta_reputation
 			Event.Queue("onReputationChanged", oldReputation, Character.persistent.player.killcount,
 			            Character.persistent.player.reputation, Character.persistent.player.killcount)
@@ -1439,6 +1444,10 @@ local closeMission = function (mission)
 			local successtxt = string.interp(mission.flavour.successmsg, {cash = Format.Money(mission.reward)})
 			Comms.ImportantMessage(successtxt)
 			PlayerState.AddMoney(mission.reward)
+			local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
+			if okTax and TaxAuthority and TaxAuthority.RecordBBSIncome then
+				TaxAuthority.RecordBBSIncome(mission.reward, false)
+			end
 			Character.persistent.player.reputation = Character.persistent.player.reputation + delta_reputation
 			FactionStanding.ApplyMissionOutcome(mission.factionName, 5, nil, "Search & rescue completed")
 			Event.Queue("onReputationChanged", oldReputation, Character.persistent.player.killcount,

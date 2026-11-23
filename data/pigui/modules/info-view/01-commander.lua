@@ -9,6 +9,7 @@ local PiGuiFace = require 'pigui.libs.face'
 local Event = require 'Event'
 local PlayerState = require 'PlayerState'
 local FactionStanding = require 'FactionStanding'
+local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
 
 local pionillium = ui.fonts.pionillium
 local orbiteer = ui.fonts.orbiteer
@@ -39,9 +40,27 @@ local function drawPlayerInfo()
 
 	ui.newLine()
 
-	textTable.withHeading(l.FINANCE, orbiteer.heading, {
+	local financeRows = {
 		{ l.CASH .. ":", ui.Format.Money(PlayerState.GetMoney()) }
-	})
+	}
+	if okTax and TaxAuthority and TaxAuthority.GetTaxAssessment then
+		local assess = TaxAuthority.GetTaxAssessment()
+		local mgr = assess.manager
+		local repDue = assess.reportedTaxDue or 0
+		local repStr = (repDue > 0)
+			and string.format("%s (%s)", ui.Format.Money(repDue), assess.isDelinquent and "DELINQUENT" or ("Due " .. (assess.earliestDueLabel or "Next Qtr")))
+			or "None"
+		table.insert(financeRows, { "Reported Taxes Due:", repStr })
+		table.insert(financeRows, {
+			string.format("Current Qtr (%s):", assess.currentQuarterLabel or "Est."),
+			string.format("%s (Reports %s)", ui.Format.Money(assess.currentQuarterTax or 0), assess.currentQuarterReportLabel or "Quarter End")
+		})
+		table.insert(financeRows, {
+			"Financial Manager:",
+			(mgr and mgr.hired) and string.format("%s (Auto-Pay Active)", mgr.name or "Officer") or "None (Hire in Station Lobby)"
+		})
+	end
+	textTable.withHeading(l.FINANCE, orbiteer.heading, financeRows)
 
 	local standings = FactionStanding.GetAll(true)
 	if #standings > 0 then

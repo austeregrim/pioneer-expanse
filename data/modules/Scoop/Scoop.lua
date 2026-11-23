@@ -283,6 +283,10 @@ local removeMission = function (mission, ref)
 	if mission.status == "COMPLETED" then
 		Character.persistent.player.reputation = oldReputation + mission_reputation
 		PlayerState.AddMoney(mission.reward)
+		local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
+		if okTax and TaxAuthority and TaxAuthority.RecordBBSIncome then
+			TaxAuthority.RecordBBSIncome(mission.reward, false)
+		end
 		Comms.ImportantMessage(l["SUCCESS_MSG_" .. mission.id], sender)
 		if mission.id == "RESCUE" then
 			FactionStanding.ApplyMissionOutcome(mission.factionName, 4, nil, "Escape pod recovery completed")
