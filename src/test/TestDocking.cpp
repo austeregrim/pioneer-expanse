@@ -4,6 +4,8 @@
 #include "doctest.h"
 #include "ship/OrbitalDockingGeometry.h"
 
+#include <cmath>
+
 TEST_CASE("OrbitalStationDetour")
 {
 	const vector3d corridorDir(0.0, 0.0, 1.0);
