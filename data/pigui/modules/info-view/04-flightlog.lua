@@ -51,8 +51,11 @@ end
 
 local function toggleBookmarkForPath(path, title)
 	if not path then return end
-	local id, _ = getBookmarkForPath(path)
+	local id, b = getBookmarkForPath(path)
 	if id then
+		if b and b.isHome then
+			return
+		end
 		PlayerState.RemoveBookmark(id)
 	else
 		local ok, sysPath = pcall(function() return path:SystemOnly() end)

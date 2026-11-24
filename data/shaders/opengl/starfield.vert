@@ -6,9 +6,11 @@
 
 out vec4 v_color;
 
+uniform vec4 starBoost;
+
 void main(void)
 {
 	gl_Position = uViewProjectionMatrix * a_vertex;
-	gl_PointSize = 1.0 + pow(a_normal.z,3.0);
+	gl_PointSize = (1.0 + pow(a_normal.z, 3.0)) * max(starBoost.x, 1.0);
 	v_color = a_color;
 }

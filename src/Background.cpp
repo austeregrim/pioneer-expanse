@@ -219,6 +219,7 @@ namespace Background {
 		Graphics::Texture *texture = Graphics::TextureBuilder::Billboard("textures/star_point.png").GetOrCreateTexture(m_renderer, "billboard");
 		m_material->SetTexture("texture0"_hash, texture);
 		m_material->emissive = Color::WHITE;
+		m_material->SetPushConstant("starBoost"_hash, vector3f(1.0f, 1.0f, 0.0f), 0.0f);
 
 		// Create material to be used with hyperjump 'star streaks'
 		Graphics::MaterialDescriptor descStreaks;
@@ -622,7 +623,18 @@ namespace Background {
 	{
 		PROFILE_SCOPED()
 		// XXX would be nice to get rid of the Pi:: stuff here
-		if (!Pi::game || Pi::player->GetFlightState() != Ship::HYPERSPACE) {
+		if (!Pi::game || !Pi::player || Pi::player->GetFlightState() != Ship::HYPERSPACE) {
+			float surge = 0.0f;
+			if (Pi::player && Pi::player->IsHyperspaceJumpSurging()) {
+				surge = Pi::player->GetHyperspaceJumpSurgeProgress();
+			} else if (Pi::game) {
+				surge = Pi::game->GetHyperspaceEntryFovFactor();
+			}
+			const float s2 = surge * surge;
+			const float sizeScale = 1.0f + 2.4f * s2;
+			const float emitBoost = 1.0f + 7.0f * s2;
+			const float whiten = Clamp(surge * 1.4f, 0.0f, 1.0f);
+			m_material->SetPushConstant("starBoost"_hash, vector3f(sizeScale, emitBoost, whiten), 0.0f);
 			m_pointSprites->Draw(m_renderer, m_material.Get());
 		}
 		// During hyperspace transit, screen transitions to pure white (no old tunnel streak animation).
@@ -694,6 +706,7 @@ namespace Background {
 
 		m_material.Reset(m_renderer->CreateMaterial("starfield", desc, stateDesc, fmt));
 		m_material->emissive = Color::WHITE;
+		m_material->SetPushConstant("starBoost"_hash, vector3f(1.0f, 1.0f, 0.0f), 0.0f);
 
 		m_meshObject.reset(m_renderer->CreateMeshObject(fmt, vtxBuffer));
 	}

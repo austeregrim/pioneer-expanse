@@ -359,6 +359,14 @@ void Camera::Draw(const Body *excludeBody)
 		bgIntensity = Clamp(bgIntensity * (1.0f - maxStarGlare), 0.0f, 1.0f);
 	}
 
+	if (Pi::player && Pi::player->IsHyperspaceJumpSurging()) {
+		const float p = Pi::player->GetHyperspaceJumpSurgeProgress();
+		bgIntensity = bgIntensity + (1.0f - bgIntensity) * Clamp(p * 1.5f, 0.0f, 1.0f);
+	} else if (Pi::game && Pi::game->GetHyperspaceEntryFovFactor() > 0.0f) {
+		const float f = Pi::game->GetHyperspaceEntryFovFactor();
+		bgIntensity = bgIntensity + (1.0f - bgIntensity) * Clamp(f * 1.5f, 0.0f, 1.0f);
+	}
+
 	m_bgIntensity = bgIntensity;
 	Pi::game->GetSpace()->GetBackground()->SetIntensity(bgIntensity);
 	Pi::game->GetSpace()->GetBackground()->Draw(trans2bg);

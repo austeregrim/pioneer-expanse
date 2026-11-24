@@ -272,6 +272,7 @@ local function drawCivilAdministrationSection(station)
 		else
 			ui.bulletText("Subsidized Ship Insurance: 40% reduction on rebuy deductible (3% vs 5%).")
 			ui.bulletText("Academic Cartography Credit: +10% scan value & 25% tax rebate at Home Port.")
+			ui.bulletText("Home Fiduciary Rebate: 20% discount on Financial Manager onboarding fee at Home Port.")
 			ui.bulletText("Faction Legal Standing: System defense patrol protection in core lanes.")
 
 			ui.spacing()
@@ -466,9 +467,12 @@ local function drawCivilAdministrationSection(station)
 				ui.textWrapped("Retain a bonded Financial Manager to monitor quarterly tax statements and automatically settle reported assessments on your behalf—preventing late penalties during multi-month deep-space voyages.")
 			end)
 			ui.spacing()
+			local feeText = mgr.isHomeStationDiscount
+				and string.format("%s (-%d%% Home Station Discount, std %s; tax-deductible)", Format.Money(mgr.hireFee or 2000), mgr.homeDiscountPct or 20, Format.Money(mgr.baseHireFee or 2500))
+				or string.format("%s (tax-deductible operating expense)", Format.Money(mgr.hireFee or 2500))
 			textTable.draw({
 				{ "Available Fiduciary Officer", string.format("%s — %s", mgr.candidateName or "Elena Vance", mgr.candidateTitle or "Senior Tax & Fiduciary Officer") },
-				{ "Onboarding Fee", string.format("%s (tax-deductible operating expense)", Format.Money(mgr.hireFee or 2500)) },
+				{ "Onboarding Fee", feeText },
 				{ "Quarterly Retainer", string.format("%s / quarter (auto-billed at quarter close)", Format.Money(mgr.quarterlyFee or 1500)) },
 			})
 		end
@@ -490,9 +494,12 @@ local function drawCivilAdministrationSection(station)
 			end)
 		else
 			local hireFee = mgr.hireFee or 2500
+			local hireBtnLabel = mgr.isHomeStationDiscount
+				and string.format("HIRE FINANCIAL MANAGER (%s · -%d%% HOME)##lobbyHireMgr", Format.Money(hireFee), mgr.homeDiscountPct or 20)
+				or string.format("HIRE FINANCIAL MANAGER (%s)##lobbyHireMgr", Format.Money(hireFee))
 			if playerMoney >= hireFee then
 				ui.withStyleColors({ Button = colors.uiPrimaryLight, Text = colors.background or colors.font }, function()
-					if ui.button(string.format("HIRE FINANCIAL MANAGER (%s)##lobbyHireMgr", Format.Money(hireFee)), mgrBtnSize) then
+					if ui.button(hireBtnLabel, mgrBtnSize) then
 						local ok, msg = TaxAuthority.HireManager(station)
 						managerStatusBanner = msg
 						managerBannerColor = ok and (colors.econProfit or colors.uiPrimaryLight) or colors.alertRed

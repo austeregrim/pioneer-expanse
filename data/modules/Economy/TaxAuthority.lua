@@ -7,6 +7,7 @@ local Serializer = require 'Serializer'
 local Event = require 'Event'
 local Timer = require 'Timer'
 local Comms = require 'Comms'
+local SystemPath = require 'SystemPath'
 
 local SECONDS_PER_DAY = 24 * 60 * 60
 local RESIDENCY_TERM_DAYS = 90
@@ -14,6 +15,7 @@ local DELINQUENCY_PENALTY_RATE = 0.05
 local WINDFALL_TAX_RATE = 0.30
 
 local MANAGER_HIRE_FEE = 2500
+local MANAGER_HOME_DISCOUNT = 0.20 -- 20% onboarding discount at registered home station
 local MANAGER_QUARTERLY_FEE = 1500
 
 local MONTH_ABBR = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" }
@@ -44,6 +46,8 @@ local function makeDefaultState()
 		homeSystemName = "None",
 		homeFaction = "Stateless / Independent",
 		homeStationPath = nil,
+		homeStationSystemPath = nil,
+		homeSystemPath = nil,
 		residencyTimestamp = 0,
 
 		accruedTax = 0,
@@ -362,8 +366,11 @@ function TaxAuthority.RegisterResidency(station)
 	state.homeSystemName = sysName
 	state.homeFaction = factionName
 	state.homeStationPath = station.path and tostring(station.path) or nil
+	state.homeStationSystemPath = station.path
+	state.homeSystemPath = station.path and station.path:SystemOnly() or (sys and sys.path and sys.path:SystemOnly()) or nil
 	state.residencyTimestamp = Game.time or 0
 
+	TaxAuthority.SyncHomeBookmark()
 	Event.Queue("onResidencyRegistered", stationName, sysName, factionName)
 	return true, string.format("Successfully registered residency at %s (%s, %s). Term: 90 days.", stationName, sysName, factionName)
 end
@@ -684,9 +691,17 @@ local function generateCandidateProfile(station)
 	return name, title
 end
 
+local function getEffectiveManagerHireFee(station)
+	local isHome = (station ~= nil) and TaxAuthority.IsHomeStation(station) or false
+	local discount = isHome and MANAGER_HOME_DISCOUNT or 0.0
+	local fee = math.floor(MANAGER_HIRE_FEE * (1.0 - discount) + 0.5)
+	return fee, isHome, discount
+end
+
 function TaxAuthority.GetManagerInfo(station)
 	local mgr = state.manager or makeDefaultState().manager
 	local candName, candTitle = generateCandidateProfile(station)
+	local hireFee, isHomeDiscount, discountRate = getEffectiveManagerHireFee(station)
 	return {
 		hired = mgr.hired == true,
 		name = mgr.name,
@@ -694,7 +709,10 @@ function TaxAuthority.GetManagerInfo(station)
 		hiredAt = mgr.hiredAt or 0,
 		hiredStation = mgr.hiredStation,
 		quarterlyFee = mgr.quarterlyFee or MANAGER_QUARTERLY_FEE,
-		hireFee = MANAGER_HIRE_FEE,
+		hireFee = hireFee,
+		baseHireFee = MANAGER_HIRE_FEE,
+		isHomeStationDiscount = isHomeDiscount,
+		homeDiscountPct = math.floor(discountRate * 100 + 0.5),
 		totalTaxesSettled = mgr.totalTaxesSettled or 0,
 		statementsSettled = mgr.statementsSettled or 0,
 		lastPaymentNote = mgr.lastPaymentNote,
@@ -711,16 +729,17 @@ function TaxAuthority.HireManager(station)
 	if station and okPenal and PenalSystem and PenalSystem.IsPrisonStation(station) then
 		return false, "Licensed fiduciary agents cannot be contracted at penal facilities."
 	end
+	local hireFee, isHomeDiscount, discountRate = getEffectiveManagerHireFee(station)
 	local cash = PlayerState.GetMoney()
-	if cash < MANAGER_HIRE_FEE then
-		return false, string.format("Insufficient funds to retain a Financial Manager (Requires %d Cr).", MANAGER_HIRE_FEE)
+	if cash < hireFee then
+		return false, string.format("Insufficient funds to retain a Financial Manager (Requires %d Cr).", hireFee)
 	end
 
 	local candName, candTitle = generateCandidateProfile(station)
 	local _, _, curQIdx = getQuarterFromTime(Game.time or 0)
 
-	PlayerState.AddMoney(-MANAGER_HIRE_FEE)
-	TaxAuthority.RecordOperatingExpense(MANAGER_HIRE_FEE, "MANAGER_HIRE", candName)
+	PlayerState.AddMoney(-hireFee)
+	TaxAuthority.RecordOperatingExpense(hireFee, "MANAGER_HIRE", candName)
 
 	state.manager = {
 		hired = true,
@@ -739,17 +758,21 @@ function TaxAuthority.HireManager(station)
 	local okFormat, Format = pcall(require, 'Format')
 	if okFlightLog and FlightLog and FlightLog.RecordTransaction then
 		local fmtMoney = (okFormat and Format and Format.Money) or function(v) return tostring(v) .. " Cr" end
+		local details = {
+			{ "Officer", string.format("%s (%s)", candName, candTitle) },
+			{ "Station Office", state.manager.hiredStation },
+			{ "Signing Retainer", fmtMoney(hireFee) },
+			{ "Quarterly Fee", fmtMoney(MANAGER_QUARTERLY_FEE) .. " / quarter" },
+			{ "Mandate", "Automated settlement of reported quarterly taxes" },
+		}
+		if isHomeDiscount then
+			table.insert(details, 4, { "Home Station Discount", string.format("-%d%% (Standard %s)", math.floor(discountRate * 100 + 0.5), fmtMoney(MANAGER_HIRE_FEE)) })
+		end
 		FlightLog.RecordTransaction({
 			category = "TAX",
-			title = string.format("Retained Financial Manager: %s (%s)", candName, fmtMoney(-MANAGER_HIRE_FEE)),
-			amount = -MANAGER_HIRE_FEE,
-			details = {
-				{ "Officer", string.format("%s (%s)", candName, candTitle) },
-				{ "Station Office", state.manager.hiredStation },
-				{ "Signing Retainer", fmtMoney(MANAGER_HIRE_FEE) },
-				{ "Quarterly Fee", fmtMoney(MANAGER_QUARTERLY_FEE) .. " / quarter" },
-				{ "Mandate", "Automated settlement of reported quarterly taxes" },
-			},
+			title = string.format("Retained Financial Manager: %s (%s)", candName, fmtMoney(-hireFee)),
+			amount = -hireFee,
+			details = details,
 			note = string.format("Hired Financial Manager %s (%s) to automate quarterly tax payments.", candName, candTitle),
 		})
 	end
@@ -1005,11 +1028,131 @@ function TaxAuthority.RecordWindfall(grossWon, taxWithheld)
 	syncSummaryTotals()
 end
 
+local function parseLegacySystemPath(pathStr)
+	if type(pathStr) ~= "string" or pathStr == "" then return nil end
+	local sx, sy, sz, sysIdx, bodyIdx = string.match(pathStr, "^<%s*(-?%d+)%s*,%s*(-?%d+)%s*,%s*(-?%d+)%s*:%s*(%d+)%s*,%s*(%d+)%s*>$")
+	if sx then
+		local ok, p = pcall(SystemPath.New, tonumber(sx), tonumber(sy), tonumber(sz), tonumber(sysIdx), tonumber(bodyIdx))
+		return ok and p or nil
+	end
+	sx, sy, sz, sysIdx = string.match(pathStr, "^<%s*(-?%d+)%s*,%s*(-?%d+)%s*,%s*(-?%d+)%s*:%s*(%d+)%s*>$")
+	if sx then
+		local ok, p = pcall(SystemPath.New, tonumber(sx), tonumber(sy), tonumber(sz), tonumber(sysIdx))
+		return ok and p or nil
+	end
+	return nil
+end
+
+function TaxAuthority.GetHomeStationPath()
+	if not state.isResident then return nil end
+	if not state.homeStationSystemPath and state.homeStationPath then
+		state.homeStationSystemPath = parseLegacySystemPath(state.homeStationPath)
+		if state.homeStationSystemPath and not state.homeSystemPath then
+			state.homeSystemPath = state.homeStationSystemPath:SystemOnly()
+		end
+	end
+	return state.homeStationSystemPath
+end
+
+function TaxAuthority.GetHomeSystemPath()
+	if not state.isResident then return nil end
+	local stPath = TaxAuthority.GetHomeStationPath()
+	if not state.homeSystemPath and stPath then
+		state.homeSystemPath = stPath:SystemOnly()
+	end
+	return state.homeSystemPath
+end
+
+function TaxAuthority.IsHomePath(path)
+	if not path or not state.isResident then return false end
+	local homeStation = TaxAuthority.GetHomeStationPath()
+	local homeSys = TaxAuthority.GetHomeSystemPath()
+	if homeStation and path == homeStation then
+		return true
+	end
+	if homeSys and path:IsSameSystem(homeSys) then
+		return true
+	end
+	return false
+end
+
+function TaxAuthority.SyncHomeBookmark()
+	local bookmarks = PlayerState.GetBookmarks()
+	if not state.isResident then
+		for id, b in pairs(bookmarks) do
+			if b and b.isHome then
+				PlayerState.RemoveBookmark(id, true)
+			end
+		end
+		return
+	end
+
+	-- Backfill native SystemPath if currently docked at the registered home station
+	if not state.homeStationSystemPath and Game.player then
+		local docked = Game.player:GetDockedWith()
+		if docked and docked.label == state.homeStationName and Game.system and Game.system.name == state.homeSystemName then
+			state.homeStationSystemPath = docked.path
+			state.homeSystemPath = docked.path and docked.path:SystemOnly() or nil
+		end
+	end
+
+	local targetPath = TaxAuthority.GetHomeStationPath() or TaxAuthority.GetHomeSystemPath()
+	if not targetPath then return end
+
+	local hasMatchingHome = false
+	local matchingRegularId = nil
+	local staleHomeIds = {}
+
+	for id, b in pairs(bookmarks) do
+		if b and b.isHome then
+			if b.path == targetPath then
+				hasMatchingHome = true
+			else
+				table.insert(staleHomeIds, id)
+			end
+		elseif b and b.path == targetPath then
+			matchingRegularId = id
+		end
+	end
+
+	for _, id in ipairs(staleHomeIds) do
+		PlayerState.RemoveBookmark(id, true)
+	end
+
+	if hasMatchingHome then
+		return
+	end
+
+	if matchingRegularId then
+		local b = bookmarks[matchingRegularId]
+		b.isHome = true
+		if not b.note or b.note == "" then
+			b.note = string.format("Registered Home Station — %s (%s)", state.homeSystemName or "Home", state.homeFaction or "Independent")
+		end
+		PlayerState.UpdateBookmark(matchingRegularId, b)
+	else
+		PlayerState.AddBookmark(targetPath, {
+			isHome = true,
+			note = string.format("Registered Home Station — %s (%s)", state.homeSystemName or "Home", state.homeFaction or "Independent"),
+		})
+	end
+end
+
 function TaxAuthority.IsHomeStation(station)
 	if not station or not state.isResident then return false end
+	local homePath = TaxAuthority.GetHomeStationPath()
+	if homePath and station.path then
+		return station.path == homePath
+	end
 	local label = station.label
 	local sys = Game.system and Game.system.name
-	return (label == state.homeStationName and sys == state.homeSystemName)
+	local matched = (label == state.homeStationName and sys == state.homeSystemName)
+	if matched and station.path and not state.homeStationSystemPath then
+		state.homeStationSystemPath = station.path
+		state.homeSystemPath = station.path:SystemOnly()
+		TaxAuthority.SyncHomeBookmark()
+	end
+	return matched
 end
 
 -- Serialization
@@ -1095,6 +1238,7 @@ end
 Event.Register("onGameStart", function()
 	cachedEpochOffsetSec = nil
 	TaxAuthority.ProcessQuarterlyRollover()
+	TaxAuthority.SyncHomeBookmark()
 	Timer:CallEvery(15, function()
 		if not Game.player then return true end
 		TaxAuthority.ProcessQuarterlyRollover()
@@ -1109,6 +1253,7 @@ end)
 Event.Register("onShipDocked", function(ship)
 	if ship and ship:IsPlayer() then
 		TaxAuthority.ProcessQuarterlyRollover()
+		TaxAuthority.SyncHomeBookmark()
 	end
 end)
 

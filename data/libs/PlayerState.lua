@@ -113,13 +113,19 @@ end
 --
 -- Remove an existing bookmark
 ---@param id BookmarkID
-function PlayerState.RemoveBookmark(id)
+---@param force boolean?
+function PlayerState.RemoveBookmark(id, force)
 	local bookmark = bookmarks[id]
 
 	if bookmark then
+		if bookmark.isHome and not force then
+			return false
+		end
 		bookmarks[id] = nil
 		Event.Queue("onBookmarkChanged", id, bookmark)
+		return true
 	end
+	return false
 end
 
 -- Function: ModifyBookmark

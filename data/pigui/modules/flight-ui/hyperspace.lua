@@ -496,11 +496,6 @@ gameView.registerModule("hyperspace-percentage", {
             if player:IsHyperspaceActive() then
                 displayHyperspaceCountdown()
             end
-            local flashAlpha = Game.GetHyperspaceFlashAlpha and Game.GetHyperspaceFlashAlpha() or 0
-            if flashAlpha > 0.005 then
-                local a = math.min(255, math.max(0, math.floor(flashAlpha * 255)))
-                ui.addRectFilled(Vector2(0, 0), Vector2(ui.screenWidth, ui.screenHeight), Color(255, 255, 255, a), 0, ui.RoundCornersNone)
-            end
         end
     end
 })

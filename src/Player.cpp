@@ -244,6 +244,14 @@ void Player::NotifyRemoved(const Body *const removedBody)
 	Ship::NotifyRemoved(removedBody);
 }
 
+void Player::OnStartHyperspaceJumpSurge()
+{
+	if (!m_hyperspace.sounds.jump_sound.empty()) {
+		s_soundHyperdrive.Play(m_hyperspace.sounds.jump_sound.c_str());
+		m_hyperspaceJumpSoundPlayed = true;
+	}
+}
+
 void Player::OnBeforeEnterHyperspace()
 {
 	Ship::OnBeforeEnterHyperspace();
@@ -254,7 +262,10 @@ void Player::OnBeforeEnterHyperspace()
 //XXX ui stuff
 void Player::OnEnterHyperspace()
 {
-	s_soundHyperdrive.Play(m_hyperspace.sounds.jump_sound.c_str());
+	if (!m_hyperspaceJumpSoundPlayed && !m_hyperspace.sounds.jump_sound.empty()) {
+		s_soundHyperdrive.Play(m_hyperspace.sounds.jump_sound.c_str());
+	}
+	m_hyperspaceJumpSoundPlayed = false;
 	SetNavTarget(0);
 	SetCombatTarget(0);
 	SetFollowTarget(0);
@@ -266,6 +277,7 @@ void Player::OnEnterHyperspace()
 
 void Player::OnEnterSystem()
 {
+	m_hyperspaceJumpSoundPlayed = false;
 	m_controller->SetFlightControlState(CONTROL_MANUAL);
 }
 
@@ -345,6 +357,7 @@ Ship::HyperjumpStatus Player::InitiateHyperjumpTo(const SystemPath &dest, int wa
 			sc->AbortCharge("HYPERJUMP FSD CHARGING");
 	}
 
+	m_hyperspaceJumpSoundPlayed = false;
 	HyperjumpStatus status = Ship::InitiateHyperjumpTo(dest, warmup_time, duration, sounds, checks);
 
 	if (status == HYPERJUMP_OK)
@@ -357,6 +370,7 @@ void Player::AbortHyperjump()
 {
 	if (IsHyperspaceJumpSurging())
 		return;
+	m_hyperspaceJumpSoundPlayed = false;
 	s_soundHyperdrive.Play(m_hyperspace.sounds.abort_sound.c_str());
 	Ship::AbortHyperjump();
 }

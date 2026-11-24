@@ -1,0 +1,15 @@
+## Copyright © 2008-2026 Pioneer Developers. See AUTHORS.txt for details
+## Licensed under the terms of the GPL v3. See licenses/GPL-3.txt
+
+# Hyperjump screen-space projection unwrap/flatten, exposure blowout, and optical bloom
+
+Shader hyperspace_warp
+
+Texture sampler2D texture0
+PushConstant vec4 warpParams
+PushConstant vec4 bloomParams
+
+Buffer DrawData binding=1
+
+Vertex "hyperspace_warp.vert"
+Fragment "hyperspace_warp.frag"

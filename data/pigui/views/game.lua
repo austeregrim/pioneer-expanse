@@ -7,6 +7,7 @@ local Input = require 'Input'
 local Game = require 'Game'
 local utils= require 'utils'
 local Vector2 = _G.Vector2
+local Color = _G.Color
 
 local Lang = require 'Lang'
 local lc = Lang.GetResource("core");
@@ -227,6 +228,14 @@ function gameView:draw()
 	self.leftSidebar:Draw()
 
 	self.rightSidebar:Draw()
+
+	if not Game.InHyperspace() then
+		local flashAlpha = Game.GetHyperspaceFlashAlpha and Game.GetHyperspaceFlashAlpha() or 0
+		if flashAlpha > 0.005 then
+			local a = math.min(255, math.max(0, math.floor(flashAlpha * 255)))
+			ui.addRectFilled(Vector2(0, 0), Vector2(ui.screenWidth, ui.screenHeight), Color(255, 255, 255, a), 0, ui.RoundCornersNone)
+		end
+	end
 end
 
 local function displayScreenshotInfo()

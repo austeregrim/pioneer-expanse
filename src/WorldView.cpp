@@ -24,8 +24,9 @@
 #include "planet/WeatherSystem.h"
 #include "graphics/Graphics.h"
 #include "graphics/Material.h"
-#include "graphics/Renderer.h"
 #include "graphics/RenderState.h"
+#include "graphics/RenderTarget.h"
+#include "graphics/Renderer.h"
 #include "graphics/TextureBuilder.h"
 #include "graphics/VertexArray.h"
 #include "matrix4x4.h"
@@ -136,6 +137,16 @@ void WorldView::InitObject()
 		Graphics::ATTRIB_POSITION | Graphics::ATTRIB_UV0);
 	m_lensFlareMat.reset(Pi::renderer->CreateMaterial("lens_flare", flareDesc, flareRsd, flareVfmt));
 
+	Graphics::RenderStateDesc hyperRsd;
+	hyperRsd.blendMode = Graphics::BLEND_SOLID;
+	hyperRsd.depthWrite = false;
+	hyperRsd.depthTest = false;
+	hyperRsd.cullMode = Graphics::CULL_NONE;
+	Graphics::MaterialDescriptor hyperDesc;
+	hyperDesc.textures = 1;
+	m_hyperWarpMat.reset(Pi::renderer->CreateMaterial("hyperspace_warp", hyperDesc, hyperRsd, flareVfmt));
+	m_hyperBaseFov = Pi::config->Float("FOVVertical");
+
 	/*
 	  NEW UI
 	*/
@@ -238,18 +249,6 @@ void WorldView::Draw3D()
 		}
 	}
 
-	// Contact trails (sublight contacts only; Supercruise ships draw short white/Doppler FTL wakes)
-	if (Pi::AreHudTrailsDisplayed()) {
-		for (auto it = Pi::player->GetSensors()->GetContacts().begin(); it != Pi::player->GetSensors()->GetContacts().end(); ++it) {
-			if (it->body && !it->body->IsDead() && it->body->IsType(ObjectType::SHIP) &&
-				static_cast<const Ship *>(it->body)->GetFlightState() == Ship::SUPERCRUISE) {
-				continue;
-			}
-			if (it->trail)
-				it->trail->Render(m_renderer);
-		}
-	}
-
 	// don't draw crosshairs etc in hyperspace
 	if (Pi::player->GetFlightState() == Ship::HYPERSPACE) {
 		m_cameraContext->EndFrame();
@@ -267,14 +266,29 @@ void WorldView::Draw3D()
 	// Supercruise ships appear as radiant points of light across the system
 	DrawSupercruiseShips();
 
+	// Screen-space projection unwrap/flatten, exposure blowout, and bloom on the physical scene & dust lines only
+	ApplyHyperspaceWarpPostProcess();
+
+	// Artificial 3D/HUD lines drawn after post-process so they stay crisp until the screen goes fully white
+	if (Pi::AreHudTrailsDisplayed()) {
+		m_cameraContext->ApplyDrawTransforms(m_renderer);
+		for (auto it = Pi::player->GetSensors()->GetContacts().begin(); it != Pi::player->GetSensors()->GetContacts().end(); ++it) {
+			if (it->body && !it->body->IsDead() && it->body->IsType(ObjectType::SHIP) &&
+				static_cast<const Ship *>(it->body)->GetFlightState() == Ship::SUPERCRUISE) {
+				continue;
+			}
+			if (it->trail)
+				it->trail->Render(m_renderer);
+		}
+		m_renderer->SetProjection(matrix4x4f::OrthoFrustum(0, m_renderer->GetWindowWidth(), m_renderer->GetWindowHeight(), 0, 0, 1));
+		m_renderer->SetTransform(matrix4x4f::Identity);
+	}
+
 	// Supercruise 3D HUD overlays (orbital path lines & body exclusion zone rings)
 	DrawSupercruiseOverlays();
 
 	// Active planetary surface scan 3D coverage grid sphere
 	DrawSurfaceScanOverlay();
-
-	// Hyperjump star-streaking surge right before hyperspace transit
-	DrawHyperspaceJumpStreaks();
 
 	m_cameraContext->EndFrame();
 
@@ -312,20 +326,28 @@ void WorldView::Update()
 
 	m_viewController->Update();
 
-	// Hyperjump wide-angle FOV warp: widen toward ~360 deg feel during jump-out surge,
-	// and snap back from ultra-wide down to normal FOV when emerging into the destination system.
+	// Hyperjump wide-angle FOV capture for projection unwrapping/flattening:
+	// widen capture FOV during jump-out surge, and smoothly re-wrap when emerging into the destination system.
 	if (Pi::player && m_cameraContext) {
 		const float defaultFov = Pi::config->Float("FOVVertical");
-		const float baseFov = (shipView && !shipView->IsExteriorView()) ? m_cameraContext->GetFovAng() : defaultFov;
-		constexpr float kWarpMaxFov = 168.0f;
-		if (Pi::player->IsHyperspaceJumpSurging()) {
-			const float p = Pi::player->GetHyperspaceJumpSurgeProgress();
-			m_cameraContext->SetFovAng(baseFov + (kWarpMaxFov - baseFov) * (p * p));
-		} else if (m_game && m_game->GetHyperspaceEntryFovFactor() > 0.0f) {
-			const float f = m_game->GetHyperspaceEntryFovFactor();
-			m_cameraContext->SetFovAng(baseFov + (kWarpMaxFov - baseFov) * (f * f));
-		} else if (shipView && shipView->IsExteriorView()) {
-			m_cameraContext->SetFovAng(defaultFov);
+		const bool surging = Pi::player->IsHyperspaceJumpSurging();
+		const float entryFactor = m_game ? m_game->GetHyperspaceEntryFovFactor() : 0.0f;
+		constexpr float kWarpMaxFov = 148.0f;
+
+		if (surging || entryFactor > 0.0f) {
+			if (shipView && !shipView->IsExteriorView()) {
+				m_hyperBaseFov = m_cameraContext->GetFovAng();
+			} else if (!surging && entryFactor <= 0.0f) {
+				m_hyperBaseFov = defaultFov;
+			}
+			const float t = surging ? Pi::player->GetHyperspaceJumpSurgeProgress() : entryFactor;
+			const float fovEase = t * t * (3.0f - 2.0f * t);
+			m_cameraContext->SetFovAng(m_hyperBaseFov + (kWarpMaxFov - m_hyperBaseFov) * fovEase);
+		} else {
+			m_hyperBaseFov = (shipView && !shipView->IsExteriorView()) ? m_cameraContext->GetFovAng() : defaultFov;
+			if (shipView && shipView->IsExteriorView()) {
+				m_cameraContext->SetFovAng(defaultFov);
+			}
 		}
 	}
 
@@ -1673,62 +1695,68 @@ void WorldView::DrawSurfaceScanOverlay()
 	}
 }
 
-void WorldView::DrawHyperspaceJumpStreaks()
+void WorldView::ApplyHyperspaceWarpPostProcess()
 {
-	if (!Pi::player || !Pi::player->IsHyperspaceJumpSurging())
+	if (!m_hyperWarpMat || !m_cameraContext || !Pi::player)
 		return;
 
-	const float p = Pi::player->GetHyperspaceJumpSurgeProgress();
-	if (p <= 0.001f)
+	const bool surging = Pi::player->IsHyperspaceJumpSurging();
+	const float entryFactor = m_game ? m_game->GetHyperspaceEntryFovFactor() : 0.0f;
+	if (!surging && entryFactor <= 0.001f)
 		return;
 
-	const float winW = float(m_renderer->GetWindowWidth());
-	const float winH = float(m_renderer->GetWindowHeight());
-	const float cx = winW * 0.5f;
-	const float cy = winH * 0.5f;
-	const float maxR = std::sqrt(cx * cx + cy * cy) * 1.2f;
+	Graphics::RenderTarget *activeRT = m_renderer->GetRenderTarget();
+	const int winW = m_renderer->GetWindowWidth();
+	const int winH = m_renderer->GetWindowHeight();
+	if (!activeRT || winW <= 0 || winH <= 0)
+		return;
 
-	std::vector<vector3f> cyanStreaks;
-	std::vector<vector3f> whiteStreaks;
-	constexpr int NUM_RAYS = 260;
-	cyanStreaks.reserve(NUM_RAYS);
-	whiteStreaks.reserve(NUM_RAYS * 2);
-
-	const float surgeEase = p * p;
-	for (int i = 0; i < NUM_RAYS; ++i) {
-		// Deterministic quasi-random angle and radial phase per ray
-		const float fi = float(i);
-		const float ang = std::fmod(fi * 2.3999632f, 2.0f * float(M_PI));
-		const float phase = std::fmod(fi * 0.6180339f + 0.17f * std::sin(fi * 1.31f), 1.0f);
-		const float speedFactor = 0.65f + 0.70f * std::fmod(fi * 0.371f, 1.0f);
-
-		const float travel = std::fmod(phase + p * (1.2f + 2.4f * surgeEase) * speedFactor, 1.0f);
-		const float rOuter = 18.0f + std::pow(travel, 1.45f) * maxR;
-		const float streakLen = (24.0f + 380.0f * surgeEase) * (0.35f + 0.65f * (rOuter / maxR));
-		const float rInner = std::max(8.0f, rOuter - streakLen);
-
-		const float dx = std::cos(ang);
-		const float dy = std::sin(ang);
-		const vector3f p0(cx + dx * rInner, cy + dy * rInner, 0.0f);
-		const vector3f p1(cx + dx * rOuter, cy + dy * rOuter, 0.0f);
-
-		if (i % 3 == 0 && p < 0.85f) {
-			cyanStreaks.push_back(p0);
-			cyanStreaks.push_back(p1);
-		} else {
-			whiteStreaks.push_back(p0);
-			whiteStreaks.push_back(p1);
-		}
+	if (!m_hyperResolveRT || m_hyperResolveRT->GetDesc().width != uint16_t(winW) || m_hyperResolveRT->GetDesc().height != uint16_t(winH)) {
+		Graphics::RenderTargetDesc resolveDesc(
+			uint16_t(winW), uint16_t(winH),
+			Graphics::TEXTURE_RGBA_8888,
+			Graphics::TEXTURE_NONE,
+			false, 0);
+		m_hyperResolveRT.reset(m_renderer->CreateRenderTarget(resolveDesc));
+		if (!m_hyperResolveRT)
+			return;
 	}
 
-	if (!cyanStreaks.empty()) {
-		const Uint8 alpha = Uint8(Clamp(int((140.0f + 115.0f * p)), 0, 255));
-		m_indicator.SetData(cyanStreaks.size(), cyanStreaks.data(), Color(140, 225, 255, alpha));
-		m_indicator.Draw(m_renderer, m_indicatorMat.get());
+	const Graphics::ViewportExtents ext{ 0, 0, winW, winH };
+	if (activeRT->GetDesc().numSamples > 0) {
+		m_renderer->ResolveRenderTarget(activeRT, m_hyperResolveRT.get(), ext);
+	} else {
+		m_renderer->CopyRenderTarget(activeRT, m_hyperResolveRT.get(), ext, ext, false);
 	}
-	if (!whiteStreaks.empty()) {
-		const Uint8 alpha = Uint8(Clamp(int((185.0f + 70.0f * p)), 0, 255));
-		m_indicator.SetData(whiteStreaks.size(), whiteStreaks.data(), Color(255, 255, 255, alpha));
-		m_indicator.Draw(m_renderer, m_indicatorMat.get());
-	}
+
+	const float prog = Clamp(surging ? Pi::player->GetHyperspaceJumpSurgeProgress() : entryFactor, 0.0f, 1.0f);
+	auto smooth01 = [](float e0, float e1, float x) -> float {
+		float t = Clamp((x - e0) / (e1 - e0), 0.0f, 1.0f);
+		return t * t * (3.0f - 2.0f * t);
+	};
+
+	const float warpAmount = smooth01(0.0f, 0.85f, prog);
+	const float tanBase = std::tan(DEG2RAD(m_hyperBaseFov) * 0.5f);
+	const float tanCap = std::tan(DEG2RAD(m_cameraContext->GetFovAng()) * 0.5f);
+	const float aspect = float(winW) / std::max(1.0f, float(winH));
+	const float bloomStrength = 0.9f + 2.6f * prog;
+	const float bloomRadius = 0.006f + 0.058f * (prog * prog);
+	const float whiteoutFloor = (prog > 0.76f) ? Clamp(std::pow((prog - 0.76f) / 0.20f, 1.8f), 0.0f, 1.0f) : 0.0f;
+
+	m_renderer->SetProjection(matrix4x4f::OrthoFrustum(0.0f, float(winW), float(winH), 0.0f, 0.0f, 1.0f));
+	m_renderer->SetTransform(matrix4x4f::Identity);
+
+	m_hyperWarpMat->SetTexture("texture0"_hash, m_hyperResolveRT->GetColorTexture());
+	m_hyperWarpMat->SetPushConstant("warpParams"_hash, vector3f(warpAmount, tanBase, tanCap), aspect);
+	m_hyperWarpMat->SetPushConstant("bloomParams"_hash, vector3f(prog, bloomStrength, bloomRadius), whiteoutFloor);
+
+	Graphics::VertexArray quad(Graphics::ATTRIB_POSITION | Graphics::ATTRIB_UV0);
+	quad.Add(vector3f(0.0f, 0.0f, 0.0f), vector2f(0.0f, 1.0f));
+	quad.Add(vector3f(float(winW), 0.0f, 0.0f), vector2f(1.0f, 1.0f));
+	quad.Add(vector3f(float(winW), float(winH), 0.0f), vector2f(1.0f, 0.0f));
+	quad.Add(vector3f(0.0f, 0.0f, 0.0f), vector2f(0.0f, 1.0f));
+	quad.Add(vector3f(float(winW), float(winH), 0.0f), vector2f(1.0f, 0.0f));
+	quad.Add(vector3f(0.0f, float(winH), 0.0f), vector2f(0.0f, 0.0f));
+
+	m_renderer->DrawBuffer(&quad, m_hyperWarpMat.get());
 }

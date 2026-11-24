@@ -67,6 +67,7 @@ public:
 protected:
 	virtual void SaveToJson(Json &jsonObj, Space *space) override;
 
+	virtual void OnStartHyperspaceJumpSurge() override;
 	virtual void OnEnterSystem() override;
 	virtual void OnBeforeEnterHyperspace() override;
 	virtual void OnEnterHyperspace() override;
@@ -79,6 +80,7 @@ private:
 	float m_takeoffTimer;
 	float m_takeoffDuration;
 	bool m_takeoffFromStation;
+	bool m_hyperspaceJumpSoundPlayed = false;
 };
 
 #endif /* _PLAYER_H */

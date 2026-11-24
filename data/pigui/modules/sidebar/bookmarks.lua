@@ -25,6 +25,18 @@ local icons = ui.theme.icons
 local pionillium = ui.fonts.pionillium
 local orbiteer = ui.fonts.orbiteer
 
+local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
+local homeIconTex = ui.loadTextureFromSVG(ui.dataDirPath({ "icons", "home.svg" }), 64, 64)
+
+local function isHomeBookmark(bookmark)
+	if not bookmark then return false end
+	if bookmark.isHome then return true end
+	if okTax and TaxAuthority and TaxAuthority.IsHomePath and bookmark.path then
+		return TaxAuthority.IsHomePath(bookmark.path)
+	end
+	return false
+end
+
 local bookmarkListStyle = themeStyles.sidebar:clone({
 	colors = {},
 	vars = {
@@ -192,7 +204,15 @@ function BookmarkView:rebuildBookmarks()
 		return route_a < route_b
 	end
 
-	table.sort(bookmarkList, sorts[self.sortMode])
+	local baseCmp = sorts[self.sortMode]
+	table.sort(bookmarkList, function(a, b)
+		local homeA = (bookmarks[a].isHome == true)
+		local homeB = (bookmarks[b].isHome == true)
+		if homeA ~= homeB then
+			return homeA
+		end
+		return baseCmp(a, b)
+	end)
 
 	self.bookmarks = bookmarkList
 end
@@ -267,6 +287,22 @@ end
 
 ---@param bookmark SystemBookmark
 function BookmarkView:drawTitleLine(bookmark, id)
+	local icon_size = Vector2(ui.getTextLineHeight())
+	local isPinnedHome = (bookmark.isHome == true)
+	local showHomeIcon = isPinnedHome or isHomeBookmark(bookmark)
+
+	if showHomeIcon then
+		local iconPos = ui.getCursorScreenPos()
+		ui.dummy(icon_size)
+		if homeIconTex then
+			ui.addImage(homeIconTex, iconPos, iconPos + icon_size, Vector2(0.0, 0.0), Vector2(1.0, 1.0), Color(255, 205, 70, 255))
+		else
+			ui.addIcon(iconPos + icon_size * 0.5, icons.star, Color(255, 205, 70, 255), icon_size, ui.anchor.center, ui.anchor.center)
+		end
+		ui.setItemTooltip(bookmark.path:IsBodyPath() and "Registered Home Station" or "Registered Home System")
+		ui.sameLine()
+	end
+
 	ui.text(get_bookmark_name(bookmark.path))
 
 	-- Compute sizing requirements for distance + buttons
@@ -274,10 +310,10 @@ function BookmarkView:drawTitleLine(bookmark, id)
 	local dist_text = ui.Format.Number(distance, 1) .. lc.UNIT_LY
 
 	local dist_size = ui.calcTextSize(dist_text, pionillium.details)
-	local icon_size = Vector2(ui.getTextLineHeight())
 
 	local line_height = ui.getTextLineHeight()
-	local util_width = dist_size.x + (icon_size.x + ui.getItemSpacing().x) * 3
+	local btnCount = isPinnedHome and 2 or 3
+	local util_width = dist_size.x + (icon_size.x + ui.getItemSpacing().x) * btnCount
 
 	-- Small system name after body name
 	if bookmark.path:IsBodyPath() then
@@ -319,8 +355,10 @@ function BookmarkView:drawTitleLine(bookmark, id)
 			bookmarkEdit:open()
 		end
 
-		if ui.iconButton("delete_" .. id, icons.cross, lui.DELETE_BOOKMARK, nil, icon_size) then
-			self:message("removeBookmark", id)
+		if not isPinnedHome then
+			if ui.iconButton("delete_" .. id, icons.cross, lui.DELETE_BOOKMARK, nil, icon_size) then
+				self:message("removeBookmark", id)
+			end
 		end
 
 	end)

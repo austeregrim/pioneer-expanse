@@ -15,6 +15,10 @@ class SpeedLines;
 class WeatherEffects;
 class Game;
 
+namespace Graphics {
+	class RenderTarget;
+}
+
 enum VelIconType {
 	V_PROGRADE,
 	V_RETROGRADE,
@@ -105,7 +109,7 @@ private:
 	void DrawStarLensFlare();
 	void DrawSupercruiseOverlays();
 	void DrawSurfaceScanOverlay();
-	void DrawHyperspaceJumpStreaks();
+	void ApplyHyperspaceWarpPostProcess();
 
 	struct SurfaceScanOverlay {
 		const Body *body = nullptr;
@@ -144,6 +148,9 @@ private:
 	Graphics::Drawables::Lines m_indicator;
 	std::unique_ptr<Graphics::Material> m_scGlowMat;
 	std::unique_ptr<Graphics::Material> m_lensFlareMat;
+	std::unique_ptr<Graphics::Material> m_hyperWarpMat;
+	std::unique_ptr<Graphics::RenderTarget> m_hyperResolveRT;
+	float m_hyperBaseFov = 65.0f;
 
 	struct InputBinding : public Input::InputFrame {
 		using InputFrame::InputFrame;

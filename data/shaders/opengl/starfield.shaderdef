@@ -4,6 +4,7 @@
 Shader starfield
 
 Texture sampler2D texture0
+PushConstant vec4 starBoost
 Buffer DrawData binding=1
 
 Vertex "starfield.vert"

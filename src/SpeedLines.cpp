@@ -74,8 +74,9 @@ void SpeedLines::Update(float time)
 
 	float d;
 	if (inJumpSurge) {
-		m_lineLength = 240.f;
-		d = MAX_VEL * (time * 60.0f);
+		const float surge = m_ship->GetHyperspaceJumpSurgeProgress();
+		m_lineLength = 120.f + 380.f * (surge * surge);
+		d = MAX_VEL * (time * (45.0f + 65.0f * surge));
 	} else if (inSupercruise) {
 		const double logNorm = Clamp(std::log10(std::max(absVelD, 30000.0) / 30000.0) / 7.3, 0.0, 1.0);
 		m_lineLength = float(65.0 + 175.0 * logNorm);
@@ -131,9 +132,11 @@ void SpeedLines::Render(Graphics::Renderer *r)
 	//distance fade
 	const bool inSupercruise = m_ship && (m_ship->GetFlightState() == Ship::SUPERCRUISE);
 	const bool inJumpSurge = m_ship && (m_ship->GetFlightState() == Ship::JUMPING);
-	Color col = inJumpSurge ? Color(235, 248, 255, 255) : (inSupercruise ? Color(125, 210, 255, 255) : Color(Color::GRAY));
+	const float surge = inJumpSurge ? m_ship->GetHyperspaceJumpSurgeProgress() : 0.0f;
+	Color col = inJumpSurge ? Color(255, 255, 255, 255) : (inSupercruise ? Color(125, 210, 255, 255) : Color(Color::GRAY));
 	for (auto it = m_points.begin(); it != m_points.end(); ++it) {
-		col.a = Clamp((1.f - it->Length() / BOUNDS), 0.f, 1.f) * 255;
+		const float baseAlpha = inJumpSurge ? (1.0f + 0.45f * surge - it->Length() / BOUNDS) : (1.0f - it->Length() / BOUNDS);
+		col.a = Clamp(baseAlpha, 0.f, 1.f) * 255;
 
 		m_varray->Set(vtx, *it - dir, col);
 		m_varray->Set(vtx + 1, *it + dir, col);

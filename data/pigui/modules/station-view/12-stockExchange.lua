@@ -55,10 +55,22 @@ local megacorpSort  = { id = "ticker", dir = 1 }
 local localSort     = { id = "ticker", dir = 1 }
 local portfolioSort = { id = "value",  dir = -1 }
 
-local function getTrendPct(history)
-	if not history or #history < 2 then return 0 end
-	local sliceCount = math.min(#history, 15)
-	local firstP = history[#history - sliceCount + 1].close
+local function getHistoryWindow(history, timeframe)
+	if not history then return 1, 0 end
+	local n = #history
+	local windowCount = n
+	if timeframe == "7D" then windowCount = math.min(7, n)
+	elseif timeframe == "14D" then windowCount = math.min(14, n)
+	elseif timeframe == "30D" then windowCount = math.min(30, n)
+	end
+	local startIndex = math.max(1, n - windowCount + 1)
+	return startIndex, windowCount
+end
+
+local function getTrendPct(history, timeframe)
+	local startIndex, windowCount = getHistoryWindow(history, timeframe or selectedTimeframe)
+	if windowCount < 2 then return 0 end
+	local firstP = history[startIndex].close
 	local lastP = history[#history].close
 	if not firstP or firstP <= 0 then return 0 end
 	return ((lastP - firstP) / firstP) * 100.0
@@ -87,37 +99,41 @@ local function formatVol(vol)
 end
 
 -- Render mini sparkline trendline for table rows
-local function drawMiniSparkline(pos, width, height, history)
-	if not history or #history < 2 then
+local function drawMiniSparkline(pos, width, height, history, timeframe)
+	local startIndex, windowCount = getHistoryWindow(history, timeframe or selectedTimeframe)
+	if windowCount < 2 then
 		ui.addLine(Vector2(pos.x, pos.y + height * 0.5), Vector2(pos.x + width, pos.y + height * 0.5), Color(70, 80, 95, 120), 1.0)
 		return
 	end
 
-	-- Extract last 15-20 data points
-	local sliceCount = math.min(#history, 15)
-	local minP, maxP = history[#history - sliceCount + 1].close, history[#history - sliceCount + 1].close
-	for i = #history - sliceCount + 1, #history do
-		local p = history[i].close
-		if p < minP then minP = p end
-		if p > maxP then maxP = p end
+	local firstRec = history[startIndex]
+	local minP = firstRec.low or firstRec.close
+	local maxP = firstRec.high or firstRec.close
+	for i = startIndex, #history do
+		local r = history[i]
+		local lo = r.low or r.close
+		local hi = r.high or r.close
+		if lo < minP then minP = lo end
+		if hi > maxP then maxP = hi end
 	end
-	local rangeP = math.max(1.0, maxP - minP)
+	local rangeP = math.max(0.01, maxP - minP)
 
-	local firstP = history[#history - sliceCount + 1].close
+	local firstP = firstRec.close
 	local lastP = history[#history].close
 	local isUp = (lastP >= firstP)
 	local lineColor = isUp and Color(65, 235, 140, 230) or Color(255, 95, 95, 230)
-	local fillColor = isUp and Color(40, 180, 100, 35) or Color(180, 50, 50, 35)
 
 	-- Subtle sparkline background box
 	ui.addRectFilled(pos, Vector2(pos.x + width, pos.y + height), Color(20, 25, 35, 140), 2.0, ui.RoundCornersAll)
 
-	local stepX = width / (sliceCount - 1)
+	local padX = 2.0
+	local plotW = math.max(1.0, width - padX * 2.0)
+	local stepX = plotW / math.max(1, windowCount - 1)
 	local prevPt = nil
-	for idx = 1, sliceCount do
-		local rec = history[#history - sliceCount + idx]
+	for idx = 1, windowCount do
+		local rec = history[startIndex + idx - 1]
 		local normY = 1.0 - ((rec.close - minP) / rangeP)
-		local pt = Vector2(pos.x + (idx - 1) * stepX, pos.y + 2 + normY * (height - 4))
+		local pt = Vector2(pos.x + padX + (idx - 1) * stepX, pos.y + 2 + normY * (height - 4))
 		if prevPt then
 			ui.addLine(prevPt, pt, lineColor, 1.4)
 		end
@@ -128,36 +144,39 @@ end
 -- Render interactive Bloomberg-grade canvas chart with price curve / candles + volume histogram
 local function drawInteractiveStockChart(canvasPos, width, height, history, timeframe, mode)
 	-- Determine timeframe window
-	local windowCount = #history
-	if timeframe == "7D" then windowCount = math.min(7, #history)
-	elseif timeframe == "14D" then windowCount = math.min(14, #history)
-	elseif timeframe == "30D" then windowCount = math.min(30, #history)
-	end
+	local startIndex, windowCount = getHistoryWindow(history, timeframe)
 	if windowCount < 2 then
 		ui.addRectFilled(canvasPos, Vector2(canvasPos.x + width, canvasPos.y + height), Color(15, 18, 26, 255), 4.0, ui.RoundCornersAll)
 		ui.addText(Vector2(canvasPos.x + 20, canvasPos.y + 40), colors.fontDim, "Insufficient market history for selected interval.")
 		return
 	end
 
-	local startIndex = #history - windowCount + 1
-	local minP, maxP = history[startIndex].low, history[startIndex].high
+	local firstRec = history[startIndex]
+	local minP = firstRec.low or firstRec.close
+	local maxP = firstRec.high or firstRec.close
 	local maxVol = 1
 	for i = startIndex, #history do
 		local r = history[i]
-		if r.low < minP then minP = r.low end
-		if r.high > maxP then maxP = r.high end
-		if r.volume > maxVol then maxVol = r.volume end
+		local lo = r.low or r.close
+		local hi = r.high or r.close
+		if lo < minP then minP = lo end
+		if hi > maxP then maxP = hi end
+		if (r.volume or 0) > maxVol then maxVol = r.volume end
 	end
-	local rangeP = math.max(1.0, maxP - minP)
+	local rangeP = math.max(0.01, maxP - minP)
 
-	-- Geometry partitioning:
-	-- Price chart: Top 72%
-	-- Volume chart: Bottom 25%
-	local chartW = width - 75 -- Leave 75px for price axis labels on right
-	local priceH = height * 0.70
-	local volH = height * 0.23
-	local volBaseY = canvasPos.y + height - 12
-	local volTopY = volBaseY - volH
+	-- Strict plot boundaries inside the chart border
+	local axisLabelW = 75
+	local plotLeft = canvasPos.x + 4
+	local plotRight = canvasPos.x + math.max(44, width - axisLabelW - 4)
+	local plotW = math.max(1.0, plotRight - plotLeft)
+	local priceTop = canvasPos.y + 12
+	local priceBot = canvasPos.y + math.floor(height * 0.68)
+	local priceSpan = math.max(10.0, priceBot - priceTop)
+	local volSepY = priceBot + 8
+	local volTopY = volSepY + 4
+	local volBaseY = canvasPos.y + height - 6
+	local volH = math.max(8.0, volBaseY - volTopY)
 
 	-- Background plate & grid
 	ui.addRectFilled(canvasPos, Vector2(canvasPos.x + width, canvasPos.y + height), Color(12, 15, 22, 255), 4.0, ui.RoundCornersAll)
@@ -166,42 +185,47 @@ local function drawInteractiveStockChart(canvasPos, width, height, history, time
 	-- Price Horizontal Gridlines (4 levels)
 	for lvl = 0, 3 do
 		local normLvl = lvl / 3.0
-		local yLine = canvasPos.y + 12 + normLvl * (priceH - 24)
+		local yLine = priceTop + normLvl * priceSpan
 		local pVal = maxP - normLvl * rangeP
-		ui.addLine(Vector2(canvasPos.x, yLine), Vector2(canvasPos.x + chartW, yLine), Color(40, 50, 70, 75), 1.0)
-		ui.addText(Vector2(canvasPos.x + chartW + 6, yLine - 6), Color(130, 155, 180, 200), string.format("%.0f Cr", pVal))
+		ui.addLine(Vector2(plotLeft, yLine), Vector2(plotRight, yLine), Color(40, 50, 70, 75), 1.0)
+		ui.addText(Vector2(plotRight + 6, yLine - 6), Color(130, 155, 180, 200), string.format("%.0f Cr", pVal))
 	end
 
 	-- Volume separator baseline
-	ui.addLine(Vector2(canvasPos.x, volTopY - 4), Vector2(canvasPos.x + chartW, volTopY - 4), Color(50, 65, 90, 120), 1.0)
-	ui.addText(Vector2(canvasPos.x + chartW + 6, volTopY - 4), Color(110, 130, 160, 180), formatVol(maxVol))
+	ui.addLine(Vector2(plotLeft, volSepY), Vector2(plotRight, volSepY), Color(50, 65, 90, 120), 1.0)
+	ui.addText(Vector2(plotRight + 6, volTopY - 2), Color(110, 130, 160, 180), formatVol(maxVol))
 
-	local stepX = chartW / math.max(1, (windowCount - 1))
-	local barWidth = math.max(2.0, (stepX * 0.65))
+	local slotW = plotW / math.max(1, windowCount)
+	local barWidth = math.clamp(slotW * 0.65, 2.0, 28.0)
 
-	-- 1. Draw Volume Bars
+	-- 1. Draw Volume Bars (strictly contained inside [plotLeft, plotRight] and [volTopY, volBaseY])
 	for i = 1, windowCount do
 		local rec = history[startIndex + i - 1]
-		local barX = canvasPos.x + (i - 1) * stepX
-		local vRatio = math.clamp(rec.volume / maxVol, 0.0, 1.0)
+		local barX = plotLeft + (i - 0.5) * slotW
+		local vRatio = math.clamp((rec.volume or 0) / maxVol, 0.0, 1.0)
 		local barH = vRatio * volH
 		local isGreen = (rec.close >= rec.open)
 		local vCol = isGreen and Color(65, 225, 130, 160) or Color(245, 80, 80, 160)
-		ui.addRectFilled(Vector2(barX - barWidth * 0.5, volBaseY - barH), Vector2(barX + barWidth * 0.5, volBaseY), vCol, 1.0, ui.RoundCornersAll)
+		local x0 = math.max(plotLeft, barX - barWidth * 0.5)
+		local x1 = math.min(plotRight, barX + barWidth * 0.5)
+		local y0 = math.max(volTopY, volBaseY - barH)
+		if (volBaseY - y0) >= 1.0 and x1 > x0 then
+			ui.addRectFilled(Vector2(x0, y0), Vector2(x1, volBaseY), vCol, 1.0, ui.RoundCornersTop)
+		end
 	end
 
 	-- 2. Draw Price Representation (Area Curve or Candlestick)
 	if mode == "CANDLES" then
 		for i = 1, windowCount do
 			local rec = history[startIndex + i - 1]
-			local barX = canvasPos.x + (i - 1) * stepX
+			local barX = plotLeft + (i - 0.5) * slotW
 			local isGreen = (rec.close >= rec.open)
 			local bodyCol = isGreen and Color(65, 235, 140, 240) or Color(255, 85, 85, 240)
 
-			local yOpen = canvasPos.y + 12 + (1.0 - (rec.open - minP) / rangeP) * (priceH - 24)
-			local yClose = canvasPos.y + 12 + (1.0 - (rec.close - minP) / rangeP) * (priceH - 24)
-			local yHigh = canvasPos.y + 12 + (1.0 - (rec.high - minP) / rangeP) * (priceH - 24)
-			local yLow = canvasPos.y + 12 + (1.0 - (rec.low - minP) / rangeP) * (priceH - 24)
+			local yOpen = priceTop + (1.0 - (rec.open - minP) / rangeP) * priceSpan
+			local yClose = priceTop + (1.0 - (rec.close - minP) / rangeP) * priceSpan
+			local yHigh = priceTop + (1.0 - (rec.high - minP) / rangeP) * priceSpan
+			local yLow = priceTop + (1.0 - (rec.low - minP) / rangeP) * priceSpan
 
 			-- Upper & Lower Wick
 			ui.addLine(Vector2(barX, yHigh), Vector2(barX, yLow), bodyCol, 1.2)
@@ -209,7 +233,9 @@ local function drawInteractiveStockChart(canvasPos, width, height, history, time
 			local topY = math.min(yOpen, yClose)
 			local botY = math.max(yOpen, yClose)
 			if (botY - topY) < 2.0 then botY = topY + 2.0 end
-			ui.addRectFilled(Vector2(barX - barWidth * 0.5, topY), Vector2(barX + barWidth * 0.5, botY), bodyCol, 1.0, ui.RoundCornersAll)
+			local x0 = math.max(plotLeft, barX - barWidth * 0.5)
+			local x1 = math.min(plotRight, barX + barWidth * 0.5)
+			ui.addRectFilled(Vector2(x0, topY), Vector2(x1, botY), bodyCol, 1.0, ui.RoundCornersAll)
 		end
 	else
 		-- Smooth Area Curve with Shaded Fill
@@ -219,8 +245,8 @@ local function drawInteractiveStockChart(canvasPos, width, height, history, time
 
 		for i = 1, windowCount do
 			local rec = history[startIndex + i - 1]
-			local curX = canvasPos.x + (i - 1) * stepX
-			local curY = canvasPos.y + 12 + (1.0 - (rec.close - minP) / rangeP) * (priceH - 24)
+			local curX = plotLeft + (i - 0.5) * slotW
+			local curY = priceTop + (1.0 - (rec.close - minP) / rangeP) * priceSpan
 			local pt = Vector2(curX, curY)
 
 			if prevPt then
@@ -228,7 +254,7 @@ local function drawInteractiveStockChart(canvasPos, width, height, history, time
 				ui.addLine(prevPt, pt, curveColor, 2.0)
 				-- Draw shaded drop column under curve
 				local shadeCol = isOverallUp and Color(40, 190, 110, 22) or Color(190, 45, 45, 22)
-				ui.addRectFilled(Vector2(prevPt.x, prevPt.y), Vector2(pt.x, volTopY - 4), shadeCol, 0, ui.RoundCornersNone)
+				ui.addRectFilled(Vector2(prevPt.x, prevPt.y), Vector2(pt.x, volSepY), shadeCol, 0, ui.RoundCornersNone)
 			end
 			prevPt = pt
 		end
@@ -236,13 +262,13 @@ local function drawInteractiveStockChart(canvasPos, width, height, history, time
 
 	-- 3. Interactive Mouse Hover Crosshair & Tooltip
 	local mousePos = ui.getMousePos()
-	if mousePos.x >= canvasPos.x and mousePos.x <= (canvasPos.x + chartW) and
+	if mousePos.x >= plotLeft and mousePos.x <= plotRight and
 	   mousePos.y >= canvasPos.y and mousePos.y <= (canvasPos.y + height) then
-		local relX = mousePos.x - canvasPos.x
-		local hoverIdx = math.clamp(math.floor((relX / stepX) + 0.5) + 1, 1, windowCount)
+		local relX = mousePos.x - plotLeft
+		local hoverIdx = math.clamp(math.floor(relX / slotW) + 1, 1, windowCount)
 		local rec = history[startIndex + hoverIdx - 1]
-		local snapX = canvasPos.x + (hoverIdx - 1) * stepX
-		local snapY = canvasPos.y + 12 + (1.0 - (rec.close - minP) / rangeP) * (priceH - 24)
+		local snapX = plotLeft + (hoverIdx - 0.5) * slotW
+		local snapY = priceTop + (1.0 - (rec.close - minP) / rangeP) * priceSpan
 
 		-- Vertical cursor crosshair
 		ui.addLine(Vector2(snapX, canvasPos.y), Vector2(snapX, canvasPos.y + height), Color(160, 200, 255, 140), 1.0)
@@ -251,7 +277,7 @@ local function drawInteractiveStockChart(canvasPos, width, height, history, time
 
 		-- Floating Inspection HUD Box
 		local hudW, hudH = 175, 78
-		local hudX = (snapX + hudW + 16 < canvasPos.x + chartW) and (snapX + 12) or (snapX - hudW - 12)
+		local hudX = (snapX + hudW + 16 < plotRight) and (snapX + 12) or (snapX - hudW - 12)
 		local hudY = math.clamp(snapY - 35, canvasPos.y + 8, canvasPos.y + height - hudH - 8)
 		ui.addRectFilled(Vector2(hudX, hudY), Vector2(hudX + hudW, hudY + hudH), Color(10, 14, 20, 240), 3.0, ui.RoundCornersAll)
 		ui.addRect(Vector2(hudX, hudY), Vector2(hudX + hudW, hudY + hudH), Color(65, 160, 220, 180), 3.0, ui.RoundCornersAll, 1.0)
@@ -345,7 +371,7 @@ local function drawStockExchange()
 				corp = corp,
 				hist = hist,
 				stats = stats,
-				trendPct = getTrendPct(hist),
+				trendPct = getTrendPct(hist, selectedTimeframe),
 			})
 		end
 		table.sort(megacorpRows, function(a, b)
@@ -385,7 +411,7 @@ local function drawStockExchange()
 				ui.columns(5, "##megacorpCols", true)
 				ui.text("TICKER") ui.nextColumn()
 				ui.text("CONGLOMERATE") ui.nextColumn()
-				ui.text("TREND (30D)") ui.nextColumn()
+				ui.text("TREND (" .. selectedTimeframe .. ")") ui.nextColumn()
 				ui.text("PRICE") ui.nextColumn()
 				ui.text("24H CHG") ui.nextColumn()
 				ui.separator()
@@ -405,7 +431,7 @@ local function drawStockExchange()
 					local sparkPos = ui.getCursorScreenPos()
 					local sparkW, sparkH = 75, 18
 					ui.dummy(Vector2(sparkW, sparkH))
-					drawMiniSparkline(sparkPos, sparkW, sparkH, row.hist)
+					drawMiniSparkline(sparkPos, sparkW, sparkH, row.hist, selectedTimeframe)
 					ui.nextColumn()
 
 					ui.text(formatMoney(corp.price))
@@ -478,7 +504,7 @@ local function drawStockExchange()
 
 				-- Main Interactive Financial Chart Canvas
 				local chartPos = ui.getCursorScreenPos()
-				local chartW = rightW - 24
+				local chartW = math.max(200, math.floor(ui.getContentRegion().x))
 				local chartH = math.clamp(math.floor(ui.getContentRegion().y - 220), 130, 220)
 				ui.dummy(Vector2(chartW, chartH))
 				local history = StockExchange.GetStockHistory(corp.ticker)
@@ -638,7 +664,7 @@ local function drawStockExchange()
 			table.insert(localRows, {
 				corp = c,
 				hist = hist,
-				trendPct = getTrendPct(hist),
+				trendPct = getTrendPct(hist, selectedTimeframe),
 			})
 		end
 		table.sort(localRows, function(a, b)
@@ -678,7 +704,7 @@ local function drawStockExchange()
 				ui.columns(5, "##localCols", true)
 				ui.text("TICKER") ui.nextColumn()
 				ui.text("ENTERPRISE") ui.nextColumn()
-				ui.text("TREND (30D)") ui.nextColumn()
+				ui.text("TREND (" .. selectedTimeframe .. ")") ui.nextColumn()
 				ui.text("PRICE") ui.nextColumn()
 				ui.text("PARENT") ui.nextColumn()
 				ui.separator()
@@ -701,7 +727,7 @@ local function drawStockExchange()
 					local sparkPos = ui.getCursorScreenPos()
 					local sparkW, sparkH = 75, 18
 					ui.dummy(Vector2(sparkW, sparkH))
-					drawMiniSparkline(sparkPos, sparkW, sparkH, row.hist)
+					drawMiniSparkline(sparkPos, sparkW, sparkH, row.hist, selectedTimeframe)
 					ui.nextColumn()
 
 					ui.text(formatMoney(c.price))
@@ -776,7 +802,7 @@ local function drawStockExchange()
 
 				-- Main Interactive Financial Chart Canvas
 				local chartPos = ui.getCursorScreenPos()
-				local chartW = rightW - 24
+				local chartW = math.max(200, math.floor(ui.getContentRegion().x))
 				local chartH = math.clamp(math.floor(ui.getContentRegion().y - 190), 130, 220)
 				ui.dummy(Vector2(chartW, chartH))
 				local history = StockExchange.GetStockHistory(selectedLocal.ticker)
@@ -876,7 +902,7 @@ local function drawStockExchange()
 					holding = h,
 					stock = stock,
 					hist = hist,
-					trendPct = getTrendPct(hist),
+					trendPct = getTrendPct(hist, selectedTimeframe),
 					curVal = curVal,
 					pnl = pnl,
 					pnlPct = pnlPct,
@@ -951,7 +977,7 @@ local function drawStockExchange()
 					ui.columns(6, "##portfolioCols", true)
 					ui.text("TICKER") ui.nextColumn()
 					ui.text("HOLDING") ui.nextColumn()
-					ui.text("TREND (30D)") ui.nextColumn()
+					ui.text("TREND (" .. selectedTimeframe .. ")") ui.nextColumn()
 					ui.text("SHARES") ui.nextColumn()
 					ui.text("MKT VALUE") ui.nextColumn()
 					ui.text("PROFIT/LOSS") ui.nextColumn()
@@ -972,7 +998,7 @@ local function drawStockExchange()
 						local sparkPos = ui.getCursorScreenPos()
 						local sparkW, sparkH = 75, 18
 						ui.dummy(Vector2(sparkW, sparkH))
-						drawMiniSparkline(sparkPos, sparkW, sparkH, row.hist)
+						drawMiniSparkline(sparkPos, sparkW, sparkH, row.hist, selectedTimeframe)
 						ui.nextColumn()
 
 						local shareStr = h.isMegacorp and string.format("%.3f", h.shares) or string.format("%d", math.floor(h.shares))
@@ -1066,7 +1092,7 @@ local function drawStockExchange()
 
 				-- Main Interactive Financial Chart Canvas
 				local chartPos = ui.getCursorScreenPos()
-				local chartW = rightW - 24
+				local chartW = math.max(200, math.floor(ui.getContentRegion().x))
 				local chartH = 200
 				ui.dummy(Vector2(chartW, chartH))
 				local history = StockExchange.GetStockHistory(selectedHolding.ticker)

@@ -2200,6 +2200,7 @@ void Ship::StaticUpdate(const float timeStep)
 						m_hyperspace.jumpSurgeDuration = HYPERJUMP_SURGE_DURATION;
 						SetAngVelocity(vector3d::Zero);
 						SetFlightState(JUMPING);
+						OnStartHyperspaceJumpSurge();
 					}
 				}
 			}

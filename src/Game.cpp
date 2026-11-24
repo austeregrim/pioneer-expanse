@@ -391,11 +391,12 @@ void Game::TimeStep(float step)
 
 	if (m_player && m_player->IsHyperspaceJumpSurging()) {
 		const float p = m_player->GetHyperspaceJumpSurgeProgress();
-		m_hyperspaceFlashAlpha = (p > 0.30f) ? Clamp(float(std::pow((p - 0.30f) / 0.70f, 1.45f)), 0.0f, 1.0f) : 0.0f;
+		// Keep artificial HUD lines crisp until the physical world has blown out completely white (p >= 0.92)
+		m_hyperspaceFlashAlpha = (p > 0.92f) ? Clamp((p - 0.92f) / 0.08f, 0.0f, 1.0f) : 0.0f;
 		m_hyperspaceEntryFovTimer = 0.0f;
 	} else {
 		if (m_hyperspaceFlashAlpha > 0.0f) {
-			m_hyperspaceFlashAlpha = std::max(0.0f, m_hyperspaceFlashAlpha - step / 0.55f);
+			m_hyperspaceFlashAlpha = std::max(0.0f, m_hyperspaceFlashAlpha - step / 0.16f);
 		}
 		if (m_hyperspaceEntryFovTimer > 0.0f) {
 			m_hyperspaceEntryFovTimer = std::max(0.0f, m_hyperspaceEntryFovTimer - step);
