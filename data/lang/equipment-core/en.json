@@ -47,6 +47,22 @@
     "description": "",
     "message": "Advanced FSD flight computer featuring Supercruise Assist (automatic 75% blue-zone throttle regulation, target alignment, and safe disengage drop-out) plus automated station docking."
   },
+  "AUTOPILOT_MK3": {
+    "description": "",
+    "message": "Autopilot Mk 3 (Navigation Computer)"
+  },
+  "AUTOPILOT_MK3_DESCRIPTION": {
+    "description": "",
+    "message": "Smart FSD navigation suite featuring prograde gravity-well departure routing, predictive anti-overshoot braking, full-throttle deep-space cruise, and safe tangential planetary orbit capture instead of impact."
+  },
+  "AUTOPILOT_MK4": {
+    "description": "",
+    "message": "Autopilot Mk 4 (Survey Navigation Suite)"
+  },
+  "AUTOPILOT_MK4_DESCRIPTION": {
+    "description": "",
+    "message": "Expedition-grade FSD flight computer integrating all Mk 3 smart navigation capabilities with autonomous multi-planet Supercruise survey orchestration: automatically cruises between queued Scan Manager bodies, enters safe orbital or polar surface-mapping sweeps, and advances the queue unattended."
+  },
   "FSD_INTERDICTOR_1": {
     "description": "",
     "message": "Class 1 FSD Interdictor"

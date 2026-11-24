@@ -31,6 +31,14 @@
     "description": "Descriptive name for the BottomCamera action.",
     "message": "Switch to Bottom Camera"
   },
+  "BIND_CLEAR_COMBAT_TARGET": {
+    "description": "Descriptive name for the ClearCombatTarget action.",
+    "message": "Deselect Combat Target"
+  },
+  "BIND_CLEAR_NAV_TARGET": {
+    "description": "Descriptive name for the ClearNavTarget action.",
+    "message": "Deselect Navigation Target"
+  },
   "BIND_CAMERA_PITCH": {
     "description": "Descriptive name for the Camera Pitch axis.",
     "message": "Camera Pitch"

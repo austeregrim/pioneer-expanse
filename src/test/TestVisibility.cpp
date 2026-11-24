@@ -187,3 +187,106 @@ TEST_CASE("Supercruise entry threshold and smooth acceleration transition")
 	}
 	CHECK(speed == doctest::Approx(SupercruiseController::MIN_SPEED));
 }
+
+TEST_CASE("SupercruiseAutopilotMk3AndMk4")
+{
+	SUBCASE("ComputeSafeSurveyOrbitRadius")
+	{
+		// Standard rocky planet (~6,000 km radius, exclusion ~7,800 km), orbital scan up to 60,000 km
+		const double planetR = 6.0e6;
+		const double planetExcl = 7.8e6;
+		const double rOrbit = SupercruiseController::ComputeSafeSurveyOrbitRadius(
+			planetExcl, planetR, false, false, 0.0, 0.0, 60.0e6, 0.0, false);
+		CHECK(rOrbit >= planetExcl * 1.35);
+		CHECK(rOrbit <= 60.0e6 * 0.90);
+
+		// Tiny moon/asteroid (20 km radius) still enforces >= 250 km turn-rate radius floor
+		const double tinyR = SupercruiseController::ComputeSafeSurveyOrbitRadius(
+			30.0e3, 20.0e3, false, false, 0.0, 0.0, 10.0e6, 0.0, false);
+		CHECK(tinyR >= 250000.0);
+
+		// Star enforces corona clearance (>= max(excl * 2.1, bodyRadius * 2.5))
+		const double starR = 7.0e8;
+		const double starExcl = 1.4e9;
+		const double starOrbit = SupercruiseController::ComputeSafeSurveyOrbitRadius(
+			starExcl, starR, true, false, 0.0, 0.0, 10.0e9, 0.0, false);
+		CHECK(starOrbit >= starExcl * 2.1);
+
+		// Ringed gas giant:
+		// 1) Equatorial orbit requested inside the ring band pushes outside outer ring edge (> ringOuter * 1.15)
+		const double ggR = 7.0e7;
+		const double ggExcl = 8.4e7;
+		const double ringIn = 1.6e8;
+		const double ringOut = 2.4e8;
+		const double eqOrbit = SupercruiseController::ComputeSafeSurveyOrbitRadius(
+			ggExcl, ggR, false, true, ringIn, ringOut, 5.0e8, 2.0e8, false);
+		CHECK(eqOrbit >= ringOut * 1.15);
+
+		// 2) Polar sweep with inner clearance can skim inside inner ring edge
+		const double polarOrbit = SupercruiseController::ComputeSafeSurveyOrbitRadius(
+			ggExcl, ggR, false, true, ringIn, ringOut, 5.0e8, 2.0e8, true);
+		CHECK(polarOrbit < ringIn);
+		CHECK(polarOrbit >= ggExcl * 1.28);
+
+		// 3) Tight inner ring that would intrude inside exclusion clearance pushes polar sweep outside rings
+		const double tightPolarOrbit = SupercruiseController::ComputeSafeSurveyOrbitRadius(
+			ggExcl, ggR, false, true, 1.0e8, 1.8e8, 5.0e8, 1.2e8, true);
+		CHECK(tightPolarOrbit >= 1.8e8 * 1.15);
+	}
+
+	SUBCASE("ComputeAssistApproachThrottle")
+	{
+		// assistLevel: 1 = Autopilot Mk 2, 2 = Autopilot Mk 3, 3 = Autopilot Mk 4
+		// Mk 3 / Mk 4 use full 1.0 throttle in aligned deep space
+		const double mk3Deep = SupercruiseController::ComputeAssistApproachThrottle(
+			1.0e12, 5.0e8, 1.0e10, 1.0, false, false, 2);
+		CHECK(mk3Deep == doctest::Approx(1.0));
+		const double mk4Deep = SupercruiseController::ComputeAssistApproachThrottle(
+			1.0e12, 5.0e8, 1.0e10, 1.0, false, true, 3);
+		CHECK(mk4Deep == doctest::Approx(1.0));
+
+		// Mk 2 (assistLevel 1) caps cruise throttle at 0.75
+		const double mk2Deep = SupercruiseController::ComputeAssistApproachThrottle(
+			1.0e12, 5.0e8, 1.0e10, 1.0, false, false, 1);
+		CHECK(mk2Deep == doctest::Approx(0.75));
+
+		// Slowdown warning or high closing velocity triggers predictive braking on Mk 3 / Mk 4
+		const double mk3Brake = SupercruiseController::ComputeAssistApproachThrottle(
+			1.0e8, 8.0e7, 5.0e6, 1.0, true, false, 2);
+		CHECK(mk3Brake < 0.3);
+		const double mk4Brake = SupercruiseController::ComputeAssistApproachThrottle(
+			1.0e8, 8.0e7, 5.0e6, 1.0, true, true, 3);
+		CHECK(mk4Brake < 0.3);
+
+		// Mk 2 (assistLevel 1) brakes to 0.15 only near orbit (< 1.5 Mm) when overspeeding
+		const double mk2OrbitBrake = SupercruiseController::ComputeAssistApproachThrottle(
+			1.0e6, 2.0e6, 5.0e6, 1.0, true, true, 1);
+		CHECK(mk2OrbitBrake == doctest::Approx(0.15));
+	}
+
+	SUBCASE("ComputeOrbitSteeringDir")
+	{
+		const double orbitR = 1.0e7;
+		const double exclR = 5.0e6;
+		const vector3d tangent(0.0, 1.0, 0.0);
+
+		// Far approach (> 2.2 * orbitR) steers toward limb point rather than direct center
+		const vector3d farToBody(5.0e7, 0.0, 0.0);
+		const vector3d farDir = SupercruiseController::ComputeOrbitSteeringDir(farToBody, tangent, orbitR, exclR);
+		CHECK(farDir.Length() == doctest::Approx(1.0));
+		CHECK(farDir.y > 0.1);
+		CHECK(farDir.x > 0.8);
+
+		// At exact orbit radius, steers essentially along tangent
+		const vector3d onOrbitToBody(orbitR, 0.0, 0.0);
+		const vector3d onOrbitDir = SupercruiseController::ComputeOrbitSteeringDir(onOrbitToBody, tangent, orbitR, exclR);
+		CHECK(onOrbitDir.Length() == doctest::Approx(1.0));
+		CHECK(onOrbitDir.y > 0.95);
+
+		// Inside exclusion safety zone (< 1.18 * exclR), pushes strongly outward away from body
+		const vector3d closeToBody(exclR * 1.05, 0.0, 0.0);
+		const vector3d escapeDir = SupercruiseController::ComputeOrbitSteeringDir(closeToBody, tangent, orbitR, exclR);
+		CHECK(escapeDir.Length() == doctest::Approx(1.0));
+		CHECK(escapeDir.x < -0.5);
+	}
+}

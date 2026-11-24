@@ -51,6 +51,11 @@ public:
 		INTERDICT_TARGET
 	};
 
+	enum AssistMode {
+		ASSIST_APPROACH = 0,
+		ASSIST_ORBIT_SCAN = 1
+	};
+
 	SupercruiseController(Ship *ship);
 	~SupercruiseController() = default;
 
@@ -109,11 +114,21 @@ public:
 	double GetTargetDistance() const { return m_targetDistance; }
 	double GetTargetETA() const { return m_targetETA; }
 
-	// Supercruise Assist (Autopilot Mk 2)
+	// Supercruise Assist (Autopilot Mk 2 / Mk 3 / Mk 4)
+	int GetAssistLevel() const;
 	bool HasAssistModule() const;
 	bool IsAssistActive() const { return m_assistActive; }
 	void SetAssistActive(bool active, bool dockOnArrival = false);
 	void ToggleAssist();
+
+	// Planetary Orbit & Autonomous Survey Orbit (Autopilot Mk 3 / Mk 4)
+	bool IsOrbitHoldActive() const { return m_assistActive && m_orbitHoldActive; }
+	bool IsSurveyOrbitActive() const { return m_assistActive && m_assistMode == ASSIST_ORBIT_SCAN; }
+	Body *GetSurveyOrbitBody() const { return (m_assistMode == ASSIST_ORBIT_SCAN) ? m_surveyOrbitBody : nullptr; }
+	double GetSurveyOrbitRadius() const { return m_orbitTargetRadius; }
+	bool IsSurveyOrbitPolar() const { return m_orbitPolarPrecess; }
+	bool SetSurveyOrbitTarget(Body *body, double requestedRadius, bool polarSweep);
+	void ClearSurveyOrbit();
 
 	// Actions
 	bool Toggle();
@@ -174,6 +189,114 @@ public:
 	// Compute exclusion zone radius (in meters) from body center
 	static double GetExclusionZoneRadius(const Body *body);
 	static double GetExclusionZoneRadiusAtDir(const Body *body, const vector3d &unitDirInBodyFrame);
+
+	// Pure Supercruise Assist math helpers (inline so unit tests link without Pi/GuiApplication)
+	static inline double ComputeSafeSurveyOrbitRadius(
+		double exclR, double bodyRadius, bool isStar, bool hasRings,
+		double ringInnerR, double ringOuterR, double maxScanDist,
+		double requestedRadius, bool polarSweep)
+	{
+		double minSafeR = std::max(exclR * 1.28, 250000.0);
+		if (isStar) {
+			minSafeR = std::max(minSafeR, std::max(bodyRadius * 2.8, exclR * 2.4));
+		}
+
+		double safeR = (requestedRadius > 0.0)
+			? std::max(requestedRadius, minSafeR)
+			: std::max(minSafeR * 1.15, exclR + 400000.0);
+
+		if (hasRings && ringOuterR > ringInnerR) {
+			if (safeR >= ringInnerR * 0.88 && safeR <= ringOuterR * 1.16) {
+				if (polarSweep && ringInnerR * 0.82 >= minSafeR) {
+					safeR = ringInnerR * 0.82;
+				} else {
+					safeR = std::max(safeR, ringOuterR * 1.22);
+				}
+			}
+		}
+
+		if (maxScanDist > minSafeR) {
+			const double upperCap = maxScanDist * 0.88;
+			if (safeR > upperCap) {
+				if (hasRings && ringInnerR * 0.82 >= minSafeR && upperCap < ringOuterR * 1.16) {
+					safeR = ringInnerR * 0.82;
+				} else {
+					safeR = upperCap;
+				}
+			}
+		}
+
+		return std::max(safeR, minSafeR);
+	}
+
+	static inline double ComputeAssistApproachThrottle(
+		double effectiveDist, double currentSpeed, double maxEnvSpeed,
+		double closingDot, bool slowDownWarning, bool isOrbitMode, int assistLevel)
+	{
+		if (assistLevel <= 0)
+			return 0.75;
+
+		if (assistLevel == 1) {
+			if (isOrbitMode && effectiveDist < 1500000.0 && currentSpeed > SAFE_DISENGAGE_SPEED * 1.05) {
+				return 0.15;
+			}
+			return 0.75;
+		}
+
+		// Mk 3 / Mk 4 smart predictive braking & deep-space full cruise
+		const double safeBrakeSpeed = std::max(MIN_SPEED, effectiveDist / 6.5);
+		if (slowDownWarning || (effectiveDist < 120.0 * LIGHT_SPEED && currentSpeed > safeBrakeSpeed * 1.08)) {
+			const double refSpeed = std::max(MIN_SPEED, std::min(safeBrakeSpeed, std::max(MIN_SPEED, maxEnvSpeed)));
+			const double excess = std::max(0.0, (currentSpeed - refSpeed) / std::max(refSpeed, 1.0));
+			return std::clamp(0.60 - excess * 0.90, 0.0, 0.60);
+		}
+
+		if (effectiveDist < 15.0 * LIGHT_SPEED && closingDot < 0.80) {
+			const double turnCap = std::max(MIN_SPEED, effectiveDist * (closingDot > 0.25 ? 0.14 : 0.08));
+			if (currentSpeed > turnCap * 1.05) {
+				return std::clamp(0.50 * (turnCap / std::max(currentSpeed, 1.0)), 0.10, 0.55);
+			}
+			return 0.75;
+		}
+
+		const double cruiseDistThresh = isOrbitMode ? (20.0 * LIGHT_SPEED) : (15.0 * LIGHT_SPEED);
+		const double cruiseSpeedMargin = isOrbitMode ? 0.78 : 0.80;
+		if (effectiveDist > cruiseDistThresh && closingDot > 0.92 && currentSpeed < safeBrakeSpeed * cruiseSpeedMargin) {
+			return 1.0;
+		}
+
+		return 0.75;
+	}
+
+	static inline vector3d ComputeOrbitSteeringDir(
+		const vector3d &toBody, const vector3d &tangentDir,
+		double orbitRadius, double exclRadius)
+	{
+		const double dist = toBody.Length();
+		if (dist < 1.0) {
+			return (tangentDir.LengthSqr() > 0.1) ? tangentDir.Normalized() : vector3d(0.0, 0.0, -1.0);
+		}
+
+		const vector3d uBS = -toBody / dist;
+		vector3d tPerp = tangentDir - uBS * tangentDir.Dot(uBS);
+		if (tPerp.LengthSqr() < 1e-6) {
+			const vector3d refAxis = (std::abs(uBS.y) < 0.9) ? vector3d(0.0, 1.0, 0.0) : vector3d(1.0, 0.0, 0.0);
+			tPerp = uBS.Cross(refAxis);
+		}
+		tPerp = tPerp.Normalized();
+
+		if (dist > orbitRadius * 2.2) {
+			const vector3d limbPoint = toBody + tPerp * orbitRadius;
+			return limbPoint.NormalizedSafe();
+		}
+
+		double radBias = std::clamp(((orbitRadius - dist) / std::max(orbitRadius, 1.0)) * 1.8, -0.55, 0.70);
+		if (exclRadius > 0.0 && dist < exclRadius * 1.18) {
+			radBias = std::max(radBias, 0.75);
+		}
+		const double tangWeight = std::sqrt(std::max(0.05, 1.0 - radBias * radBias));
+		return (tPerp * tangWeight + uBS * radBias).NormalizedSafe();
+	}
 
 	// Advance Supercruise speed for one timestep, smoothly ramping from sublight entry speed through MIN_SPEED
 	static inline double StepSpeed(double currentSpeed, double desiredSpeed, double throttle, double gravityStrain, bool inBlueZoneOrAssist, float timeStep)
@@ -240,6 +363,14 @@ private:
 
 	bool m_assistActive = false;
 	bool m_dockOnArrival = false;
+	AssistMode m_assistMode = ASSIST_APPROACH;
+	bool m_orbitHoldActive = false;
+	bool m_orbitPolarPrecess = false;
+	double m_orbitTargetRadius = 0.0;
+	double m_orbitPlaneAngle = 0.0;
+	Body *m_surveyOrbitBody = nullptr;
+	int m_surveyOrbitBodyIndex = 0;
+	double GetActiveOrbitRadius(const Body *body) const;
 	Planet *m_ringDropPlanet = nullptr;
 	Planet *m_ringImmersionPlanet = nullptr;
 

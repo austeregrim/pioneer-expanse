@@ -162,6 +162,11 @@ function ScanManager:Constructor(ship)
 	-- is there a currently running scan callback
 	self.activeCallback = false
 
+	-- Autopilot Mk 4 autonomous survey state
+	self.autoSurveyActive = false
+	self.autoSurveyTimerActive = false
+	self.autoSurveyEngagedSC = false
+
 	self:SetupShipEquipListener()
 end
 
@@ -357,6 +362,20 @@ local function isSameBodyPath(p1, p2)
 	return tostring(p1) == tostring(p2)
 end
 
+local function insertScanGrouped(self, scanData)
+	for idx, existing in ipairs(self.pendingScans) do
+		if isSameBodyPath(existing.bodyPath, scanData.bodyPath) then
+			if scanData.orbital and not existing.orbital then
+				table.insert(self.pendingScans, idx, scanData)
+			else
+				table.insert(self.pendingScans, idx + 1, scanData)
+			end
+			return
+		end
+	end
+	table.insert(self.pendingScans, scanData)
+end
+
 function ScanManager:GetScanStatusForBody(bodyPath, isOrbital)
 	if self.activeScan and isSameBodyPath(self.activeScan.bodyPath, bodyPath) and self.activeScan.orbital == isOrbital then
 		return "ACTIVE", self.activeScan
@@ -468,7 +487,7 @@ function ScanManager:AddNewSurfaceScan(bodyPath, minResolution, requiredCoverage
 	local scanData = ScanData.New(id, bodyPath, minResolution, 1.0, false)
 
 	self.scanMap[id] = scanData
-	table.insert(self.pendingScans, scanData)
+	insertScanGrouped(self, scanData)
 
 	return id
 end
@@ -486,7 +505,7 @@ function ScanManager:AddNewOrbitalScan(bodyPath, minResolution, requiredCoverage
 	local scanData = ScanData.New(id, bodyPath, minResolution, requiredCoverage, true)
 
 	self.scanMap[id] = scanData
-	table.insert(self.pendingScans, scanData)
+	insertScanGrouped(self, scanData)
 
 	return id
 end
@@ -582,7 +601,7 @@ function ScanManager:StartFreeScan(body, isOrbital)
 	local scanData = ScanData.New(id, body.path, 1e9, targetCov, isOrbital)
 	scanData.freeScan = true
 	self.scanMap[id] = scanData
-	table.insert(self.pendingScans, scanData)
+	insertScanGrouped(self, scanData)
 
 	-- If we have no active scan, auto-select sensor and activate immediately!
 	if not self.activeScan then
@@ -598,38 +617,234 @@ function ScanManager:StartFreeScan(body, isOrbital)
 	return id
 end
 
--- Move any scan for the given body to the top of the queue and activate it immediately
+-- Move all scans for the given body to the top of the queue (Orbital before Surface) and activate
 ---@param body Body
 ---@return boolean success
 function ScanManager:PrioritizeBodyInQueue(body)
 	if not body or not body.path then return false end
-	if self.activeScan and isSameBodyPath(self.activeScan.bodyPath, body.path) then
-		return true -- Already actively scanning this body
-	end
 
-	-- Check pendingScans for any scan targeting this body
-	local bestIdx = nil
-	for idx, s in ipairs(self.pendingScans) do
+	local bodyPending = {}
+	local others = {}
+	for _, s in ipairs(self.pendingScans) do
 		if isSameBodyPath(s.bodyPath, body.path) then
-			-- Prefer orbital scan first if not complete, otherwise surface scan
-			if not bestIdx then
-				bestIdx = idx
-			elseif s.orbital and not self.pendingScans[bestIdx].orbital then
-				bestIdx = idx
-			end
+			table.insert(bodyPending, s)
+		else
+			table.insert(others, s)
 		end
 	end
 
-	if bestIdx then
-		local scan = table.remove(self.pendingScans, bestIdx)
-		table.insert(self.pendingScans, 1, scan)
-		if self:CanScanBeActivated(scan.id) then
-			self:SetActiveScan(scan.id)
+	table.sort(bodyPending, function(a, b)
+		if a.orbital ~= b.orbital then
+			return a.orbital == true
+		end
+		return false
+	end)
+
+	if self.activeScan and isSameBodyPath(self.activeScan.bodyPath, body.path) then
+		if #bodyPending > 0 then
+			self.pendingScans = {}
+			for _, s in ipairs(bodyPending) do table.insert(self.pendingScans, s) end
+			for _, s in ipairs(others) do table.insert(self.pendingScans, s) end
 		end
 		return true
 	end
 
-	return false
+	if #bodyPending == 0 then
+		return false
+	end
+
+	self.pendingScans = {}
+	for _, s in ipairs(bodyPending) do table.insert(self.pendingScans, s) end
+	for _, s in ipairs(others) do table.insert(self.pendingScans, s) end
+
+	for _, s in ipairs(bodyPending) do
+		if self:CanScanBeActivated(s.id) then
+			self:SetActiveScan(s.id)
+			return true
+		end
+	end
+	return true
+end
+
+-- Helper to rebuild active/pending scan slots from a flat ordered array
+function ScanManager:applyQueueOrder(ordered)
+	local firstScan = ordered[1]
+	self.pendingScans = {}
+	for i = 2, #ordered do
+		table.insert(self.pendingScans, ordered[i])
+	end
+
+	if self.activeScan and self.activeScan ~= firstScan then
+		Event.Queue("onScanPaused", self.ship, self.activeScan.id)
+		self.activeScan = nil
+		self.activeCallback = nil
+		self.withinParameters = false
+		Game.SetSurfaceScanOverlay(nil)
+	end
+
+	if not firstScan or self.activeScan == firstScan then
+		return
+	end
+
+	if self:CanScanBeActivated(firstScan.id) then
+		local _, sensorIdx = self:HasSensorForScan(firstScan)
+		if sensorIdx and (not self.activeSensor or self.activeSensor.orbital ~= firstScan.orbital) then
+			self:SetActiveSensor(sensorIdx)
+		end
+		self.activeScan = firstScan
+		self.withinParameters = false
+		self:StartScanCallback()
+	else
+		table.insert(self.pendingScans, 1, firstScan)
+	end
+end
+
+-- Group and optionally resort all queued scans by body so orbital & surface scans stay paired
+---@param sortMode string? "body" | "distance" | "name"
+function ScanManager:GroupQueueByBody(sortMode)
+	local all = {}
+	if self.activeScan then
+		table.insert(all, self.activeScan)
+	end
+	for _, s in ipairs(self.pendingScans) do
+		table.insert(all, s)
+	end
+	if #all <= 1 then return end
+
+	local groups = {}
+	local groupMap = {}
+	local curSysPath = Game.system and Game.system.path
+	for idx, s in ipairs(all) do
+		local key = tostring(s.bodyPath)
+		local g = groupMap[key]
+		if not g then
+			local sb = s.bodyPath.GetSystemBody and s.bodyPath:GetSystemBody()
+			local body = self:GetScanBodyByType(s)
+			local inCurSys = (curSysPath and s.bodyPath.IsSameSystem and s.bodyPath:IsSameSystem(curSysPath)) or (body ~= nil)
+			local dist = (body and self.ship) and self.ship:GetPositionRelTo(body):length() or math.huge
+			g = {
+				key = key,
+				firstIdx = idx,
+				inCurSys = inCurSys and 0 or 1,
+				dist = dist,
+				name = string.lower((sb and sb.name) or key),
+				scans = {},
+			}
+			groupMap[key] = g
+			table.insert(groups, g)
+		end
+		table.insert(g.scans, s)
+	end
+
+	for _, g in ipairs(groups) do
+		table.sort(g.scans, function(a, b)
+			if a.orbital ~= b.orbital then
+				return a.orbital == true
+			end
+			return false
+		end)
+	end
+
+	table.sort(groups, function(a, b)
+		if a.inCurSys ~= b.inCurSys then
+			return a.inCurSys < b.inCurSys
+		end
+		if sortMode == "distance" then
+			if a.dist ~= b.dist then return a.dist < b.dist end
+		elseif sortMode == "name" then
+			if a.name ~= b.name then return a.name < b.name end
+		end
+		if a.firstIdx ~= b.firstIdx then
+			return a.firstIdx < b.firstIdx
+		end
+		return false
+	end)
+
+	local ordered = {}
+	for _, g in ipairs(groups) do
+		for _, s in ipairs(g.scans) do
+			table.insert(ordered, s)
+		end
+	end
+	self:applyQueueOrder(ordered)
+end
+
+-- Move an individual scan up (delta < 0) or down (delta > 0) in the queue
+function ScanManager:MoveScanInQueue(scanId, delta)
+	local all = {}
+	if self.activeScan then table.insert(all, self.activeScan) end
+	for _, s in ipairs(self.pendingScans) do table.insert(all, s) end
+
+	local curIdx = nil
+	for i, s in ipairs(all) do
+		if s.id == scanId then curIdx = i; break end
+	end
+	if not curIdx then return false end
+
+	local newIdx = math.clamp(curIdx + (delta < 0 and -1 or 1), 1, #all)
+	if newIdx == curIdx then return false end
+
+	local elem = table.remove(all, curIdx)
+	table.insert(all, newIdx, elem)
+	self:applyQueueOrder(all)
+	return true
+end
+
+-- Move all scans for a given bodyPath together up or down past the neighboring body group
+function ScanManager:MoveBodyGroupInQueue(bodyPath, delta)
+	self:GroupQueueByBody("body")
+	local all = {}
+	if self.activeScan then table.insert(all, self.activeScan) end
+	for _, s in ipairs(self.pendingScans) do table.insert(all, s) end
+	if #all <= 1 then return false end
+
+	local groups = {}
+	local curKey = nil
+	local targetGroupIdx = nil
+	for _, s in ipairs(all) do
+		local k = tostring(s.bodyPath)
+		if k ~= curKey then
+			curKey = k
+			table.insert(groups, { key = k, scans = {} })
+			if isSameBodyPath(s.bodyPath, bodyPath) then
+				targetGroupIdx = #groups
+			end
+		end
+		table.insert(groups[#groups].scans, s)
+	end
+	if not targetGroupIdx then return false end
+
+	local newGIdx = math.clamp(targetGroupIdx + (delta < 0 and -1 or 1), 1, #groups)
+	if newGIdx == targetGroupIdx then return false end
+
+	local grp = table.remove(groups, targetGroupIdx)
+	table.insert(groups, newGIdx, grp)
+
+	local ordered = {}
+	for _, g in ipairs(groups) do
+		for _, s in ipairs(g.scans) do table.insert(ordered, s) end
+	end
+	self:applyQueueOrder(ordered)
+	return true
+end
+
+-- Cancel all free survey scans while preserving mission contract scans
+function ScanManager:ClearFreeScans()
+	local toCancel = {}
+	if self.activeScan and self.activeScan.freeScan then
+		table.insert(toCancel, self.activeScan.id)
+	end
+	for _, s in ipairs(self.pendingScans) do
+		if s.freeScan then
+			table.insert(toCancel, s.id)
+		end
+	end
+	for _, id in ipairs(toCancel) do
+		self:CancelScan(id)
+	end
+	if #toCancel > 0 and self.autoSurveyActive and not self.activeScan and #self.pendingScans == 0 then
+		self:SetAutoSurveyActive(false)
+	end
 end
 
 -- Automatically activate the next scan in the queue if one is viable
@@ -651,8 +866,23 @@ end
 -- Clear the currently active scan and running callback
 function ScanManager:ClearActiveScan()
 	if self.activeScan then
-		table.insert(self.pendingScans, self.activeScan)
-		Event.Queue("onScanPaused", self.ship, self.activeScan.id)
+		local paused = self.activeScan
+		local inserted = false
+		for idx, existing in ipairs(self.pendingScans) do
+			if isSameBodyPath(existing.bodyPath, paused.bodyPath) then
+				if paused.orbital and not existing.orbital then
+					table.insert(self.pendingScans, idx, paused)
+				else
+					table.insert(self.pendingScans, idx + 1, paused)
+				end
+				inserted = true
+				break
+			end
+		end
+		if not inserted then
+			table.insert(self.pendingScans, 1, paused)
+		end
+		Event.Queue("onScanPaused", self.ship, paused.id)
 	end
 
 	self.activeScan = nil
@@ -892,6 +1122,161 @@ function ScanManager:OnUpdateScan(scan)
 end
 
 --=============================================================================
+-- Autopilot Mk 4: Autonomous Multi-Planet Supercruise Survey Orchestrator
+--=============================================================================
+
+function ScanManager:HasAutoSurveyModule()
+	return self.ship and self.ship.GetSupercruiseAssistLevel and self.ship:GetSupercruiseAssistLevel() >= 3
+end
+
+function ScanManager:IsAutoSurveyActive()
+	return self.autoSurveyActive == true
+end
+
+function ScanManager:GetRecommendedScanOrbitRadius(body, isOrbital)
+	local sbody = body and body:GetSystemBody()
+	local r = sbody and sbody.radius or 6371000
+	local maxDist = getScanMaxDistance(body, isOrbital)
+	if isOrbital then
+		if sbody and sbody.superType == "STAR" then
+			return math.min(maxDist * 0.65, math.max(r * 3.5, 2500000))
+		end
+		return math.min(maxDist * 0.65, math.max(r * 2.8, 1200000))
+	else
+		return math.min(maxDist * 0.60, math.max(r * 2.2, 600000))
+	end
+end
+
+function ScanManager:UpdateAutoSurvey()
+	if not self.autoSurveyActive then
+		self.autoSurveyTimerActive = false
+		return true
+	end
+
+	local ship = self.ship
+	if not ship or not ship:exists() or ship ~= Game.player or (Game.InHyperspace and Game.InHyperspace()) then
+		self.autoSurveyActive = false
+		self.autoSurveyTimerActive = false
+		return true
+	end
+
+	local fs = ship:GetFlightState()
+	if fs == "DOCKED" or fs == "LANDED" or not self:HasAutoSurveyModule() or (ship.IsBeingInterdicted and ship:IsBeingInterdicted()) then
+		self:SetAutoSurveyActive(false)
+		return true
+	end
+
+	-- Respect manual disengagement: once SC/charging started, if player drops out or toggles SC Assist off, yield control
+	if self.autoSurveyEngagedSC then
+		local inSC = ship.IsSupercruiseActive and ship:IsSupercruiseActive()
+		local charging = ship.IsSupercruiseCharging and ship:IsSupercruiseCharging()
+		local surveyOrbitOn = ship.IsSurveyOrbitActive and ship:IsSurveyOrbitActive()
+		if (not inSC and not charging) or (inSC and not surveyOrbitOn) then
+			self.autoSurveyActive = false
+			self.autoSurveyTimerActive = false
+			self.autoSurveyEngagedSC = false
+			return true
+		end
+	end
+
+	if not self.activeScan then
+		self:AdvanceQueue()
+	end
+
+	local scan = self.activeScan
+	if not scan then
+		if ship.ClearSurveyOrbit then ship:ClearSurveyOrbit() end
+		if ship.IsSupercruiseActive and ship:IsSupercruiseActive() and ship.SetSupercruiseThrottle then
+			ship:SetSupercruiseThrottle(0.0)
+		end
+		self.autoSurveyActive = false
+		self.autoSurveyTimerActive = false
+		self.autoSurveyEngagedSC = false
+		if Game.AddCommsLogLine then
+			Game.AddCommsLogLine("Autopilot Mk 4: Auto-Survey complete — all queued system scans finished.")
+		end
+		return true
+	end
+
+	local body = self:GetScanBodyByType(scan)
+	if not body then
+		-- Next scan is in a different star system; pause auto-survey cleanly
+		self:SetAutoSurveyActive(false)
+		return true
+	end
+
+	local polarSweep = not scan.orbital
+	local targetR = self:GetRecommendedScanOrbitRadius(body, scan.orbital)
+	local curSurveyOn = ship.IsSurveyOrbitActive and ship:IsSurveyOrbitActive()
+	local curTarget = ship:GetNavTarget()
+
+	if (not curSurveyOn) or (curTarget ~= body) or (self._lastAutoSurveyScanId ~= scan.id) then
+		self._lastAutoSurveyScanId = scan.id
+		if ship.SetSurveyOrbitTarget then
+			local ok = ship:SetSurveyOrbitTarget(body, targetR, polarSweep)
+			if not ok then
+				self.autoSurveyActive = false
+				self.autoSurveyTimerActive = false
+				return true
+			end
+		end
+	end
+
+	if (ship.IsSupercruiseActive and ship:IsSupercruiseActive()) or (ship.IsSupercruiseCharging and ship:IsSupercruiseCharging()) then
+		self.autoSurveyEngagedSC = true
+	end
+
+	return false
+end
+
+function ScanManager:SetAutoSurveyActive(enabled)
+	if not enabled then
+		self.autoSurveyActive = false
+		self.autoSurveyEngagedSC = false
+		self._lastAutoSurveyScanId = nil
+		if self.ship and self.ship.ClearSurveyOrbit and self.ship:IsSurveyOrbitActive() then
+			self.ship:ClearSurveyOrbit()
+		end
+		return false
+	end
+
+	if not self:HasAutoSurveyModule() then
+		return false
+	end
+	if Game.InHyperspace and Game.InHyperspace() then
+		return false
+	end
+	local fs = self.ship and self.ship:GetFlightState()
+	if fs == "DOCKED" or fs == "LANDED" then
+		return false
+	end
+
+	if not self.activeScan then
+		self:AdvanceQueue()
+	end
+	if not self.activeScan then
+		return false
+	end
+
+	self.autoSurveyActive = true
+	self.autoSurveyEngagedSC = (self.ship.IsSupercruiseActive and self.ship:IsSupercruiseActive()) or false
+	self._lastAutoSurveyScanId = nil
+	self:UpdateAutoSurvey()
+
+	if self.autoSurveyActive and not self.autoSurveyTimerActive then
+		self.autoSurveyTimerActive = true
+		Timer:CallEvery(0.5, function()
+			return self:UpdateAutoSurvey()
+		end)
+	end
+	return self.autoSurveyActive
+end
+
+function ScanManager:ToggleAutoSurvey()
+	return self:SetAutoSurveyActive(not self.autoSurveyActive)
+end
+
+--=============================================================================
 
 function ScanManager:Unserialize()
 	setmetatable(self, ScanManager.meta)
@@ -994,8 +1379,13 @@ end)
 Event.Register("onLeaveSystem", function(ship)
 	local scanMgr = ship:GetComponent("ScanManager")
 
-	if scanMgr and scanMgr:GetActiveScan() then
-		scanMgr:ClearActiveScan()
+	if scanMgr then
+		if scanMgr:IsAutoSurveyActive() then
+			scanMgr:SetAutoSurveyActive(false)
+		end
+		if scanMgr:GetActiveScan() then
+			scanMgr:ClearActiveScan()
+		end
 	end
 end)
 

@@ -89,7 +89,11 @@ local function button_supercruise()
 	if player:HasSupercruiseAssist() then
 		ui.sameLine()
 		local assistActive = player:IsSupercruiseAssistActive()
-		local assistTip = assistActive and "Disengage Supercruise Assist (Autopilot Mk 2)" or "Engage Supercruise Assist (75% Blue Zone & Auto-Drop)"
+		local level = player.GetSupercruiseAssistLevel and player:GetSupercruiseAssistLevel() or 1
+		local assistLabel = (level >= 3 and "Autopilot Mk 4: Smart Cruise & Survey Orbit")
+			or (level == 2 and "Autopilot Mk 3: Smart Cruise & Planetary Orbit")
+			or "Supercruise Assist (Autopilot Mk 2)"
+		local assistTip = assistActive and ("Disengage " .. assistLabel) or ("Engage " .. assistLabel)
 		if ui.mainMenuButton(icons.autopilot_fly_to, assistTip .. "##sc_assist", assistActive) then
 			player:ToggleSupercruiseAssist()
 		end

@@ -284,16 +284,22 @@ local function drawFuelScoopHUD(player, center, reticuleRadius)
 		return
 	end
 
-	local boxW = 300
-	local boxH = active and 54 or 28
-	local tl = Vector2(center.x - boxW * 0.5, center.y + reticuleRadius + 24)
-	local br = Vector2(tl.x + boxW, tl.y + boxH)
+	local s = pionillium.small.size / 13.0
+	local padX = math.round(10 * s)
+	local padY = math.round(6 * s)
+	local gapX = math.round(14 * s)
 
 	if unscoopable then
+		local msg = "FUEL SCOOP: UNSCOOPABLE STAR CLASS"
+		local msgW = ui.calcTextSize(msg, pionillium.small).x
+		local boxW = math.max(math.round(300 * s), math.ceil(msgW + padX * 2))
+		local boxH = math.ceil(pionillium.small.size + padY * 2 + 4 * s)
+		local tl = Vector2(center.x - boxW * 0.5, center.y + reticuleRadius + math.round(24 * s))
+		local br = Vector2(tl.x + boxW, tl.y + boxH)
 		ui.addRectFilled(tl, br, colPanelBg, 4, ui.RoundCornersAll)
 		ui.addRect(tl, br, colAmber, 4, ui.RoundCornersAll, 1.5)
 		ui.addStyledText(Vector2(center.x, tl.y + boxH * 0.5), ui.anchor.center, ui.anchor.center,
-			"FUEL SCOOP: UNSCOOPABLE STAR CLASS", colAmber, pionillium.small)
+			msg, colAmber, pionillium.small)
 		return
 	end
 
@@ -304,23 +310,32 @@ local function drawFuelScoopHUD(player, center, reticuleRadius)
 	local thrNeed = (player.fuel or 100) < 99.9
 	local full = (not hdNeed) and (not thrNeed)
 
+	local title = full and "FUEL RESERVOIR FULL" or string.format("FUEL SCOOPING — +%.2f t/s", rate)
+	local fuelText = hd and string.format("HYP %.1f/%.0ft | THR %.0f%%", hd.storedFuel, hd:GetMaxFuel(), player.fuel or 0) or nil
+	local titleW = ui.calcTextSize(title, pionillium.small).x
+	local fuelW = fuelText and ui.calcTextSize(fuelText, pionillium.tiny).x or 0
+	local boxW = math.max(math.round(320 * s), math.ceil(titleW + fuelW + padX * 2 + (fuelText and gapX or 0)))
+	local textH = math.max(pionillium.small.size, pionillium.tiny.size)
+	local barH = math.round(10 * s)
+	local barGap = math.round(6 * s)
+	local boxH = math.ceil(padY + textH + barGap + barH + padY + 2 * s)
+	local tl = Vector2(center.x - boxW * 0.5, center.y + reticuleRadius + math.round(24 * s))
+	local br = Vector2(tl.x + boxW, tl.y + boxH)
+
 	local borderCol = full and colGreen or ((prox > 0.65) and colAmber or colCyan)
 	ui.addRectFilled(tl, br, colPanelBg, 4, ui.RoundCornersAll)
 	ui.addRect(tl, br, borderCol, 4, ui.RoundCornersAll, 1.5)
 
-	local title = full and "FUEL RESERVOIR FULL" or string.format("FUEL SCOOPING — +%.2f t/s", rate)
-	ui.addStyledText(Vector2(tl.x + 10, tl.y + 6), ui.anchor.left, ui.anchor.top, title, borderCol, pionillium.small)
+	ui.addStyledText(Vector2(tl.x + padX, tl.y + padY), ui.anchor.left, ui.anchor.top, title, borderCol, pionillium.small)
 
-	if hd then
-		ui.addStyledText(Vector2(br.x - 10, tl.y + 6), ui.anchor.right, ui.anchor.top,
-			string.format("HYP %.1f/%.0ft | THR %.0f%%", hd.storedFuel, hd:GetMaxFuel(), player.fuel or 0),
-			colWhite, pionillium.tiny)
+	if fuelText then
+		ui.addStyledText(Vector2(br.x - padX, tl.y + padY + (textH - pionillium.tiny.size) * 0.5), ui.anchor.right, ui.anchor.top,
+			fuelText, colWhite, pionillium.tiny)
 	end
 
-	local barX = tl.x + 10
-	local barY = tl.y + 30
-	local barW = boxW - 20
-	local barH = 10
+	local barX = tl.x + padX
+	local barY = tl.y + padY + textH + barGap
+	local barW = boxW - padX * 2
 	ui.addRectFilled(Vector2(barX, barY), Vector2(barX + barW, barY + barH), colBarBg, 2, ui.RoundCornersAll)
 	local fillW = math.max(0.0, math.min(1.0, prox)) * barW
 	if fillW > 1 then
@@ -581,8 +596,13 @@ local function drawSupercruiseTargetPanel(player, center, reticuleRadius)
 		ui.addStyledText(Vector2(panelX + panelW * 0.5, (btnDropTL.y + btnDropBR.y) * 0.5),
 			ui.anchor.center, ui.anchor.center, occMsg, colAmber, pionillium.tiny)
 	elseif assist then
+		local isSurveyOrbit = player.IsSurveyOrbitActive and player:IsSurveyOrbitActive()
+		local isOrbitHold = player.IsSupercruiseOrbitHoldActive and player:IsSupercruiseOrbitHoldActive()
+		local assistMsg = isSurveyOrbit and (isOrbitHold and "AUTO-SURVEY: ORBITING" or "AUTO-SURVEY: TRANSIT")
+			or (isOrbitHold and "SC ASSIST: ORBIT HOLD" or "SC ASSIST: AUTO-DROP")
+		local assistCol = (isSurveyOrbit or isOrbitHold) and colCyan or colGreen
 		ui.addStyledText(Vector2(panelX + panelW * 0.5, (btnDropTL.y + btnDropBR.y) * 0.5),
-			ui.anchor.center, ui.anchor.center, "SC ASSIST: AUTO-DROP", colGreen, pionillium.small)
+			ui.anchor.center, ui.anchor.center, assistMsg, assistCol, pionillium.small)
 	elseif slowDown then
 		ui.addStyledText(Vector2(panelX + panelW * 0.5, (btnDropTL.y + btnDropBR.y) * 0.5),
 			ui.anchor.center, ui.anchor.center, "SLOW DOWN (THROTTLE BACK)", colRed, pionillium.tiny)

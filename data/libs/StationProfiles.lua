@@ -383,6 +383,7 @@ function StationProfiles.CategorizeEquipment(equip)
 		or slotType:match("^utility%.scanner%.wake_tracer") ~= nil
 	local surveyScanner = slotType:match("^sensor%.discovery_scanner") ~= nil
 		or slotType:match("^utility%.scanner%.planet") ~= nil
+		or id == "misc.autopilot_mk4"
 	local scanner = (slotType:match("^sensor") ~= nil) or (slotType:match("^utility%.scanner") ~= nil)
 	local interdiction = slotType:match("^computer%.interdictor") ~= nil
 		or slotType:match("^computer%.countermeasure") ~= nil

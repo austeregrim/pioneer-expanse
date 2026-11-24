@@ -1766,6 +1766,46 @@ static int l_ship_has_supercruise_assist(lua_State *l)
 	return 1;
 }
 
+static int l_ship_get_supercruise_assist_level(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	LuaPush(l, s->GetSupercruise() ? s->GetSupercruise()->GetAssistLevel() : 0);
+	return 1;
+}
+
+static int l_ship_is_supercruise_orbit_hold_active(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushboolean(l, s->GetSupercruise() && s->GetSupercruise()->IsOrbitHoldActive());
+	return 1;
+}
+
+static int l_ship_is_survey_orbit_active(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	lua_pushboolean(l, s->GetSupercruise() && s->GetSupercruise()->IsSurveyOrbitActive());
+	return 1;
+}
+
+static int l_ship_set_survey_orbit_target(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	Body *body = LuaObject<Body>::CheckFromLua(2);
+	double radius = luaL_optnumber(l, 3, 0.0);
+	bool polarSweep = lua_gettop(l) >= 4 ? lua_toboolean(l, 4) : false;
+	bool ok = s->GetSupercruise() ? s->GetSupercruise()->SetSurveyOrbitTarget(body, radius, polarSweep) : false;
+	lua_pushboolean(l, ok);
+	return 1;
+}
+
+static int l_ship_clear_survey_orbit(lua_State *l)
+{
+	Ship *s = LuaObject<Ship>::CheckFromLua(1);
+	if (s->GetSupercruise())
+		s->GetSupercruise()->ClearSurveyOrbit();
+	return 0;
+}
+
 static int l_ship_is_supercruise_assist_active(lua_State *l)
 {
 	Ship *s = LuaObject<Ship>::CheckFromLua(1);
@@ -2393,6 +2433,11 @@ void LuaObject<Ship>::RegisterClass()
 		{ "GetSupercruiseTargetDistance", l_ship_get_supercruise_target_distance },
 		{ "GetSupercruiseTargetETA", l_ship_get_supercruise_target_eta },
 		{ "HasSupercruiseAssist", l_ship_has_supercruise_assist },
+		{ "GetSupercruiseAssistLevel", l_ship_get_supercruise_assist_level },
+		{ "IsSupercruiseOrbitHoldActive", l_ship_is_supercruise_orbit_hold_active },
+		{ "IsSurveyOrbitActive", l_ship_is_survey_orbit_active },
+		{ "SetSurveyOrbitTarget", l_ship_set_survey_orbit_target },
+		{ "ClearSurveyOrbit", l_ship_clear_survey_orbit },
 		{ "IsSupercruiseAssistActive", l_ship_is_supercruise_assist_active },
 		{ "SetSupercruiseAssist", l_ship_set_supercruise_assist },
 		{ "ToggleSupercruiseAssist", l_ship_toggle_supercruise_assist },

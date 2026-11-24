@@ -144,7 +144,9 @@ REGISTER_INPUT_BINDING(PlayerShipController)
 
 	auto weaponsGroup = controlsPage->GetBindingGroup("Weapons");
 	input->AddActionBinding("BindTargetObject", weaponsGroup, Action({ SDLK_y }));
+	input->AddActionBinding("BindClearNavTarget", weaponsGroup, Action({ SDLK_y, SDLK_LSHIFT }));
 	input->AddActionBinding("BindCycleHostiles", weaponsGroup, Action({ SDLK_t }));
+	input->AddActionBinding("BindClearCombatTarget", weaponsGroup, Action({ SDLK_t, SDLK_LSHIFT }));
 	input->AddActionBinding("BindCycleTargetsNext", weaponsGroup, Action({ SDLK_g }));
 	input->AddActionBinding("BindCycleTargetsPrev", weaponsGroup, Action({ SDLK_h }));
 	input->AddActionBinding("BindCycleSubsystemsNext", weaponsGroup, Action({ SDLK_RIGHTBRACKET }, { SDLK_z }));
@@ -226,8 +228,14 @@ PlayerShipController::PlayerShipController() :
 	m_selectTarget = InputBindings.targetObject->onPressed.connect (
 		sigc::mem_fun(this, &PlayerShipController::SelectTarget));
 
+	m_clearNavTarget = InputBindings.clearNavTarget->onPressed.connect(
+		sigc::mem_fun(this, &PlayerShipController::ClearNavTarget));
+
 	m_cycleHostiles = InputBindings.cycleHostiles->onPressed.connect (
 		sigc::mem_fun(this, &PlayerShipController::CycleHostiles));
+
+	m_clearCombatTarget = InputBindings.clearCombatTarget->onPressed.connect(
+		sigc::mem_fun(this, &PlayerShipController::ClearCombatTarget));
 
 	m_cycleTargetsNext = InputBindings.cycleTargetsNext->onPressed.connect(
 		[this]() { this->CycleTargets(1); });
@@ -248,7 +256,9 @@ PlayerShipController::PlayerShipController() :
 void PlayerShipController::InputBinding::RegisterBindings()
 {
 	targetObject = AddAction("BindTargetObject");
+	clearNavTarget = AddAction("BindClearNavTarget");
 	cycleHostiles = AddAction("BindCycleHostiles");
+	clearCombatTarget = AddAction("BindClearCombatTarget");
 	cycleTargetsNext = AddAction("BindCycleTargetsNext");
 	cycleTargetsPrev = AddAction("BindCycleTargetsPrev");
 	cycleSubsystemsNext = AddAction("BindCycleSubsystemsNext");
@@ -1198,6 +1208,32 @@ void PlayerShipController::CycleHostiles()
 		return;
 	Body *newTarget = Pi::player->GetSensors()->ChooseTarget(Sensors::CYCLE_HOSTILE, GetCombatTarget());
 	SetCombatTarget(newTarget);
+}
+
+void PlayerShipController::ClearNavTarget()
+{
+	if (!InputBindings.active || !Pi::game || Pi::game->IsPaused() ||
+		(Pi::GetView() != Pi::game->GetWorldView() && Pi::GetView() != Pi::game->GetSystemView()))
+		return;
+	if (Body *prev = GetNavTarget()) {
+		if (GetFollowTarget() == prev)
+			SetFollowTarget(nullptr);
+		SetNavTarget(nullptr);
+		if (m_ship && m_ship->GetSupercruise())
+			m_ship->GetSupercruise()->ShowStatusMessage("NAVIGATION TARGET CLEARED", 2.5f);
+	}
+}
+
+void PlayerShipController::ClearCombatTarget()
+{
+	if (!InputBindings.active || !Pi::game || Pi::game->IsPaused() ||
+		(Pi::GetView() != Pi::game->GetWorldView() && Pi::GetView() != Pi::game->GetSystemView()))
+		return;
+	if (GetCombatTarget()) {
+		SetCombatTarget(nullptr);
+		if (m_ship && m_ship->GetSupercruise())
+			m_ship->GetSupercruise()->ShowStatusMessage("COMBAT TARGET CLEARED", 2.5f);
+	}
 }
 
 void PlayerShipController::CycleTargets(int direction)

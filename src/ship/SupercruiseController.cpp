@@ -2,8 +2,6 @@
 // Licensed under the terms of the GPL v3. See licenses/GPL-3.txt
 
 #include "SupercruiseController.h"
-#include "ship/OrbitalDockingGeometry.h"
-#include "ship/Visibility.h"
 #include "Frame.h"
 #include "Game.h"
 #include "HyperspaceCloud.h"
@@ -21,6 +19,8 @@
 #include "galaxy/StarSystem.h"
 #include "galaxy/SystemBody.h"
 #include "lua/LuaEvent.h"
+#include "ship/OrbitalDockingGeometry.h"
+#include "ship/Visibility.h"
 #include "sound/Sound.h"
 
 #include <algorithm>
@@ -42,9 +42,14 @@ void SupercruiseController::SaveToJson(Json &jsonObj, Space *space) const
 	scObj["speed_cap"] = m_speedCap;
 	scObj["assist_active"] = m_assistActive;
 	scObj["dock_on_arrival"] = m_dockOnArrival;
+	scObj["assist_mode"] = int(m_assistMode);
+	scObj["orbit_polar_precess"] = m_orbitPolarPrecess;
+	scObj["orbit_target_radius"] = m_orbitTargetRadius;
+	scObj["orbit_plane_angle"] = m_orbitPlaneAngle;
 	scObj["nullifier_cooldown"] = m_nullifierCooldown;
 	scObj["heat_spike"] = m_heatSpike;
 	Space *sp = space ? space : (Pi::game ? Pi::game->GetSpace() : nullptr);
+	scObj["index_for_survey_body"] = (sp && m_surveyOrbitBody) ? sp->GetIndexForBody(m_surveyOrbitBody) : 0;
 	scObj["index_for_target"] = (sp && m_target) ? sp->GetIndexForBody(m_target) : 0;
 	scObj["index_for_locked_ship"] = (sp && m_lockedShip) ? sp->GetIndexForBody(m_lockedShip) : 0;
 	scObj["target_frame"] = m_targetFrame;
@@ -75,6 +80,13 @@ void SupercruiseController::LoadFromJson(const Json &jsonObj)
 	m_speedCap = scObj.value("speed_cap", 0.0);
 	m_assistActive = scObj.value("assist_active", false);
 	m_dockOnArrival = scObj.value("dock_on_arrival", false);
+	m_assistMode = static_cast<AssistMode>(scObj.value("assist_mode", 0));
+	m_orbitHoldActive = false;
+	m_orbitPolarPrecess = scObj.value("orbit_polar_precess", false);
+	m_orbitTargetRadius = scObj.value("orbit_target_radius", 0.0);
+	m_orbitPlaneAngle = scObj.value("orbit_plane_angle", 0.0);
+	m_surveyOrbitBodyIndex = scObj.value("index_for_survey_body", 0);
+	m_surveyOrbitBody = nullptr;
 	m_nullifierCooldown = scObj.value("nullifier_cooldown", 0.0f);
 	m_heatSpike = scObj.value("heat_spike", 0.0);
 	m_targetIndex = scObj.value("index_for_target", 0);
@@ -105,12 +117,26 @@ void SupercruiseController::PostLoadFixup(Space *space)
 	m_interdictPeer = (peerBody && peerBody->IsType(ObjectType::SHIP)) ? static_cast<Ship *>(peerBody) : nullptr;
 	if (m_interdictRole != INTERDICT_NONE && !m_interdictPeer)
 		ClearInterdiction();
+	m_surveyOrbitBody = (space && m_surveyOrbitBodyIndex) ? space->GetBodyByIndex(m_surveyOrbitBodyIndex) : nullptr;
+	if (m_assistMode == ASSIST_ORBIT_SCAN && !m_surveyOrbitBody) {
+		m_assistMode = ASSIST_APPROACH;
+		m_assistActive = false;
+	}
 }
 
 void SupercruiseController::OnDeleted(const Body *body)
 {
 	if (m_target == body)
 		m_target = nullptr;
+	if (m_surveyOrbitBody == body) {
+		m_surveyOrbitBody = nullptr;
+		m_surveyOrbitBodyIndex = 0;
+		if (m_assistMode == ASSIST_ORBIT_SCAN) {
+			m_assistMode = ASSIST_APPROACH;
+			m_assistActive = false;
+			m_orbitHoldActive = false;
+		}
+	}
 	if (m_lockedShip == body) {
 		m_lockedShip = nullptr;
 		m_lockedShipIndex = 0;
@@ -423,21 +449,118 @@ void SupercruiseController::SetSpeed(double speed)
 	m_speed = Clamp(speed, MIN_SPEED, MAX_SPEED);
 }
 
-bool SupercruiseController::HasAssistModule() const
+int SupercruiseController::GetAssistLevel() const
 {
 	if (!m_ship)
+		return 0;
+	const int cap = m_ship->Properties().Get("supercruise_assist_cap");
+	const int apCap = m_ship->Properties().Get("autopilot_cap");
+	return std::max(cap, (apCap >= 2) ? (apCap - 1) : 0);
+}
+
+bool SupercruiseController::HasAssistModule() const
+{
+	return GetAssistLevel() >= 1;
+}
+
+double SupercruiseController::GetActiveOrbitRadius(const Body *body) const
+{
+	if (!body)
+		return 0.0;
+	if (m_assistMode == ASSIST_ORBIT_SCAN && m_surveyOrbitBody == body && m_orbitTargetRadius > 0.0)
+		return m_orbitTargetRadius;
+
+	const double exclR = GetExclusionZoneRadius(body);
+	const SystemBody *sb = body->GetSystemBody();
+	const double bodyR = sb ? sb->GetRadius() : 0.0;
+	const bool isStar = sb && (sb->GetSuperType() == SystemBody::SUPERTYPE_STAR);
+	const bool hasRings = sb && sb->HasRings();
+	double ringInnerR = 0.0;
+	double ringOuterR = 0.0;
+	if (hasRings) {
+		const RingStyle &rings = sb->GetRings();
+		ringInnerR = rings.minRadius.ToDouble() * bodyR;
+		ringOuterR = rings.maxRadius.ToDouble() * bodyR;
+	}
+	const double reqR = isStar ? std::max(bodyR * 2.85, exclR * 2.45) : std::max({ exclR * 1.45, exclR + 400000.0, 300000.0 });
+	return ComputeSafeSurveyOrbitRadius(exclR, bodyR, isStar, hasRings, ringInnerR, ringOuterR, 0.0, reqR, false);
+}
+
+bool SupercruiseController::SetSurveyOrbitTarget(Body *body, double requestedRadius, bool polarSweep)
+{
+	if (GetAssistLevel() < 3) {
+		ShowStatusMessage("AUTO-SURVEY ORBIT REQUIRES AUTOPILOT MK 4", 4.0f);
 		return false;
-	int cap = m_ship->Properties().Get("supercruise_assist_cap");
-	int apCap = m_ship->Properties().Get("autopilot_cap");
-	return (cap >= 1) || (apCap >= 2);
+	}
+	if (!body || !body->IsType(ObjectType::TERRAINBODY)) {
+		ShowStatusMessage("AUTO-SURVEY: INVALID ORBIT BODY", 3.5f);
+		return false;
+	}
+
+	const double exclR = GetExclusionZoneRadius(body);
+	const SystemBody *sb = body->GetSystemBody();
+	const double bodyR = sb ? sb->GetRadius() : 0.0;
+	const bool isStar = sb && (sb->GetSuperType() == SystemBody::SUPERTYPE_STAR);
+	const bool hasRings = sb && sb->HasRings();
+	double ringInnerR = 0.0;
+	double ringOuterR = 0.0;
+	if (hasRings) {
+		const RingStyle &rings = sb->GetRings();
+		ringInnerR = rings.minRadius.ToDouble() * bodyR;
+		ringOuterR = rings.maxRadius.ToDouble() * bodyR;
+	}
+	const double maxScanDist = std::max(bodyR * (polarSweep ? 4.0 : 12.0), polarSweep ? 8000000.0 : 24000000.0);
+	const double safeR = ComputeSafeSurveyOrbitRadius(
+		exclR, bodyR, isStar, hasRings, ringInnerR, ringOuterR, maxScanDist, requestedRadius, polarSweep);
+
+	m_assistMode = ASSIST_ORBIT_SCAN;
+	m_surveyOrbitBody = body;
+	m_surveyOrbitBodyIndex = 0;
+	m_orbitTargetRadius = safeR;
+	m_orbitPolarPrecess = polarSweep;
+	m_orbitHoldActive = false;
+	m_assistActive = true;
+	m_dockOnArrival = false;
+
+	if (m_ship && m_ship->IsType(ObjectType::PLAYER)) {
+		static_cast<Player *>(m_ship)->SetNavTarget(body);
+	}
+
+	if (!IsActive() && !m_charging) {
+		if (!StartCharge()) {
+			ClearSurveyOrbit();
+			return false;
+		}
+	}
+
+	ShowStatusMessage("AUTO-SURVEY ORBIT ENGAGED: " + body->GetLabel(), 3.5f);
+	return true;
+}
+
+void SupercruiseController::ClearSurveyOrbit()
+{
+	if (m_assistMode == ASSIST_ORBIT_SCAN) {
+		m_assistMode = ASSIST_APPROACH;
+		m_surveyOrbitBody = nullptr;
+		m_surveyOrbitBodyIndex = 0;
+		m_orbitTargetRadius = 0.0;
+		m_orbitPolarPrecess = false;
+		m_orbitHoldActive = false;
+		m_assistActive = false;
+		m_dockOnArrival = false;
+	}
 }
 
 void SupercruiseController::SetAssistActive(bool active, bool dockOnArrival)
 {
 	if (active && !HasAssistModule()) {
-		ShowStatusMessage("SUPERCRUISE ASSIST REQUIRES AUTOPILOT MK 2", 4.0f);
+		ShowStatusMessage("SUPERCRUISE ASSIST REQUIRES AUTOPILOT MK 2+", 4.0f);
 		m_assistActive = false;
 		m_dockOnArrival = false;
+		m_assistMode = ASSIST_APPROACH;
+		m_orbitHoldActive = false;
+		m_surveyOrbitBody = nullptr;
+		m_surveyOrbitBodyIndex = 0;
 		return;
 	}
 
@@ -457,15 +580,31 @@ void SupercruiseController::SetAssistActive(bool active, bool dockOnArrival)
 		ShowStatusMessage("SUPERCRUISE ASSIST: NO NAVIGATION TARGET SELECTED", 4.0f);
 		m_assistActive = false;
 		m_dockOnArrival = false;
+		m_assistMode = ASSIST_APPROACH;
+		m_orbitHoldActive = false;
+		m_surveyOrbitBody = nullptr;
+		m_surveyOrbitBodyIndex = 0;
 		return;
 	}
 
+	m_assistMode = ASSIST_APPROACH;
+	m_orbitHoldActive = false;
+	m_orbitPolarPrecess = false;
+	m_orbitTargetRadius = 0.0;
+	m_surveyOrbitBody = nullptr;
+	m_surveyOrbitBodyIndex = 0;
 	m_assistActive = active;
 	m_dockOnArrival = active ? dockOnArrival : false;
 
 	if (m_assistActive) {
-		m_throttle = 0.75; // Lock to 75% blue zone
-		ShowStatusMessage("SUPERCRUISE ASSIST ENGAGED — THROTTLE LOCKED TO 75%", 4.0f);
+		m_throttle = 0.75; // Lock to 75% blue zone initially
+		const int level = GetAssistLevel();
+		if (level >= 3)
+			ShowStatusMessage("AUTOPILOT MK 4 NAVIGATION ENGAGED", 4.0f);
+		else if (level == 2)
+			ShowStatusMessage("AUTOPILOT MK 3 SMART NAVIGATION ENGAGED", 4.0f);
+		else
+			ShowStatusMessage("SUPERCRUISE ASSIST ENGAGED — THROTTLE LOCKED TO 75%", 4.0f);
 		if (!IsActive() && !m_charging) {
 			if (!StartCharge()) {
 				m_assistActive = false;
@@ -636,6 +775,13 @@ void SupercruiseController::EnterSupercruiseOnHyperspaceExit()
 	m_chargeCountdown = 0.0f;
 	m_assistActive = false;
 	m_dockOnArrival = false;
+	m_assistMode = ASSIST_APPROACH;
+	m_orbitHoldActive = false;
+	m_orbitPolarPrecess = false;
+	m_orbitTargetRadius = 0.0;
+	m_orbitPlaneAngle = 0.0;
+	m_surveyOrbitBody = nullptr;
+	m_surveyOrbitBodyIndex = 0;
 	m_safeDisengageReady = false;
 	m_slowDownWarning = false;
 	m_cooldown = HYPERJUMP_COOLDOWN;
@@ -664,6 +810,12 @@ void SupercruiseController::DropIntoRing(Planet *planet, const std::string &reas
 	m_charging = false;
 	m_assistActive = false;
 	m_dockOnArrival = false;
+	m_assistMode = ASSIST_APPROACH;
+	m_orbitHoldActive = false;
+	m_orbitPolarPrecess = false;
+	m_orbitTargetRadius = 0.0;
+	m_surveyOrbitBody = nullptr;
+	m_surveyOrbitBodyIndex = 0;
 	m_cooldown = NORMAL_COOLDOWN;
 	m_speed = 0.0;
 	m_safeDisengageReady = false;
@@ -748,6 +900,12 @@ void SupercruiseController::SafeDisengage()
 	m_charging = false;
 	m_assistActive = false;
 	m_dockOnArrival = false;
+	m_assistMode = ASSIST_APPROACH;
+	m_orbitHoldActive = false;
+	m_orbitPolarPrecess = false;
+	m_orbitTargetRadius = 0.0;
+	m_surveyOrbitBody = nullptr;
+	m_surveyOrbitBodyIndex = 0;
 	m_cooldown = NORMAL_COOLDOWN;
 	m_speed = 0.0;
 	m_safeDisengageReady = false;
@@ -925,6 +1083,12 @@ void SupercruiseController::NormalDrop(const std::string &reason)
 	m_charging = false;
 	m_assistActive = false;
 	m_dockOnArrival = false;
+	m_assistMode = ASSIST_APPROACH;
+	m_orbitHoldActive = false;
+	m_orbitPolarPrecess = false;
+	m_orbitTargetRadius = 0.0;
+	m_surveyOrbitBody = nullptr;
+	m_surveyOrbitBodyIndex = 0;
 	m_cooldown = NORMAL_COOLDOWN;
 	m_speed = 0.0;
 	m_safeDisengageReady = false;
@@ -953,6 +1117,12 @@ void SupercruiseController::EmergencyDrop(const std::string &reason)
 	m_charging = false;
 	m_assistActive = false;
 	m_dockOnArrival = false;
+	m_assistMode = ASSIST_APPROACH;
+	m_orbitHoldActive = false;
+	m_orbitPolarPrecess = false;
+	m_orbitTargetRadius = 0.0;
+	m_surveyOrbitBody = nullptr;
+	m_surveyOrbitBodyIndex = 0;
 	m_cooldown = EMERGENCY_COOLDOWN;
 	m_speed = 0.0;
 	m_safeDisengageReady = false;
@@ -988,6 +1158,13 @@ void SupercruiseController::Reset()
 	m_cooldown = 0.0f;
 	m_assistActive = false;
 	m_dockOnArrival = false;
+	m_assistMode = ASSIST_APPROACH;
+	m_orbitHoldActive = false;
+	m_orbitPolarPrecess = false;
+	m_orbitTargetRadius = 0.0;
+	m_orbitPlaneAngle = 0.0;
+	m_surveyOrbitBody = nullptr;
+	m_surveyOrbitBodyIndex = 0;
 	m_speed = 0.0;
 	m_desiredSpeed = 0.0;
 	m_throttle = 0.75;
@@ -1023,6 +1200,13 @@ void SupercruiseController::OnEnterHyperspace()
 	m_chargeCountdown = 0.0f;
 	m_assistActive = false;
 	m_dockOnArrival = false;
+	m_assistMode = ASSIST_APPROACH;
+	m_orbitHoldActive = false;
+	m_orbitPolarPrecess = false;
+	m_orbitTargetRadius = 0.0;
+	m_orbitPlaneAngle = 0.0;
+	m_surveyOrbitBody = nullptr;
+	m_surveyOrbitBodyIndex = 0;
 	m_speed = 0.0;
 	m_safeDisengageReady = false;
 	m_slowDownWarning = false;
@@ -1130,6 +1314,9 @@ Body *SupercruiseController::GetActiveTarget() const
 {
 	if (!m_ship)
 		return nullptr;
+
+	if (m_assistActive && m_assistMode == ASSIST_ORBIT_SCAN && m_surveyOrbitBody)
+		return m_surveyOrbitBody;
 
 	if (m_ship->IsType(ObjectType::PLAYER)) {
 		const Player *player = static_cast<const Player *>(m_ship);
@@ -1241,6 +1428,10 @@ void SupercruiseController::ComputeAISteering(const vector3d &targetPosRelToShip
 		desiredDir = -m_ship->GetOrient().VectorZ();
 
 	bool isOccluded = false;
+	const int assistLevel = GetAssistLevel();
+	const bool isPlayer = m_ship->IsType(ObjectType::PLAYER);
+	const bool useSmartPathing = !isPlayer || (m_assistActive && assistLevel >= 2);
+	const bool isOrbitMode = m_assistActive && ((m_assistMode == ASSIST_ORBIT_SCAN && m_surveyOrbitBody) || (assistLevel >= 2 && targetBody && targetBody->IsType(ObjectType::TERRAINBODY) && !m_dockOnArrival));
 
 	// 1. Planetary occlusion avoidance: when destination is obscured behind a planetary or stellar body,
 	// orbit tangentially along the great circle until line-of-sight clears the horizon limb.
@@ -1285,6 +1476,51 @@ void SupercruiseController::ComputeAISteering(const vector3d &targetPosRelToShip
 			}
 		}
 	} else if (Pi::game && Pi::game->GetSpace()) {
+		// 1b. Smart prograde gravity-well departure (Autopilot Mk 3+ / AI):
+		// When deep inside a nearby non-target body's gravity well, arc prograde along its horizon tangent
+		// + radial climb instead of cutting straight across the deep gravity well.
+		if (useSmartPathing) {
+			const Body *localGravBody = nullptr;
+			double bestRatio = 4.5;
+			for (Body *b : Pi::game->GetSpace()->GetBodies()) {
+				if (!b || b == targetBody || !b->IsType(ObjectType::TERRAINBODY))
+					continue;
+				const double exclR = GetExclusionZoneRadius(b);
+				if (exclR <= 0.0)
+					continue;
+				const double bodyDist = b->GetPositionRelTo(m_ship).Length();
+				if (bodyDist >= dist || bodyDist >= exclR * 4.5)
+					continue;
+				if (targetBody && targetBody->GetPositionRelTo(b).Length() <= exclR * 1.65 + SAFE_DISENGAGE_DIST)
+					continue;
+				const double ratio = bodyDist / exclR;
+				if (ratio < bestRatio) {
+					bestRatio = ratio;
+					localGravBody = b;
+				}
+			}
+
+			if (localGravBody) {
+				const vector3d toLocal = localGravBody->GetPositionRelTo(m_ship);
+				const double localDist = toLocal.Length();
+				if (localDist > 1.0) {
+					const vector3d uBS = -toLocal / localDist;
+					const double inwardDot = (-uBS).Dot(desiredDir);
+					if (inwardDot > -0.15) {
+						vector3d tang = desiredDir - uBS * desiredDir.Dot(uBS);
+						if (tang.LengthSqr() < 1e-4) {
+							const vector3d fwd = -m_ship->GetOrient().VectorZ();
+							tang = fwd - uBS * fwd.Dot(uBS);
+							if (tang.LengthSqr() < 1e-4)
+								tang = MathUtil::OrthogonalDirection(uBS);
+						}
+						tang = tang.Normalized();
+						desiredDir = (tang * 0.75 + uBS * 0.65).NormalizedSafe();
+					}
+				}
+			}
+		}
+
 		// 2. Obstacle avoidance: steer tangentially around intervening planetary/stellar exclusion zones
 		double bestAvoidDist = dist;
 		for (Body *b : Pi::game->GetSpace()->GetBodies()) {
@@ -1303,9 +1539,7 @@ void SupercruiseController::ComputeAISteering(const vector3d &targetPosRelToShip
 			}
 
 			// Keep a tighter buffer when approaching the target body (or a station on/orbiting it) vs an intervening body
-			const double margin = (b == targetBody)
-				? (exclR + std::min(200000.0, SAFE_DISENGAGE_DIST * 0.25))
-				: (targetOnOrNearBody ? (exclR + 15000.0) : (exclR * 1.35 + 80000.0));
+			const double margin = (b == targetBody) ? (exclR + std::min(200000.0, SAFE_DISENGAGE_DIST * 0.25)) : (targetOnOrNearBody ? (exclR + 15000.0) : (exclR * 1.35 + 80000.0));
 			const vector3d toBody = b->GetPositionRelTo(m_ship);
 			const double bodyDist = toBody.Length();
 			if (bodyDist < 1.0)
@@ -1358,6 +1592,64 @@ void SupercruiseController::ComputeAISteering(const vector3d &targetPosRelToShip
 		}
 	}
 
+	// 3. Planetary Orbit Insertion & Hold (Autopilot Mk 3 / Mk 4) or Mk 2 proximity safety deflection
+	if (!isOccluded && isOrbitMode) {
+		const Body *orbitBody = (m_assistMode == ASSIST_ORBIT_SCAN && m_surveyOrbitBody) ? m_surveyOrbitBody : targetBody;
+		if (orbitBody && orbitBody->IsType(ObjectType::TERRAINBODY)) {
+			const vector3d toOrbitBody = orbitBody->GetPositionRelTo(m_ship);
+			const double orbitDist = toOrbitBody.Length();
+			const double exclR = GetExclusionZoneRadius(orbitBody);
+			const double orbitR = GetActiveOrbitRadius(orbitBody);
+			const vector3d uBS = (-toOrbitBody).NormalizedSafe();
+
+			vector3d tangentDir;
+			if (m_assistMode == ASSIST_ORBIT_SCAN && m_orbitPolarPrecess) {
+				const matrix3x3d bodyOrient = orbitBody->GetOrientRelTo(m_ship->GetFrame());
+				vector3d spinAxis = bodyOrient.VectorY().NormalizedSafe();
+				if (spinAxis.LengthSqr() < 0.1)
+					spinAxis = vector3d(0.0, 1.0, 0.0);
+				vector3d eqA = bodyOrient.VectorX().NormalizedSafe();
+				if (eqA.LengthSqr() < 0.1 || std::fabs(eqA.Dot(spinAxis)) > 0.9)
+					eqA = MathUtil::OrthogonalDirection(spinAxis).Normalized();
+				const vector3d eqB = spinAxis.Cross(eqA).Normalized();
+				const vector3d planeNormal = (eqA * std::cos(m_orbitPlaneAngle) + eqB * std::sin(m_orbitPlaneAngle)).Normalized();
+				tangentDir = planeNormal.Cross(uBS);
+				if (tangentDir.LengthSqr() < 1e-4) {
+					const vector3d fwd = -m_ship->GetOrient().VectorZ();
+					tangentDir = fwd - uBS * fwd.Dot(uBS);
+					if (tangentDir.LengthSqr() < 1e-4)
+						tangentDir = MathUtil::OrthogonalDirection(uBS);
+				}
+				tangentDir = tangentDir.Normalized();
+			} else {
+				const vector3d fwd = -m_ship->GetOrient().VectorZ();
+				tangentDir = fwd - uBS * fwd.Dot(uBS);
+				if (tangentDir.LengthSqr() < 1e-4)
+					tangentDir = MathUtil::OrthogonalDirection(uBS);
+				tangentDir = tangentDir.Normalized();
+			}
+
+			if (orbitDist <= orbitR * 2.5) {
+				desiredDir = ComputeOrbitSteeringDir(toOrbitBody, tangentDir, orbitR, exclR);
+			} else if (orbitDist <= orbitR * 4.5) {
+				const vector3d limbDir = ComputeOrbitSteeringDir(toOrbitBody, tangentDir, orbitR, exclR);
+				const double blend = Clamp((orbitR * 4.5 - orbitDist) / (orbitR * 2.0), 0.0, 1.0);
+				desiredDir = (desiredDir * (1.0 - blend) + limbDir * blend).NormalizedSafe();
+			}
+		}
+	} else if (!isOccluded && isPlayer && m_assistActive && assistLevel == 1 && targetBody && targetBody->IsType(ObjectType::TERRAINBODY)) {
+		const double exclR = GetExclusionZoneRadius(targetBody);
+		const double effectiveDist = std::max(0.0, dist - exclR);
+		if (effectiveDist < 1500000.0 && m_speed > SAFE_DISENGAGE_SPEED * 1.05) {
+			const vector3d uBS = (-targetPosRelToShip).NormalizedSafe();
+			const vector3d fwd = -m_ship->GetOrient().VectorZ();
+			vector3d tangentDir = fwd - uBS * fwd.Dot(uBS);
+			if (tangentDir.LengthSqr() < 1e-4)
+				tangentDir = MathUtil::OrthogonalDirection(uBS);
+			desiredDir = ComputeOrbitSteeringDir(targetPosRelToShip, tangentDir.Normalized(), exclR + 500000.0, exclR);
+		}
+	}
+
 	// Convert desired world direction to ship-local coordinates (-Z forward, +X right, +Y up)
 	const vector3d toLocal = desiredDir * m_ship->GetOrient();
 	const double pitchErr = std::atan2(toLocal.y, -toLocal.z);
@@ -1382,9 +1674,7 @@ void SupercruiseController::ComputeAISteering(const vector3d &targetPosRelToShip
 		return;
 	}
 
-	const double exclR = (targetBody && targetBody->IsType(ObjectType::TERRAINBODY))
-		? GetExclusionZoneRadius(targetBody)
-		: 0.0;
+	const double exclR = (targetBody && targetBody->IsType(ObjectType::TERRAINBODY)) ? GetExclusionZoneRadius(targetBody) : 0.0;
 	const double effectiveDist = std::max(0.0, dist - exclR);
 	const double speed = std::max(m_speed, MIN_SPEED);
 	const double eta = (speed > 1.0) ? (effectiveDist / speed) : 0.0;
@@ -1443,7 +1733,7 @@ void SupercruiseController::UpdateEnvironmentAndTarget(float timeStep, Body **ou
 
 		const vector3d toBodyNorm = (toBody.Length() > 1.0) ? toBody.Normalized() : vector3d(0.0);
 		const double toBodyDot = forwardDir.Dot(toBodyNorm); // > 0: heading towards body
-		const double outboundDot = -toBodyDot;               // > 0: heading away from body
+		const double outboundDot = -toBodyDot;				 // > 0: heading away from body
 
 		// Check exclusion zone impact: a ship in Supercruise can never remain inside a body's exclusion zone
 		if (exclR > 0.0 && dist <= exclR) {
@@ -1530,17 +1820,13 @@ void SupercruiseController::UpdateEnvironmentAndTarget(float timeStep, Body **ou
 				const double halfThick = rings.thickness.ToDouble();
 
 				if (rXZ >= innerR * 0.96 && rXZ <= outerR * 1.04) {
-					const vector3d fwdOrb = (shipFrame && shipFrameId != orbFrameId)
-						? (shipFrame->GetOrientRelTo(orbFrameId) * forwardDir)
-						: forwardDir;
+					const vector3d fwdOrb = (shipFrame && shipFrameId != orbFrameId) ? (shipFrame->GetOrientRelTo(orbFrameId) * forwardDir) : forwardDir;
 					const vector3d fwdRing = axialRot.Transpose() * fwdOrb;
 					const double vertSign = relRing.y * fwdRing.y; // < 0: approaching midplane; > 0: escaping plane
 
 					if (absY < 200000000.0) {
 						const double yAlt = std::max(absY - 85000.0, 0.0);
-						double ringVMax = (yAlt <= 250000.0)
-							? (SAFE_DISENGAGE_SPEED * 0.85)
-							: (SAFE_DISENGAGE_SPEED * 0.85 + 0.08 * yAlt);
+						double ringVMax = (yAlt <= 250000.0) ? (SAFE_DISENGAGE_SPEED * 0.85) : (SAFE_DISENGAGE_SPEED * 0.85 + 0.08 * yAlt);
 						double ringStrain = 1.0 / (1.0 + std::pow(yAlt / 1200000.0, 1.25));
 						if (vertSign > 0.0 && std::abs(fwdRing.y) > 0.05) {
 							ringVMax = std::min(MAX_SPEED, ringVMax * (1.0 + 3.0 * std::abs(fwdRing.y)));
@@ -1587,9 +1873,7 @@ void SupercruiseController::UpdateEnvironmentAndTarget(float timeStep, Body **ou
 		double targetExclR = 0.0;
 		if (activeTarget && activeTarget->IsType(ObjectType::TERRAINBODY)) {
 			const double maxTargetExclR = GetExclusionZoneRadius(activeTarget);
-			targetExclR = (m_targetDistance <= maxTargetExclR * 3.0 + 250000.0)
-				? GetExclusionZoneRadiusAtDir(activeTarget, m_ship->GetPositionRelTo(activeTarget).NormalizedSafe())
-				: maxTargetExclR;
+			targetExclR = (m_targetDistance <= maxTargetExclR * 3.0 + 250000.0) ? GetExclusionZoneRadiusAtDir(activeTarget, m_ship->GetPositionRelTo(activeTarget).NormalizedSafe()) : maxTargetExclR;
 		}
 		const double effectiveDist = std::max(0.0, m_targetDistance - targetExclR);
 		m_targetETA = (m_speed > 1.0) ? (effectiveDist / m_speed) : 0.0;
@@ -1721,15 +2005,26 @@ void SupercruiseController::StaticUpdate(float timeStep)
 		m_dockOnArrival = false;
 	}
 
-	// Supercruise Assist (Autopilot Mk 2) management
+	// Supercruise Assist (Autopilot Mk 2 / Mk 3 / Mk 4) management
+	const int assistLevel = GetAssistLevel();
+	Body *activeTarget = GetActiveTarget();
+	const bool orbitTargetMode = m_assistActive && ((m_assistMode == ASSIST_ORBIT_SCAN && m_surveyOrbitBody) || (assistLevel >= 2 && activeTarget && activeTarget->IsType(ObjectType::TERRAINBODY) && !m_dockOnArrival));
+	Body *orbitBody = orbitTargetMode ? ((m_assistMode == ASSIST_ORBIT_SCAN && m_surveyOrbitBody) ? m_surveyOrbitBody : activeTarget) : nullptr;
+	const double activeOrbitR = orbitBody ? GetActiveOrbitRadius(orbitBody) : 0.0;
+
 	if (m_assistActive) {
-		if (!HasAssistModule()) {
+		if (!HasAssistModule() || (m_assistMode == ASSIST_ORBIT_SCAN && assistLevel < 3)) {
 			SetAssistActive(false, false);
+		} else if (orbitTargetMode && orbitBody) {
+			const double orbitDist = (orbitBody == activeTarget) ? m_targetDistance : orbitBody->GetPositionRelTo(m_ship).Length();
+			m_orbitHoldActive = (orbitDist <= activeOrbitR * 1.45);
+			if (m_orbitHoldActive && m_orbitPolarPrecess) {
+				m_orbitPlaneAngle += double(timeStep) * 0.045;
+			}
 		} else {
-			m_throttle = 0.75;
+			m_orbitHoldActive = false;
 			if (m_safeDisengageReady) {
 				bool alignedForDrop = true;
-				Body *activeTarget = GetActiveTarget();
 				if (activeTarget && activeTarget->IsType(ObjectType::SPACESTATION)) {
 					vector3d targetRel;
 					if (GetActiveTargetPosRelToShip(targetRel)) {
@@ -1744,41 +2039,65 @@ void SupercruiseController::StaticUpdate(float timeStep)
 				}
 			}
 		}
+	} else {
+		m_orbitHoldActive = false;
 	}
 
 	// Compute desired speed from throttle and environment cap
 	double targetCapSpeed = m_maxEnvSpeed;
 	vector3d targetRel;
 	const bool hasTarget = GetActiveTargetPosRelToShip(targetRel);
-	Body *activeTarget = GetActiveTarget();
 	const bool targetIsSCShip = activeTarget && activeTarget->IsType(ObjectType::SHIP) &&
 		static_cast<const Ship *>(activeTarget)->GetFlightState() == Ship::SUPERCRUISE;
+
+	double targetExclR = 0.0;
+	if (hasTarget && !targetIsSCShip && activeTarget && activeTarget->IsType(ObjectType::TERRAINBODY)) {
+		const double maxTargetExclR = GetExclusionZoneRadius(activeTarget);
+		targetExclR = (m_targetDistance <= maxTargetExclR * 3.0 + 250000.0) ? GetExclusionZoneRadiusAtDir(activeTarget, m_ship->GetPositionRelTo(activeTarget).NormalizedSafe()) : maxTargetExclR;
+	}
+	const double effectiveDist = std::max(0.0, m_targetDistance - targetExclR);
+	const double approachDist = (orbitTargetMode && activeOrbitR > targetExclR) ? std::max(0.0, effectiveDist - (activeOrbitR - targetExclR)) : effectiveDist;
+
+	if (m_assistActive) {
+		if (m_orbitHoldActive && orbitBody) {
+			m_throttle = 0.75;
+			const double minOrbitSpeed = MIN_SPEED * (m_orbitPolarPrecess ? 4.0 : 2.0);
+			const double desiredOrbitSpeed = std::max(minOrbitSpeed, activeOrbitR * (m_orbitPolarPrecess ? 0.16 : 0.10));
+			const double maxAngularOrbitSpeed = std::max(MIN_SPEED, activeOrbitR * 0.22);
+			const double envShare = m_maxEnvSpeed * (m_orbitPolarPrecess ? 0.85 : 0.65);
+			const double orbitSpeedCap = std::min({ maxAngularOrbitSpeed, envShare, desiredOrbitSpeed });
+			targetCapSpeed = std::min(targetCapSpeed, orbitSpeedCap / 0.75);
+		} else {
+			const double closingDot = hasTarget ? (-m_ship->GetOrient().VectorZ()).Dot(targetRel.NormalizedSafe()) : 1.0;
+			m_throttle = ComputeAssistApproachThrottle(
+				approachDist, m_speed, m_maxEnvSpeed, closingDot, m_slowDownWarning, orbitTargetMode, assistLevel);
+			if (assistLevel >= 2 && hasTarget && !targetIsSCShip) {
+				const double brakeSpeed = std::max(MIN_SPEED, approachDist / 6.5);
+				if (m_speed > brakeSpeed * 1.02 || m_slowDownWarning) {
+					targetCapSpeed = std::min(targetCapSpeed, brakeSpeed);
+				}
+			}
+		}
+	}
+
 	const bool inBlueZone = (m_throttle >= 0.65 && m_throttle <= 0.80);
 
 	// The 6-Second Rule: when approaching a stationary/sublight target, regulate the speed envelope
 	// along v = d / 6.0 so ETA holds steady at 0:06 all the way down to Safe Disengage.
-	double targetExclR = 0.0;
-	if (hasTarget && !targetIsSCShip && activeTarget && activeTarget->IsType(ObjectType::TERRAINBODY)) {
-		const double maxTargetExclR = GetExclusionZoneRadius(activeTarget);
-		targetExclR = (m_targetDistance <= maxTargetExclR * 3.0 + 250000.0)
-			? GetExclusionZoneRadiusAtDir(activeTarget, m_ship->GetPositionRelTo(activeTarget).NormalizedSafe())
-			: maxTargetExclR;
-	}
-	const double effectiveDist = std::max(0.0, m_targetDistance - targetExclR);
-	if (hasTarget && !targetIsSCShip && effectiveDist < 500.0 * LIGHT_SPEED) {
+	if (hasTarget && !targetIsSCShip && effectiveDist < 500.0 * LIGHT_SPEED && !m_orbitHoldActive) {
 
 		const Body *blocker = GetTargetObscuredBy(targetRel, activeTarget);
 		const bool isOccluded = (blocker != nullptr);
-		double sixSecondDist = effectiveDist;
+		double sixSecondDist = approachDist;
 		if (isOccluded && blocker) {
 			// When orbiting an intervening or host planet to reach a surface starport or occluded station,
 			// maintain controlled orbital cruise speed proportional to remaining arc distance so the ship
 			// never overshoots at high speed upon cresting the horizon.
 			const double exclR = GetExclusionZoneRadius(blocker);
-			sixSecondDist = std::max(effectiveDist, exclR * 0.45);
+			sixSecondDist = std::max(approachDist, exclR * 0.45);
 		}
 
-		if (inBlueZone || m_assistActive) {
+		if (inBlueZone || (m_assistActive && m_throttle < 0.85)) {
 			const double sixSecondSpeed = std::max(MIN_SPEED, sixSecondDist / 6.0);
 			targetCapSpeed = std::min(targetCapSpeed, sixSecondSpeed / 0.75);
 		} else if (m_throttle < 0.65 && m_throttle > 0.001) {
@@ -1788,11 +2107,11 @@ void SupercruiseController::StaticUpdate(float timeStep)
 
 		// Anti-Loop-of-Shame misalignment speed regulation for AI / Assist:
 		// ensure turn radius (v / omega) stays strictly inside 0.3 * effectiveDist when misaligned with a close target
-		if ((!m_ship->IsType(ObjectType::PLAYER) || m_assistActive) && !isOccluded && effectiveDist < 25.0 * LIGHT_SPEED) {
+		if ((!m_ship->IsType(ObjectType::PLAYER) || m_assistActive) && !isOccluded && approachDist < 25.0 * LIGHT_SPEED) {
 			const vector3d forwardDir = -m_ship->GetOrient().VectorZ();
 			const double closingDot = forwardDir.Dot(targetRel.NormalizedSafe());
 			if (closingDot < 0.82) {
-				const double turnSpeedCap = std::max(MIN_SPEED, effectiveDist * (closingDot > 0.25 ? 0.14 : 0.08));
+				const double turnSpeedCap = std::max(MIN_SPEED, approachDist * (closingDot > 0.25 ? 0.14 : 0.08));
 				targetCapSpeed = std::min(targetCapSpeed, turnSpeedCap / std::max(0.25, m_throttle));
 			}
 		}
@@ -2009,9 +2328,7 @@ void SupercruiseController::TimeStepUpdate(float timeStep, const vector3d &desir
 					const double t = segStart + (searchEnd - segStart) * frac;
 					const vector3d p = startRel + fwdRel * t;
 					const double d = p.Length();
-					const double localExclR = (d > 1.0)
-						? (std::max(sb->GetRadius(), tb->GetTerrainHeight(p / d)) + 4500.0)
-						: maxExclR;
+					const double localExclR = (d > 1.0) ? (std::max(sb->GetRadius(), tb->GetTerrainHeight(p / d)) + 4500.0) : maxExclR;
 					if (d <= localExclR) {
 						if (k == 0) {
 							hitT = segStart;
@@ -2022,9 +2339,7 @@ void SupercruiseController::TimeStepUpdate(float timeStep, const vector3d &desir
 								const double mid = 0.5 * (lo + hi);
 								const vector3d pm = startRel + fwdRel * mid;
 								const double dm = pm.Length();
-								const double exclM = (dm > 1.0)
-									? (std::max(sb->GetRadius(), tb->GetTerrainHeight(pm / dm)) + 4500.0)
-									: maxExclR;
+								const double exclM = (dm > 1.0) ? (std::max(sb->GetRadius(), tb->GetTerrainHeight(pm / dm)) + 4500.0) : maxExclR;
 								if (dm <= exclM)
 									hi = mid;
 								else
@@ -2327,7 +2642,8 @@ void SupercruiseController::UpdateInterdiction(float timeStep)
 	const vector3d targetFwd = -target->GetOrient().VectorZ();
 	// Slerp base vector gently toward target forward so Escape Vector stays in front hemisphere
 	targetSc->m_escapeBaseDir = (targetSc->m_escapeBaseDir * (1.0 - Clamp(double(timeStep) * 0.65, 0.0, 1.0)) +
-		targetFwd * Clamp(double(timeStep) * 0.65, 0.0, 1.0)).NormalizedSafe();
+		targetFwd * Clamp(double(timeStep) * 0.65, 0.0, 1.0))
+									.NormalizedSafe();
 	const vector3d baseFwd = targetSc->m_escapeBaseDir;
 	const vector3d refUp = (std::fabs(baseFwd.y) < 0.9) ? vector3d(0.0, 1.0, 0.0) : vector3d(1.0, 0.0, 0.0);
 	const vector3d tangentRight = baseFwd.Cross(refUp).Normalized();

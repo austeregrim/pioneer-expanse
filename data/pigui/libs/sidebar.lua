@@ -255,6 +255,20 @@ function Sidebar:Draw()
 		return
 	end
 
+	local baseWidth = self.displaySize.x
+	local targetWidth = 0
+	for _, m in ipairs(activeModules) do
+		local w = m.getWidth and m:getWidth(baseWidth) or m.width or baseWidth
+		if w > targetWidth then targetWidth = w end
+	end
+	if targetWidth > 0 and targetWidth ~= baseWidth then
+		self.displaySize.x = targetWidth
+		local padding = ui.getWindowPadding()
+		self.displayPos.x = (self.side == "right")
+			and (self.buttonPos.x - padding.x - self.displaySize.x)
+			or (self.buttonPos.x + padding.x)
+	end
+
 	-- Display a dividing line when the sidebar is open
 	local linePos = self.displayPos - Vector2(0, ui.getWindowPadding().y)
 	ui.addLine(linePos, linePos + Vector2(self.displaySize.x, 0), colors.grey:opacity(self.displayAlpha), 1)

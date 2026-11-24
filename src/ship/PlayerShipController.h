@@ -43,6 +43,8 @@ public:
 	void ToggleSupercruise();
 	void ToggleTransponder();
 	void SelectTarget();
+	void ClearNavTarget();
+	void ClearCombatTarget();
 	void CycleHostiles();
 	void CycleTargets(int direction);
 	void CycleSubsystems(int direction);
@@ -101,6 +103,8 @@ private:
 
 		// Weapons
 		Action *targetObject;
+		Action *clearNavTarget;
+		Action *clearCombatTarget;
 		Action *cycleHostiles;
 		Action *cycleTargetsNext;
 		Action *cycleTargetsPrev;
@@ -195,6 +199,8 @@ private:
 	ConnectionTicket m_toggleSupercruise;
 	ConnectionTicket m_toggleTransponder;
 	ConnectionTicket m_selectTarget;
+	ConnectionTicket m_clearNavTarget;
+	ConnectionTicket m_clearCombatTarget;
 	ConnectionTicket m_cycleHostiles;
 	ConnectionTicket m_cycleTargetsNext;
 	ConnectionTicket m_cycleTargetsPrev;

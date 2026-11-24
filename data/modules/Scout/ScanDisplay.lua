@@ -25,6 +25,9 @@ local scanDisplay = {
 	icon = icons.equip_orbit_scanner,
 	tooltip = ls.SCAN_MANAGER or "Scan Manager",
 	exclusive = false,
+	getWidth = function(self, baseWidth)
+		return math.clamp(math.floor(baseWidth * 0.52), 250, 340)
+	end,
 
 	debugReload = function()
 		package.reimport('pigui.libs.item-card')
@@ -69,11 +72,11 @@ function scanDisplay:drawHardwareBar()
 	local hasDisco = Cartography.HasDiscoveryScanner(self.ship)
 
 	ui.withFont(pionillium.details, function()
-		ui.textColored(hasOrbit and colors.econMajorImport or colors.fontDim, hasOrbit and "● Orbit Scanner" or "○ No Orbit")
+		ui.textColored(hasOrbit and colors.econMajorImport or colors.fontDim, hasOrbit and "● Orbit" or "○ Orbit")
 		ui.sameLine()
-		ui.textColored(hasSurface and colors.econMajorImport or colors.fontDim, hasSurface and "● Surface Scanner" or "○ No Surface")
+		ui.textColored(hasSurface and colors.econMajorImport or colors.fontDim, hasSurface and "● Surf" or "○ Surf")
 		ui.sameLine()
-		ui.textColored(hasDisco and colors.econMajorImport or colors.fontDim, hasDisco and "● Discovery" or "○ No Discovery")
+		ui.textColored(hasDisco and colors.econMajorImport or colors.fontDim, hasDisco and "● Disco" or "○ Disco")
 	end)
 end
 
@@ -249,7 +252,7 @@ function scanDisplay:drawSystemSurvey()
 	-- Batch queue buttons
 	local batchBtnW = (ui.getContentRegion().x - ui.getItemSpacing().x * 2) / 3
 	local bBtnH = 22
-	if ui.button("+ All Orbit", Vector2(batchBtnW, bBtnH)) then
+	if ui.button("+ Orbit", Vector2(batchBtnW, bBtnH)) then
 		local count = 0
 		for _, item in ipairs(list) do
 			if not Cartography.HasUnsoldScan(item.body, true) then
@@ -269,7 +272,7 @@ function scanDisplay:drawSystemSurvey()
 	end
 
 	ui.sameLine()
-	if ui.button("+ All Surface", Vector2(batchBtnW, bBtnH)) then
+	if ui.button("+ Surf", Vector2(batchBtnW, bBtnH)) then
 		local count = 0
 		for _, item in ipairs(list) do
 			local isStar = item.sbody.superType == "STAR"
@@ -291,7 +294,7 @@ function scanDisplay:drawSystemSurvey()
 	end
 
 	ui.sameLine()
-	if ui.button("+ Queue Both", Vector2(batchBtnW, bBtnH)) then
+	if ui.button("+ Both", Vector2(batchBtnW, bBtnH)) then
 		local count = 0
 		for _, item in ipairs(list) do
 			if not Cartography.HasUnsoldScan(item.body, true) then
@@ -355,7 +358,7 @@ function scanDisplay:drawSystemSurvey()
 			visibleCount = visibleCount + 1
 
 			local bName = b.label or sb.name or "Unknown"
-			local typeStr = isStar and "Star" or (isGasGiant and "Gas Giant" or (sb.type == "PLANET_ASTEROID" and "Asteroid" or "Terrestrial Planet"))
+			local typeStr = isStar and "Star" or (isGasGiant and "Gas Giant" or (sb.type == "PLANET_ASTEROID" and "Asteroid" or "Planet"))
 			local radiusStr = ui.Format.Distance(sb.radius)
 			local distStr = ui.Format.Distance(dist)
 			local isNavTarget = player and player:GetNavTarget() == b
@@ -396,13 +399,13 @@ function scanDisplay:drawSystemSurvey()
 						end
 					end)
 					if ui.isItemHovered() then
-						ui.setTooltip("Click to target & prioritize in Scan Queue")
+						ui.setTooltip("Radius: " .. radiusStr .. " • Click to target & prioritize")
 					end
 
 					ui.withFont(pionillium.details, function()
-						local infoText = string.format("%s • Dist: %s • R: %s", typeStr, distStr, radiusStr)
+						local infoText = string.format("%s • %s", typeStr, distStr)
 						if isScanning then
-							infoText = infoText .. " • [SCANNING]"
+							infoText = infoText .. " • [SCAN]"
 							ui.textColored(colors.econMajorImport, infoText)
 						else
 							ui.textColored(colors.fontDim, infoText)
@@ -543,27 +546,28 @@ function scanDisplay:drawScanCard(scan, queueIndex)
 	}, function()
 		ui.withStyleVars({
 			ChildRounding = 4.0,
-			WindowPadding = Vector2(8, 8),
+			WindowPadding = Vector2(6, 6),
 		}, function()
 			ui.child("##qCard_" .. scan.id, Vector2(0, 0), { "NoScrollbar" }, childFlags, function()
 				-- Badges row
 				ui.withFont(pionillium.details, function()
 					local modeCol = scan.orbital and colors.uiPrimaryLight or colors.econMajorImport
 					local posBadge = queueIndex and string.format("#%d ", queueIndex) or ""
-					ui.textColored(modeCol, posBadge .. (scan.orbital and "[ORBITAL]" or "[SURFACE]"))
+					ui.textColored(modeCol, posBadge .. (scan.orbital and "[ORB]" or "[SURF]"))
 					ui.sameLine()
 					if scan.freeScan then
 						ui.textColored(colors.uiPrimaryLight, "[SURVEY]")
 					else
-						ui.textColored(colors.alertYellow, "[MISSION CONTRACT]")
+						ui.textColored(colors.alertYellow, "[MISSION]")
 					end
-					ui.sameLine()
-					ui.textColored(colors.fontDim, sysName)
+					if not isCurSystem then
+						ui.sameLine()
+						ui.textColored(colors.fontDim, sysName)
+					end
 				end)
 
 				-- Body name (Clickable to target and prioritize)
 				ui.withFont(pionillium.body, function()
-					local nameCol = isNavTarget and colors.uiPrimaryLight or colors.font
 					if body and ui.selectable((isNavTarget and "● " or "") .. bodyName .. "##qsel" .. scan.id, isNavTarget) then
 						self.ship:SetNavTarget(body)
 						self.scanMgr:PrioritizeBodyInQueue(body)
@@ -573,41 +577,43 @@ function scanDisplay:drawScanCard(scan, queueIndex)
 					end
 				end)
 				if body and ui.isItemHovered() then
-					ui.setTooltip("Click to target & prioritize to top of queue")
+					ui.setTooltip("Click to target & prioritize body in queue")
 				end
 
 				-- Details row
 				ui.withFont(pionillium.details, function()
 					if isPercentScan then
-						ui.text(string.format("Progress: %s   •   Max Range: %s", completionStr, altitudeStr))
+						ui.text(string.format("%s • Max %s", completionStr, altitudeStr))
 					else
 						local targetStr = ui.Format.Area(scan.targetCoverage * 1e6)
 						local curAreaStr = ui.Format.Area(scan.coverage * 1e6)
-						ui.text(string.format("Coverage: %s / %s   •   Max Range: %s", curAreaStr, targetStr, altitudeStr))
+						ui.text(string.format("%s/%s • %s", curAreaStr, targetStr, altitudeStr))
 					end
 
 					if not hasSensor then
-						ui.textColored(colors.alertRed, scan.orbital and "Requires Orbital Scanner (Not Equipped)" or "Requires Surface Scanner (Not Equipped)")
+						ui.textColored(colors.alertRed, scan.orbital and "No Orbital Scanner" or "No Surface Scanner")
 					elseif not isCurSystem then
-						ui.textColored(colors.fontDim, "Requires Hyperspace Jump to " .. sysName)
+						ui.textColored(colors.fontDim, "Jump to " .. sysName)
 					elseif body then
 						local dist = self.ship:GetPositionRelTo(body):length()
 						if dist <= maxRange then
-							ui.textColored(colors.econMajorImport, "In Scan Range (" .. ui.Format.Distance(dist) .. ")")
+							ui.textColored(colors.econMajorImport, "In Range (" .. ui.Format.Distance(dist) .. ")")
 						else
-							ui.textColored(colors.fontDim, "Distance: " .. ui.Format.Distance(dist))
+							ui.textColored(colors.fontDim, "Dist: " .. ui.Format.Distance(dist))
 						end
 					end
 				end)
 
 				ui.spacing()
 
-				-- Actions
+				-- Actions: Activate/Pause + Reorder Up/Down + Discard
 				local availW = ui.getContentRegion().x
 				local spacing = ui.getItemSpacing().x
 				local btnH = 22
-				local discardBtnW = scan.freeScan and 24 or 0
-				local actBtnW = availW - (discardBtnW > 0 and (discardBtnW + spacing) or 0)
+				local moveBtnW = 22
+				local discardBtnW = scan.freeScan and 22 or 0
+				local extraW = (moveBtnW * 2 + spacing * 2) + (discardBtnW > 0 and (discardBtnW + spacing) or 0)
+				local actBtnW = math.max(60, availW - extraW)
 
 				if isActive then
 					if ui.button("Active [Pause]##" .. scan.id, Vector2(actBtnW, btnH), ui.theme.buttonColors.selected) then
@@ -616,7 +622,7 @@ function scanDisplay:drawScanCard(scan, queueIndex)
 					end
 				else
 					local canAct = isCurSystem and hasSensor
-					if ui.button("Activate / Move to Top##" .. scan.id, Vector2(actBtnW, btnH), canAct and ui.theme.buttonColors.deselected or ui.theme.buttonColors.disabled) then
+					if ui.button("Activate##" .. scan.id, Vector2(actBtnW, btnH), canAct and ui.theme.buttonColors.deselected or ui.theme.buttonColors.disabled) then
 						if canAct then
 							if body then
 								self.ship:SetNavTarget(body)
@@ -629,6 +635,32 @@ function scanDisplay:drawScanCard(scan, queueIndex)
 							ui.playSfx("Cancel")
 						end
 					end
+				end
+
+				ui.sameLine()
+				if ui.button("▲##up" .. scan.id, Vector2(moveBtnW, btnH)) then
+					if ui.shiftHeld() then
+						self.scanMgr:MoveBodyGroupInQueue(scan.bodyPath, -1)
+					else
+						self.scanMgr:MoveScanInQueue(scan.id, -1)
+					end
+					ui.playSfx("OK")
+				end
+				if ui.isItemHovered() then
+					ui.setTooltip("Move scan up (Shift+click: move body group)")
+				end
+
+				ui.sameLine()
+				if ui.button("▼##dn" .. scan.id, Vector2(moveBtnW, btnH)) then
+					if ui.shiftHeld() then
+						self.scanMgr:MoveBodyGroupInQueue(scan.bodyPath, 1)
+					else
+						self.scanMgr:MoveScanInQueue(scan.id, 1)
+					end
+					ui.playSfx("OK")
+				end
+				if ui.isItemHovered() then
+					ui.setTooltip("Move scan down (Shift+click: move body group)")
 				end
 
 				if scan.freeScan then
@@ -681,12 +713,46 @@ function scanDisplay:drawScanQueue()
 		self.queueFilter = "all"
 	end
 	ui.sameLine()
-	if ui.button(string.format("Orbital (%d)", #allOrbital), Vector2(filterBtnW, btnH), self.queueFilter == "orbital" and selectedBtn or deselectedBtn) then
+	if ui.button(string.format("Orb (%d)", #allOrbital), Vector2(filterBtnW, btnH), self.queueFilter == "orbital" and selectedBtn or deselectedBtn) then
 		self.queueFilter = "orbital"
 	end
 	ui.sameLine()
-	if ui.button(string.format("Surface (%d)", #allSurface), Vector2(filterBtnW, btnH), self.queueFilter == "surface" and selectedBtn or deselectedBtn) then
+	if ui.button(string.format("Surf (%d)", #allSurface), Vector2(filterBtnW, btnH), self.queueFilter == "surface" and selectedBtn or deselectedBtn) then
 		self.queueFilter = "surface"
+	end
+
+	-- Queue resort & body-grouping bar
+	local sortBtnW = (ui.getContentRegion().x - ui.getItemSpacing().x * 3) / 4
+	if ui.button("Near##qSortDist", Vector2(sortBtnW, btnH), deselectedBtn) then
+		self.scanMgr:GroupQueueByBody("distance")
+		ui.playSfx("OK")
+	end
+	if ui.isItemHovered() then
+		ui.setTooltip("Sort by nearest body (pairs Orbital & Surface)")
+	end
+	ui.sameLine()
+	if ui.button("Group##qSortGrp", Vector2(sortBtnW, btnH), deselectedBtn) then
+		self.scanMgr:GroupQueueByBody("body")
+		ui.playSfx("OK")
+	end
+	if ui.isItemHovered() then
+		ui.setTooltip("Group Orbital & Surface scans of the same body together")
+	end
+	ui.sameLine()
+	if ui.button("Name##qSortName", Vector2(sortBtnW, btnH), deselectedBtn) then
+		self.scanMgr:GroupQueueByBody("name")
+		ui.playSfx("OK")
+	end
+	if ui.isItemHovered() then
+		ui.setTooltip("Sort alphabetically by body name (pairs Orbital & Surface)")
+	end
+	ui.sameLine()
+	if ui.button("Clear##qClear", Vector2(sortBtnW, btnH), deselectedBtn) then
+		self.scanMgr:ClearFreeScans()
+		ui.playSfx("Cancel")
+	end
+	if ui.isItemHovered() then
+		ui.setTooltip("Clear free survey scans from queue (keeps mission contracts)")
 	end
 
 	ui.spacing()
@@ -835,6 +901,28 @@ function scanDisplay:drawBody()
 	-- 2. Active Scan HUD (pinned if active)
 	self:drawActiveScanHUD()
 
+	-- 2b. Autopilot Mk 4 Autonomous Survey control
+	if self.scanMgr and self.scanMgr:HasAutoSurveyModule() then
+		local availW = ui.getContentRegion().x
+		local totalQueueCount = #self.scanMgr:GetPendingScans() + (self.scanMgr:GetActiveScan() and 1 or 0)
+		local autoActive = self.scanMgr:IsAutoSurveyActive()
+		local btnLabel = autoActive and "AUTO-SURVEY: ACTIVE [Stop]" or "Start Auto-Survey (Mk 4)"
+		local btnStyle = autoActive and ui.theme.buttonColors.selected
+			or (totalQueueCount > 0 and ui.theme.buttonColors.default or ui.theme.buttonColors.disabled)
+		if ui.button(btnLabel .. "##autoSurveyBtn", Vector2(availW, ui.getButtonHeight()), btnStyle) then
+			if autoActive or totalQueueCount > 0 then
+				local ok = self.scanMgr:ToggleAutoSurvey()
+				ui.playSfx(ok and "OK" or "Cancel")
+			else
+				ui.playSfx("Cancel")
+			end
+		end
+		if ui.isItemHovered() then
+			ui.setTooltip("Autopilot Mk 4: Supercruise to each queued body, enter optimal orbital/polar scan orbit, and advance queue automatically")
+		end
+		ui.spacing()
+	end
+
 	-- 3. Main Navigation Tabs
 	local availW = ui.getContentRegion().x
 	local tabW = (availW - ui.getItemSpacing().x * 2) / 3
@@ -842,7 +930,7 @@ function scanDisplay:drawBody()
 	local selectedBtn = ui.theme.buttonColors.selected
 	local deselectedBtn = ui.theme.buttonColors.deselected
 
-	if ui.button("System Survey", Vector2(tabW, btnH), self.activeTab == 1 and selectedBtn or deselectedBtn) then
+	if ui.button("Survey", Vector2(tabW, btnH), self.activeTab == 1 and selectedBtn or deselectedBtn) then
 		self.activeTab = 1
 	end
 	ui.sameLine()
@@ -851,7 +939,7 @@ function scanDisplay:drawBody()
 		self.activeTab = 2
 	end
 	ui.sameLine()
-	if ui.button("Completed", Vector2(tabW, btnH), self.activeTab == 3 and selectedBtn or deselectedBtn) then
+	if ui.button("Done", Vector2(tabW, btnH), self.activeTab == 3 and selectedBtn or deselectedBtn) then
 		self.activeTab = 3
 	end
 
