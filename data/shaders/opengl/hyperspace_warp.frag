@@ -7,93 +7,57 @@
 in vec2 screenUV;
 
 uniform sampler2D texture0;
-// warpParams: x = warpAmount [0..1], y = tanHalfBaseFov, z = tanHalfCapFov, w = aspect (w/h)
-uniform vec4 warpParams;
-// bloomParams: x = exposureProg [0..1], y = bloomStrength, z = bloomRadius, w = whiteoutFloor
-uniform vec4 bloomParams;
+// exposureParams: x = prog [0..1], y = dopplerShift [-1..1] (+blueshift entry, -redshift exit), z = exposureGain, w = whiteout [0..1]
+uniform vec4 exposureParams;
 
 out vec4 frag_color;
 
-vec3 sampleBloomTap(vec2 uv, float threshold, float lumaPow)
-{
-	vec3 c = texture(texture0, clamp(uv, vec2(0.0005), vec2(0.9995))).rgb;
-	float luma = max(max(c.r, c.g), c.b);
-	float weight = smoothstep(threshold, 1.0, luma);
-	float boost = pow(max(luma, 0.0001), lumaPow) / max(luma, 0.0001);
-	return c * weight * boost;
-}
-
 void main(void)
 {
-	// screenUV has v=0 at bottom and v=1 at top (OpenGL FBO UV convention passed from quad)
-	vec2 ndc = screenUV * 2.0 - 1.0;
-	float aspect = max(warpParams.w, 0.1);
-	vec2 q = vec2(ndc.x * aspect, ndc.y);
-	float r = length(q);
-	float rMax = sqrt(aspect * aspect + 1.0);
-	float t = clamp(r / rMax, 0.0, 1.0);
+	vec3 col = texture(texture0, screenUV).rgb;
 
-	float tanCap = max(warpParams.z, 0.05);
-	float thetaMax = atan(rMax * tanCap);
-	float thetaRect = atan(r * tanCap);
-	float thetaEq = t * thetaMax;
-	float thetaOrtho = asin(clamp(t * sin(thetaMax), 0.0, 0.9999));
-	float thetaFlat = mix(thetaEq, thetaOrtho, 0.50);
-	float theta = mix(thetaRect, thetaFlat, clamp(warpParams.x, 0.0, 1.0));
+	float prog = clamp(exposureParams.x, 0.0, 1.0);
+	float doppler = clamp(exposureParams.y, -1.0, 1.0);
+	float exposure = max(exposureParams.z, 1.0);
+	float whiteout = clamp(exposureParams.w, 0.0, 1.0);
 
-	vec2 srcUV = screenUV;
-	if (r > 1e-5 && warpParams.x > 1e-4) {
-		float rSrc = tan(theta) / tanCap;
-		vec2 qSrc = q * (rSrc / r);
-		srcUV = vec2(qSrc.x / aspect, qSrc.y) * 0.5 + 0.5;
-	}
-	srcUV = clamp(srcUV, vec2(0.0005), vec2(0.9995));
+	float bgGather = pow(smoothstep(0.18, 0.96, prog), 2.0);
+	vec3 bgTint;
+	vec3 spillWeights;
 
-	vec3 baseCol = texture(texture0, srcUV).rgb;
-
-	float eProg = clamp(bloomParams.x, 0.0, 1.0);
-	float threshold = mix(0.28, 0.02, eProg);
-	float lumaPow = mix(1.45, 0.65, eProg);
-
-	vec2 invAspect = vec2(1.0 / aspect, 1.0);
-	float baseRad = max(bloomParams.z, 0.001);
-	float rad1 = baseRad * 0.45;
-	float rad2 = baseRad * 1.15;
-	float rad3 = baseRad * 2.40;
-
-	vec3 bloomAccum = vec3(0.0);
-	const float TAU = 6.28318530718;
-
-	for (int i = 0; i < 8; ++i) {
-		float a1 = float(i) * (TAU / 8.0);
-		float a2 = a1 + (TAU / 16.0);
-		vec2 d1 = vec2(cos(a1), sin(a1)) * invAspect;
-		vec2 d2 = vec2(cos(a2), sin(a2)) * invAspect;
-
-		bloomAccum += sampleBloomTap(srcUV + d1 * rad1, threshold, lumaPow) * 0.060;
-		bloomAccum += sampleBloomTap(srcUV + d2 * rad2, threshold, lumaPow) * 0.045;
-		bloomAccum += sampleBloomTap(srcUV + d1 * rad3, threshold, lumaPow) * 0.028;
+	if (doppler >= 0.0) {
+		// Entry surge: crisp relativistic blueshift into oncoming starlight (red -> green/cyan -> blue/violet)
+		float bShift = doppler;
+		vec3 shifted = vec3(
+			col.r * (1.0 - 0.65 * bShift),
+			col.g * (1.0 - 0.12 * bShift) + col.r * (0.38 * bShift),
+			col.b * (1.0 + 0.60 * bShift) + col.g * (0.48 * bShift) + col.r * (0.20 * bShift)
+		);
+		col = mix(col, shifted, bShift);
+		bgTint = mix(vec3(0.28, 0.58, 1.0), vec3(0.96, 0.98, 1.0), smoothstep(0.55, 0.96, prog));
+		spillWeights = vec3(0.85, 0.72, 0.50);
+	} else {
+		// Destination arrival exit: crisp relativistic redshift as wide-angle decompression settles
+		float rShift = -doppler;
+		vec3 shifted = vec3(
+			col.r * (1.0 + 0.55 * rShift) + col.g * (0.48 * rShift) + col.b * (0.18 * rShift),
+			col.g * (1.0 - 0.22 * rShift) + col.b * (0.38 * rShift) + col.r * (0.06 * rShift),
+			col.b * (1.0 - 0.72 * rShift)
+		);
+		col = mix(col, shifted, rShift);
+		bgTint = mix(vec3(1.0, 0.46, 0.22), vec3(1.0, 0.98, 0.96), smoothstep(0.55, 0.96, prog));
+		spillWeights = vec3(0.50, 0.65, 0.85);
 	}
 
-	// Outward radial streak bloom for stars and dust lines
-	vec2 radialDir = srcUV - vec2(0.5);
-	float radLen = length(radialDir);
-	if (radLen > 1e-4) {
-		vec2 dirN = radialDir / radLen;
-		for (int j = 1; j <= 4; ++j) {
-			float stepDist = float(j) * baseRad * 0.85;
-			float w = 0.055 * (1.0 - float(j - 1) * 0.18);
-			bloomAccum += sampleBloomTap(srcUV - dirN * stepDist, threshold, lumaPow) * w;
-		}
-	}
+	// Background sky radiance gather + photographic exposure increase (no blur)
+	vec3 exposed = col * exposure + bgTint * (bgGather * 1.35);
 
-	float exposure = exp2(eProg * eProg * 7.8);
-	vec3 hdr = baseCol * exposure + bloomAccum * (bloomParams.y * exposure * 0.85);
+	// Smooth sensor full-well cross-channel saturation before whiteout
+	float lum = dot(exposed, vec3(0.35, 0.45, 0.20));
+	float spill = max(0.0, lum - 0.65);
+	exposed += spillWeights * (spill * smoothstep(0.35, 0.95, prog));
 
-	float maxCh = max(hdr.r, max(hdr.g, hdr.b));
-	float bleach = smoothstep(0.75, 2.6, maxCh);
-	vec3 col = mix(hdr, vec3(maxCh), bleach * 0.88);
-	col += vec3(bloomParams.w);
-
-	frag_color = vec4(clamp(col, 0.0, 1.0), 1.0);
+	// Smooth filmic shoulder + final pure-white handoff
+	vec3 mapped = 1.0 - exp(-exposed * (1.15 + 1.45 * prog));
+	frag_color = vec4(clamp(mix(mapped, vec3(1.0), whiteout * whiteout), 0.0, 1.0), 1.0);
 }

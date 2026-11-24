@@ -78,7 +78,7 @@ local scheduleWages = function (crewMember)
 		-- Check if crew member has been dismissed
 		if not contract then return end
 
-		if PlayerState.GetMoney() > contract.wage then
+		if PlayerState.GetMoney() >= contract.wage then
 			PlayerState.AddMoney(0 - contract.wage)
 			local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
 			if okTax and TaxAuthority and TaxAuthority.RecordOperatingExpense then

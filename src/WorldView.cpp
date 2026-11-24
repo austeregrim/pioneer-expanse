@@ -326,13 +326,14 @@ void WorldView::Update()
 
 	m_viewController->Update();
 
-	// Hyperjump wide-angle FOV capture for projection unwrapping/flattening:
-	// widen capture FOV during jump-out surge, and smoothly re-wrap when emerging into the destination system.
+	// Hyperjump wide-angle FOV flattening:
+	// widen rectilinear FOV during jump-out surge so forward hemisphere appears to flatten out,
+	// and smoothly restore when emerging into the destination system.
 	if (Pi::player && m_cameraContext) {
 		const float defaultFov = Pi::config->Float("FOVVertical");
 		const bool surging = Pi::player->IsHyperspaceJumpSurging();
 		const float entryFactor = m_game ? m_game->GetHyperspaceEntryFovFactor() : 0.0f;
-		constexpr float kWarpMaxFov = 148.0f;
+		constexpr float kWarpMaxFov = 168.0f;
 
 		if (surging || entryFactor > 0.0f) {
 			if (shipView && !shipView->IsExteriorView()) {
@@ -340,8 +341,8 @@ void WorldView::Update()
 			} else if (!surging && entryFactor <= 0.0f) {
 				m_hyperBaseFov = defaultFov;
 			}
-			const float t = surging ? Pi::player->GetHyperspaceJumpSurgeProgress() : entryFactor;
-			const float fovEase = t * t * (3.0f - 2.0f * t);
+			const float t = Clamp(surging ? Pi::player->GetHyperspaceJumpSurgeProgress() : entryFactor, 0.0f, 1.0f);
+			const float fovEase = std::pow(t, 1.35f);
 			m_cameraContext->SetFovAng(m_hyperBaseFov + (kWarpMaxFov - m_hyperBaseFov) * fovEase);
 		} else {
 			m_hyperBaseFov = (shipView && !shipView->IsExteriorView()) ? m_cameraContext->GetFovAng() : defaultFov;
@@ -1735,20 +1736,16 @@ void WorldView::ApplyHyperspaceWarpPostProcess()
 		return t * t * (3.0f - 2.0f * t);
 	};
 
-	const float warpAmount = smooth01(0.0f, 0.85f, prog);
-	const float tanBase = std::tan(DEG2RAD(m_hyperBaseFov) * 0.5f);
-	const float tanCap = std::tan(DEG2RAD(m_cameraContext->GetFovAng()) * 0.5f);
-	const float aspect = float(winW) / std::max(1.0f, float(winH));
-	const float bloomStrength = 0.9f + 2.6f * prog;
-	const float bloomRadius = 0.006f + 0.058f * (prog * prog);
-	const float whiteoutFloor = (prog > 0.76f) ? Clamp(std::pow((prog - 0.76f) / 0.20f, 1.8f), 0.0f, 1.0f) : 0.0f;
+	const float shiftMag = smooth01(0.04f, 0.82f, prog);
+	const float dopplerShift = surging ? shiftMag : -shiftMag; // +blueshift on surge entry, -redshift on destination exit
+	const float exposure = std::exp2(prog * 3.4f);
+	const float whiteout = smooth01(0.84f, 0.98f, prog);
 
 	m_renderer->SetProjection(matrix4x4f::OrthoFrustum(0.0f, float(winW), float(winH), 0.0f, 0.0f, 1.0f));
 	m_renderer->SetTransform(matrix4x4f::Identity);
 
 	m_hyperWarpMat->SetTexture("texture0"_hash, m_hyperResolveRT->GetColorTexture());
-	m_hyperWarpMat->SetPushConstant("warpParams"_hash, vector3f(warpAmount, tanBase, tanCap), aspect);
-	m_hyperWarpMat->SetPushConstant("bloomParams"_hash, vector3f(prog, bloomStrength, bloomRadius), whiteoutFloor);
+	m_hyperWarpMat->SetPushConstant("exposureParams"_hash, vector3f(prog, dopplerShift, exposure), whiteout);
 
 	Graphics::VertexArray quad(Graphics::ATTRIB_POSITION | Graphics::ATTRIB_UV0);
 	quad.Add(vector3f(0.0f, 0.0f, 0.0f), vector2f(0.0f, 1.0f));

@@ -813,7 +813,36 @@ function SpaceStation:UnlockAdvert (ref)
 	end
 end
 
+function SpaceStation:CleanExpiredAdverts (now)
+	if not self:exists() or not SpaceStation.adverts[self] then return false end
+	local tNow = now or Game.time or 0
+	local expiredRefs = {}
+	for ref, ad in pairs(SpaceStation.adverts[self]) do
+		if type(ad) == "table" and ((type(ad.due) == "number" and (ad.due - tNow) <= 0) or (type(ad.timeout) == "number" and (ad.timeout - tNow) <= 0)) then
+			table.insert(expiredRefs, ref)
+		end
+	end
+	for _, ref in ipairs(expiredRefs) do
+		self:RemoveAdvert(ref)
+	end
+	return #expiredRefs > 0
+end
+
+function SpaceStation.CleanAllExpiredAdverts (now)
+	local tNow = now or Game.time or 0
+	local stations = {}
+	for station, _ in pairs(SpaceStation.adverts) do
+		table.insert(stations, station)
+	end
+	for _, station in ipairs(stations) do
+		if station and station:exists() then
+			station:CleanExpiredAdverts(tNow)
+		end
+	end
+end
+
 local function updateSystem ()
+	SpaceStation.CleanAllExpiredAdverts()
 	local stations = Space.GetBodies("SpaceStation")
 	for i, station in ipairs(stations) do
 		Economy.UpdateStationMarket(assert(station:GetSystemBody()), station:GetCommodityMarket())
@@ -888,11 +917,16 @@ end
 
 
 local loaded_data
+local expiryTimerActive = false
 
 Event.Register("_ensureDockedBB", function (station)
-	if station:exists() and not SpaceStation.adverts[station] then
-		SpaceStation.adverts[station] = {}
-		Event.Queue("onCreateBB", station)
+	if station:exists() then
+		if not SpaceStation.adverts[station] then
+			SpaceStation.adverts[station] = {}
+			Event.Queue("onCreateBB", station)
+		else
+			station:CleanExpiredAdverts()
+		end
 	end
 end)
 
@@ -964,12 +998,21 @@ Event.Register("onGameStart", function ()
 	end
 
 	Timer:CallEvery(3600, updateSystem)
+	if not expiryTimerActive then
+		expiryTimerActive = true
+		Timer:CallEvery(30, function ()
+			if not Game.player then return false end
+			SpaceStation.CleanAllExpiredAdverts()
+			return false
+		end)
+	end
 end)
 
 Event.Register("onPlayerDocked", function (ship, station)
 	if not visited[station] then
 		createStationData(station)
 	else
+		station:CleanExpiredAdverts()
 		Economy.UpdateStationMarket(assert(station:GetSystemBody()), station:GetCommodityMarket())
 	end
 end, true)
@@ -1000,6 +1043,7 @@ Event.Register("onShipDestroyed", function (ship, _)
 end)
 
 Event.Register("onGameEnd", function ()
+	expiryTimerActive = false
 	destroySystem()
 
 	-- XXX clean up for next game

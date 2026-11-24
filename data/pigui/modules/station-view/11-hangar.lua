@@ -8,6 +8,7 @@ local Format      = require 'Format'
 local ShipDef     = require 'ShipDef'
 local Commodities = require 'Commodities'
 local StationView = require 'pigui.views.station-view'
+local PlayerState = require 'PlayerState'
 local PlayerFleet = require 'modules.PlayerFleet.PlayerFleet'
 
 local l = Lang.GetResource("ui-core")
@@ -38,9 +39,16 @@ end
 local function drawFlagshipBanner(station)
 	local player = Game.player
 	local def = ShipDef[player.shipId]
+	local hullName = def and def.name or player.shipId
+	local reg = player.label or ""
+	local defaultName = (reg ~= "") and string.format("%s [%s]", hullName, reg) or hullName
+	local customName = (player.shipName and player.shipName ~= "" and player.shipName ~= defaultName) and player.shipName or nil
+	local bannerTitle = customName
+		and string.format("ACTIVE FLAGSHIP: %s — %s [%s]", customName, hullName, reg)
+		or string.format("ACTIVE FLAGSHIP: %s [%s]", hullName, reg)
 	ui.child("##HangarFlagshipHeader", Vector2(-1, ui.rescaleUI(68, Vector2(1920, 1080))), nil, childFlags, function()
 		ui.withFont(orbiteer.heading, function()
-			ui.textColored(colors.uiPrimaryLight, string.format("ACTIVE FLAGSHIP: %s [%s]", def and def.name or player.shipId, player.label or ""))
+			ui.textColored(colors.uiPrimaryLight, bannerTitle)
 			if statusMsg then
 				ui.sameLine(0, ui.rescaleUI(24, Vector2(1920, 1080)))
 				ui.withFont(pionillium.body, function()
@@ -359,7 +367,7 @@ local function drawFleetShipDetail(entry, station)
 			ui.textColored(colors.uiPrimaryLight, string.format("CREW & CAPTAIN QUARTERS (%d / %d BERTHS)", #(entry.crew or {}), def and def.maxCrew or 1))
 		end)
 		if entry.status == "DOCKED" and not entry.captain then
-			if ui.button("Hire Captain (1,500 Cr Signing Bonus)", Vector2(0, 0)) then
+			if ui.button("Hire Captain (1,500 Cr Signing Bonus + Weekly Wage)", Vector2(0, 0)) then
 				local _, msg = PlayerFleet.HireInstantCaptain(entry.uid)
 				setStatus(msg)
 			end
@@ -380,8 +388,20 @@ local function drawFleetShipDetail(entry, station)
 
 		for _, member in ipairs(entry.crew or {}) do
 			local role = (member == entry.captain) and "[CAPTAIN]" or "[CREW]"
-			ui.text(string.format("  %s %s — Pil:%d  Nav:%d  Eng:%d  Sen:%d",
-				role, member.name, member.piloting or 15, member.navigation or 15, member.engineering or 15, member.sensors or 15))
+			ui.text(string.format("  %s %s — %s/wk | Ops:%d | Pil:%d  Nav:%d  Eng:%d  Sen:%d",
+				role, member.name, Format.Money(member.fleetWage or 0, false), member.completedOps or 0,
+				member.piloting or 15, member.navigation or 15, member.engineering or 15, member.sensors or 15))
+			if (member.fleetOwed or 0) > 0 then
+				ui.sameLine()
+				ui.textColored(colors.alertRed, string.format("Owed: %s", Format.Money(member.fleetOwed, false)))
+				if PlayerState.GetMoney() > 0 then
+					ui.sameLine()
+					if ui.button("Pay Arrears##hangar_arr_" .. member.name, Vector2(0, 0)) then
+						local _, msg = PlayerFleet.PayCrewArrears(member)
+						setStatus(msg)
+					end
+				end
+			end
 			if here then
 				if member ~= entry.captain then
 					ui.sameLine()

@@ -3,12 +3,14 @@
 
 local Event      = require 'Event'
 local Game       = require 'Game'
+local Timer      = require 'Timer'
 local Format     = require 'Format'
 local Serializer = require 'Serializer'
 local Rand       = require 'Rand'
 local InterCast  = require 'modules.InterCast.InterCast'
 
 local MacroGalaxyEngine = {}
+local macroTimerActive = false
 
 ---@class MacroCrisis
 ---@field id string
@@ -495,23 +497,28 @@ function MacroGalaxyEngine.ContributeToCrisis(systemName, amount)
 	return false
 end
 
-local function onEnterSystem()
+local function checkMacroSimulation(forceAnyElapsed)
 	local curTime = Game.time or 0
-	if lastSimulationTime == 0 then
-		lastSimulationTime = curTime
-		-- Seed initial crises
+	if #activeCrises == 0 then
 		while #activeCrises < 14 do
-			seedEmergentCrisis()
+			if not seedEmergentCrisis() then break end
 		end
+	end
+	if lastSimulationTime <= 0 or curTime < lastSimulationTime then
+		lastSimulationTime = curTime
 		return
 	end
 
 	local elapsedSeconds = curTime - lastSimulationTime
-	if elapsedSeconds > 0 then
-		local deltaDays = elapsedSeconds / SECONDS_PER_DAY
-		MacroGalaxyEngine.AdvanceMacroTick(deltaDays)
+	local minInterval = forceAnyElapsed and 1 or 3600
+	if elapsedSeconds >= minInterval then
 		lastSimulationTime = curTime
+		MacroGalaxyEngine.AdvanceMacroTick(elapsedSeconds / SECONDS_PER_DAY)
 	end
+end
+
+local function onEnterSystem()
+	checkMacroSimulation(true)
 end
 
 Event.Register("onGameStart", function()
@@ -520,12 +527,26 @@ Event.Register("onGameStart", function()
 	end
 	if #activeCrises == 0 then
 		while #activeCrises < 14 do
-			seedEmergentCrisis()
+			if not seedEmergentCrisis() then break end
 		end
+	end
+	if not macroTimerActive then
+		macroTimerActive = true
+		Timer:CallEvery(300, function()
+			if not Game.player then return false end
+			checkMacroSimulation(false)
+			return false
+		end)
 	end
 end)
 
 Event.Register("onEnterSystem", onEnterSystem)
+
+Event.Register("onGameEnd", function()
+	macroTimerActive = false
+	activeCrises = {}
+	lastSimulationTime = 0
+end)
 
 local function serialize()
 	return {

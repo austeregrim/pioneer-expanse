@@ -179,7 +179,7 @@ private:
 	double m_hyperspaceDuration;
 	double m_hyperspaceEndTime;
 	float m_hyperspaceFlashAlpha = 0.0f;
-	static constexpr float HYPERSPACE_ENTRY_FOV_DURATION = 0.70f;
+	static constexpr float HYPERSPACE_ENTRY_FOV_DURATION = 0.90f;
 	float m_hyperspaceEntryFovTimer = 0.0f;
 
 	TimeAccel m_timeAccel;

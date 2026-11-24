@@ -1,13 +1,12 @@
 ## Copyright © 2008-2026 Pioneer Developers. See AUTHORS.txt for details
 ## Licensed under the terms of the GPL v3. See licenses/GPL-3.txt
 
-# Hyperjump screen-space projection unwrap/flatten, exposure blowout, and optical bloom
+# Hyperjump crisp exposure increase and relativistic redshift post-process
 
 Shader hyperspace_warp
 
 Texture sampler2D texture0
-PushConstant vec4 warpParams
-PushConstant vec4 bloomParams
+PushConstant vec4 exposureParams
 
 Buffer DrawData binding=1
 

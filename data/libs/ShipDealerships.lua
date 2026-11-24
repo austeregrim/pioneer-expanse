@@ -938,6 +938,15 @@ function ShipDealerships.InstallListingEquipment(ship, offer, sos)
 	ship:SetFuelPercent(100)
 end
 
+function ShipDealerships.DefaultShipNameForListing(sos)
+	if sos and sos.shipName and sos.shipName ~= "" then
+		return sos.shipName
+	end
+	local defName = (sos and sos.def and sos.def.name) or "Vessel"
+	local label = (sos and sos.label and sos.label ~= "") and sos.label or nil
+	return label and string.format("%s [%s]", defName, label) or defName
+end
+
 function ShipDealerships.BuildTradeInListing(playerShip)
 	local def = ShipDef[playerShip.shipId]
 	local equipSet = playerShip:GetComponent('EquipSet')
@@ -977,6 +986,7 @@ function ShipDealerships.BuildTradeInListing(playerShip)
 		skin = playerShip:GetSkin(),
 		pattern = playerShip.model and playerShip.model.pattern or nil,
 		label = playerShip.label,
+		shipName = (playerShip.shipName and playerShip.shipName ~= "") and playerShip.shipName or nil,
 		condition = "USED",
 		sellerType = "PLAYER_TRADE_IN",
 		hullPercent = hullPct,

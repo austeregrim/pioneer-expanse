@@ -18,7 +18,7 @@ local icons = ui.theme.icons
 local SCREEN_BORDER = 6
 
 local MAX_RADAR_SIZE = 1000000000
-local MAX_SC_RADAR_SIZE = 500000000000 -- 5e11 m (~1,668 ls) for Supercruise contacts
+local MAX_SC_RADAR_SIZE = 1500000000000 -- 1.5e12 m (~5,000 ls) for Supercruise contacts
 local MIN_RADAR_SIZE = 50
 local DEFAULT_RADAR_SIZE = 10000
 
@@ -55,6 +55,8 @@ local function getColorFor(item)
 	if body == player:GetNavTarget() then
 		return colors.radarNavTarget
 	elseif body == player:GetCombatTarget() then
+		return colors.radarCombatTarget
+	elseif item.is_hostile then
 		return colors.radarCombatTarget
 	elseif body:IsShip() then
 		return colors.radarShip
@@ -123,7 +125,9 @@ local radar2d = {
 		self.zoom = prevZoomSeq(self.zoom, MIN_RADAR_SIZE)
 	end,
 	zoomOut = function(self)
-		self.zoom = nextZoomSeq(self.zoom, MAX_RADAR_SIZE)
+		local inSC = player and player:GetFlightState() == "SUPERCRUISE"
+		local maxZ = inSC and MAX_SC_RADAR_SIZE or MAX_RADAR_SIZE
+		self.zoom = nextZoomSeq(self.zoom, maxZ)
 	end,
 	resetZoom = function(self)
 		self.zoom = DEFAULT_RADAR_SIZE
@@ -169,7 +173,9 @@ local radar3d = {
 
 -- display the 2D radar
 radar2d.draw = function(self, center)
-	local targets = ui.getTargetsNearby(self.zoom)
+	local inSC = player and player:GetFlightState() == "SUPERCRUISE"
+	local maxZoomLimit = inSC and MAX_SC_RADAR_SIZE or MAX_RADAR_SIZE
+	local targets = ui.getTargetsNearby(math.min(self.zoom, maxZoomLimit))
 	local lineThickness = 1.5
 	local size = self.size - lineThickness
 	local halfsize = size * 0.5
@@ -284,6 +290,8 @@ radar3d.draw = function(self, center)
 	local navTarget = player:GetNavTarget()
 	local maxBodyDist = 0.0
 	local maxShipDist = 0.0
+	local nearestHostileDist = nil
+	local nearestShipDist = nil
 	local maxCargoDist = 0.0
 
 	radar.maxZoom = maxZoomLimit
@@ -301,6 +309,12 @@ radar3d.draw = function(self, center)
 		local shipSnapRange = inSC and MAX_SC_RADAR_SIZE or 50000
 		if v.body:IsShip() and v.distance < shipSnapRange then
 			maxShipDist = math.max(maxShipDist, v.distance)
+			if not nearestShipDist or v.distance < nearestShipDist then
+				nearestShipDist = v.distance
+			end
+			if v.is_hostile and (not nearestHostileDist or v.distance < nearestHostileDist) then
+				nearestHostileDist = v.distance
+			end
 		end
 
 		-- only snap to cargo containers if they're less than 25km away (arbitrary)
@@ -377,15 +391,28 @@ radar3d.draw = function(self, center)
 	-- handle automatic radar zoom based on player surroundings
 	if self.auto_zoom then
 		local maxDist = maxBodyDist
-		if combatTarget then
-			maxDist = combatTarget:GetPositionRelTo(player):length() * 1.4
-		elseif maxShipDist > 0 then
-			maxDist = maxShipDist * 1.4
-		elseif maxCargoDist > 0 then
-			maxDist = maxCargoDist * 1.4
-		elseif navTarget then
-			local dist = navTarget:GetPositionRelTo(player):length()
-			maxDist = dist > maxZoomLimit and maxBodyDist or dist * 1.4
+		if inSC then
+			if combatTarget then
+				maxDist = combatTarget:GetPositionRelTo(player):length() * 1.4
+			elseif nearestHostileDist then
+				maxDist = math.max(nearestHostileDist * 1.8, 3000000)
+			elseif navTarget then
+				local dist = navTarget:GetPositionRelTo(player):length()
+				maxDist = dist > maxZoomLimit and maxBodyDist or dist * 1.4
+			elseif nearestShipDist and nearestShipDist <= 4.5e10 then
+				maxDist = math.max(nearestShipDist * 2.0, 5000000)
+			end
+		else
+			if combatTarget then
+				maxDist = combatTarget:GetPositionRelTo(player):length() * 1.4
+			elseif maxShipDist > 0 then
+				maxDist = maxShipDist * 1.4
+			elseif maxCargoDist > 0 then
+				maxDist = maxCargoDist * 1.4
+			elseif navTarget then
+				local dist = navTarget:GetPositionRelTo(player):length()
+				maxDist = dist > maxZoomLimit and maxBodyDist or dist * 1.4
+			end
 		end
 		radar.zoom = math.clamp(radar.zoom + (maxDist - radar.zoom) * 0.03, MIN_RADAR_SIZE, maxZoomLimit)
 	end

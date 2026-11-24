@@ -290,6 +290,7 @@ local function drawInteractiveStockChart(canvasPos, width, height, history, time
 end
 
 local function drawStockExchange()
+	StockExchange.UpdateToCurrentTime()
 	ui.withFont(orbiteer.title, function()
 		ui.textColored(colors.uiPrimaryLight, "INTERSTELLAR STOCK & COMMODITY EXCHANGE (ISX)")
 	end)

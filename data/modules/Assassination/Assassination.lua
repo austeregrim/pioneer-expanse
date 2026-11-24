@@ -65,16 +65,24 @@ end
 
 local onChat = function (form, ref, option)
 	local ad = ads[ref]
-	local target = ad.target
-	local gender = ad.target.female and "_FEMALE" or "_MALE"
-	local suffix = (Engine.rand:Integer(0,2) < 2) and gender or ""	-- Three way selector. Gender or
-																	-- a third option.
+
 	form:Clear()
 
 	if option == -1 then
 		form:Close()
 		return
 	end
+
+	if not ad or MissionUtils.IsAdExpired(ad, Game.time) then
+		form:RemoveAdvertOnClose()
+		form:SetMessage(l.EXPIRED or "This posting has expired.")
+		return
+	end
+
+	local target = ad.target
+	local gender = ad.target.female and "_FEMALE" or "_MALE"
+	local suffix = (Engine.rand:Integer(0,2) < 2) and gender or ""	-- Three way selector. Gender or
+																	-- a third option.
 
 	local qualified = isQualifiedFor(Character.persistent.player.reputation, Character.persistent.player.killcount, ad)
 
@@ -197,13 +205,13 @@ local makeAdvert = function (station)
 	local flavour = Engine.rand:Integer(1, #flavours)
 	local location = nearbysystems[Engine.rand:Integer(1,#nearbysystems)]
 	local dist = location:DistanceTo(Game.system)
-	local time = Engine.rand:Number(7*60*60*24, 35*60*60*24)
-	local due = time + MissionUtils.TravelTime(dist, location) * Engine.rand:Number(0.5, 1.5)
-	local timeout = Game.time + due/2
+	local time = Engine.rand:Number(1.5*60*60*24, 5*60*60*24)
+	local due = time + MissionUtils.TravelTime(dist, location) * Engine.rand:Number(1.1, 1.4)
+	local timeout = MissionUtils.CalcBoardTimeout(Game.time, due, 36)
 	local danger = Engine.rand:Integer(1,4)
 	local reward = Engine.rand:Number(2100, 7000) * danger
 	reward = utils.round(reward, 500)
-	due = utils.round(due + Game.time, 3600)
+	due = utils.round(due + Game.time, 900)
 
 	local threat = (1.0 + danger) * 10.0
 	local hullConfig = ShipBuilder.SelectHull(AssassinationTargetShip, threat)
@@ -228,9 +236,14 @@ local makeAdvert = function (station)
 	placeAdvert(station, ad)
 end
 
+local maxAdsForStation = function ()
+	return math.clamp(math.ceil(Game.system.population * Game.system.lawlessness), 1, 4)
+end
+
 local onCreateBB = function (station)
-	local num = Engine.rand:Integer(math.ceil(Game.system.population * Game.system.lawlessness))
+	local num = math.min(maxAdsForStation(), Engine.rand:Integer(math.ceil(Game.system.population * Game.system.lawlessness)))
 	for _ = 1,num do
+		if MissionUtils.CountStationAds(ads, station) >= maxAdsForStation() then break end
 		makeAdvert(station)
 	end
 end
@@ -437,11 +450,11 @@ end
 
 local onUpdateBB = function (station)
 	for ref,ad in pairs(ads) do
-		if ad.timeout < Game.time then
+		if ad.station == station and MissionUtils.IsAdExpired(ad, Game.time) then
 			ad.station:RemoveAdvert(ref)
 		end
 	end
-	if Engine.rand:Integer(4*24*60*60) < 60*60 then -- roughly once every four days
+	if MissionUtils.CountStationAds(ads, station) < maxAdsForStation() and Engine.rand:Integer(4*24*60*60) < 60*60 then
 		makeAdvert(station)
 	end
 end
@@ -464,7 +477,11 @@ local onGameStart = function ()
 	if not loaded_data or not loaded_data.ads then return end
 
 	for k,ad in pairs(loaded_data.ads) do
-		placeAdvert(ad.station, ad)
+		if ad.station and ad.station:exists() and not MissionUtils.IsAdExpired(ad, Game.time) then
+			if MissionUtils.CountStationAds(ads, ad.station) < maxAdsForStation() then
+				placeAdvert(ad.station, ad)
+			end
+		end
 	end
 
 	missions = loaded_data.missions

@@ -607,6 +607,9 @@ function EquipmentWidget:drawShipSpinner()
 				end
 			end
 		end)
+		ui.withFont(pionillium.details, function()
+			ui.textColored(colors.fontDim, string.format("%s  •  Reg: %s", hullName, self.ship.label or "----"))
+		end)
 
 		if self.showShipNameEdit then
 			ui.popup("rename_ship_popup_equip", function()

@@ -2754,7 +2754,7 @@ static int l_pigui_get_projected_bodies(lua_State *l)
 static int l_pigui_get_targets_nearby(lua_State *l)
 {
 	PROFILE_SCOPED()
-	int range_max = LuaPull<double>(l, 1);
+	const double range_max = LuaPull<double>(l, 1);
 	Space::BodyNearList nearby = Pi::game->GetSpace()->GetBodiesMaybeNear(Pi::player, range_max);
 
 	const bool playerInSC = (Pi::player->GetFlightState() == Ship::SUPERCRUISE);
@@ -2766,6 +2766,7 @@ static int l_pigui_get_targets_nearby(lua_State *l)
 		if (body == Pi::player) continue;
 		if (body->GetType() == ObjectType::PROJECTILE) continue;
 		if (body->GetType() == ObjectType::SHIP) continue;
+		if (body->GetPositionRelTo(Pi::player).Length() > range_max) continue;
 		filtered.push_back(body);
 	}
 
@@ -2777,7 +2778,7 @@ static int l_pigui_get_targets_nearby(lua_State *l)
 			if (!SupercruiseController::IsShipVisibleToSensors(Pi::player, otherShip))
 				continue;
 			const double dist = body->GetPositionRelTo(Pi::player).Length();
-			if (dist > double(range_max))
+			if (dist > range_max)
 				continue;
 			const bool isFTL = SupercruiseController::IsShipFTL(otherShip);
 			const bool isLocked = SupercruiseController::HasTrackedLock(Pi::player, otherShip);
@@ -2795,7 +2796,7 @@ static int l_pigui_get_targets_nearby(lua_State *l)
 	int index = 1;
 	for (Body *body : filtered) {
 		vector3d position = body->GetPositionRelTo(Pi::player);
-		float distance = float(position.Length());
+		const double distance = position.Length();
 		vector3d shipSpacePosition = position * Pi::player->GetOrient();
 		// convert to polar https://en.wikipedia.org/wiki/Spherical_coordinate_system
 		vector3d polarPosition( // don't calculate X, it is not used
@@ -2811,15 +2812,25 @@ static int l_pigui_get_targets_nearby(lua_State *l)
 
 		vector2d aep(rho * sin(theta) / (2 * M_PI), -rho * cos(theta) / (2 * M_PI));
 
-		LuaTable object(l, 0, 4);
+		LuaTable object(l, 0, 6);
 
 		std::string displayLabel = body->GetLabel();
-		if (body->IsType(ObjectType::SHIP) && !Visibility::CanReadShipIdentity(Pi::player, static_cast<const Ship *>(body))) {
-			displayLabel = "UNIDENTIFIED";
+		bool isHostile = false;
+		if (body->IsType(ObjectType::SHIP)) {
+			const Ship *otherShip = static_cast<const Ship *>(body);
+			const bool idReadable = Visibility::CanReadShipIdentity(Pi::player, otherShip);
+			if (!idReadable) {
+				displayLabel = "UNIDENTIFIED";
+			}
+			const bool interdictingPlayer = otherShip->GetSupercruise() && otherShip->GetSupercruise()->IsInterdictingPeer(Pi::player);
+			isHostile = otherShip->IsAIAttacking(Pi::player) ||
+				interdictingPlayer ||
+				(idReadable && Pi::player->GetRelations(const_cast<Ship *>(otherShip)) == 0);
 		}
 
 		object.Set("distance", distance);
 		object.Set("label", displayLabel);
+		object.Set("is_hostile", isHostile);
 		object.Set("rel_position", shipSpacePosition);
 
 		//		object.Set("type", EnumStrings::GetString("PhysicsObjectType", (*i)->GetType()));

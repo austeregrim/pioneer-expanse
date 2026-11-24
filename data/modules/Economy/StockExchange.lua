@@ -3,6 +3,7 @@
 
 local Event       = require 'Event'
 local Game        = require 'Game'
+local Timer       = require 'Timer'
 local PlayerState = require 'PlayerState'
 local Serializer  = require 'Serializer'
 local Rand        = require 'Rand'
@@ -124,7 +125,8 @@ local localEnterprisesCache = {} -- sysName -> list of enterprises
 local playerPortfolio = {} -- ticker -> { ticker, name, shares, avgBuyPrice, totalInvested, isMegacorp }
 local totalDividendsCollected = 0
 local daysSinceLastDividend = 0
-local lastProcessedDay = 0
+local lastProcessedDay = nil
+local stockTimerActive = false
 
 -- Station Market Volume Boost Calculation
 function StockExchange.GetStationMarketVolumeMultiplier(sector, ticker)
@@ -780,16 +782,70 @@ local function advanceStockDay(stock, dayNum, rand, activeCrises)
 	if #hist > 90 then table.remove(hist, 1) end
 end
 
--- Daily close-of-day simulation step triggered on calendar day change or macro tick
-function StockExchange.OnMacroTick(deltaDays, activeCrises)
-	if deltaDays <= 0 then return end
-	local currentDay = math.floor((Game.time or 0) / 86400)
-	local randSeed = math.floor((Game.time or 0) * 1000)
+local function syncStockPricesFromHistory()
+	for _, corp in ipairs(MEGACORPS) do
+		local hist = stockHistory[corp.ticker]
+		if hist and #hist > 0 then
+			corp.price = hist[#hist].close
+		end
+	end
+	for _, idx in ipairs(FACTION_INDICES) do
+		local hist = stockHistory[idx.ticker]
+		if hist and #hist > 0 then
+			idx.price = hist[#hist].close
+			if #hist >= 2 then
+				idx.change = math.floor((hist[#hist].close - hist[#hist - 1].close) * 100) / 100
+			else
+				idx.change = 0.0
+			end
+		end
+	end
+	for _, sysList in pairs(localEnterprisesCache) do
+		for _, ent in ipairs(sysList) do
+			local hist = stockHistory[ent.ticker]
+			if hist and #hist > 0 then
+				ent.price = hist[#hist].close
+			end
+		end
+	end
+end
+
+-- Daily close-of-day simulation step triggered whenever calendar day advances (in flight, hyperspace, or docked)
+function StockExchange.UpdateToCurrentTime(activeCrisesOverride)
+	if not Game.player then return false end
+	local curTime = Game.time or 0
+	local currentDay = math.floor(curTime / 86400)
+
+	if lastProcessedDay == nil or currentDay < lastProcessedDay then
+		lastProcessedDay = currentDay
+		return false
+	end
+	if currentDay <= lastProcessedDay then
+		return false
+	end
+
+	local daysDiff = currentDay - lastProcessedDay
+	lastProcessedDay = currentDay
+
+	-- Ensure current system's local enterprises are initialized so they also tick daily while docked
+	if Game.system and Game.system.name then
+		StockExchange.GetLocalEnterprises(Game.system.name)
+	end
+
+	local activeCrises = activeCrisesOverride
+	if activeCrises == nil then
+		local okMacro, MacroEngine = pcall(require, 'modules.MacroGalaxy.MacroGalaxyEngine')
+		if okMacro and MacroEngine and MacroEngine.GetActiveCrises then
+			activeCrises = MacroEngine.GetActiveCrises()
+		end
+	end
+
+	local randSeed = math.floor(curTime * 1000) + currentDay * 97
 	if randSeed == 0 then randSeed = 1234567 end
 	local rand = Rand.New(randSeed)
 
-	-- Process all elapsed days
-	local daysToStep = math.min(10, math.max(1, math.floor(deltaDays)))
+	-- Process all elapsed calendar days (capped at 30 days per step)
+	local daysToStep = math.min(30, daysDiff)
 	for step = 1, daysToStep do
 		local dayNum = currentDay - (daysToStep - step)
 
@@ -813,9 +869,9 @@ function StockExchange.OnMacroTick(deltaDays, activeCrises)
 	end
 
 	-- Quarterly Dividend evaluation (every 30 calendar days)
-	daysSinceLastDividend = daysSinceLastDividend + deltaDays
-	if daysSinceLastDividend >= 30.0 then
-		daysSinceLastDividend = 0.0
+	daysSinceLastDividend = daysSinceLastDividend + daysDiff
+	while daysSinceLastDividend >= 30.0 do
+		daysSinceLastDividend = daysSinceLastDividend - 30.0
 		local dividendPayout = 0
 		for ticker, h in pairs(playerPortfolio) do
 			local corp = StockExchange.GetStock(ticker)
@@ -851,19 +907,51 @@ function StockExchange.OnMacroTick(deltaDays, activeCrises)
 			end
 		end
 	end
+	return true
 end
 
--- Check day transitions during normal play
-Event.Register("onGameUpdate", function()
-	local currentDay = math.floor((Game.time or 0) / 86400)
-	if lastProcessedDay == 0 then
-		lastProcessedDay = currentDay
-		return
+function StockExchange.OnMacroTick(deltaDays, activeCrises)
+	return StockExchange.UpdateToCurrentTime(activeCrises)
+end
+
+Event.Register("onGameStart", function()
+	if lastProcessedDay == nil then
+		lastProcessedDay = math.floor((Game.time or 0) / 86400)
 	end
-	if currentDay > lastProcessedDay then
-		local daysDiff = currentDay - lastProcessedDay
-		lastProcessedDay = currentDay
-		StockExchange.OnMacroTick(daysDiff, nil)
+	if Game.system and Game.system.name then
+		StockExchange.GetLocalEnterprises(Game.system.name)
+	end
+	syncStockPricesFromHistory()
+	if not stockTimerActive then
+		stockTimerActive = true
+		Timer:CallEvery(60, function()
+			if not Game.player then return false end
+			StockExchange.UpdateToCurrentTime(nil)
+			return false
+		end)
+	end
+end)
+
+Event.Register("onEnterSystem", function()
+	StockExchange.UpdateToCurrentTime(nil)
+end)
+
+Event.Register("onGameEnd", function()
+	stockTimerActive = false
+	lastProcessedDay = nil
+	playerPortfolio = {}
+	totalDividendsCollected = 0
+	daysSinceLastDividend = 0
+	localEnterprisesCache = {}
+	stockHistory = {}
+	for _, corp in ipairs(MEGACORPS) do
+		corp.price = corp.basePrice
+		seedStockHistory(corp, corp.basePrice, corp.baseDailyVolume, "megacorp-" .. corp.ticker .. "-v2")
+	end
+	for _, idx in ipairs(FACTION_INDICES) do
+		idx.price = idx.basePrice
+		idx.change = 0.0
+		seedStockHistory(idx, idx.basePrice, idx.baseDailyVolume, "index-" .. idx.ticker .. "-v2")
 	end
 end)
 
@@ -908,7 +996,13 @@ local function unserialize(data)
 		if data.stockHistory then
 			stockHistory = data.stockHistory
 		end
-		lastProcessedDay = data.lastProcessedDay or 0
+		local currentDay = math.floor((Game.time or 0) / 86400)
+		if data.lastProcessedDay and (data.lastProcessedDay > 0 or currentDay <= 30) then
+			lastProcessedDay = data.lastProcessedDay
+		else
+			lastProcessedDay = nil
+		end
+		syncStockPricesFromHistory()
 	end
 end
 

@@ -170,7 +170,17 @@ local dismissButton = function(crewMember)
 	end
 end
 
--- Function that creates the crew list
+local function isCrewActive(crew)
+	if not crew then return false end
+	for member in Game.player:EachCrewMember() do
+		if member == crew then
+			return true
+		end
+	end
+	return PlayerFleet.FindCrewAssignment(crew) ~= nil
+end
+
+-- Function that creates the crew list (Flagship + Fleet ships)
 local function makeCrewList()
 	local t = {
 		separated = true, headerOnly = true,
@@ -180,16 +190,24 @@ local function makeCrewList()
 	local wageTotal = 0
 	local owedTotal = 0
 
-	-- Create a row for each crew member
+	-- 1. Flagship crew (including Player Commander)
+	local flagshipLabel = (Game.player.shipName and Game.player.shipName ~= "") and Game.player.shipName or "Flagship"
 	for crewMember in Game.player:EachCrewMember() do
 		local crewWage = (crewMember.contract and crewMember.contract.wage or 0)
 		local crewOwed = (crewMember.contract and crewMember.contract.outstanding or 0)
 		wageTotal = wageTotal + crewWage
 		owedTotal = owedTotal + crewOwed
 
+		local posText
+		if crewMember.player then
+			posText = crewMember.title or l.COMMANDER
+		else
+			posText = string.format("%s (%s)", crewMember.title or l.GENERAL_CREW, flagshipLabel)
+		end
+
 		table.insert(t, {
 			crewMember.name,
-			crewMember.title or l.GENERAL_CREW,
+			posText,
 			{ ui.Format.Money(crewWage), color = colors.econProfit },
 			{ ui.Format.Money(crewOwed), color = colors.econLoss },
 			crewMember.contract and ui.Format.Date(crewMember.contract.payday) or "",
@@ -201,9 +219,38 @@ local function makeCrewList()
 		})
 	end
 
+	-- 2. Fleet Captains & Fleet Crew across player-owned vessels
+	for _, entry in ipairs(PlayerFleet.GetShips() or {}) do
+		if entry.status ~= "DESTROYED" then
+			for idx, member in ipairs(entry.crew or {}) do
+				local isCap = (member == entry.captain)
+				local crewWage = tonumber(member.fleetWage) or 0
+				local crewOwed = tonumber(member.fleetOwed) or 0
+				wageTotal = wageTotal + crewWage
+				owedTotal = owedTotal + crewOwed
+
+				local roleLabel = isCap and "Captain" or (member.title or l.GENERAL_CREW)
+				local posText = string.format("%s (%s)", roleLabel, entry.shipName or "Fleet Vessel")
+
+				table.insert(t, {
+					member.name,
+					posText,
+					{ ui.Format.Money(crewWage), color = colors.econProfit },
+					{ ui.Format.Money(crewOwed), color = colors.econLoss },
+					member.fleetPayday and ui.Format.Date(member.fleetPayday) or "",
+					function()
+						if ui.button(l.MORE_INFO .. '##fleet_' .. tostring(entry.uid) .. '_' .. tostring(idx), Vector2(-1, 0)) then
+							inspectingCrewMember = member
+						end
+					end
+				})
+			end
+		end
+	end
+
 	table.insert(t, {
 		false,
-		{ l.TOTAL,						color = colors.alertYellow },
+		{ l.TOTAL .. " (Tax-Deductible)", color = colors.alertYellow },
 		{ ui.Format.Money(wageTotal),	color = colors.econProfit },
 		{ ui.Format.Money(owedTotal),	color = colors.econLoss },
 		false,
@@ -234,6 +281,8 @@ local function drawCrewInfo(crew)
 		crewFace = PiGuiFace.New(crew)
 	end
 
+	local fleetEntry, isFleetCaptain = PlayerFleet.FindCrewAssignment(crew)
+
 	local region = ui.getContentRegion()
 	local leftWidth = math.floor(region.x * 0.50)
 	ui.child("PlayerInfoDetails", Vector2(leftWidth, 0), nil, childFlags, function()
@@ -255,23 +304,97 @@ local function drawCrewInfo(crew)
 
 		if not crew.player then
 			ui.newLine()
-			ui.withFont(orbiteer.body, function() ui.text(l.EMPLOYMENT) end)
+			if fleetEntry then
+				textTable.withHeading(l.EMPLOYMENT, orbiteer.body, {
+					{ "Assigned Vessel",	fleetEntry.shipName or "Fleet Vessel" },
+					{ l.POSITION,			isFleetCaptain and "Captain" or (crew.title or "Fleet Crew") },
+					{ "Vessel Status",		string.format("%s — %s", fleetEntry.status or "DOCKED", fleetEntry.locationName or "Unknown") },
+					{ l.WAGE,				ui.Format.Money(crew.fleetWage or 0) .. " / wk" },
+					{ l.OWED,				ui.Format.Money(crew.fleetOwed or 0) },
+					{ l.NEXT_PAID,			crew.fleetPayday and ui.Format.Date(crew.fleetPayday) or "—" },
+					{ "Completed Ops",		tostring(crew.completedOps or 0) },
+					{ "Active Service",		string.format("%d wk", crew.activeWeeks or crew.weeksServed or 0) },
+				})
 
-			if Game.player.flightState == 'DOCKED' then
-				if ui.button(l.DISMISS, Vector2(0, 0)) then dismissButton(crew) end
+				ui.spacing()
+				if (crew.fleetOwed or 0) > 0 and PlayerState.GetMoney() > 0 then
+					local settleAmt = math.min(PlayerState.GetMoney(), crew.fleetOwed)
+					if ui.button("Settle Arrears (" .. ui.Format.Money(settleAmt) .. ")##pay_arrears", Vector2(0, 0)) then
+						local _, msg = PlayerFleet.PayCrewArrears(crew)
+						lastTaskResult = msg or ""
+					end
+					ui.sameLine()
+				end
 
-				local station = Game.player:GetDockedWith()
-				local dockedShips = station and PlayerFleet.GetShipsAtStation(station.path) or {}
-				if #dockedShips > 0 then
-					ui.newLine()
-					ui.withFont(orbiteer.body, function() ui.textColored(colors.uiPrimaryLight, "TRANSFER TO DOCKED FLEET VESSEL") end)
-					for _, shipEntry in ipairs(dockedShips) do
-						if ui.button("Assign as Captain -> " .. shipEntry.shipName .. "##cap_" .. shipEntry.uid, Vector2(0, 0)) then
-							local ok, msg = PlayerFleet.AssignCrewFromPlayerShip(shipEntry.uid, crew, true)
-							lastTaskResult = msg or ""
-							if ok then
-								cachedCrewList = nil
-								inspectingCrewMember = nil
+				if fleetEntry.status == "DOCKED" then
+					if not isFleetCaptain then
+						if ui.button("Promote to Captain##prom_cap", Vector2(0, 0)) then
+							PlayerFleet.SetCaptain(fleetEntry.uid, crew)
+							lastTaskResult = crew.name .. " promoted to Captain."
+						end
+						ui.sameLine()
+					end
+					if Game.player.flightState == 'DOCKED' then
+						local station = Game.player:GetDockedWith()
+						if station and fleetEntry.locationPath == station.path then
+							if ui.button("Transfer to Flagship##xfer_flag", Vector2(0, 0)) then
+								local ok, msg = PlayerFleet.TransferCrewToPlayerShip(fleetEntry.uid, crew)
+								lastTaskResult = msg or ""
+								if ok then
+									cachedCrewList = nil
+									inspectingCrewMember = nil
+								end
+							end
+							ui.sameLine()
+						end
+					end
+					if ui.button(l.DISMISS .. "##dismiss_fleet", Vector2(0, 0)) then
+						local ok, msg = PlayerFleet.DismissFleetCrew(fleetEntry.uid, crew)
+						lastTaskResult = msg or ""
+						if ok then
+							cachedCrewList = nil
+							inspectingCrewMember = nil
+						end
+					end
+				end
+			else
+				local flagshipName = (Game.player.shipName and Game.player.shipName ~= "") and Game.player.shipName or (Game.player.label or "Flagship")
+				textTable.withHeading(l.EMPLOYMENT, orbiteer.body, {
+					{ "Assigned Vessel",	flagshipName },
+					{ l.WAGE,				ui.Format.Money((crew.contract and crew.contract.wage) or 0) .. " / wk" },
+					{ l.OWED,				ui.Format.Money((crew.contract and crew.contract.outstanding) or 0) },
+					{ l.NEXT_PAID,			(crew.contract and crew.contract.payday) and ui.Format.Date(crew.contract.payday) or "—" },
+				})
+
+				ui.spacing()
+				if Game.player.flightState == 'DOCKED' then
+					if ui.button(l.DISMISS, Vector2(0, 0)) then dismissButton(crew) end
+
+					local station = Game.player:GetDockedWith()
+					local dockedShips = station and PlayerFleet.GetShipsAtStation(station.path) or {}
+					if #dockedShips > 0 then
+						ui.newLine()
+						ui.withFont(orbiteer.body, function() ui.textColored(colors.uiPrimaryLight, "TRANSFER TO DOCKED FLEET VESSEL") end)
+						for _, shipEntry in ipairs(dockedShips) do
+							if ui.button("Assign as Captain -> " .. shipEntry.shipName .. "##cap_" .. shipEntry.uid, Vector2(0, 0)) then
+								local ok, msg = PlayerFleet.AssignCrewFromPlayerShip(shipEntry.uid, crew, true)
+								lastTaskResult = msg or ""
+								if ok then
+									cachedCrewList = nil
+									inspectingCrewMember = nil
+								end
+							end
+							local shipDef = ShipDef[shipEntry.shipId]
+							if shipDef and (shipDef.maxCrew or 1) > 1 and shipEntry.captain ~= nil then
+								ui.sameLine()
+								if ui.button("Assign as Crew -> " .. shipEntry.shipName .. "##crew_" .. shipEntry.uid, Vector2(0, 0)) then
+									local ok, msg = PlayerFleet.AssignCrewFromPlayerShip(shipEntry.uid, crew, false)
+									lastTaskResult = msg or ""
+									if ok then
+										cachedCrewList = nil
+										inspectingCrewMember = nil
+									end
+								end
 							end
 						end
 					end
@@ -309,11 +432,13 @@ InfoView:registerView({
 	draw = function()
 		ui.withStyleVars({ItemSpacing = itemSpacing}, function()
 			ui.withFont(pionillium.body, function()
+				if inspectingCrewMember and not isCrewActive(inspectingCrewMember) then
+					inspectingCrewMember = nil
+				end
 				if inspectingCrewMember then
 					drawCrewInfo(inspectingCrewMember)
 				else
-					cachedCrewList = cachedCrewList or makeCrewList()
-					drawCrewList(cachedCrewList)
+					drawCrewList(makeCrewList())
 				end
 			end)
 		end)

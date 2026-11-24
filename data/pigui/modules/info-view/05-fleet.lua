@@ -360,7 +360,21 @@ local function drawCommandDeck(entry)
 		end)
 		if entry.captain then
 			local cap = entry.captain
-			ui.text(string.format("Captain: %s   (Kills: %d)", cap.name, cap.killcount or 0))
+			ui.text(string.format("Captain: %s   (Ops: %d  |  Kills: %d)", cap.name, cap.completedOps or 0, cap.killcount or 0))
+			ui.text(string.format("Salary: %s/wk  |  Next Paid: %s",
+				Format.Money(cap.fleetWage or 0, false),
+				cap.fleetPayday and ui.Format.Date(cap.fleetPayday) or "—"))
+			if (cap.fleetOwed or 0) > 0 then
+				ui.sameLine()
+				ui.textColored(colors.alertRed, string.format("Owed: %s", Format.Money(cap.fleetOwed, false)))
+				if PlayerState.GetMoney() > 0 then
+					ui.sameLine()
+					if ui.button("Pay Arrears##cap_arrears_" .. entry.uid, Vector2(0, 0)) then
+						local _, msg = PlayerFleet.PayCrewArrears(cap)
+						statusMsg = msg
+					end
+				end
+			end
 			drawSkillBar("Piloting", cap.piloting or 15)
 			drawSkillBar("Navigation", cap.navigation or 15)
 			drawSkillBar("Engineering", cap.engineering or 15)
@@ -368,9 +382,32 @@ local function drawCommandDeck(entry)
 		else
 			ui.textColored(colors.fontDim, "No Captain assigned.")
 			if entry.status == "DOCKED" then
-				if ui.button("Recruit Station Captain (1,500 Cr)##hire_cap", Vector2(0, 0)) then
+				if ui.button("Recruit Station Captain (1,500 Cr + Weekly Wage)##hire_cap", Vector2(0, 0)) then
 					local _, msg = PlayerFleet.HireInstantCaptain(entry.uid)
 					statusMsg = msg
+				end
+			end
+		end
+
+		if #(entry.crew or {}) > (entry.captain and 1 or 0) then
+			ui.spacing()
+			ui.textColored(colors.fontDim, "Assigned Fleet Crew:")
+			for idx, member in ipairs(entry.crew or {}) do
+				if member ~= entry.captain then
+					ui.text(string.format("  • %s — %s/wk (Pil:%d Nav:%d Eng:%d Sen:%d)",
+						member.name, Format.Money(member.fleetWage or 0, false),
+						member.piloting or 15, member.navigation or 15, member.engineering or 15, member.sensors or 15))
+					if (member.fleetOwed or 0) > 0 then
+						ui.sameLine()
+						ui.textColored(colors.alertRed, string.format("[Owed %s]", Format.Money(member.fleetOwed, false)))
+					end
+					if entry.status == "DOCKED" then
+						ui.sameLine()
+						if ui.button("Promote##fleet_prom_" .. tostring(idx), Vector2(0, 0)) then
+							PlayerFleet.SetCaptain(entry.uid, member)
+							statusMsg = member.name .. " promoted to Captain."
+						end
+					end
 				end
 			end
 		end
@@ -402,10 +439,11 @@ local function drawCommandDeck(entry)
 			ui.sameLine(0, 0)
 			ui.textColored(colors.alertYellow, string.format(" (%d need service)", below80Count))
 		end
-		ui.text(string.format("Stats: %d Runs  |  %d Missions  |  %dt Hauled  |  Maint: %s  |  Tax: %s",
+		ui.text(string.format("Stats: %d Runs | %d Missions | %dt Hauled | Wages: %s | Maint: %s | Tax: %s",
 			(entry.stats and entry.stats.runsCompleted) or 0,
 			(entry.stats and entry.stats.missionsDone) or 0,
 			(entry.stats and entry.stats.cargoHauled) or 0,
+			Format.Money((entry.stats and entry.stats.wagesPaid) or 0, false),
 			Format.Money((entry.stats and entry.stats.maintenancePaid) or 0, false),
 			Format.Money((entry.stats and entry.stats.taxesGenerated) or 0, false)
 		))

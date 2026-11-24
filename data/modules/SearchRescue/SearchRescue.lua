@@ -258,10 +258,13 @@ end
 -- basic mission functions
 -- =======================
 
-local triggerAdCreation = function ()
+local triggerAdCreation = function (station)
 	-- Return if ad should be created based on lawlessness and min/max frequency values.
 	-- Ad number per system is based on how many stations a system has so a player will
 	-- be met with a certain number of stations that have one or more ads.
+	if station and MissionUtils.CountStationAds(ads, station) >= 3 then
+		return false
+	end
 	local stations = Space.GetBodies("SpaceStation")
 	local freq = Game.system.lawlessness * ad_freq_max
 	if freq < ad_freq_min then freq = ad_freq_min end
@@ -700,6 +703,12 @@ local onChat = function (form, ref, option)
 
 	if option == -1 then
 		form:Close()
+		return
+	end
+
+	if not ad or MissionUtils.IsAdExpired(ad, Game.time) then
+		form:RemoveAdvertOnClose()
+		form:SetMessage(l.EXPIRED or "This distress call has expired.")
 		return
 	end
 
@@ -1160,7 +1169,7 @@ local makeAdvert = function (station, manualFlavour, closestplanets)
 		system_target = system_local
 		location = planet_target
 		lat, long, dist = randomLatLong(station)
-		due = 60 * 60 * Engine.rand:Number(2,24)        --TODO: adjust due date based on urgency
+		due = 60 * 60 * Engine.rand:Number(2, 10)
 
 	elseif flavour.loctype == "MEDIUM_PLANET" then
 		station_target = nil
@@ -1179,8 +1188,7 @@ local makeAdvert = function (station, manualFlavour, closestplanets)
 		location = planet_target
 		lat, long, dist = randomLatLong()
 		dist = station:DistanceTo(Space.GetBody(planet_target.bodyIndex))  --overwrite empty dist from randomLatLong()
-		--1 added for short distances when most of the time is spent at low average speed (accelerating and deccelerating)
-		due = (dist / MissionUtils.AU * 2 + 1) * Engine.rand:Integer(20,24) * 60 * 60     -- TODO: adjust due date based on urgency
+		due = (5 * 3600 + MissionUtils.TravelTimeLocal(dist)) * Engine.rand:Number(0.85, 1.35)
 
 	elseif flavour.loctype == "CLOSE_SPACE" then
 		station_target = station_local
@@ -1188,7 +1196,7 @@ local makeAdvert = function (station, manualFlavour, closestplanets)
 		system_target = system_local
 		location = planet_target
 		dist = 1000 * Engine.rand:Integer(1,max_close_space_dist)     -- minimum of 1 km distance from station
-		due = (60 * 60 * Engine.rand:Number(2,24))        --TODO: adjust due date based on urgency
+		due = 60 * 60 * Engine.rand:Number(2, 10)
 
 	elseif flavour.loctype == "FAR_SPACE" then
 		local nearbysystems = findNearbySystems(false)  -- setup to only return systems without stations
@@ -1199,7 +1207,7 @@ local makeAdvert = function (station, manualFlavour, closestplanets)
 		if not planet_target then return nil end
 		location = planet_target
 		dist = system_local:DistanceTo(system_target)
-		due = (5 * dist + 4) * Engine.rand:Integer(20,24) * 60 * 60     -- TODO: adjust due date based on urgency
+		due = MissionUtils.TravelTime(dist) * Engine.rand:Number(1.0, 1.3)
 	end
 
 	-- Create message string for the cases where the target landed on a planet that is higher gravity (> 1.2 g)
@@ -1213,7 +1221,8 @@ local makeAdvert = function (station, manualFlavour, closestplanets)
 
 	--double the time if return to original station is required
 	if flavour.reward_immediate == false then due = 2 * due end
-	due = Game.time + due
+	local timeout = MissionUtils.CalcBoardTimeout(Game.time, due, (flavour.loctype == "FAR_SPACE") and 36 or 8)
+	due = utils.round(Game.time + due, 900)
 
 	-- determine pickup and deliver of items based on mission flavour
 	-- appropriate target ship size will be selected later based on this
@@ -1313,6 +1322,7 @@ local makeAdvert = function (station, manualFlavour, closestplanets)
 		problem        = problem,
 		dist           = dist,
 		due	           = due,
+		timeout        = timeout,
 		urgency	       = urgency,
 		reward         = reward,
 		factionName    = issuingFaction,
@@ -1963,51 +1973,41 @@ local onCreateBB = function (station)
 		-- makeAdvert(station, 7, closestplanets)
 	-- end
 
-	if triggerAdCreation() then makeAdvert(station, nil, closestplanets) end
+	if triggerAdCreation(station) then makeAdvert(station, nil, closestplanets) end
 end
 
 local onUpdateBB = function (station)
 	-- Called by game every 1-2 hours to update current banter boards. Ads are removed based on due date and new ones added here.
 
-	-- remove ads based on time until due
+	-- remove ads based on expiry or time until due
 	for ref,ad in pairs(ads) do
 		local st = ad.station_local and Space.GetBody(ad.station_local.bodyIndex)
 		if not st or not st.RemoveAdvert then
 			ads[ref] = nil
+		elseif MissionUtils.IsAdExpired(ad, Game.time) then
+			st:RemoveAdvert(ref)
 		-- 30 minute timeout for very close missions (same planet)
 		elseif ad.flavour.loctype == "CLOSE_PLANET" or ad.flavour.loctype == "CLOSE_SPACE" then
 			if ad.due < Game.time + 30*60 then
 				st:RemoveAdvert(ref)
 			end
 
-			-- one day timeout for medium distance missions (same system)
+			-- two hour timeout for medium distance missions (same system)
 		elseif ad.flavour.loctype == "MEDIUM_PLANET" then
-			if ad.due < Game.time + 60*60*24 then
+			if ad.due < Game.time + 2*60*60 then
 				st:RemoveAdvert(ref)
 			end
 
-			-- five day timeout as catch-all for everything else
+			-- one day timeout as catch-all for far-space rescue missions
 		else
-			if ad.due < Game.time + 5*60*60*24 then
+			if ad.due < Game.time + 24*60*60 then
 				st:RemoveAdvert(ref)
 			end
 		end
 	end
 
-	-- force ad creation for debugging
-	-- local num = 3
-	-- for _ = 1,num do
-	-- 	makeAdvert(station, 1, closestplanets)
-	-- 	makeAdvert(station, 2, closestplanets)
-	-- 	makeAdvert(station, 3, closestplanets)
-	-- 	makeAdvert(station, 4, closestplanets)
-	-- 	makeAdvert(station, 5, closestplanets)
-	-- 	makeAdvert(station, 6, closestplanets)
-	-- 	makeAdvert(station, 7, closestplanets)
-	-- end
-
 	-- trigger new ad creation if appropriate
-	if triggerAdCreation() then makeAdvert(station, nil, nil) end
+	if triggerAdCreation(station) then makeAdvert(station, nil, nil) end
 end
 
 local onEnterSystem = function (player)
@@ -2093,8 +2093,10 @@ local onGameStart = function ()
 	-- fill the global containers with previously saved data if this is a reload
 	for _,ad in pairs(loaded_data.ads) do
 		local st = ad.station_local and Space.GetBody(ad.station_local.bodyIndex)
-		if st and st.AddAdvert then
-			placeAdvert(st, ad)
+		if st and st.AddAdvert and not MissionUtils.IsAdExpired(ad, Game.time) then
+			if MissionUtils.CountStationAds(ads, st) < 3 then
+				placeAdvert(st, ad)
+			end
 		end
 	end
 	missions = loaded_data.missions

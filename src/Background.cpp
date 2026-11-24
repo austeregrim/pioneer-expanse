@@ -631,10 +631,10 @@ namespace Background {
 				surge = Pi::game->GetHyperspaceEntryFovFactor();
 			}
 			const float s2 = surge * surge;
-			const float sizeScale = 1.0f + 2.4f * s2;
-			const float emitBoost = 1.0f + 7.0f * s2;
-			const float whiten = Clamp(surge * 1.4f, 0.0f, 1.0f);
-			m_material->SetPushConstant("starBoost"_hash, vector3f(sizeScale, emitBoost, whiten), 0.0f);
+			const float sizeScale = 1.0f;
+			const float emitBoost = 1.0f + 3.0f * s2;
+			const float faintLift = Clamp(surge, 0.0f, 1.0f);
+			m_material->SetPushConstant("starBoost"_hash, vector3f(sizeScale, emitBoost, faintLift), 0.0f);
 			m_pointSprites->Draw(m_renderer, m_material.Get());
 		}
 		// During hyperspace transit, screen transitions to pure white (no old tunnel streak animation).

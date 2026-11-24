@@ -29,13 +29,13 @@ local Calculator = utils.class("MissionUtils.Calculator")
 
 MissionUtils.Calculator = Calculator
 
--- Default starting parameters
-Calculator.baseDuration = 4 * Days
+-- Default starting parameters (calibrated for Supercruise + real-time play)
+Calculator.baseDuration = 6 * Hours
 Calculator.baseReward = 0
 
-Calculator.inSystemTime = 1 * Days
-Calculator.travelTimeAU = 1.0
-Calculator.typHyperTime = 7 * Days
+Calculator.inSystemTime = 4 * Hours
+Calculator.travelTimeAU = 0.5 * Hours
+Calculator.typHyperTime = 5 * Days
 Calculator.typHyperDist = 15
 
 Calculator.inSystemReward = 200
@@ -198,7 +198,7 @@ end
 --   the travel time in seconds
 --
 function MissionUtils.TravelTimeLocal(distance)
-	return distance/AU * 2*Days
+	return math.min(6 * Hours, (distance / AU) * 0.5 * Hours)
 end
 
 --
@@ -227,13 +227,43 @@ function MissionUtils.TravelTime(distance, location)
 	if location then
 		local sbody = location:GetSystemBody()
 		-- find the primary planet orbiting the star or gravpoint to calculate the local travel time
-		while sbody.parent and sbody.parent.superType ~= 'STAR' do sbody = sbody.parent end
-		ltt = MissionUtils.TravelTimeLocal((sbody.periapsis+sbody.apoapsis)/2)
+		while sbody and sbody.parent and sbody.parent.superType ~= 'STAR' do sbody = sbody.parent end
+		ltt = sbody and MissionUtils.TravelTimeLocal(((sbody.periapsis or 0) + (sbody.apoapsis or 0)) / 2) or MissionUtils.TravelTimeLocal(AU)
 	else
 		ltt = MissionUtils.TravelTimeLocal(AU)
 	end
 
-	return distance * 1.75*Days + ltt
+	return 12 * Hours + distance * 0.45 * Days + ltt
+end
+
+function MissionUtils.CountStationAds(adsTable, station)
+	if not adsTable or not station then return 0 end
+	local count = 0
+	for _, ad in pairs(adsTable) do
+		if ad.station == station or (station.path and ad.station_local == station.path) then
+			count = count + 1
+		end
+	end
+	return count
+end
+
+function MissionUtils.CalcBoardTimeout(now, dueDurationSec, maxBoardHours)
+	local tNow = now or Game.time or 0
+	local maxSec = (maxBoardHours or 36) * Hours
+	local dur = math.max(0, tonumber(dueDurationSec) or 0)
+	return tNow + math.max(15 * 60, math.min(maxSec, dur * 0.45))
+end
+
+function MissionUtils.IsAdExpired(ad, now)
+	if not ad then return true end
+	local tNow = now or Game.time or 0
+	if type(ad.due) == "number" and ad.due <= tNow then
+		return true
+	end
+	if type(ad.timeout) == "number" and ad.timeout <= tNow then
+		return true
+	end
+	return false
 end
 
 function MissionUtils.SetupOverdueTimer(mission)

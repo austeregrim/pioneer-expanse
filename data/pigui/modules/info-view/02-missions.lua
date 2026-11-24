@@ -188,11 +188,15 @@ local function makeMissionRows()
 			end
 		end
 
+		local remainingStr = (mission.due > Game.time)
+			and (l.D_DAYS_LEFT .. " " .. ui.Format.Duration(mission.due - Game.time, 2))
+			or (l.FAILED or "EXPIRED")
+
 		local row = {
 			mission:GetTypeDescription(),
 			mission.client.name,
 			locationName .. dist_display,
-			ui.Format.Date(mission.due) .."\n".. l.D_DAYS_LEFT .." ".. ui.Format.Duration(mission.due - Game.time, 2),
+			ui.Format.Date(mission.due) .. "\n" .. remainingStr,
 			ui.Format.Money(mission.reward),
 		}
 
@@ -219,11 +223,11 @@ InfoView:registerView({
     showView = true,
 	draw = function()
 		ui.withFont(pionillium.body, function()
-			if not rowCache then makeMissionRows() end
 			if activeMission then
 				drawMissionDescription(activeMission)
 				return
 			end
+			makeMissionRows()
 
 			ui.child("MissionsListPane", Vector2(0, 0), nil, childFlags, function()
 				ui.withStyleVars({ItemSpacing = itemSpacing, FramePadding = framePadding}, function()

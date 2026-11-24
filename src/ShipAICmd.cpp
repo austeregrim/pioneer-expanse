@@ -1077,7 +1077,9 @@ AICmdFlyTo::AICmdFlyTo(DynamicBody *dBody, Body *target) :
 	m_suicideRecovery = false;
 
 	if (!target->IsType(ObjectType::TERRAINBODY)) {
-		m_dist = VICINITY_MIN;
+		m_dist = target->IsType(ObjectType::SHIP)
+			? std::max(600.0, (target->GetPhysRadius() + dBody->GetPhysRadius()) * 4.0)
+			: VICINITY_MIN;
 		if (target->IsType(ObjectType::SPACESTATION) && !static_cast<const SpaceStation *>(target)->IsGroundStation()) {
 			m_dist = std::max(m_dist, target->GetClipRadius() * 1.5 + 600.0);
 		}
@@ -1231,7 +1233,7 @@ bool AICmdFlyTo::TimeStepUpdate()
 					}
 
 					const double targetSpeed = targetShip->GetSupercruise() ? targetShip->GetSupercruise()->GetSpeed() : SupercruiseController::MIN_SPEED;
-					const double idealTailDist = std::max(SupercruiseController::SAFE_DISENGAGE_DIST * 0.5, targetSpeed * 2.5);
+					const double idealTailDist = std::min(std::max(SupercruiseController::SAFE_DISENGAGE_DIST * 0.5, targetSpeed * 1.8), 10.0 * SupercruiseController::LIGHT_SPEED);
 					const vector3d targetFwd = (-targetShip->GetOrient().VectorZ()).NormalizedSafe();
 					const vector3d dirToTarget = rawRel.NormalizedSafe();
 					// Positive when pursuer is behind target chasing in the same direction

@@ -37,11 +37,13 @@ local ComponentIntegrity = require 'modules.ComponentIntegrity.ComponentIntegrit
 local TaxAuthority    = require 'modules.Economy.TaxAuthority'
 local SystemPath      = package.core['SystemPath']
 
-local CAPTAIN_SIGNING_BONUS = 1500
-local FERRY_BASE_FEE        = 250
-local FERRY_PER_LY_FEE      = 180
-local MAX_LOG_ENTRIES       = 80
-local TICK_INTERVAL_SEC     = 2
+local CAPTAIN_SIGNING_BONUS        = 1500
+local FERRY_BASE_FEE               = 250
+local FERRY_PER_LY_FEE             = 180
+local MAX_LOG_ENTRIES              = 80
+local TICK_INTERVAL_SEC            = 2
+local WAGE_PERIOD_SEC              = 604800 -- 7 days (matches CrewContracts)
+local MAX_PAYROLL_PERIODS_PER_STEP = 12
 
 local SHIP_SELL_RATIO       = 0.65
 local EQUIP_SELL_RATIO      = 0.80
@@ -113,6 +115,135 @@ local function getDefaultHyperFuelForEquip(equipList, fuelPercent)
 	return 0
 end
 
+function PlayerFleet.ComputeTargetFleetWage(member, isCaptain)
+	if not member then return isCaptain and 90 or 25 end
+	local totalSkill = (member.piloting or 15) + (member.navigation or 15)
+		+ (member.engineering or 15) + (member.sensors or 15)
+	local skillAboveBase = math.max(0, totalSkill - 60)
+	local skillPay = math.floor(skillAboveBase * 1.25 + (math.max(0, totalSkill - 100) ^ 2) / 160)
+	local roleBase = isCaptain and 75 or 25
+	local ops = math.max(0, math.floor(tonumber(member.completedOps) or 0))
+	local activeWeeks = math.max(0, math.floor(tonumber(member.activeWeeks) or 0))
+	local opsBonus = math.min(ops, 60) * 2 + math.floor(math.max(0, ops - 60) * 0.5)
+	local tenureMult = 1.0 + math.min(0.50, math.floor(activeWeeks / 4) * 0.03)
+	local target = math.floor((roleBase + skillPay + opsBonus) * tenureMult + 0.5)
+	return math.max(isCaptain and 90 or 25, target)
+end
+
+local function normalizeFleetCrewForEntry(entry, anchorTime)
+	if not entry then return end
+	if type(entry.crew) ~= "table" then entry.crew = {} end
+
+	-- Ensure entry.captain is included inside entry.crew (older saves could diverge)
+	if type(entry.captain) == "table" and not entry.captain.player and not entry.captain.dead then
+		local foundCap = false
+		for _, m in ipairs(entry.crew) do
+			if m == entry.captain then
+				foundCap = true
+				break
+			end
+		end
+		if not foundCap then
+			table.insert(entry.crew, 1, entry.captain)
+		end
+	end
+
+	-- Deduplicate crew and strip invalid / dead / player characters
+	local seen = {}
+	local clean = {}
+	for _, member in ipairs(entry.crew) do
+		if type(member) == "table" and not member.player and not member.dead and not seen[member] then
+			seen[member] = true
+			table.insert(clean, member)
+		end
+	end
+	entry.crew = clean
+
+	-- Reconcile entry.captain against normalized entry.crew
+	if entry.captain and not seen[entry.captain] then
+		entry.captain = nil
+	end
+	if not entry.captain and #entry.crew > 0 then
+		for _, member in ipairs(entry.crew) do
+			if string.find(string.upper(tostring(member.title or "")), "CAPTAIN") then
+				entry.captain = member
+				break
+			end
+		end
+		if not entry.captain and entry.order and entry.order ~= "IDLE" then
+			entry.captain = entry.crew[1]
+		end
+	end
+
+	for _, member in ipairs(entry.crew) do
+		-- Restore Character metatable if deserialized from legacy plain tables
+		local mt = getmetatable(member)
+		if type(mt) ~= "table" or mt.class ~= "Character" then
+			setmetatable(member, Character.meta)
+		end
+
+		member.name = (type(member.name) == "string" and member.name ~= "") and member.name or "Unknown Crew"
+		member.seed = tonumber(member.seed) or 1
+		member.piloting = tonumber(member.piloting) or 15
+		member.navigation = tonumber(member.navigation) or 15
+		member.engineering = tonumber(member.engineering) or 15
+		member.sensors = tonumber(member.sensors) or 15
+		member.killcount = tonumber(member.killcount) or 0
+		member.reputation = tonumber(member.reputation) or 0
+		member.playerRelationship = tonumber(member.playerRelationship) or 0
+		member.lawfulness = tonumber(member.lawfulness) or 0
+		member.available = false
+		member.dead = false
+
+		-- Migrate any stale Flagship contract left on old transferred crew
+		if type(member.contract) == "table" then
+			if type(member.fleetWage) ~= "number" or member.fleetWage <= 0 then
+				member.fleetWage = tonumber(member.contract.wage)
+			end
+			if type(member.fleetOwed) ~= "number" then
+				member.fleetOwed = tonumber(member.contract.outstanding) or 0
+			end
+			if type(member.fleetPayday) ~= "number" and type(member.contract.payday) == "number" then
+				member.fleetPayday = member.contract.payday
+			end
+			member.contract = nil
+		end
+
+		local isCap = (member == entry.captain)
+		if isCap then
+			member.title = "Captain"
+		elseif type(member.title) ~= "string" or member.title == "" or member.title == "Captain" then
+			member.title = "Fleet Crew"
+		end
+
+		member.completedOps = math.max(0, math.floor(tonumber(member.completedOps) or 0))
+		member.weeksServed = math.max(0, math.floor(tonumber(member.weeksServed) or 0))
+		member.activeWeeks = math.max(0, math.floor(tonumber(member.activeWeeks) or 0))
+		member.lastPayOps = math.max(0, math.floor(tonumber(member.lastPayOps) or member.completedOps))
+		member.fleetOwed = math.max(0, math.floor(tonumber(member.fleetOwed) or 0))
+
+		local targetWage = PlayerFleet.ComputeTargetFleetWage(member, isCap)
+		if type(member.fleetWage) ~= "number" or member.fleetWage <= 0 then
+			member.fleetWage = targetWage
+		else
+			member.fleetWage = math.max(math.floor(member.fleetWage), isCap and 75 or 20)
+		end
+
+		-- Anchor payday safely on pre-payroll saves so loading old saves does not charge retroactive arrears
+		if type(anchorTime) == "number" and anchorTime > 0 then
+			if not member.payrollInitialized then
+				if type(member.fleetPayday) ~= "number" or member.fleetPayday <= anchorTime then
+					member.fleetPayday = anchorTime + WAGE_PERIOD_SEC
+				end
+				member.fleetWage = math.max(member.fleetWage, targetWage)
+				member.payrollInitialized = true
+			elseif type(member.fleetPayday) ~= "number" or member.fleetPayday <= 0 then
+				member.fleetPayday = anchorTime + WAGE_PERIOD_SEC
+			end
+		end
+	end
+end
+
 local function normalizeFleetState(data)
 	local s = (type(data) == "table") and data or {}
 	if type(s.ships) ~= "table" then s.ships = {} end
@@ -153,7 +284,7 @@ local function normalizeFleetState(data)
 		if type(entry.stats) ~= "table" then
 			entry.stats = {
 				netProfit = 0, runsCompleted = 0, bountiesEarned = 0,
-				missionsDone = 0, cargoHauled = 0, maintenancePaid = 0, taxesGenerated = 0,
+				missionsDone = 0, cargoHauled = 0, maintenancePaid = 0, taxesGenerated = 0, wagesPaid = 0,
 			}
 		else
 			entry.stats.netProfit = entry.stats.netProfit or 0
@@ -163,13 +294,12 @@ local function normalizeFleetState(data)
 			entry.stats.cargoHauled = entry.stats.cargoHauled or 0
 			entry.stats.maintenancePaid = entry.stats.maintenancePaid or 0
 			entry.stats.taxesGenerated = entry.stats.taxesGenerated or 0
+			entry.stats.wagesPaid = entry.stats.wagesPaid or 0
 		end
 		if type(entry.hyperFuel) ~= "number" then
 			entry.hyperFuel = getDefaultHyperFuelForEquip(entry.equip, entry.fuel)
 		end
-		for _, member in ipairs(entry.crew) do
-			member.available = false
-		end
+		normalizeFleetCrewForEntry(entry, nil)
 		if type(entry.uid) == "number" and entry.uid >= s.nextUid then
 			s.nextUid = entry.uid + 1
 		end
@@ -952,6 +1082,7 @@ local function createFleetEntryFromShip(ship, stationPath, customName)
 			cargoHauled = 0,
 			maintenancePaid = 0,
 			taxesGenerated = 0,
+			wagesPaid = 0,
 		},
 	}
 	return entry
@@ -1170,32 +1301,45 @@ local function transferCrewFromPlayerInternal(crewMember)
 		payday = crewMember.contract.payday,
 		outstanding = crewMember.contract.outstanding or 0,
 	} or nil
-	crewMember.fleetWage = savedContract and savedContract.wage or (crewMember.fleetWage or 50)
-	crewMember.fleetPayday = savedContract and savedContract.payday or (Game.time + 604800)
+	local now = Game.time or 0
+	local oldWage = (savedContract and tonumber(savedContract.wage)) or tonumber(crewMember.fleetWage) or 50
+	local oldPayday = (savedContract and tonumber(savedContract.payday)) or tonumber(crewMember.fleetPayday)
+	local oldOwed = (savedContract and tonumber(savedContract.outstanding)) or tonumber(crewMember.fleetOwed) or 0
 
 	Game.player:Dismiss(crewMember)
 	-- Undo Save()/availability release since they remain in player's fleet service
 	crewMember:UnSave()
 	crewMember.available = false
-	if savedContract then
-		-- Note: onLeaveCrew event clears crewMember.contract async; PlayerFleet keeps fleetWage/fleetPayday
-		crewMember.contract = savedContract
-	end
+	-- Leave contract nil so CrewContracts does not double-pay while assigned to fleet
+	crewMember.contract = nil
+	crewMember.fleetWage = math.max(25, math.floor(oldWage))
+	crewMember.fleetOwed = math.max(0, math.floor(oldOwed))
+	crewMember.fleetPayday = (type(oldPayday) == "number" and oldPayday > now) and oldPayday or (now + WAGE_PERIOD_SEC)
+	crewMember.completedOps = math.max(0, math.floor(tonumber(crewMember.completedOps) or 0))
+	crewMember.weeksServed = math.max(0, math.floor(tonumber(crewMember.weeksServed) or 0))
+	crewMember.activeWeeks = math.max(0, math.floor(tonumber(crewMember.activeWeeks) or 0))
+	crewMember.lastPayOps = math.max(0, math.floor(tonumber(crewMember.lastPayOps) or crewMember.completedOps))
+	crewMember.payrollInitialized = true
 	return crewMember
 end
 
 local function enrollCrewBackOnPlayer(crewMember)
 	if not crewMember or crewMember.player then return false end
-	if not crewMember.contract then
-		crewMember.contract = {
-			wage = crewMember.fleetWage or 50,
-			payday = crewMember.fleetPayday or (Game.time + 604800),
-			outstanding = 0,
-		}
-	end
+	local now = Game.time or 0
+	crewMember.contract = {
+		wage = math.max(10, math.floor(tonumber(crewMember.fleetWage) or 50)),
+		payday = (type(crewMember.fleetPayday) == "number" and crewMember.fleetPayday > now) and crewMember.fleetPayday or (now + WAGE_PERIOD_SEC),
+		outstanding = math.max(0, math.floor(tonumber(crewMember.fleetOwed) or 0)),
+	}
 	crewMember.available = true
 	local ok = Game.player:Enroll(crewMember)
-	if not ok then
+	if ok then
+		crewMember.fleetOwed = 0
+		if crewMember.title == "Captain" or crewMember.title == "Fleet Crew" then
+			crewMember.title = nil
+		end
+	else
+		crewMember.contract = nil
 		crewMember.available = false
 	end
 	return ok
@@ -1208,6 +1352,9 @@ local function setupPlayerShipFromAdvert(player, sos, advertData)
 	player:SetSkin(sos.skin)
 	if sos.pattern then player.model:SetPattern(sos.pattern) end
 	player:SetLabel(sos.label)
+	if player.SetShipName then
+		player:SetShipName(ShipDealerships.DefaultShipNameForListing(sos))
+	end
 
 	ShipDealerships.InstallListingEquipment(player, advertData, sos)
 end
@@ -1234,6 +1381,7 @@ function PlayerFleet.StorePlayerShipAndBuy(sos, advertData)
 
 	-- Offload any non-player crew exceeding new hull capacity onto the stored ship
 	local newMax = sos.def.maxCrew or 1
+	local storedMax = (ShipDef[storedEntry.shipId] and ShipDef[storedEntry.shipId].maxCrew) or 1
 	local currentCount = player:CrewNumber()
 	if currentCount > newMax then
 		local excess = currentCount - newMax
@@ -1247,15 +1395,21 @@ function PlayerFleet.StorePlayerShipAndBuy(sos, advertData)
 			return (a.piloting or 0) > (b.piloting or 0)
 		end)
 		for i = 1, math.min(excess, #candidates) do
-			local c = transferCrewFromPlayerInternal(candidates[i])
-			if c then
-				table.insert(storedEntry.crew, c)
-				if not storedEntry.captain then
-					storedEntry.captain = c
+			if #storedEntry.crew < storedMax then
+				local c = transferCrewFromPlayerInternal(candidates[i])
+				if c then
+					table.insert(storedEntry.crew, c)
+					if not storedEntry.captain then
+						storedEntry.captain = c
+					end
 				end
+			else
+				Game.player:Dismiss(candidates[i])
+				candidates[i]:Save()
 			end
 		end
 	end
+	normalizeFleetCrewForEntry(storedEntry, Game.time)
 
 	PlayerState.AddMoney(-cost)
 	station:RemoveShipOnSale(sos)
@@ -1343,6 +1497,7 @@ function PlayerFleet.BuyShipToHangar(sos, advertData)
 			cargoHauled = 0,
 			maintenancePaid = 0,
 			taxesGenerated = 0,
+			wagesPaid = 0,
 		},
 	}
 
@@ -1407,6 +1562,7 @@ function PlayerFleet.SwapWithFlagship(uid)
 
 	-- Move excess non-player crew to parkedOld if new ship has fewer berths
 	local targetMaxCrew = targetDef.maxCrew or 1
+	local parkedMaxCrew = (ShipDef[parkedOld.shipId] and ShipDef[parkedOld.shipId].maxCrew) or 1
 	local nonPlayerCrew = {}
 	for member in player:EachCrewMember() do
 		if not member.player then
@@ -1416,32 +1572,47 @@ function PlayerFleet.SwapWithFlagship(uid)
 	if (1 + #nonPlayerCrew) > targetMaxCrew then
 		local needRemove = (1 + #nonPlayerCrew) - targetMaxCrew
 		for i = 1, needRemove do
-			local c = transferCrewFromPlayerInternal(nonPlayerCrew[i])
-			if c then
-				table.insert(parkedOld.crew, c)
-				if not parkedOld.captain then parkedOld.captain = c end
+			if #parkedOld.crew < parkedMaxCrew then
+				local c = transferCrewFromPlayerInternal(nonPlayerCrew[i])
+				if c then
+					table.insert(parkedOld.crew, c)
+					if not parkedOld.captain then parkedOld.captain = c end
+				end
+			else
+				Game.player:Dismiss(nonPlayerCrew[i])
+				nonPlayerCrew[i]:Save()
 			end
 		end
 	end
 
-	-- Preserve the boarded ship's captain/crew onto parkedOld if it had a captain and parkedOld doesn't,
-	-- so your parked ship remains crew-ready! Otherwise keep its crew or enroll on player if room.
-	if entry.captain and not parkedOld.captain and (#parkedOld.crew < (ShipDef[parkedOld.shipId].maxCrew or 1)) then
-		for _, c in ipairs(entry.crew or {}) do
-			table.insert(parkedOld.crew, c)
+	-- Preserve the boarded ship's captain/crew onto parkedOld respecting berth capacity;
+	-- overflow crew attempt to join the player's newly boarded flagship or enter station pool.
+	if #(entry.crew or {}) > 0 then
+		local ordered = {}
+		if entry.captain then
+			table.insert(ordered, entry.captain)
 		end
-		parkedOld.captain = entry.captain
-		parkedOld.orderPhase = "Docked with Captain " .. entry.captain.name
-	elseif #(entry.crew or {}) > 0 then
-		-- Keep crew with the parked old ship if there's room
 		for _, c in ipairs(entry.crew) do
-			if #parkedOld.crew < (ShipDef[parkedOld.shipId].maxCrew or 1) then
-				table.insert(parkedOld.crew, c)
-				if c == entry.captain then parkedOld.captain = c end
-			else
-				enrollCrewBackOnPlayer(c)
+			if c ~= entry.captain then
+				table.insert(ordered, c)
 			end
 		end
+		for _, c in ipairs(ordered) do
+			if #parkedOld.crew < parkedMaxCrew then
+				table.insert(parkedOld.crew, c)
+				if c == entry.captain and not parkedOld.captain then
+					parkedOld.captain = c
+				end
+			else
+				if not enrollCrewBackOnPlayer(c) then
+					c:Save()
+				end
+			end
+		end
+	end
+	normalizeFleetCrewForEntry(parkedOld, Game.time)
+	if parkedOld.captain then
+		parkedOld.orderPhase = "Docked with Captain " .. parkedOld.captain.name
 	end
 
 	local oldLive = (entry.liveShip and entry.liveShip:exists()) and entry.liveShip or nil
@@ -1729,7 +1900,7 @@ function PlayerFleet.TransferCargo(uid, commodityName, amount, toFlagship)
 end
 
 -- ============================================================================
--- Crew, Captains & Skill Progression (Phase A2)
+-- Crew, Captains, Salary Progression & Payroll (Phase A2+)
 -- ============================================================================
 
 function PlayerFleet.GetCaptainSkillScore(captain)
@@ -1737,22 +1908,97 @@ function PlayerFleet.GetCaptainSkillScore(captain)
 	return math.floor(((captain.piloting or 15) + (captain.navigation or 15) + (captain.engineering or 15) + (captain.sensors or 15)) / 4)
 end
 
-function PlayerFleet.AwardCaptainXP(entry, primarySkill)
-	local cap = entry.captain
-	if not cap then return end
+function PlayerFleet.FindCrewAssignment(crewMember)
+	if not crewMember then return nil, false, nil end
+	for _, entry in ipairs(fleetState.ships or {}) do
+		if entry.status ~= "DESTROYED" then
+			for idx, member in ipairs(entry.crew or {}) do
+				if member == crewMember then
+					return entry, (member == entry.captain), idx
+				end
+			end
+		end
+	end
+	return nil, false, nil
+end
 
+local function recordFleetPayrollFlightLog(entry, amountPaid, note)
+	local okFlightLog, FlightLog = pcall(require, 'modules.FlightLog.FlightLog')
+	if okFlightLog and FlightLog and FlightLog.RecordTransaction then
+		FlightLog.RecordTransaction({
+			category = "CREW",
+			title = string.format("Fleet Payroll: %s (%s)", entry.shipName, Format.Money(-amountPaid)),
+			amount = -amountPaid,
+			details = {
+				{ "Vessel", entry.shipName },
+				{ "Location", entry.locationName or "Deep Space" },
+				{ "Payroll Settled", Format.Money(amountPaid) },
+			},
+			note = note,
+		})
+	end
+end
+
+function PlayerFleet.PayCrewArrears(crewMember)
+	local entry, _, _ = PlayerFleet.FindCrewAssignment(crewMember)
+	if not entry then return false, "Crew member is not assigned to a fleet ship." end
+	local owed = math.max(0, math.floor(tonumber(crewMember.fleetOwed) or 0))
+	if owed <= 0 then return false, "No unpaid wages owed." end
+	local available = math.max(0, math.floor(PlayerState.GetMoney()))
+	if available <= 0 then return false, "Insufficient credits to settle arrears." end
+
+	local paid = math.min(available, owed)
+	PlayerState.AddMoney(-paid)
+	crewMember.fleetOwed = owed - paid
+	TaxAuthority.RecordOperatingExpense(paid, "FLEET_CREW", "[FLEET] " .. entry.shipName)
+	entry.stats.wagesPaid = (entry.stats.wagesPaid or 0) + paid
+	entry.stats.netProfit = (entry.stats.netProfit or 0) - paid
+	fleetState.totalProfit = (fleetState.totalProfit or 0) - paid
+	if crewMember.fleetOwed == 0 then
+		crewMember.playerRelationship = (crewMember.playerRelationship or 0) + 1
+	end
+	local note = string.format("Settled wage arrears for %s aboard %s.", crewMember.name, entry.shipName)
+	addLog(entry.shipName, note, -paid)
+	recordFleetPayrollFlightLog(entry, paid, note)
+	return true, string.format("Paid %s arrears to %s.", Format.Money(paid, false), crewMember.name)
+end
+
+function PlayerFleet.AwardCaptainXP(entry, primarySkill)
+	if not entry then return end
+	normalizeFleetCrewForEntry(entry, Game.time)
+	local cap = entry.captain
 	local skills = { "piloting", "navigation", "engineering", "sensors" }
 	local chosen = primarySkill or skills[Engine.rand:Integer(1, #skills)]
-	local cur = cap[chosen] or 15
-	-- Diminishing returns past 65, mirroring Pioneer RPG attributes
-	if cur < 65 and Engine.rand:Number(0, 1) < math.max(0.18, (70 - cur) / 80) then
-		cap[chosen] = cur + 1
-		addLog(entry.shipName, string.format("Captain %s improved %s skill to %d!", cap.name, chosen:gsub("^%l", string.upper), cap[chosen]), 0)
-	end
 
 	for _, member in ipairs(entry.crew or {}) do
-		if member ~= cap and (member[chosen] or 15) < 60 and Engine.rand:Number(0, 1) < 0.25 then
-			member[chosen] = (member[chosen] or 15) + 1
+		local isCap = (member == cap)
+		member.completedOps = (member.completedOps or 0) + 1
+		local skilledUp = false
+
+		if isCap then
+			local cur = member[chosen] or 15
+			-- Diminishing returns past 65, mirroring Pioneer RPG attributes
+			if cur < 65 and Engine.rand:Number(0, 1) < math.max(0.18, (70 - cur) / 80) then
+				member[chosen] = cur + 1
+				skilledUp = true
+				addLog(entry.shipName, string.format("Captain %s improved %s skill to %d!", member.name, chosen:gsub("^%l", string.upper), member[chosen]), 0)
+			end
+		else
+			local cur = member[chosen] or 15
+			if cur < 60 and Engine.rand:Number(0, 1) < 0.25 then
+				member[chosen] = cur + 1
+				skilledUp = true
+				addLog(entry.shipName, string.format("%s improved %s skill to %d!", member.name, chosen:gsub("^%l", string.upper), member[chosen]), 0)
+			end
+		end
+
+		if skilledUp or (member.completedOps % 5 == 0) then
+			local newWage = PlayerFleet.ComputeTargetFleetWage(member, isCap)
+			if newWage > (member.fleetWage or 0) then
+				member.fleetWage = newWage
+				addLog(entry.shipName, string.format("%s %s earned a salary increase to %s/wk.",
+					isCap and "Captain" or "Crew", member.name, Format.Money(newWage, false)), 0)
+			end
 		end
 	end
 end
@@ -1774,15 +2020,23 @@ function PlayerFleet.AssignCrewFromPlayerShip(uid, crewMember, asCaptain)
 		return false, "Cannot transfer player commander or invalid crew."
 	end
 
+	local makeCap = asCaptain or (entry.captain == nil)
+	if makeCap and entry.captain and entry.captain ~= transferred then
+		entry.captain.title = "Fleet Crew"
+	end
+
 	table.insert(entry.crew, transferred)
-	if asCaptain or not entry.captain then
+	if makeCap then
 		entry.captain = transferred
 		transferred.title = "Captain"
-		addLog(entry.shipName, string.format("%s assigned as Captain.", transferred.name), 0)
+		transferred.fleetWage = math.max(transferred.fleetWage or 0, PlayerFleet.ComputeTargetFleetWage(transferred, true))
+		addLog(entry.shipName, string.format("%s assigned as Captain (%s/wk).", transferred.name, Format.Money(transferred.fleetWage, false)), 0)
 	else
-		addLog(entry.shipName, string.format("%s assigned to crew.", transferred.name), 0)
+		transferred.title = "Fleet Crew"
+		transferred.fleetWage = math.max(transferred.fleetWage or 0, PlayerFleet.ComputeTargetFleetWage(transferred, false))
+		addLog(entry.shipName, string.format("%s assigned to crew (%s/wk).", transferred.name, Format.Money(transferred.fleetWage, false)), 0)
 	end
-	return true, string.format("Assigned %s to %s.", transferred.name, entry.shipName)
+	return true, string.format("Assigned %s to %s (%s/wk).", transferred.name, entry.shipName, Format.Money(transferred.fleetWage, false))
 end
 
 function PlayerFleet.TransferCrewToPlayerShip(uid, crewMember)
@@ -1808,7 +2062,10 @@ function PlayerFleet.TransferCrewToPlayerShip(uid, crewMember)
 	table.remove(entry.crew, foundIdx)
 	if entry.captain == crewMember then
 		entry.captain = entry.crew[1] or nil
-		if entry.order ~= "IDLE" and not entry.captain then
+		if entry.captain then
+			entry.captain.title = "Captain"
+			entry.captain.fleetWage = math.max(entry.captain.fleetWage or 0, PlayerFleet.ComputeTargetFleetWage(entry.captain, true))
+		elseif entry.order ~= "IDLE" then
 			entry.order = "IDLE"
 			entry.orderPhase = "Standing down (no Captain aboard)"
 		end
@@ -1823,12 +2080,69 @@ function PlayerFleet.SetCaptain(uid, crewMember)
 	if not entry then return false end
 	for _, c in ipairs(entry.crew or {}) do
 		if c == crewMember then
+			if entry.captain and entry.captain ~= c then
+				entry.captain.title = "Fleet Crew"
+			end
 			entry.captain = c
 			c.title = "Captain"
+			c.fleetWage = math.max(c.fleetWage or 0, PlayerFleet.ComputeTargetFleetWage(c, true))
 			return true
 		end
 	end
 	return false
+end
+
+function PlayerFleet.DismissFleetCrew(uid, crewMember)
+	local _, entry = findShipIndex(uid)
+	if not entry then return false, "Vessel not found." end
+	if entry.status ~= "DOCKED" then
+		return false, "Vessel must be docked to dismiss crew."
+	end
+
+	local foundIdx = nil
+	for i, c in ipairs(entry.crew or {}) do
+		if c == crewMember then
+			foundIdx = i
+			break
+		end
+	end
+	if not foundIdx then return false, "Crew member not aboard this vessel." end
+
+	table.remove(entry.crew, foundIdx)
+	if entry.captain == crewMember then
+		entry.captain = entry.crew[1] or nil
+		if entry.captain then
+			entry.captain.title = "Captain"
+			entry.captain.fleetWage = math.max(entry.captain.fleetWage or 0, PlayerFleet.ComputeTargetFleetWage(entry.captain, true))
+		elseif entry.order ~= "IDLE" then
+			entry.order = "IDLE"
+			entry.orderPhase = "Standing down (no Captain aboard)"
+		end
+	end
+
+	local owed = math.max(0, math.floor(tonumber(crewMember.fleetOwed) or 0))
+	if owed > 0 then
+		Comms.Message("I'm tired of working for nothing. Don't you know what a contract is?", crewMember.name)
+		crewMember.playerRelationship = (crewMember.playerRelationship or 0) - 5
+		if owed > 500 then
+			PlayerState.AddCrime("CONTRACT_FRAUD", owed * 1.1)
+		end
+	elseif crewMember:TestRoll('playerRelationship') then
+		Comms.Message("It's been great working for you. Look me up if you need a skilled hand again.", crewMember.name)
+	else
+		Comms.Message("Fair winds, Commander. Contract terminated.", crewMember.name)
+		crewMember.playerRelationship = (crewMember.playerRelationship or 0) - 1
+	end
+
+	crewMember.estimatedWage = (crewMember.fleetWage or 50) + 5
+	crewMember.contract = nil
+	crewMember.fleetOwed = nil
+	crewMember.fleetPayday = nil
+	crewMember.available = true
+	crewMember:Save()
+
+	addLog(entry.shipName, string.format("Dismissed %s at %s.", crewMember.name, entry.locationName or "station"), 0)
+	return true, string.format("Dismissed %s from %s.", crewMember.name, entry.shipName)
 end
 
 function PlayerFleet.HireInstantCaptain(uid)
@@ -1848,6 +2162,9 @@ function PlayerFleet.HireInstantCaptain(uid)
 
 	PlayerState.AddMoney(-CAPTAIN_SIGNING_BONUS)
 	TaxAuthority.RecordOperatingExpense(CAPTAIN_SIGNING_BONUS, "FLEET_CREW", "[FLEET] " .. entry.shipName)
+	entry.stats.wagesPaid = (entry.stats.wagesPaid or 0) + CAPTAIN_SIGNING_BONUS
+	entry.stats.netProfit = (entry.stats.netProfit or 0) - CAPTAIN_SIGNING_BONUS
+	fleetState.totalProfit = (fleetState.totalProfit or 0) - CAPTAIN_SIGNING_BONUS
 
 	local cap = Character.New({
 		title       = "Captain",
@@ -1858,13 +2175,115 @@ function PlayerFleet.HireInstantCaptain(uid)
 		intelligence = Engine.rand:Integer(18, 32),
 		available   = false,
 	}, Engine.rand)
-	cap.fleetWage = 65 + math.floor((cap.piloting + cap.navigation) * 0.5)
+	local now = Game.time or 0
+	cap.completedOps = 0
+	cap.weeksServed = 0
+	cap.activeWeeks = 0
+	cap.lastPayOps = 0
+	cap.fleetOwed = 0
+	cap.fleetPayday = now + WAGE_PERIOD_SEC
+	cap.payrollInitialized = true
+	cap.fleetWage = PlayerFleet.ComputeTargetFleetWage(cap, true)
 
+	if entry.captain and entry.captain ~= cap then
+		entry.captain.title = "Fleet Crew"
+	end
 	table.insert(entry.crew, cap)
 	entry.captain = cap
-	addLog(entry.shipName, string.format("Recruited Captain %s at %s.", cap.name, entry.locationName), -CAPTAIN_SIGNING_BONUS)
+	addLog(entry.shipName, string.format("Recruited Captain %s at %s (%s/wk).", cap.name, entry.locationName, Format.Money(cap.fleetWage, false)), -CAPTAIN_SIGNING_BONUS)
 
-	return true, string.format("Hired Captain %s for %s.", cap.name, entry.shipName)
+	return true, string.format("Hired Captain %s for %s (%s/wk).", cap.name, entry.shipName, Format.Money(cap.fleetWage, false))
+end
+
+local function processFleetPayroll(now, silentComms)
+	if type(now) ~= "number" or now <= 0 then return end
+	local attrs = { "piloting", "navigation", "engineering", "sensors" }
+
+	for _, entry in ipairs(fleetState.ships or {}) do
+		if entry.status ~= "DESTROYED" and (#(entry.crew or {}) > 0 or entry.captain) then
+			normalizeFleetCrewForEntry(entry, now)
+			local shipPaid = 0
+			local shipUnpaid = 0
+
+			for _, member in ipairs(entry.crew) do
+				local isCap = (member == entry.captain)
+				local periods = 0
+				while (member.fleetPayday or (now + WAGE_PERIOD_SEC)) <= now and periods < MAX_PAYROLL_PERIODS_PER_STEP do
+					periods = periods + 1
+					local payTime = member.fleetPayday or now
+					local wage = math.max(1, math.floor(tonumber(member.fleetWage) or 50))
+
+					if PlayerState.GetMoney() >= wage then
+						PlayerState.AddMoney(-wage)
+						TaxAuthority.RecordOperatingExpense(wage, "FLEET_CREW", "[FLEET] " .. entry.shipName)
+						shipPaid = shipPaid + wage
+						if not member:TestRoll('playerRelationship') then
+							member.playerRelationship = (member.playerRelationship or 0) + 1
+						end
+					else
+						member.fleetOwed = (member.fleetOwed or 0) + wage
+						shipUnpaid = shipUnpaid + wage
+						member.playerRelationship = (member.playerRelationship or 0) - 1
+						if Character.persistent and Character.persistent.player then
+							Character.persistent.player.reputation = (Character.persistent.player.reputation or 0) - 0.5
+						end
+					end
+
+					local arrears = math.min(math.max(0, math.floor(PlayerState.GetMoney())), member.fleetOwed or 0)
+					if arrears > 0 then
+						PlayerState.AddMoney(-arrears)
+						TaxAuthority.RecordOperatingExpense(arrears, "FLEET_CREW", "[FLEET] " .. entry.shipName)
+						member.fleetOwed = (member.fleetOwed or 0) - arrears
+						shipPaid = shipPaid + arrears
+					end
+
+					member.weeksServed = (member.weeksServed or 0) + 1
+					local wasActive = (entry.order ~= "IDLE") or ((member.completedOps or 0) > (member.lastPayOps or 0))
+					if wasActive then
+						member.activeWeeks = (member.activeWeeks or 0) + 1
+						local attr = attrs[Engine.rand:Integer(1, #attrs)]
+						local curAttr = member[attr] or 15
+						if curAttr < 65 and Engine.rand:Number(0, 1) < 0.25 then
+							member[attr] = curAttr + 1
+						end
+						local targetWage = PlayerFleet.ComputeTargetFleetWage(member, isCap)
+						if targetWage > (member.fleetWage or 0) then
+							member.fleetWage = targetWage
+							addLog(entry.shipName, string.format("%s %s promoted to %s/wk salary (%d wks active service).",
+								isCap and "Captain" or "Crew", member.name, Format.Money(targetWage, false), member.activeWeeks), 0, payTime)
+						end
+					end
+					member.lastPayOps = member.completedOps or 0
+					member.fleetPayday = payTime + WAGE_PERIOD_SEC
+				end
+
+				if (member.fleetPayday or 0) <= now then
+					member.fleetPayday = now + WAGE_PERIOD_SEC
+				end
+			end
+
+			if shipPaid > 0 then
+				entry.stats.wagesPaid = (entry.stats.wagesPaid or 0) + shipPaid
+				entry.stats.netProfit = (entry.stats.netProfit or 0) - shipPaid
+				fleetState.totalProfit = (fleetState.totalProfit or 0) - shipPaid
+				local note = string.format("Paid weekly crew payroll (%d crew).", #entry.crew)
+				addLog(entry.shipName, note, -shipPaid, now)
+				recordFleetPayrollFlightLog(entry, shipPaid, note)
+			end
+			if shipUnpaid > 0 then
+				addLog(entry.shipName, string.format("Insufficient funds for crew payroll (%s in arrears).", Format.Money(shipUnpaid, false)), 0, now)
+				if not silentComms then
+					Comms.ImportantMessage(string.format("Commander, crew wages on %s went unpaid (%s owed).", entry.shipName, Format.Money(shipUnpaid, false)), entry.captain and entry.captain.name or "Fleet Payroll")
+				end
+				if entry.captain and (entry.captain.fleetOwed or 0) >= (entry.captain.fleetWage or 50) * 3 and entry.status == "DOCKED" and entry.order ~= "IDLE" then
+					entry.order = "IDLE"
+					entry.orderPhase = "Standing down (unpaid crew arrears)"
+					Comms.ImportantMessage(string.format("Captain %s has stood down %s until unpaid wage arrears (%s) are settled.",
+						entry.captain.name, entry.shipName, Format.Money(entry.captain.fleetOwed, false)), entry.captain.name)
+				end
+			end
+		end
+	end
 end
 
 -- ============================================================================
@@ -4816,6 +5235,7 @@ local function fleetSimulationStep()
 			advanceFleetEntryAtTime(entry, Game.time, false, false)
 		end
 	end
+	processFleetPayroll(Game.time, false)
 end
 
 local function ensureTickLoop()
@@ -4836,6 +5256,11 @@ local loaded_data = nil
 Event.Register("onGameStart", function()
 	fleetState = normalizeFleetState(loaded_data)
 	loaded_data = nil
+	for _, entry in ipairs(fleetState.ships or {}) do
+		if entry.status ~= "DESTROYED" then
+			normalizeFleetCrewForEntry(entry, Game.time)
+		end
+	end
 	tickTimerActive = false
 	liveOrderRuntime = {}
 	soldDepartingShips = {}
@@ -4933,6 +5358,8 @@ Event.Register("onEnterSystem", function(player)
 			end
 		end
 	end
+
+	processFleetPayroll(Game.time, elapsedJumpSec >= 300)
 
 	local r1, m1, n1, t1, maint1 = collectFleetTotalsSnapshot()
 	local dRuns = (r1 - r0) + (m1 - m0)

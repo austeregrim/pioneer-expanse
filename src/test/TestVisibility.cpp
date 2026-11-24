@@ -290,3 +290,97 @@ TEST_CASE("SupercruiseAutopilotMk3AndMk4")
 		CHECK(escapeDir.x < -0.5);
 	}
 }
+
+TEST_CASE("SupercruiseInterdiction")
+{
+	SUBCASE("ComputeMaxInterdictionRange and EvaluateInterdictionEnvelope")
+	{
+		const double speed2001c = 2001.0 * SupercruiseController::LIGHT_SPEED;
+		const double ls = SupercruiseController::LIGHT_SPEED;
+
+		// Max range caps at 20 ls (level 1), 25 ls (level 2), 30 ls (level 3) — never 40+ AU
+		CHECK(SupercruiseController::ComputeMaxInterdictionRange(speed2001c, speed2001c, 1) == doctest::Approx(20.0 * ls));
+		CHECK(SupercruiseController::ComputeMaxInterdictionRange(speed2001c, speed2001c, 2) == doctest::Approx(25.0 * ls));
+		CHECK(SupercruiseController::ComputeMaxInterdictionRange(speed2001c, speed2001c, 3) == doctest::Approx(30.0 * ls));
+
+		const vector3d targetFwd(0.0, 0.0, -1.0);
+		int failCode = 0;
+
+		// Valid close rear-hemisphere pursuit with matched speed & vector
+		CHECK(SupercruiseController::EvaluateInterdictionEnvelope(
+			vector3d(0.0, 0.0, -12.0 * ls), speed2001c * 1.05, speed2001c,
+			targetFwd, targetFwd, 1, &failCode));
+		CHECK(failCode == SupercruiseController::INTERDICT_OK);
+
+		// Rejects distant 40 AU (20,000 ls) and 100 ls attackers even at 2001c
+		CHECK_FALSE(SupercruiseController::EvaluateInterdictionEnvelope(
+			vector3d(0.0, 0.0, -100.0 * ls), speed2001c, speed2001c,
+			targetFwd, targetFwd, 1, &failCode));
+		CHECK(failCode == SupercruiseController::INTERDICT_FAIL_RANGE);
+
+		CHECK_FALSE(SupercruiseController::EvaluateInterdictionEnvelope(
+			vector3d(0.0, 0.0, -20000.0 * ls), speed2001c, speed2001c,
+			targetFwd, targetFwd, 3, &failCode));
+		CHECK(failCode == SupercruiseController::INTERDICT_FAIL_RANGE);
+
+		// Rejects large speed mismatches (0.4x too slow, 2.0x too fast)
+		CHECK_FALSE(SupercruiseController::EvaluateInterdictionEnvelope(
+			vector3d(0.0, 0.0, -10.0 * ls), speed2001c * 0.40, speed2001c,
+			targetFwd, targetFwd, 1, &failCode));
+		CHECK(failCode == SupercruiseController::INTERDICT_FAIL_TOO_SLOW);
+
+		CHECK_FALSE(SupercruiseController::EvaluateInterdictionEnvelope(
+			vector3d(0.0, 0.0, -10.0 * ls), speed2001c * 2.0, speed2001c,
+			targetFwd, targetFwd, 1, &failCode));
+		CHECK(failCode == SupercruiseController::INTERDICT_FAIL_TOO_FAST);
+
+		// Rejects crossing flight vector (38 deg off target heading) even when behind target tail & aiming within aim cone
+		const double rad20 = 20.0 * (M_PI / 180.0);
+		const double rad38 = 38.0 * (M_PI / 180.0);
+		const vector3d rel20(std::sin(rad20) * (10.0 * ls), 0.0, -std::cos(rad20) * (10.0 * ls));
+		const vector3d fwd38(std::sin(rad38), 0.0, -std::cos(rad38));
+		CHECK_FALSE(SupercruiseController::EvaluateInterdictionEnvelope(
+			rel20, speed2001c, speed2001c,
+			fwd38, targetFwd, 1, &failCode));
+		CHECK(failCode == SupercruiseController::INTERDICT_FAIL_VECTOR_MISMATCH);
+	}
+
+	SUBCASE("ComputeEscapeWanderDeflection and StepInterdictionTugOfWar")
+	{
+		// Zero deflection at t = 0 so Escape Vector spawns centered on target nose
+		double yaw0 = 1.0, pitch0 = 1.0;
+		SupercruiseController::ComputeEscapeWanderDeflection(0.0, 1.0, yaw0, pitch0);
+		CHECK(yaw0 == doctest::Approx(0.0));
+		CHECK(pitch0 == doctest::Approx(0.0));
+
+		// Unaligned player survives >= 8.0s against NPC attacker (no instant 2.6s fail)
+		double capFail = 0.20, escFail = 0.20;
+		const double dt = 0.1;
+		double failTime = 0.0;
+		const double unalignedDot = std::cos(45.0 * M_PI / 180.0);
+		for (int i = 0; i < 250; ++i) {
+			failTime += dt;
+			SupercruiseController::StepInterdictionTugOfWar(
+				capFail, escFail, unalignedDot, 1.0, 60.0, 60.0, 2, failTime, true, false, dt);
+			if (capFail >= 1.0)
+				break;
+		}
+		CHECK(capFail >= 1.0);
+		CHECK(failTime >= 8.0);
+
+		// Player aligned within 15 deg of Escape Vector breaks free cleanly in < 11s
+		double capWin = 0.20, escWin = 0.20;
+		double winTime = 0.0;
+		const double aligned15Dot = std::cos(15.0 * M_PI / 180.0);
+		for (int i = 0; i < 200; ++i) {
+			winTime += dt;
+			SupercruiseController::StepInterdictionTugOfWar(
+				capWin, escWin, aligned15Dot, 1.0, 60.0, 60.0, 2, winTime, true, false, dt);
+			if (escWin >= 1.0 || capWin >= 1.0)
+				break;
+		}
+		CHECK(escWin >= 1.0);
+		CHECK(capWin < 0.20);
+		CHECK(winTime < 11.0);
+	}
+}

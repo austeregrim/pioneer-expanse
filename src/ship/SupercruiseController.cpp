@@ -60,6 +60,8 @@ void SupercruiseController::SaveToJson(Json &jsonObj, Space *space) const
 	scObj["capture_progress"] = m_captureProgress;
 	scObj["escape_progress"] = m_escapeProgress;
 	scObj["escape_wander_time"] = m_escapeWanderTime;
+	scObj["interdict_elapsed"] = m_interdictElapsed;
+	scObj["escape_wander_phase"] = m_escapeWanderPhase;
 	scObj["submit_timer"] = m_submitTimer;
 	scObj["submitting"] = m_submitting;
 	scObj["escape_base_dir"] = m_escapeBaseDir;
@@ -99,9 +101,11 @@ void SupercruiseController::LoadFromJson(const Json &jsonObj)
 	m_interdictRole = static_cast<InterdictionRole>(scObj.value("interdict_role", 0));
 	m_interdictPeerIndex = scObj.value("index_for_interdict_peer", 0);
 	m_interdictPeer = nullptr;
-	m_captureProgress = scObj.value("capture_progress", 0.30);
-	m_escapeProgress = scObj.value("escape_progress", 0.30);
+	m_captureProgress = scObj.value("capture_progress", 0.20);
+	m_escapeProgress = scObj.value("escape_progress", 0.20);
 	m_escapeWanderTime = scObj.value("escape_wander_time", 0.0);
+	m_interdictElapsed = scObj.value("interdict_elapsed", 0.0);
+	m_escapeWanderPhase = scObj.value("escape_wander_phase", 1.0);
 	m_submitTimer = scObj.value("submit_timer", 0.0);
 	m_submitting = scObj.value("submitting", false);
 	m_escapeBaseDir = scObj.count("escape_base_dir") ? scObj["escape_base_dir"].get<vector3d>() : vector3d(0.0, 0.0, -1.0);
@@ -2124,12 +2128,12 @@ void SupercruiseController::StaticUpdate(float timeStep)
 		const vector3d toTargetDir = targetRel.NormalizedSafe();
 		const double closingDot = forwardDir.Dot(toTargetDir);
 		const double behindDot = (-targetShip->GetOrient().VectorZ()).Dot(toTargetDir);
-		const double followGap = std::max(SAFE_DISENGAGE_DIST * 0.5, targetSpeed * 3.0);
+		const double followGap = std::min(std::max(SAFE_DISENGAGE_DIST * 0.5, targetSpeed * 1.8), 10.0 * LIGHT_SPEED);
 		double desiredPursuitSpeed;
 		if (closingDot > 0.55) {
-			if (m_targetDistance <= followGap * 2.5 && behindDot > 0.45) {
+			if (m_targetDistance <= 25.0 * LIGHT_SPEED && behindDot > 0.45) {
 				const double closure = std::max(0.0, (m_targetDistance - followGap) / 6.0);
-				desiredPursuitSpeed = std::max(MIN_SPEED, std::min(targetSpeed * 1.45 + MIN_SPEED, targetSpeed + closure));
+				desiredPursuitSpeed = std::max(MIN_SPEED, std::min(targetSpeed * 1.28 + 50000.0, targetSpeed + closure));
 			} else {
 				desiredPursuitSpeed = std::max(MIN_SPEED, targetSpeed + m_targetDistance / 6.0);
 			}
@@ -2187,7 +2191,9 @@ void SupercruiseController::TimeStepUpdate(float timeStep, const vector3d &desir
 	const double speedNorm = Clamp(
 		std::log10(std::max(m_speed, MIN_SPEED) / MIN_SPEED) / std::log10(MAX_SPEED / MIN_SPEED),
 		0.0, 1.0);
-	const double speedFactor = 1.0 - 0.55 * speedNorm;
+	double speedFactor = 1.0 - 0.55 * speedNorm;
+	if (m_interdictRole != INTERDICT_NONE)
+		speedFactor = std::max(speedFactor, 0.75);
 	const bool inBlueZone = (m_throttle >= 0.65 && m_throttle <= 0.80);
 	const double blueZoneMult = inBlueZone ? 1.25 : 1.0;
 
@@ -2390,8 +2396,9 @@ void SupercruiseController::ClearInterdiction()
 			peerSc->m_interdictRole = INTERDICT_NONE;
 			peerSc->m_interdictPeer = nullptr;
 			peerSc->m_interdictPeerIndex = 0;
-			peerSc->m_captureProgress = 0.30;
-			peerSc->m_escapeProgress = 0.30;
+			peerSc->m_captureProgress = 0.20;
+			peerSc->m_escapeProgress = 0.20;
+			peerSc->m_interdictElapsed = 0.0;
 			peerSc->m_submitTimer = 0.0;
 			peerSc->m_submitting = false;
 		}
@@ -2399,8 +2406,9 @@ void SupercruiseController::ClearInterdiction()
 	m_interdictRole = INTERDICT_NONE;
 	m_interdictPeer = nullptr;
 	m_interdictPeerIndex = 0;
-	m_captureProgress = 0.30;
-	m_escapeProgress = 0.30;
+	m_captureProgress = 0.20;
+	m_escapeProgress = 0.20;
+	m_interdictElapsed = 0.0;
 	m_submitTimer = 0.0;
 	m_submitting = false;
 }
@@ -2448,55 +2456,48 @@ bool SupercruiseController::CanInterdict(const Ship *target, std::string *outRea
 	const vector3d relToTarget = target->GetPositionRelTo(m_ship);
 	const double dist = relToTarget.Length();
 	const double targetSpeed = targetSc->GetSpeed();
-	const double levelMult = 1.0 + 0.35 * double(level - 1);
-	const double refSpeed = std::min(m_speed, targetSpeed);
-	const double maxRange = std::max(SAFE_DISENGAGE_DIST, refSpeed * 10.0) * levelMult;
-	if (dist > maxRange) {
+	const double maxRange = ComputeMaxInterdictionRange(m_speed, targetSpeed, level);
+	const vector3d attackerFwd = -m_ship->GetOrient().VectorZ();
+	const vector3d targetFwd = -target->GetOrient().VectorZ();
+
+	int failCode = INTERDICT_OK;
+	if (!EvaluateInterdictionEnvelope(relToTarget, m_speed, targetSpeed, attackerFwd, targetFwd, level, &failCode)) {
 		if (outReason) {
 			char buf[128];
-			if (maxRange >= 0.1 * LIGHT_SPEED) {
-				snprintf(buf, sizeof(buf), "OUT OF INTERDICTION RANGE (%.1f ls / MAX %.1f ls)",
-					dist / LIGHT_SPEED, maxRange / LIGHT_SPEED);
-			} else if (maxRange >= 1.0e6) {
-				snprintf(buf, sizeof(buf), "OUT OF INTERDICTION RANGE (%.1f Mm / MAX %.1f Mm)",
-					dist / 1.0e6, maxRange / 1.0e6);
-			} else {
-				snprintf(buf, sizeof(buf), "OUT OF INTERDICTION RANGE (%.0f km / MAX %.0f km)",
-					dist / 1.0e3, maxRange / 1.0e3);
+			switch (failCode) {
+			case INTERDICT_FAIL_RANGE:
+				if (maxRange >= 0.1 * LIGHT_SPEED) {
+					snprintf(buf, sizeof(buf), "OUT OF INTERDICTION RANGE (%.1f ls / MAX %.1f ls)",
+						dist / LIGHT_SPEED, maxRange / LIGHT_SPEED);
+				} else if (maxRange >= 1.0e6) {
+					snprintf(buf, sizeof(buf), "OUT OF INTERDICTION RANGE (%.1f Mm / MAX %.1f Mm)",
+						dist / 1.0e6, maxRange / 1.0e6);
+				} else {
+					snprintf(buf, sizeof(buf), "OUT OF INTERDICTION RANGE (%.0f km / MAX %.0f km)",
+						dist / 1.0e3, maxRange / 1.0e3);
+				}
+				*outReason = buf;
+				break;
+			case INTERDICT_FAIL_TOO_FAST:
+				*outReason = "TOO FAST — MATCH TARGET SPEED TO INTERDICT";
+				break;
+			case INTERDICT_FAIL_TOO_SLOW:
+				*outReason = "TOO SLOW — MATCH TARGET SPEED TO INTERDICT";
+				break;
+			case INTERDICT_FAIL_NOT_BEHIND:
+				*outReason = "MOVE BEHIND TARGET TO ENGAGE INTERDICTION";
+				break;
+			case INTERDICT_FAIL_AIM:
+				*outReason = "ALIGN NOSE WITH TARGET TO ENGAGE TETHER";
+				break;
+			case INTERDICT_FAIL_VECTOR_MISMATCH:
+				*outReason = "ALIGN FLIGHT VECTOR WITH TARGET WAKE";
+				break;
+			default:
+				*outReason = "OUT OF INTERDICTION ENVELOPE";
+				break;
 			}
-			*outReason = buf;
 		}
-		return false;
-	}
-
-	const double maxMatchSpeed = std::max(targetSpeed * 2.25, MIN_SPEED * 4.0);
-	const double minMatchSpeed = (targetSpeed > MIN_SPEED * 2.5) ? (targetSpeed * 0.40) : 0.0;
-	if (m_speed > maxMatchSpeed) {
-		if (outReason)
-			*outReason = "TOO FAST — MATCH TARGET SPEED TO INTERDICT";
-		return false;
-	}
-	if (m_speed < minMatchSpeed) {
-		if (outReason)
-			*outReason = "TOO SLOW — MATCH TARGET SPEED TO INTERDICT";
-		return false;
-	}
-
-	const vector3d toTargetDir = relToTarget.NormalizedSafe();
-	const vector3d attackerFwd = -m_ship->GetOrient().VectorZ();
-	const double aimCos = std::cos((30.0 + 5.0 * double(level - 1)) * (M_PI / 180.0));
-	if (attackerFwd.Dot(toTargetDir) < aimCos) {
-		if (outReason)
-			*outReason = "ALIGN NOSE WITH TARGET TO ENGAGE TETHER";
-		return false;
-	}
-
-	// Rear-hemisphere check: attacker must be behind target's tail (-(-targetFwd) = targetFwd)
-	const vector3d targetBack = target->GetOrient().VectorZ();
-	const double rearCos = std::cos((50.0 + 5.0 * double(level - 1)) * (M_PI / 180.0));
-	if (targetBack.Dot(-toTargetDir) < rearCos) {
-		if (outReason)
-			*outReason = "MOVE BEHIND TARGET TO ENGAGE INTERDICTION";
 		return false;
 	}
 
@@ -2575,16 +2576,19 @@ bool SupercruiseController::StartInterdiction(Ship *target)
 
 	m_interdictRole = INTERDICT_ATTACKER;
 	m_interdictPeer = target;
-	m_captureProgress = 0.30;
-	m_escapeProgress = 0.30;
+	m_captureProgress = 0.20;
+	m_escapeProgress = 0.20;
+	m_interdictElapsed = 0.0;
 	m_submitTimer = 0.0;
 	m_submitting = false;
 
 	targetSc->m_interdictRole = INTERDICT_TARGET;
 	targetSc->m_interdictPeer = m_ship;
-	targetSc->m_captureProgress = 0.30;
-	targetSc->m_escapeProgress = 0.30;
-	targetSc->m_escapeWanderTime = Pi::rng.Double(0.0, 10.0);
+	targetSc->m_captureProgress = 0.20;
+	targetSc->m_escapeProgress = 0.20;
+	targetSc->m_escapeWanderTime = 0.0;
+	targetSc->m_interdictElapsed = 0.0;
+	targetSc->m_escapeWanderPhase = (Pi::rng.Int32(2) == 0) ? 1.0 : -1.0;
 	targetSc->m_submitTimer = 0.0;
 	targetSc->m_submitting = false;
 	targetSc->m_escapeBaseDir = -target->GetOrient().VectorZ();
@@ -2631,13 +2635,15 @@ void SupercruiseController::UpdateInterdiction(float timeStep)
 	const vector3d relToTarget = target->GetPositionRelTo(m_ship);
 	const double dist = relToTarget.Length();
 	double desiredTetherSpeed = targetSc->GetSpeed();
-	if (dist > 2.5 * LIGHT_SPEED)
+	if (dist > 2.0 * LIGHT_SPEED)
 		desiredTetherSpeed = std::min(MAX_SPEED, desiredTetherSpeed * 1.12 + 0.05 * LIGHT_SPEED);
-	else if (dist < 0.35 * LIGHT_SPEED)
+	else if (dist < 0.25 * LIGHT_SPEED)
 		desiredTetherSpeed = std::max(MIN_SPEED, desiredTetherSpeed * 0.88);
 	m_speed = Clamp(m_speed + (desiredTetherSpeed - m_speed) * Clamp(double(timeStep) * 3.0, 0.0, 1.0), MIN_SPEED, MAX_SPEED);
 
-	// Update wandering Escape Vector ahead of target
+	// Update wandering Escape Vector ahead of target (starts centered and ramps smoothly)
+	m_interdictElapsed += double(timeStep);
+	targetSc->m_interdictElapsed = m_interdictElapsed;
 	targetSc->m_escapeWanderTime += double(timeStep);
 	const vector3d targetFwd = -target->GetOrient().VectorZ();
 	// Slerp base vector gently toward target forward so Escape Vector stays in front hemisphere
@@ -2649,9 +2655,9 @@ void SupercruiseController::UpdateInterdiction(float timeStep)
 	const vector3d tangentRight = baseFwd.Cross(refUp).Normalized();
 	const vector3d tangentUp = tangentRight.Cross(baseFwd).Normalized();
 
-	const double t = targetSc->m_escapeWanderTime;
-	const double yawDeflect = 0.34 * std::sin(t * 0.85) + 0.14 * std::sin(t * 2.05);
-	const double pitchDeflect = 0.28 * std::cos(t * 0.72) + 0.12 * std::sin(t * 1.65);
+	double yawDeflect = 0.0;
+	double pitchDeflect = 0.0;
+	ComputeEscapeWanderDeflection(targetSc->m_escapeWanderTime, targetSc->m_escapeWanderPhase, yawDeflect, pitchDeflect);
 	targetSc->m_escapeDirWorld = (baseFwd + tangentRight * yawDeflect + tangentUp * pitchDeflect).NormalizedSafe();
 
 	// Submission check (0% throttle for 0.8s)
@@ -2668,32 +2674,20 @@ void SupercruiseController::UpdateInterdiction(float timeStep)
 	// Alignment scoring
 	const double targetMass = std::max(15.0, double(target->GetShipType()->hullMass));
 	const double attackerMass = std::max(15.0, double(m_ship->GetShipType()->hullMass));
-	const double targetAgility = Clamp(std::sqrt(60.0 / targetMass), 0.55, 1.55);
-	const double attackerAgility = Clamp(std::sqrt(60.0 / attackerMass), 0.65, 1.45);
-	const double levelBonus = 1.0 + 0.22 * double(GetInterdictorLevel() - 1);
-
 	const double evaderDot = targetFwd.Dot(targetSc->m_escapeDirWorld);
-	const double cosTight = std::cos(14.0 * M_PI / 180.0);
-	const double cosLoose = std::cos(26.0 * M_PI / 180.0);
-
-	if (evaderDot >= cosTight)
-		m_escapeProgress += 0.14 * targetAgility * double(timeStep);
-	else if (evaderDot >= cosLoose)
-		m_escapeProgress += 0.03 * targetAgility * double(timeStep);
-	else
-		m_escapeProgress -= 0.05 * double(timeStep);
-
 	const vector3d attackerFwd = -m_ship->GetOrient().VectorZ();
 	const double attackerDot = attackerFwd.Dot(relToTarget.NormalizedSafe());
-	if (attackerDot >= cosTight)
-		m_captureProgress += 0.15 * levelBonus * attackerAgility * double(timeStep);
-	else if (attackerDot >= cosLoose)
-		m_captureProgress += 0.04 * levelBonus * double(timeStep);
-	else
-		m_captureProgress -= 0.06 * double(timeStep);
 
-	m_captureProgress = Clamp(m_captureProgress, 0.0, 1.0);
-	m_escapeProgress = Clamp(m_escapeProgress, 0.0, 1.0);
+	StepInterdictionTugOfWar(
+		m_captureProgress, m_escapeProgress,
+		evaderDot, attackerDot,
+		targetMass, attackerMass,
+		GetInterdictorLevel(),
+		m_interdictElapsed,
+		target->IsType(ObjectType::PLAYER),
+		m_ship->IsType(ObjectType::PLAYER),
+		double(timeStep));
+
 	targetSc->m_captureProgress = m_captureProgress;
 	targetSc->m_escapeProgress = m_escapeProgress;
 
@@ -2719,26 +2713,6 @@ void SupercruiseController::DropPairFromInterdiction(Ship *attacker, Ship *targe
 
 	attSc->ClearInterdiction();
 
-	// Place both ships in target's current orbital/system frame at dogfight range
-	const FrameId dropFrame = target->GetFrame();
-	const vector3d targetPos = target->GetPosition();
-	const vector3d targetFwd = (-target->GetOrient().VectorZ()).NormalizedSafe();
-	const vector3d upDir = target->GetOrient().VectorY().NormalizedSafe();
-
-	attacker->SwitchToFrame(dropFrame);
-	attacker->SetPosition(targetPos - targetFwd * 1600.0 + upDir * 120.0);
-	const vector3d attZ = (-targetFwd).NormalizedSafe(); // -Z points toward targetFwd
-	vector3d attX = upDir.Cross(attZ).NormalizedSafe();
-	if (attX.LengthSqr() < 0.1)
-		attX = MathUtil::OrthogonalDirection(attZ).Normalized();
-	const vector3d attY = attZ.Cross(attX).Normalized();
-	attacker->SetOrient(matrix3x3d::FromVectors(attX, attY, attZ));
-
-	target->SetVelocity(targetFwd * 180.0);
-	target->SetAngVelocity(vector3d(0.0));
-	attacker->SetVelocity(targetFwd * 210.0);
-	attacker->SetAngVelocity(vector3d(0.0));
-
 	attSc->m_charging = false;
 	attSc->m_assistActive = false;
 	attSc->m_speed = 0.0;
@@ -2763,12 +2737,38 @@ void SupercruiseController::DropPairFromInterdiction(Ship *attacker, Ship *targe
 
 	target->SetFlightState(Ship::FLYING);
 	tgtSc->EnsureShipAboveTerrainAndSyncFrame();
+
+	// Place both ships in target's synchronized frame, with attacker clearly visible ahead & slightly offset
+	const FrameId dropFrame = target->GetFrame();
+	const vector3d targetPos = target->GetPosition();
+	const vector3d targetFwd = (-target->GetOrient().VectorZ()).NormalizedSafe();
+	const vector3d upDir = target->GetOrient().VectorY().NormalizedSafe();
+	const vector3d rightDir = target->GetOrient().VectorX().NormalizedSafe();
+
+	const vector3d attackerPos = targetPos + targetFwd * 850.0 + rightDir * 220.0 + upDir * 80.0;
+	attacker->SwitchToFrame(dropFrame);
+	attacker->SetPosition(attackerPos);
+	const vector3d attZ = (attackerPos - targetPos).NormalizedSafe(); // -Z points back toward target
+	vector3d attX = upDir.Cross(attZ).NormalizedSafe();
+	if (attX.LengthSqr() < 0.1)
+		attX = MathUtil::OrthogonalDirection(attZ).Normalized();
+	const vector3d attY = attZ.Cross(attX).Normalized();
+	attacker->SetOrient(matrix3x3d::FromVectors(attX, attY, attZ));
+
+	target->SetVelocity(targetFwd * 120.0);
+	target->SetAngVelocity(vector3d(0.0));
 	target->ClearThrusterState();
 	target->CalcExternalForce();
+
+	attacker->SetVelocity(targetFwd * 90.0);
+	attacker->SetAngVelocity(vector3d(0.0));
 	attacker->SetFlightState(Ship::FLYING);
 	attSc->EnsureShipAboveTerrainAndSyncFrame();
 	attacker->ClearThrusterState();
 	attacker->CalcExternalForce();
+
+	target->SnapInterpTransform();
+	attacker->SnapInterpTransform();
 
 	// Preserve/assign player combat target lock for immediate dogfighting
 	if (attacker->IsType(ObjectType::PLAYER)) {

@@ -84,11 +84,11 @@ MissionCalc:SetParams({
 	baseDuration = 0,
 	baseReward = 0,
 
-	inSystemTime = 2 * MissionUtils.Days,
-	travelTimeAU = 3 * MissionUtils.Days,
+	inSystemTime = 6 * MissionUtils.Hours,
+	travelTimeAU = 1 * MissionUtils.Hours,
 	inSystemReward = local_reward,
 
-	hyperspaceTime = 60 * MissionUtils.Days,
+	hyperspaceTime = 12 * MissionUtils.Days,
 	hyperspaceDist = max_scout_dist,
 	hyperspaceReward = hyperspace_reward
 })
@@ -117,7 +117,7 @@ local flavours = {
 	-- dropoff: data needs to be delivered to another station than where the mission was accepted from
 	{                          -- 1 - Galactic Geographic Society
 		localscout = false,    -- is in same system?
-		days       = 60,       -- days until deadline, from accepting it
+		days       = 6,        -- days until deadline, from accepting it
 		difficulty = 1,        -- altitude, [0,1]
 		reward     = 1,        -- reward multiplier, 1=none. (unrelated to "urgency")
 		dropoff    = false,
@@ -126,7 +126,7 @@ local flavours = {
 		title      = "Senior Cartographer",
 	}, {
 		localscout = false,    -- 2 - Low altitude mapping
-		days       = 60,
+		days       = 6,
 		difficulty = 2,        -- low altitude flying
 		reward     = 1,
 		dropoff    = false,
@@ -135,7 +135,7 @@ local flavours = {
 		title      = "Survey Coordinator",
 	}, {
 		localscout = false,    -- 3 rich pirate hiring
-		days       = 30,
+		days       = 4,
 		difficulty = 1.5,
 		reward     = 1.5,
 		dropoff    = true,
@@ -145,7 +145,7 @@ local flavours = {
 		covert     = true,
 	}, {
 		localscout = false,    -- 4 Stressed PhD student, short time
-		days       = 30,
+		days       = 4,
 		difficulty = 1.5,
 		reward     = 1,
 		dropoff    = false,
@@ -154,7 +154,7 @@ local flavours = {
 		title      = "Doctoral Researcher",
 	}, {
 		localscout = false,    -- 5 Neutral / standard
-		days       = 60,
+		days       = 6,
 		difficulty = 1,
 		reward     = 1,
 		dropoff    = false,
@@ -163,7 +163,7 @@ local flavours = {
 		title      = "Information Broker",
 	}, {
 		localscout = true,     -- 6 local system admin
-		days       = 60,
+		days       = 2,
 		difficulty = 1,
 		reward     = 1.5,      -- government pays well
 		dropoff    = false,
@@ -172,7 +172,7 @@ local flavours = {
 		useFaction = true,
 	}, {
 		localscout = true,     -- 7 family in need of new land
-		days       = 25,       -- urgent!
+		days       = 1,        -- urgent!
 		difficulty = 1,
 		reward     = 2,        -- because urgent
 		dropoff    = false,
@@ -181,7 +181,7 @@ local flavours = {
 		title      = "Family Representative",
 	}, {
 		localscout = true,     -- 8 geographical society, low-flying
-		days       = 80,
+		days       = 3,
 		difficulty = 2,
 		reward     = 2,
 		dropoff    = false,
@@ -190,7 +190,7 @@ local flavours = {
 		title      = "Field Liaison",
 	}, {
 		localscout = false,    -- 9 Family in race to a claim
-		days       = 30,	   -- should be short
+		days       = 4,        -- should be short
 		difficulty = 1,
 		reward     = 3,
 		dropoff    = true,
@@ -234,6 +234,12 @@ local onChat = function (form, ref, option)
 	form:Clear()
 	if option == -1 then
 		form:Close()
+		return
+	end
+
+	if not ad or MissionUtils.IsAdExpired(ad, Game.time) then
+		form:RemoveAdvertOnClose()
+		form:SetMessage(l.EXPIRED or "This posting has expired.")
 		return
 	end
 
@@ -522,8 +528,8 @@ local makeAdvert = function (station)
 		flavourN = Engine.rand:Integer(1,#flavours)
 	end
 	local flavour = flavours[flavourN]
-	local days = Engine.rand:Number(flavour.days * 0.5, flavour.days)
-	local urgency = 1.0 - math.clamp((days - 30) / 50, 0.0, 1.0)
+	local days = Engine.rand:Number(flavour.days * 0.65, flavour.days)
+	local urgency = 1.0 - math.clamp((days - 1) / 6, 0.0, 1.0)
 	local difficulty = flavour.difficulty
 
 	local orbital = Engine.rand:Number() > 0.6 -- slightly more surface scans than orbital scans
@@ -565,7 +571,9 @@ local makeAdvert = function (station)
 		info = calcSurfaceScanMission(missionBody, difficulty, flavour.reward)
 	end
 
-	due = Game.time + days * MissionUtils.Days + MissionCalc:CalcTravelTime(station, location, urgency, 0.1) * 3.5
+	local dueDur = days * MissionUtils.Days + MissionCalc:CalcTravelTime(station, location, urgency, 0.1) * 1.6
+	due = utils.round(Game.time + dueDur, 900)
+	local timeout = MissionUtils.CalcBoardTimeout(Game.time, dueDur, flavour.localscout and 18 or 48)
 	reward = info.reward + MissionCalc:CalcReward(station, location, urgency, difficulty - 1.0, 0.2) * 1.6
 	local dist = MissionCalc:CalcDistance(station, location)
 
@@ -588,6 +596,7 @@ local makeAdvert = function (station)
 		location    = location,
 		dist        = dist,
 		due         = due,
+		timeout     = timeout,
 		difficulty  = difficulty,
 		days        = days,
 		reward      = reward,
@@ -603,10 +612,15 @@ local makeAdvert = function (station)
 	placeAdvert(station, ad)
 end
 
+local maxAdsForStation = function ()
+	return math.clamp(1 + math.ceil(Game.system.population / 3), 2, 5)
+end
+
 local onCreateBB = function (station)
-	local num = Engine.rand:Integer(math.ceil(Game.system.population / 3))
+	local num = math.min(maxAdsForStation(), Engine.rand:Integer(math.ceil(Game.system.population / 3)))
 
 	for _ = 1,num do
+		if MissionUtils.CountStationAds(ads, station) >= maxAdsForStation() then break end
 		makeAdvert(station)
 	end
 end
@@ -614,15 +628,14 @@ end
 
 local onUpdateBB = function (station)
 	for ref,ad in pairs(ads) do
-		if not flavours[ad.flavour].localscout
-			and ad.due < Game.time + 5*24*60*60 then
-			ad.station:RemoveAdvert(ref)
-		elseif flavours[ad.flavour].localscout
-			and ad.due < Game.time + 2*24*60*60 then
-			ad.station:RemoveAdvert(ref)
+		if ad.station == station then
+			local minLeft = flavours[ad.flavour].localscout and (4 * 3600) or (24 * 3600)
+			if MissionUtils.IsAdExpired(ad, Game.time) or (ad.due and ad.due < Game.time + minLeft) then
+				ad.station:RemoveAdvert(ref)
+			end
 		end
 	end
-	if Engine.rand:Integer(3*24*60*60) < 60*60 then
+	if MissionUtils.CountStationAds(ads, station) < maxAdsForStation() and Engine.rand:Integer(3*24*60*60) < 60*60 then
 		makeAdvert(station)
 	end
 end
@@ -796,7 +809,11 @@ local onGameStart = function ()
 
 	if loaded_data then
 		for k,ad in pairs(loaded_data.ads) do
-			placeAdvert(ad.station, ad)
+			if ad.station and ad.station:exists() and not MissionUtils.IsAdExpired(ad, Game.time) then
+				if MissionUtils.CountStationAds(ads, ad.station) < maxAdsForStation() then
+					placeAdvert(ad.station, ad)
+				end
+			end
 		end
 
 		-- Recreate mission lookup key

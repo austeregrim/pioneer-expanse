@@ -11,6 +11,7 @@ local Comms = require 'Comms'
 local PlayerState = require 'PlayerState'
 local Serializer = require 'Serializer'
 local Cartography = require 'modules.Cartography.Cartography'
+local MissionUtils = require 'modules.MissionUtils'
 
 local ui = require 'pigui'
 
@@ -40,6 +41,12 @@ local function onChat(form, ref, option)
 
 	if option == -1 then
 		form:Close()
+		return
+	end
+
+	if MissionUtils.IsAdExpired(ad, Game.time) then
+		form:RemoveAdvertOnClose()
+		form:SetMessage("This survey contract has expired.")
 		return
 	end
 
@@ -76,11 +83,12 @@ local function onChat(form, ref, option)
 			returnStation = station.path,
 			returnStationName = station.label,
 			reward = ad.reward,
-			due = Game.time + 30 * 24 * 3600, -- 30 days
+			due = ad.due or (Game.time + 7 * 24 * 3600),
 			status = "ACTIVE",
 		}
 		mission = Mission.New(mission)
 		table.insert(missions, mission)
+		MissionUtils.SetupOverdueTimer(mission)
 
 		form:RemoveAdvertOnClose()
 		ads[ref] = nil
@@ -106,6 +114,9 @@ local function makeAdvert(station)
 	local reward = requireBodyScan
 		and (math.floor((8000 + dist * 250) / 100) * 100)
 		or (math.floor((3500 + dist * 150) / 100) * 100)
+	local dueDur = MissionUtils.TravelTime(dist) * 1.8 + (requireBodyScan and 3 or 2) * 86400
+	local due = math.floor((Game.time + dueDur) / 900 + 0.5) * 900
+	local timeout = MissionUtils.CalcBoardTimeout(Game.time, dueDur, 48)
 
 	local client = Character.New({
 		title = "CARTOGRAPHIC SURVEY DIRECTOR",
@@ -120,6 +131,8 @@ local function makeAdvert(station)
 		targetKey = Cartography.GetSystemKey(targetSys.path),
 		targetName = targetSys.name,
 		dist = dist,
+		due = due,
+		timeout = timeout,
 		requireBodyScan = requireBodyScan,
 		reward = reward,
 		icon = requireBodyScan and "scout_surface" or "scout_orbital",
@@ -145,6 +158,9 @@ local function makeAdvert(station)
 		title = ad.desc,
 		description = ad.desc,
 		icon = ad.icon,
+		due = ad.due,
+		reward = ad.reward,
+		location = ad.targetPath,
 		onChat = onChat,
 		onDelete = onDelete,
 	})
@@ -154,7 +170,18 @@ local function makeAdvert(station)
 end
 
 local function onCreateBB(station)
-	if Engine.rand:Integer(1, 100) <= 75 then
+	if MissionUtils.CountStationAds(ads, station) < 2 and Engine.rand:Integer(1, 100) <= 75 then
+		makeAdvert(station)
+	end
+end
+
+local function onUpdateBB(station)
+	for ref, ad in pairs(ads) do
+		if ad.station == station and MissionUtils.IsAdExpired(ad, Game.time) then
+			ad.station:RemoveAdvert(ref)
+		end
+	end
+	if MissionUtils.CountStationAds(ads, station) < 1 and Engine.rand:Integer(1, 100) <= 35 then
 		makeAdvert(station)
 	end
 end
@@ -227,6 +254,7 @@ end
 Mission.RegisterType("Cartography", "Universal Cartographics", onClick)
 
 Event.Register("onCreateBB", onCreateBB)
+Event.Register("onUpdateBB", onUpdateBB)
 Event.Register("onSystemDiscovered", onSystemDiscovered)
 Event.Register("onCartographyScanRecorded", onCartographyScanRecorded)
 Event.Register("onShipDocked", onShipDocked)

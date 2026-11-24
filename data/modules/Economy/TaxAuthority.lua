@@ -36,6 +36,7 @@ local function makeEmptyBreakdown()
 		exemptIncome = 0,
 		windfallTaxWithheld = 0,
 		operatingExpensesDeducted = 0,
+		crewPayrollDeducted = 0,
 	}
 end
 
@@ -56,6 +57,7 @@ local function makeDefaultState()
 		penaltyApplied = false,
 
 		deductibleExpensePool = 0,
+		deductibleCrewPool = 0,
 		fractionalTaxCarry = 0,
 
 		currentQuarter = {
@@ -93,6 +95,7 @@ local function makeDefaultState()
 			totalExemptIncome = 0,
 			totalWindfallTaxWithheld = 0,
 			totalOperatingExpenses = 0,
+			totalCrewPayrollExpenses = 0,
 			totalTaxSavedByDeductions = 0,
 		},
 
@@ -431,6 +434,7 @@ local function recordTaxPaymentStatsAndLog(paidAmount, breakdown, penaltyAmount,
 	local cartoTax = breakdown.cartographyTax or 0
 	local investTax = breakdown.investmentTax or 0
 	local deductedOps = breakdown.operatingExpensesDeducted or 0
+	local deductedCrew = breakdown.crewPayrollDeducted or 0
 
 	state.stats.totalTaxPaid = (state.stats.totalTaxPaid or 0) + paidAmount
 	state.stats.totalTradeProfitTax = (state.stats.totalTradeProfitTax or 0) + tradeTax
@@ -460,6 +464,9 @@ local function recordTaxPaymentStatsAndLog(paidAmount, breakdown, penaltyAmount,
 		if investTax > 0 then
 			table.insert(details, { "Equities & Dividends Tax", formatMoney(investTax) })
 		end
+		if deductedCrew > 0 then
+			table.insert(details, { "Crew & Captain Salaries Deducted", formatMoney(deductedCrew) })
+		end
 		if deductedOps > 0 then
 			table.insert(details, { "Deductible Operating Expenses Applied", formatMoney(deductedOps) })
 		end
@@ -487,6 +494,92 @@ end
 
 local isProcessingRollover = false
 
+local function isCrewExpenseCategory(cat)
+	local c = tostring(cat or "")
+	return c == "CREW_WAGES" or c == "FLEET_CREW" or string.find(c, "CREW", 1, true) ~= nil
+end
+
+local function applyExpensePoolAgainstCurrentQuarter(preferLedgerDomain)
+	local curTime = Game.time or 0
+	local curYear, curQ, curQIdx = getQuarterFromTime(curTime)
+	ensureCurrentQuarter(curYear, curQ, curQIdx)
+
+	local pool = state.deductibleExpensePool or 0
+	local curTax = state.currentQuarter.tax or 0
+	if pool <= 0 or curTax <= 0 then
+		return 0, 0
+	end
+
+	local effRate = TaxAuthority.GetEffectiveTaxRate()
+	if effRate <= 0 then
+		return 0, 0
+	end
+
+	local maxProfitOffset = math.ceil(curTax / effRate)
+	local deductNow = math.min(pool, maxProfitOffset)
+	if deductNow <= 0 then
+		return 0, 0
+	end
+
+	local rawTaxOffset = deductNow * effRate
+	local newCarry = (state.fractionalTaxCarry or 0) - rawTaxOffset
+	local taxReduction = 0
+	if newCarry < 0 then
+		taxReduction = math.min(curTax, math.ceil(-newCarry - 1e-9))
+		newCarry = newCarry + taxReduction
+	end
+	state.fractionalTaxCarry = math.clamp(newCarry, 0, 0.999999)
+
+	local bd = state.currentQuarter.breakdown
+	if taxReduction > 0 then
+		state.currentQuarter.tax = math.max(0, curTax - taxReduction)
+
+		local domainKeyMap = {
+			FLEET = "fleetOperationsTax",
+			STATION = "stationOperationsTax",
+			FLAGSHIP = "tradeProfitTax",
+			INVESTMENTS = "investmentTax",
+		}
+		local keyOrder = {}
+		local preferredKey = domainKeyMap[preferLedgerDomain]
+		if preferredKey then
+			table.insert(keyOrder, preferredKey)
+		end
+		for _, k in ipairs({ "fleetOperationsTax", "tradeProfitTax", "bbsJobsTax", "stationOperationsTax", "cartographyTax", "investmentTax" }) do
+			if k ~= preferredKey then
+				table.insert(keyOrder, k)
+			end
+		end
+
+		local rem = taxReduction
+		for _, k in ipairs(keyOrder) do
+			if rem <= 0 then break end
+			local avail = bd[k] or 0
+			if avail > 0 then
+				local take = math.min(avail, rem)
+				bd[k] = avail - take
+				rem = rem - take
+			end
+		end
+
+		if preferLedgerDomain then
+			local bucket = ensureLedgerBucket(preferLedgerDomain)
+			bucket.taxAccrued = math.max(0, (bucket.taxAccrued or 0) - taxReduction)
+		end
+	end
+
+	state.deductibleExpensePool = math.max(0, pool - deductNow)
+	local crewUsed = math.min(deductNow, state.deductibleCrewPool or 0)
+	if crewUsed > 0 then
+		state.deductibleCrewPool = math.max(0, (state.deductibleCrewPool or 0) - crewUsed)
+		bd.crewPayrollDeducted = (bd.crewPayrollDeducted or 0) + crewUsed
+	end
+	bd.operatingExpensesDeducted = (bd.operatingExpensesDeducted or 0) + deductNow
+	state.stats.totalTaxSavedByDeductions = (state.stats.totalTaxSavedByDeductions or 0) + taxReduction
+	syncSummaryTotals()
+	return taxReduction, deductNow
+end
+
 function TaxAuthority.ProcessQuarterlyRollover()
 	if not Game.player or isProcessingRollover then return end
 	isProcessingRollover = true
@@ -494,6 +587,9 @@ function TaxAuthority.ProcessQuarterlyRollover()
 	local curTime = Game.time or 0
 	local curYear, curQ, curQIdx = getQuarterFromTime(curTime)
 	ensureCurrentQuarter(curYear, curQ, curQIdx)
+
+	-- Apply any remaining deductible expenses against current quarter accruals before closing it
+	applyExpensePoolAgainstCurrentQuarter(nil)
 
 	-- 1. Close out current quarter if calendar moved into a newer quarter
 	if state.currentQuarter.qIndex < curQIdx then
@@ -616,10 +712,15 @@ local function assessTaxableProfit(grossProfit, breakdownKey, ledgerDomain, rate
 	TaxAuthority.ProcessQuarterlyRollover()
 
 	local effRate = TaxAuthority.GetEffectiveTaxRate() * (rateMultiplier or 1.0)
-	local maxDeduction = math.floor(grossProfit * 0.50)
+	local maxDeduction = math.floor(grossProfit)
 	local deductionApplied = math.min(state.deductibleExpensePool or 0, maxDeduction)
+	local crewDeductionApplied = 0
 	if deductionApplied > 0 then
 		state.deductibleExpensePool = math.max(0, (state.deductibleExpensePool or 0) - deductionApplied)
+		crewDeductionApplied = math.min(deductionApplied, state.deductibleCrewPool or 0)
+		if crewDeductionApplied > 0 then
+			state.deductibleCrewPool = math.max(0, (state.deductibleCrewPool or 0) - crewDeductionApplied)
+		end
 		state.stats.totalTaxSavedByDeductions = (state.stats.totalTaxSavedByDeductions or 0) + math.floor(deductionApplied * effRate)
 	end
 
@@ -637,8 +738,10 @@ local function assessTaxableProfit(grossProfit, breakdownKey, ledgerDomain, rate
 		if evQIdx < curQIdx then
 			local stmt = ensureStatementForQuarter(evQIdx)
 			stmt.breakdown.operatingExpensesDeducted = (stmt.breakdown.operatingExpensesDeducted or 0) + deductionApplied
+			stmt.breakdown.crewPayrollDeducted = (stmt.breakdown.crewPayrollDeducted or 0) + crewDeductionApplied
 		else
 			state.currentQuarter.breakdown.operatingExpensesDeducted = (state.currentQuarter.breakdown.operatingExpensesDeducted or 0) + deductionApplied
+			state.currentQuarter.breakdown.crewPayrollDeducted = (state.currentQuarter.breakdown.crewPayrollDeducted or 0) + crewDeductionApplied
 		end
 	end
 
@@ -892,11 +995,16 @@ function TaxAuthority.RecordOperatingExpense(amount, expenseCategory, sourceLabe
 	local spend = math.floor(tonumber(amount) or 0)
 	if spend <= 0 then return 0 end
 
-	state.deductibleExpensePool = (state.deductibleExpensePool or 0) + spend
-	state.stats.totalOperatingExpenses = (state.stats.totalOperatingExpenses or 0) + spend
-
 	local cat = tostring(expenseCategory or "MAINTENANCE")
 	local src = tostring(sourceLabel or "")
+
+	state.deductibleExpensePool = (state.deductibleExpensePool or 0) + spend
+	state.stats.totalOperatingExpenses = (state.stats.totalOperatingExpenses or 0) + spend
+	if isCrewExpenseCategory(cat) then
+		state.deductibleCrewPool = (state.deductibleCrewPool or 0) + spend
+		state.stats.totalCrewPayrollExpenses = (state.stats.totalCrewPayrollExpenses or 0) + spend
+	end
+
 	local ledgerDomain = "FLAGSHIP"
 	if cat:match("^STATION") or src:match("^STATION") then
 		ledgerDomain = "STATION"
@@ -906,6 +1014,10 @@ function TaxAuthority.RecordOperatingExpense(amount, expenseCategory, sourceLabe
 
 	local bucket = ensureLedgerBucket(ledgerDomain)
 	bucket.expenses = (bucket.expenses or 0) + spend
+
+	if Game.player and not isProcessingRollover then
+		applyExpensePoolAgainstCurrentQuarter(ledgerDomain)
+	end
 	return spend
 end
 
@@ -1170,6 +1282,7 @@ local function unserialize(saved)
 	if saved and saved.state then
 		state = saved.state
 		state.deductibleExpensePool = state.deductibleExpensePool or defaults.deductibleExpensePool
+		state.deductibleCrewPool = math.min(state.deductibleExpensePool, state.deductibleCrewPool or 0)
 		state.fractionalTaxCarry = state.fractionalTaxCarry or defaults.fractionalTaxCarry
 
 		local legacyBreakdown = copyBreakdown(state.breakdown)

@@ -2,6 +2,7 @@
 -- Licensed under the terms of the GPL v3. See licenses/GPL-3.txt
 
 local Lang = require 'Lang'
+local Event = require 'Event'
 local Game = require 'Game'
 local StationView = require 'pigui.views.station-view'
 local Insurance = require 'modules.Insurance.Insurance'
@@ -42,6 +43,7 @@ StationView:registerView({
 	refresh = function()
 		equipmentWidget.ship    = Game.player
 		equipmentWidget.station = Game.player:GetDockedWith()
+		equipmentWidget.showShipNameEdit = true
 		equipmentWidget:refresh()
 	end,
 	debugReload = function()
@@ -49,3 +51,11 @@ StationView:registerView({
 		package.reimport()
 	end
 })
+
+Event.Register("onShipTypeChanged", function(ship)
+	if ship == Game.player then
+		equipmentWidget.ship = Game.player
+		equipmentWidget.station = Game.player:GetDockedWith()
+		equipmentWidget:refresh()
+	end
+end)

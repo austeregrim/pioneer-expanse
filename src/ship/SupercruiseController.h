@@ -327,6 +327,138 @@ public:
 	const Body *GetTargetObscuredBy(const vector3d &targetPosRelToShip, const Body *targetBody) const;
 	bool IsTargetOccluded(Body **outBlocker = nullptr) const;
 
+	// Pure FSD interdiction envelope & tug-of-war math helpers (inline for unit tests)
+	enum InterdictFailCode {
+		INTERDICT_OK = 0,
+		INTERDICT_FAIL_RANGE = 1,
+		INTERDICT_FAIL_TOO_FAST = 2,
+		INTERDICT_FAIL_TOO_SLOW = 3,
+		INTERDICT_FAIL_AIM = 4,
+		INTERDICT_FAIL_NOT_BEHIND = 5,
+		INTERDICT_FAIL_VECTOR_MISMATCH = 6
+	};
+
+	static inline double ComputeMaxInterdictionRange(double attackerSpeed, double targetSpeed, int level)
+	{
+		const double levelMult = 1.0 + 0.25 * double(std::max(1, level) - 1);
+		const double refSpeed = std::min(attackerSpeed, targetSpeed);
+		const double baseRange = std::clamp(refSpeed * 4.0, SAFE_DISENGAGE_DIST * 1.5, 20.0 * LIGHT_SPEED);
+		return baseRange * levelMult;
+	}
+
+	static inline bool EvaluateInterdictionEnvelope(
+		const vector3d &relToTarget,
+		double attackerSpeed,
+		double targetSpeed,
+		const vector3d &attackerFwd,
+		const vector3d &targetFwd,
+		int level,
+		int *outFailCode = nullptr)
+	{
+		const int lvl = std::max(1, level);
+		const double dist = relToTarget.Length();
+		const double maxRange = ComputeMaxInterdictionRange(attackerSpeed, targetSpeed, lvl);
+		if (dist > maxRange) {
+			if (outFailCode) *outFailCode = INTERDICT_FAIL_RANGE;
+			return false;
+		}
+
+		const double maxMatchSpeed = targetSpeed * 1.35 + 150000.0;
+		const double minMatchSpeed = std::max(0.0, targetSpeed * 0.75 - 150000.0);
+		if (attackerSpeed > maxMatchSpeed) {
+			if (outFailCode) *outFailCode = INTERDICT_FAIL_TOO_FAST;
+			return false;
+		}
+		if (attackerSpeed < minMatchSpeed) {
+			if (outFailCode) *outFailCode = INTERDICT_FAIL_TOO_SLOW;
+			return false;
+		}
+
+		const vector3d toTargetDir = relToTarget.NormalizedSafe();
+		const vector3d attFwdN = attackerFwd.NormalizedSafe();
+		const vector3d tgtFwdN = targetFwd.NormalizedSafe();
+
+		// Rear-hemisphere check: attacker must be behind target's tail (-targetFwd)
+		const double rearCos = std::cos((32.0 + 4.0 * double(lvl - 1)) * (M_PI / 180.0));
+		if (tgtFwdN.Dot(toTargetDir) < rearCos) {
+			if (outFailCode) *outFailCode = INTERDICT_FAIL_NOT_BEHIND;
+			return false;
+		}
+
+		const double aimCos = std::cos((22.0 + 3.0 * double(lvl - 1)) * (M_PI / 180.0));
+		if (attFwdN.Dot(toTargetDir) < aimCos) {
+			if (outFailCode) *outFailCode = INTERDICT_FAIL_AIM;
+			return false;
+		}
+
+		// Flight vector matching with variance
+		const double vecCos = std::cos((25.0 + 4.0 * double(lvl - 1)) * (M_PI / 180.0));
+		if (attFwdN.Dot(tgtFwdN) < vecCos) {
+			if (outFailCode) *outFailCode = INTERDICT_FAIL_VECTOR_MISMATCH;
+			return false;
+		}
+
+		if (outFailCode) *outFailCode = INTERDICT_OK;
+		return true;
+	}
+
+	static inline void ComputeEscapeWanderDeflection(
+		double elapsed, double phaseSign, double &outYawDeflect, double &outPitchDeflect)
+	{
+		const double ramp = std::clamp(elapsed / 2.0, 0.0, 1.0);
+		const double s = (phaseSign >= 0.0) ? 1.0 : -1.0;
+		outYawDeflect = ramp * s * (0.24 * std::sin(elapsed * 0.52) + 0.07 * std::sin(elapsed * 1.15));
+		outPitchDeflect = ramp * (0.20 * std::sin(elapsed * 0.44) + 0.06 * std::sin(elapsed * 1.05));
+	}
+
+	static inline void StepInterdictionTugOfWar(
+		double &ioCapture,
+		double &ioEscape,
+		double evaderDot,
+		double attackerDot,
+		double targetMass,
+		double attackerMass,
+		int interdictorLevel,
+		double elapsed,
+		bool targetIsPlayer,
+		bool attackerIsPlayer,
+		double dt)
+	{
+		const double targetAgility = std::clamp(std::sqrt(70.0 / std::max(15.0, targetMass)), 0.72, 1.45);
+		const double attackerAgility = std::clamp(std::sqrt(60.0 / std::max(15.0, attackerMass)), 0.70, 1.25);
+		const double levelBonus = 1.0 + 0.15 * double(std::max(1, interdictorLevel) - 1);
+
+		const double cosEvadeCenter = std::cos(7.0 * M_PI / 180.0);
+		const double cosEvadeTight = std::cos(18.0 * M_PI / 180.0);
+		const double cosEvadeLoose = std::cos(32.0 * M_PI / 180.0);
+
+		if (evaderDot >= cosEvadeTight) {
+			const double centerFrac = std::clamp((evaderDot - cosEvadeTight) / std::max(1e-6, cosEvadeCenter - cosEvadeTight), 0.0, 1.0);
+			ioEscape += (0.115 + 0.030 * centerFrac) * targetAgility * dt;
+		} else if (evaderDot >= cosEvadeLoose) {
+			ioEscape += 0.045 * targetAgility * dt;
+		} else {
+			ioEscape -= 0.025 * dt;
+		}
+
+		const double cosAttTight = std::cos(14.0 * M_PI / 180.0);
+		const double cosAttLoose = std::cos(24.0 * M_PI / 180.0);
+		const double grace = targetIsPlayer ? std::clamp(elapsed / 1.2, 0.15, 1.0) : 1.0;
+
+		if (!attackerIsPlayer && evaderDot >= cosEvadeTight) {
+			ioCapture -= 0.020 * dt;
+		} else if (attackerDot >= cosAttTight) {
+			ioCapture += (attackerIsPlayer ? 0.115 : 0.075) * levelBonus * attackerAgility * grace * dt;
+		} else if (attackerDot >= cosAttLoose) {
+			ioCapture += 0.025 * levelBonus * grace * dt;
+		} else {
+			ioCapture -= 0.045 * dt;
+		}
+
+		ioCapture = std::clamp(ioCapture, 0.0, 1.0);
+		ioEscape = std::clamp(ioEscape, 0.0, 1.0);
+	}
+
 private:
 	void UpdateEnvironmentAndTarget(float timeStep, Body **outHitExclusionBody);
 	void UpdateStellarFuelScoop(float timeStep);
@@ -384,9 +516,11 @@ private:
 	InterdictionRole m_interdictRole = INTERDICT_NONE;
 	Ship *m_interdictPeer = nullptr;
 	int m_interdictPeerIndex = 0;
-	double m_captureProgress = 0.30;
-	double m_escapeProgress = 0.30;
+	double m_captureProgress = 0.20;
+	double m_escapeProgress = 0.20;
 	double m_escapeWanderTime = 0.0;
+	double m_interdictElapsed = 0.0;
+	double m_escapeWanderPhase = 1.0;
 	double m_submitTimer = 0.0;
 	bool m_submitting = false;
 	vector3d m_escapeBaseDir = vector3d(0.0, 0.0, -1.0);

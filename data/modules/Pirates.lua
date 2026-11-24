@@ -405,13 +405,18 @@ local onInterdictionDrop = function (attacker, victim, submitted)
 	if not victim or not victim:exists() then return end
 	local s = pirates[attacker]
 	if attacker.SetSupercruiseSpeedCap then attacker:SetSupercruiseSpeedCap(0) end
+	if attacker.SetTransponder then attacker:SetTransponder(true) end
 	if attacker.AcquireSupercruiseLock then attacker:AcquireSupercruiseLock(victim) end
 	attacker:CancelAI()
 	s.status = 'SCAN_CARGO'
 	s.target = victim
 	s.warned = false
-	s.demandDeadline = Game.time + 18.0
+	s.scanReadyTime = Game.time + 5.0
+	s.demandDeadline = Game.time + 28.0
 	s.jettisonedUnits = 0
+	if victim:IsPlayer() then
+		Comms.ImportantMessage("Interdiction complete! Cut your engines and hold position for cargo scan!", attacker.label or "Raider")
+	end
 	attacker:AIFlyTo(victim)
 end
 
@@ -533,12 +538,12 @@ local onGameStart = function ()
 						s.status = 'ORBIT'
 						s.target = nil
 						s.planet = assignSupercruisePatrol(p, s.planet)
-					elseif p:DistanceTo(v) <= 10000 and (p["target_scanner_level_cap"] or 0) > 0 then
+					elseif p:DistanceTo(v) <= 10000 and Game.time >= (s.scanReadyTime or 0) and (p["target_scanner_level_cap"] or 0) > 0 then
 						v:NotifyScanned(p, "CARGO")
 						local units, val = evaluateTargetCargoValue(v)
 						if units <= 0 or val < 500 then
 							if v:IsPlayer() then
-								Comms.Message("Empty hold... waste of an FSD pulse. Get lost.", p.label or "Raider")
+								Comms.ImportantMessage("Empty hold... waste of an FSD pulse. Get lost.", p.label or "Raider")
 							end
 							p:CancelAI()
 							s.status = 'ORBIT'
@@ -555,7 +560,7 @@ local onGameStart = function ()
 							end
 							p:AIFlyTo(v)
 						end
-					elseif p:DistanceTo(v) > 10000 then
+					elseif p:DistanceTo(v) > 2500 then
 						p:AIFlyTo(v)
 					end
 				elseif s.status == 'DEMAND_CARGO' then
@@ -573,7 +578,14 @@ local onGameStart = function ()
 					end
 				elseif s.status == 'INTERDICT_PLAYER' then
 					local tetheredToPlayer = p.GetInterdictionPeer and (p:GetInterdictionPeer() == Game.player)
-					if not tetheredToPlayer and (not playerInSC or p:GetFlightState() ~= "SUPERCRUISE") then
+					local distToPlayer = p:DistanceTo(Game.player)
+					local isInterdictingNow = p.IsInterdicting and p:IsInterdicting()
+					if not s.warned and (distToPlayer <= 35 * LIGHT_SPEED or isInterdictingNow) then
+						Comms.ImportantMessage(threatMessages[Engine.rand:Integer(1, #threatMessages)], p.label or "Unknown Contact")
+						s.warned = true
+					end
+					if not tetheredToPlayer and (not playerInSC or p:GetFlightState() ~= "SUPERCRUISE" or
+						(distToPlayer > 300 * LIGHT_SPEED and playerSCSpeed >= 1800 * LIGHT_SPEED)) then
 						if playerInSC and p:GetFlightState() ~= "SUPERCRUISE" then
 							nextPlayerInterdictTime = math.max(nextPlayerInterdictTime, Game.time + 180.0)
 						end
@@ -596,7 +608,7 @@ local onGameStart = function ()
 			end
 		end
 
-		-- 2. Supercruise pursuit of visible FTL player (capped at 2 attackers; never sees dark < 1c player)
+		-- 2. Supercruise pursuit of physically reachable visible FTL player (no teleportation)
 		local scGraceElapsed = playerSCStartTime and (Game.time - playerSCStartTime >= 40.0)
 		local scCheckDue = Game.time >= nextPlayerSCCheckTime
 		local cooldownElapsed = Game.time >= nextPlayerInterdictTime
@@ -605,28 +617,33 @@ local onGameStart = function ()
 			not playerBusy and countPlayerHunters() < MAX_PLAYER_ATTACKERS then
 			nextPlayerSCCheckTime = Game.time + 75.0
 			if shouldInterdictPlayerInSC(Game.player) then
+				local bestPirate = nil
+				local bestDist = math.huge
 				for p, s in pairs(pirates) do
 					if p:exists() and s.status ~= 'ATTACK' and s.status ~= 'INTERDICT_PLAYER' and
 						s.status ~= 'SCAN_CARGO' and s.status ~= 'DEMAND_CARGO' and s.hasInterdictor ~= false and
-						Game.time >= (s.cooldownUntil or 0) then
+						Game.time >= (s.cooldownUntil or 0) and p:GetFlightState() == "SUPERCRUISE" then
 						local canDetect = p.CanSeeShip and p:CanSeeShip(Game.player)
-						if canDetect and (p:GetFlightState() == "SUPERCRUISE" or p:GetFlightState() == "FLYING") then
-							if p.SetSupercruiseSpeedCap then p:SetSupercruiseSpeedCap(0) end
-							if p.AcquireSupercruiseLock then p:AcquireSupercruiseLock(Game.player) end
-							if p:DistanceTo(Game.player) > 120 * LIGHT_SPEED or p:GetFlightState() ~= "SUPERCRUISE" then
-								Space.PutShipInSupercruiseBehind(p, Game.player, 35, 65)
+						if canDetect then
+							local dist = p:DistanceTo(Game.player)
+							local reachable = (dist <= 250 * LIGHT_SPEED) and
+								(playerSCSpeed < 1800 * LIGHT_SPEED or dist <= 25 * LIGHT_SPEED)
+							if reachable and dist < bestDist then
+								bestPirate = p
+								bestDist = dist
 							end
-							if not s.warned then
-								Comms.ImportantMessage(threatMessages[Engine.rand:Integer(1, #threatMessages)], p.label or "Unknown Contact")
-								s.warned = true
-							end
-							s.status = 'INTERDICT_PLAYER'
-							s.target = Game.player
-							nextPlayerInterdictTime = Game.time + 180.0
-							p:AIKill(Game.player)
-							break
 						end
 					end
+				end
+				if bestPirate then
+					local s = pirates[bestPirate]
+					if bestPirate.SetSupercruiseSpeedCap then bestPirate:SetSupercruiseSpeedCap(0) end
+					if bestPirate.AcquireSupercruiseLock then bestPirate:AcquireSupercruiseLock(Game.player) end
+					s.status = 'INTERDICT_PLAYER'
+					s.target = Game.player
+					s.warned = false
+					nextPlayerInterdictTime = Game.time + 180.0
+					bestPirate:AIKill(Game.player)
 				end
 			end
 		end

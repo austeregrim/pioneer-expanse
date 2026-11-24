@@ -168,6 +168,12 @@ local onChat = function (form, ref, option)
 
 	local qualified = isQualifiedFor(Character.persistent.player.reputation, ad)
 
+	if not ad or MissionUtils.IsAdExpired(ad, Game.time) then
+		form:RemoveAdvertOnClose()
+		form:SetMessage(l.EXPIRED or "This posting has expired.")
+		return
+	end
+
 	form:SetFace(ad.client)
 
 	if not qualified then
@@ -325,8 +331,8 @@ local makeAdvert = function (station)
 		reward = MissionUtils.ApplyFactionReward(reward, issuingFaction)
 	end
 	reward = utils.round(reward, 50)
-	due = MissionUtils.TravelTime(dist) * 1.25 * (1.5-urgency) * Engine.rand:Number(0.9,1.1)
-	timeout = due/2 + Game.time -- timeout after half of the travel time
+	due = MissionUtils.TravelTime(dist) * (1.30 - 0.40 * urgency) * Engine.rand:Number(0.9,1.1)
+	timeout = MissionUtils.CalcBoardTimeout(Game.time, due, 36)
 	due = utils.round(due + Game.time, 900)
 
 	local destFaction = MissionUtils.GetSystemFactionName(location)
@@ -352,20 +358,25 @@ local makeAdvert = function (station)
 	placeAdvert(station, ad)
 end
 
+local maxAdsForStation = function ()
+	return math.clamp(1 + math.ceil(Game.system.population * 0.8), 2, 6)
+end
+
 local onCreateBB = function (station)
-	local num = Engine.rand:Integer(0, math.ceil(Game.system.population))
+	local num = math.min(maxAdsForStation(), Engine.rand:Integer(0, math.ceil(Game.system.population)))
 	for i = 1,num do
+		if MissionUtils.CountStationAds(ads, station) >= maxAdsForStation() then break end
 		makeAdvert(station)
 	end
 end
 
 local onUpdateBB = function (station)
 	for ref,ad in pairs(ads) do
-		if ad.timeout < Game.time then
+		if ad.station == station and MissionUtils.IsAdExpired(ad, Game.time) then
 			ad.station:RemoveAdvert(ref)
 		end
 	end
-	if Engine.rand:Integer(24*60*60) < 60*60 then -- roughly once every day
+	if MissionUtils.CountStationAds(ads, station) < maxAdsForStation() and Engine.rand:Integer(24*60*60) < 60*60 then
 		makeAdvert(station)
 	end
 end
@@ -502,7 +513,11 @@ local onGameStart = function ()
 	if not loaded_data or not loaded_data.ads then return end
 
 	for k,ad in pairs(loaded_data.ads) do
-		placeAdvert(ad.station, ad)
+		if ad.station and ad.station:exists() and not MissionUtils.IsAdExpired(ad, Game.time) then
+			if MissionUtils.CountStationAds(ads, ad.station) < maxAdsForStation() then
+				placeAdvert(ad.station, ad)
+			end
+		end
 	end
 
 	missions = loaded_data.missions

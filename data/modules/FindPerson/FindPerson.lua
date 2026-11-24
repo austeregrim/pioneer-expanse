@@ -87,6 +87,12 @@ local onChat = function (form, ref, option)
 		return
 	end
 
+	if not ad or MissionUtils.IsAdExpired(ad, Game.time) then
+		form:RemoveAdvertOnClose()
+		form:SetMessage(l.EXPIRED or "This posting has expired.")
+		return
+	end
+
 	local qualified = isQualifiedFor(Character.persistent.player.reputation, ad)
 
 	form:SetFace(ad.client)
@@ -222,7 +228,9 @@ local makeAdvert = function (station)
 	local urgency = Engine.rand:Number(1)
 	local ns = location:GetStarSystem().numberOfStations
 	local reward = math.ceil(dist * (typical_reward + ns) * (1 + risk) * (1.5 + urgency) * Engine.rand:Number(0.8, 1.2))
-	local due = Game.time + ns * 86400 + MissionUtils.TravelTime(dist) * 1.75 * (1.5 - urgency) * Engine.rand:Number(0.9, 1.1)
+	local dueDur = math.min(3 * 86400, ns * 4 * 3600) + MissionUtils.TravelTime(dist) * 1.4 * (1.35 - 0.4 * urgency) * Engine.rand:Number(0.9, 1.1)
+	local timeout = MissionUtils.CalcBoardTimeout(Game.time, dueDur, 48)
+	local due = Game.time + dueDur
 
 	local introtext = "INTROTEXT_" .. flavour.id .. gender
 	local intro_number = Engine.rand:Integer(1, MissionUtils.getNumberOfFlavours(l, introtext))
@@ -253,7 +261,8 @@ local makeAdvert = function (station)
 		location        = location,
 		shipid          = flavour.ship and Ship.MakeRandomLabel() or nil,
 		dist            = dist,
-		due             = utils.round(due, 3600),
+		due             = utils.round(due, 900),
+		timeout         = timeout,
 		risk            = risk,
 		urgency         = urgency,
 		reward          = utils.round(reward, 100),
@@ -277,20 +286,25 @@ local makeAdvert = function (station)
 	placeAdvert(station, ad)
 end
 
+local maxAdsForStation = function ()
+	return math.clamp(math.ceil(Game.system.population / 5), 1, 4)
+end
+
 local onCreateBB = function (station)
-	local num = Engine.rand:Integer(math.ceil(Game.system.population / 6))
+	local num = math.min(maxAdsForStation(), Engine.rand:Integer(math.ceil(Game.system.population / 6)))
 	for _ = 1, num do
+		if MissionUtils.CountStationAds(ads, station) >= maxAdsForStation() then break end
 		makeAdvert(station)
 	end
 end
 
 local onUpdateBB = function (station)
 	for ref, ad in pairs(ads) do
-		if ad.due < Game.time + 5*24*60*60 then -- five day timeout
+		if ad.station == station and (MissionUtils.IsAdExpired(ad, Game.time) or (ad.due and ad.due < Game.time + 24*60*60)) then
 			ad.station:RemoveAdvert(ref)
 		end
 	end
-	if Engine.rand:Integer(10*24*60*60) < 60*60 then -- roughly once every ten days
+	if MissionUtils.CountStationAds(ads, station) < maxAdsForStation() and Engine.rand:Integer(10*24*60*60) < 60*60 then
 		makeAdvert(station)
 	end
 end
@@ -529,7 +543,11 @@ local onGameStart = function ()
 		missions = {}
 
 		for _, ad in pairs(loaded_data.ads) do
-			placeAdvert(ad.station, ad)
+			if ad.station and ad.station:exists() and not MissionUtils.IsAdExpired(ad, Game.time) then
+				if MissionUtils.CountStationAds(ads, ad.station) < maxAdsForStation() then
+					placeAdvert(ad.station, ad)
+				end
+			end
 		end
 		missions = loaded_data.missions
 		loaded_data = nil

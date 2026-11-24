@@ -75,7 +75,7 @@ void SpeedLines::Update(float time)
 	float d;
 	if (inJumpSurge) {
 		const float surge = m_ship->GetHyperspaceJumpSurgeProgress();
-		m_lineLength = 120.f + 380.f * (surge * surge);
+		m_lineLength = 110.f + 160.f * (surge * surge);
 		d = MAX_VEL * (time * (45.0f + 65.0f * surge));
 	} else if (inSupercruise) {
 		const double logNorm = Clamp(std::log10(std::max(absVelD, 30000.0) / 30000.0) / 7.3, 0.0, 1.0);

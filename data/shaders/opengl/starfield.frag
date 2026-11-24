@@ -13,7 +13,7 @@ out vec4 frag_color;
 
 void main(void)
 {
-	vec3 starRgb = mix(v_color.rgb, vec3(1.0), clamp(starBoost.z, 0.0, 1.0));
-	vec4 boostedColor = vec4(starRgb * max(starBoost.y, 1.0), v_color.a);
+	vec3 lifted = pow(max(v_color.rgb, vec3(0.001)), vec3(mix(1.0, 0.50, clamp(starBoost.z, 0.0, 1.0))));
+	vec4 boostedColor = vec4(lifted * max(starBoost.y, 1.0), v_color.a);
 	frag_color = (texture(texture0, gl_PointCoord) * boostedColor) * material.emission;
 }

@@ -454,7 +454,7 @@ function PiGuiFace:resolveLogoProfile()
 	-- 9. Commander / Ship Crew
 	if string.find(titleUpper, "COMMANDER") then
 		return ROLE_PROFILES.pilots_federation
-	elseif string.find(titleUpper, "CREW") or string.find(titleUpper, "PILOT") or string.find(titleUpper, "NAVIGATOR") then
+	elseif string.find(titleUpper, "CREW") or string.find(titleUpper, "PILOT") or string.find(titleUpper, "NAVIGATOR") or string.find(titleUpper, "CAPTAIN") then
 		return ROLE_PROFILES.crew
 	end
 

@@ -300,6 +300,9 @@ local function buyShip (mkt, sos)
 	player:SetSkin(sos.skin)
 	if sos.pattern then player.model:SetPattern(sos.pattern) end
 	player:SetLabel(sos.label)
+	if player.SetShipName then
+		player:SetShipName(ShipDealerships.DefaultShipNameForListing(sos))
+	end
 
 	ShipDealerships.InstallListingEquipment(player, shipData, sos)
 	refreshShipMarket()

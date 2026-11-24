@@ -125,6 +125,12 @@ onChat = function (form, ref, option)
 		return
 	end
 
+	if not ad or MissionUtils.IsAdExpired(ad, Game.time) then
+		form:RemoveAdvertOnClose()
+		form:SetMessage(l.EXPIRED or "This posting has expired.")
+		return
+	end
+
 	local qualified = isQualifiedFor(Character.persistent.player.reputation, ad)
 
 	form:SetFace(ad.client)
@@ -250,7 +256,7 @@ onChat = function (form, ref, option)
 		table.insert(missions, mission)
 		MissionUtils.SetupOverdueTimer(mission)
 
-		if ad.amount ~= ad.negotiated_amount then
+		if ad.amount ~= ad.negotiated_amount and ad.due > Game.time + 1800 then
 			-- recreate advert with the rest of the cargo
 			ad.amount = ad.amount - ad.negotiated_amount
 			ad.reward = ad.reward - ad.negotiated_reward
@@ -373,8 +379,7 @@ local makeAdvert = function (station)
 		pickup = Engine.rand:Number(0, 1) > 0.75 and true or false
 		location, dist = table.unpack(nearbystations[Engine.rand:Integer(1,#nearbystations)])
 		reward = typical_reward_local + math.max(math.sqrt(dist) / 15000, min_local_dist_pay) * (1.5+urgency) * (1+amount/max_cargo)
-		due = (60*60*18 + MissionUtils.TravelTimeLocal(dist)) * 1.66 * (1.5 - urgency) * Engine.rand:Number(0.9, 1.1)
-		timeout = due/2 -- timeout after half of the travel time
+		due = (10*3600 + MissionUtils.TravelTimeLocal(dist)) * (1.4 - 0.5 * urgency) * Engine.rand:Number(0.9, 1.1)
 
 		if pickup then
 			missiontype = "PICKUP_LOCAL"
@@ -406,18 +411,15 @@ local makeAdvert = function (station)
 
 		risk = 0.75 * cargotype.price / max_price + Engine.rand:Number(0, 0.25) -- goods with price max_price have a risk of 0.75 to 1
 		reward = (dist / max_delivery_dist) * typical_reward * (1+risk) * (1.5+urgency) * (1+amount/max_cargo_wholesaler) * Engine.rand:Number(0.8,1.2)
-		due = MissionUtils.TravelTime(dist, location) * 1.66 * (1.5 - urgency) * Engine.rand:Number(0.9, 1.1)
-		timeout = due/2 -- timeout after half of the travel time
+		due = MissionUtils.TravelTime(dist, location) * (1.35 - 0.45 * urgency) * Engine.rand:Number(0.9, 1.1)
 	end
 
 	if pickup then
 		reward = reward * pickup_factor
-		due = due * pickup_factor + Game.time
-		timeout = timeout * pickup_factor + Game.time
-	else
-		due = due + Game.time
-		timeout = timeout + Game.time
+		due = due * 1.75
 	end
+	timeout = MissionUtils.CalcBoardTimeout(Game.time, due, localdelivery and 12 or 36)
+	due = due + Game.time
 	reward = utils.round(MissionUtils.ApplyFactionReward(reward, issuingFaction), 25)
 	due = utils.round(due, 900)
 
@@ -498,21 +500,26 @@ local makeAdvert = function (station)
 	return ad
 end
 
+local maxAdsForStation = function ()
+	return math.clamp(2 + math.ceil(Game.system.population), 3, 8)
+end
+
 local onCreateBB = function (station)
-	local num = Engine.rand:Integer(0, math.ceil(Game.system.population))
+	local num = math.min(maxAdsForStation(), Engine.rand:Integer(0, math.ceil(Game.system.population)))
 	for i = 1,num do
+		if MissionUtils.CountStationAds(ads, station) >= maxAdsForStation() then break end
 		makeAdvert(station)
 	end
 end
 
 local onUpdateBB = function (station)
 	for ref,ad in pairs(ads) do
-		if ad.timeout < Game.time then
+		if ad.station == station and MissionUtils.IsAdExpired(ad, Game.time) then
 			ad.station:RemoveAdvert(ref)
 		end
 	end
 
-	if Engine.rand:Integer(12*60*60) < 60*60 then -- roughly once every twelve hours
+	if MissionUtils.CountStationAds(ads, station) < maxAdsForStation() and Engine.rand:Integer(12*60*60) < 60*60 then
 		makeAdvert(station)
 	end
 end
@@ -809,7 +816,11 @@ local onGameStart = function ()
 		custom_cargo_weight_sum = 0
 
 		for k,ad in pairs(loaded_data.ads) do
-			postAdvert(ad.station, ad)
+			if ad.station and ad.station:exists() and not MissionUtils.IsAdExpired(ad, Game.time) then
+				if MissionUtils.CountStationAds(ads, ad.station) < maxAdsForStation() then
+					postAdvert(ad.station, ad)
+				end
+			end
 		end
 		missions = loaded_data.missions
 

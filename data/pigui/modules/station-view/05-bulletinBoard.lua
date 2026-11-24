@@ -139,17 +139,23 @@ end
 
 local function refresh()
 	local station = Game.player and Game.player:GetDockedWith()
+	if station and station.CleanExpiredAdverts then
+		station:CleanExpiredAdverts(Game.time)
+	end
 	local ads = station and SpaceStation.adverts[station] or nil
 	bulletinBoard.items = {}
 
+	local now = Game.time or 0
 	local query = searchText and string.lower(searchText) or ""
 	for _, ad in pairs(ads or {}) do
+		local expired = (type(ad.due) == "number" and (ad.due - now) <= 0)
+			or (type(ad.timeout) == "number" and (ad.timeout - now) <= 0)
 		local matchesCategory = (categoryFilter == "ALL") or (getAdCategory(ad) == categoryFilter)
 		local matchesSearch = (query == "")
 			or string.find(string.lower(ad.title or ""), query, 1, true)
 			or string.find(string.lower(ad.description or ""), query, 1, true)
 
-		if matchesCategory and matchesSearch then
+		if not expired and matchesCategory and matchesSearch then
 			table.insert(bulletinBoard.items, ad)
 		end
 	end
@@ -245,7 +251,7 @@ bulletinBoard = Table.New("BulletinBoardTable", false, {
 					ui.sameLine(region.x - maxDuration - maxDistance - maxReward)
 					ui.icon(icons.clock, iconSize, adTextColor)
 					ui.sameLine()
-					ui.text(ui.Format.Duration(item.due - Game.time, 3))
+					ui.text(ui.Format.Duration(math.max(0, item.due - Game.time), 3))
 				end
 
 				if item.location then
@@ -461,8 +467,28 @@ local function renderCommsStandby()
 end
 
 local function renderBulletinBoard()
-	if (chatForm or activeRef) and (not (Game.player and Game.player:GetDockedWith()) or Game.player:GetDockedWith() ~= activeStation) then
+	local station = Game.player and Game.player:GetDockedWith()
+	if (chatForm or activeRef) and (not station or station ~= activeStation) then
 		closeActiveComms()
+	end
+
+	local now = Game.time or 0
+	if activeAd and ((type(activeAd.due) == "number" and (activeAd.due - now) <= 0)
+		or (type(activeAd.timeout) == "number" and (activeAd.timeout - now) <= 0)) then
+		local expiredRef = activeRef
+		closeActiveComms()
+		if station and expiredRef and SpaceStation.adverts[station] and SpaceStation.adverts[station][expiredRef] then
+			station:RemoveAdvert(expiredRef)
+		end
+		refresh()
+	end
+
+	for _, item in ipairs(bulletinBoard.items or {}) do
+		if (type(item.due) == "number" and (item.due - now) <= 0)
+			or (type(item.timeout) == "number" and (item.timeout - now) <= 0) then
+			refresh()
+			break
+		end
 	end
 
 	ui.withFont(pionillium.body, function()
@@ -494,6 +520,17 @@ Event.Register("onShipUndocked", function(ship)
 		closeActiveComms()
 	end
 end)
+
+local function onAdvertEvent(station)
+	local docked = Game.player and Game.player:GetDockedWith()
+	if docked and docked == station then
+		refresh()
+	end
+end
+
+Event.Register("onAdvertAdded", onAdvertEvent)
+Event.Register("onAdvertRemoved", onAdvertEvent)
+Event.Register("onAdvertChanged", onAdvertEvent)
 
 Event.Register("onGameEnd", closeActiveComms)
 
