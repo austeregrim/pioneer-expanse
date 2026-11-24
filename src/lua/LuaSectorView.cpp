@@ -111,6 +111,32 @@ void LuaObject<SectorView>::RegisterClass()
 			}
 			return 1;
 		})
+		.AddFunction("StartAutoRoute", [](lua_State *l, SectorView *sv) {
+			SystemPath current_path = LuaPull<SystemPath>(l, 2, sv->GetCurrent());
+			SystemPath target_path = LuaPull<SystemPath>(l, 3, sv->GetSelected());
+			float maxJumpDist = 0.0f;
+			if (lua_gettop(l) >= 4 && !lua_isnil(l, 4)) {
+				maxJumpDist = static_cast<float>(lua_tonumber(l, 4));
+			}
+			bool findFuelStar = false;
+			if (lua_gettop(l) >= 5 && !lua_isnil(l, 5)) {
+				findFuelStar = lua_toboolean(l, 5);
+			}
+			float maxLawlessness = 1.0f;
+			if (lua_gettop(l) >= 6 && !lua_isnil(l, 6)) {
+				maxLawlessness = static_cast<float>(lua_tonumber(l, 6));
+			}
+			std::string factionFilter;
+			if (lua_gettop(l) >= 7 && !lua_isnil(l, 7)) {
+				factionFilter = lua_tostring(l, 7);
+			}
+			sv->StartAutoRoute(current_path, target_path, maxJumpDist, findFuelStar, maxLawlessness, factionFilter);
+			return 0;
+		})
+		.AddFunction("CancelAutoRoute", &SectorView::CancelAutoRoute)
+		.AddFunction("IsAutoRouting", &SectorView::IsAutoRouting)
+		.AddFunction("GetAutoRouteProgress", &SectorView::GetAutoRouteProgress)
+		.AddFunction("ConsumeAutoRouteResult", &SectorView::ConsumeAutoRouteResult)
 		.StopRecording();
 	LuaObjectBase::CreateClass(&metaType);
 }

@@ -49,6 +49,7 @@ public:
 	void SaveToJson(Json &jsonObj) override;
 
 	// HyperJump Route Planner
+	static constexpr uint32_t MAX_ROUTE_HOPS = 50;
 	bool MoveRouteItemUp(const std::vector<SystemPath>::size_type element);
 	bool MoveRouteItemDown(const std::vector<SystemPath>::size_type element);
 	void UpdateRouteItem(const std::vector<SystemPath>::size_type element, const SystemPath &path);
@@ -57,6 +58,11 @@ public:
 	void ClearRoute();
 	const std::vector<SystemPath>& GetRoute() const;
 	const std::string AutoRoute(const SystemPath &start, const SystemPath &target, std::vector<SystemPath> &outRoute, float maxJumpDist = 0.0f, bool findFuelStar = false, float maxLawlessness = 1.0f, const std::string &factionFilter = "") const;
+	void StartAutoRoute(const SystemPath &start, const SystemPath &target, float maxJumpDist = 0.0f, bool findFuelStar = false, float maxLawlessness = 1.0f, const std::string &factionFilter = "");
+	void CancelAutoRoute();
+	bool IsAutoRouting() const;
+	float GetAutoRouteProgress() const;
+	std::string ConsumeAutoRouteResult();
 	void SetDrawRouteLines(bool value);
 
 	sigc::signal<void> onHyperspaceTargetChanged;
@@ -88,6 +94,9 @@ private:
 
 	class SectorMapCallbacks;
 	SectorMapContext CreateMapContext();
+	struct AutoRouteState;
+	std::unique_ptr<AutoRouteState> CreateAutoRouteState(const SystemPath &start, const SystemPath &target, float maxJumpDist, bool findFuelStar, float maxLawlessness, const std::string &factionFilter) const;
+	void StepAutoRoute(AutoRouteState &state, bool runToCompletion) const;
 
 	SystemPath m_current;
 	SystemPath m_selected;
@@ -109,6 +118,7 @@ private:
 	Game &m_game;
 	std::unique_ptr<SectorMap> m_map;
 	std::vector<SystemPath> m_route;
+	std::unique_ptr<AutoRouteState> m_autoRouteState;
 
 };
 

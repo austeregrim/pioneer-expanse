@@ -32,8 +32,11 @@
 
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <queue>
+#include <unordered_map>
 #include <unordered_set>
 
 SectorView::~SectorView() {}
@@ -391,91 +394,14 @@ const std::vector<SystemPath> &SectorView::GetRoute() const
 	return m_route;
 }
 
-const std::string SectorView::AutoRoute(const SystemPath &start, const SystemPath &target, std::vector<SystemPath> &outRoute, float maxJumpDist, bool findFuelStar, float maxLawlessness, const std::string &factionFilter) const
-{
-	const RefCountedPtr<const Sector> start_sec = m_game.GetGalaxy()->GetSector(start);
-	const RefCountedPtr<const Sector> target_sec = m_game.GetGalaxy()->GetSector(target);
+struct SectorView::AutoRouteState {
+	enum class Status {
+		RUNNING,
+		FINISHED_OKAY,
+		FINISHED_NO_DRIVE,
+		FINISHED_NO_VALID_ROUTE
+	};
 
-	LuaRef try_hdrive = LuaObject<Player>::CallMethod<LuaRef>(Pi::player, "GetInstalledHyperdrive");
-	if (try_hdrive.IsNil())
-		return "NO_DRIVE";
-	// Get the player's hyperdrive from Lua, later used to calculate the duration between systems
-	const ScopedTable hyperdrive = ScopedTable(try_hdrive);
-	// Cache max range so it doesn't get recalculated every time we call GetDuration
-	const float drive_max_range = hyperdrive.CallMethod<float>("GetMaximumRange", Pi::player);
-	const float max_range = (maxJumpDist > 0.0f && maxJumpDist < drive_max_range) ? maxJumpDist : drive_max_range;
-	const float max_range_sqr = max_range * max_range;
-
-	float drive_fuel = 0.0f;
-	hyperdrive.Get("storedFuel", drive_fuel);
-	const float drive_max_fuel = hyperdrive.CallMethod<float>("GetMaxFuel");
-	const float tank_fuel = (Pi::player && Pi::player->GetShipType()) ? float(Pi::player->GetShipType()->fuelTankMass * Pi::player->GetFuel()) : 0.0f;
-	const float tank_max_fuel = (Pi::player && Pi::player->GetShipType()) ? float(Pi::player->GetShipType()->fuelTankMass) : 0.0f;
-	const float initial_total_fuel = drive_fuel + tank_fuel;
-	const float max_total_fuel_capacity = drive_max_fuel + tank_max_fuel;
-
-	// use the square of the distance to avoid doing a sqrt for each sector
-	const float distSqr = Sector::DistanceBetweenSqr(start_sec, start.systemIndex, target_sec, target.systemIndex) * 1.10;
-
-	// the maximum distance that anything can be from the direct line between the start and target systems
-	const float max_dist_from_straight_line = (Sector::SIZE * 3);
-
-	// nodes[0] is always start
-	std::vector<SystemPath> nodes;
-	{
-		// calculate an approximate initial number of nodes
-		const float dist = sqrt(distSqr);
-		// +2 for the sectors near start and target, *9 for the sectors immediately around the path... might want to be bigger but seems to work
-		const size_t num_sectors_covered = (size_t(dist / Sector::SIZE) + 2) * 9;
-		const size_t num_systems_per_sector = 6; // total guess
-		nodes.reserve(num_sectors_covered * num_systems_per_sector);
-	}
-	nodes.push_back(start);
-
-	const Sint32 minX = std::min(start.sectorX, target.sectorX) - 2, maxX = std::max(start.sectorX, target.sectorX) + 2;
-	const Sint32 minY = std::min(start.sectorY, target.sectorY) - 2, maxY = std::max(start.sectorY, target.sectorY) + 2;
-	const Sint32 minZ = std::min(start.sectorZ, target.sectorZ) - 2, maxZ = std::max(start.sectorZ, target.sectorZ) + 2;
-	const vector3f start_pos = start_sec->m_systems[start.systemIndex].GetFullPosition();
-	const vector3f target_pos = target_sec->m_systems[target.systemIndex].GetFullPosition();
-
-	// go sector by sector for the minimum cube of sectors and add systems
-	// if they are within 110% of dist of both start and target
-	size_t secLineToFar = 0u;
-	for (Sint32 sx = minX; sx <= maxX; sx++) {
-		for (Sint32 sy = minY; sy <= maxY; sy++) {
-			for (Sint32 sz = minZ; sz <= maxZ; sz++) {
-				const SystemPath sec_path = SystemPath(sx, sy, sz);
-
-				// early out here if the sector is too far from the direct line
-				vector3f sec_centre(Sector::SIZE * vector3f(float(sx) + 0.5f, float(sy) + 0.5f, float(sz) + 0.5f));
-				const float secLineDist = MathUtil::DistanceFromLine(start_pos, target_pos, sec_centre);
-				// this test is deliberately conservative to over include sectors, a better test might use the nearest corner of an AABB to the line - Math hard, Andy tired
-				if ((secLineDist - Sector::SIZE) > max_dist_from_straight_line) {
-					++secLineToFar;
-					continue;
-				}
-
-				// GetSector is very expensive if it's not in the cache
-				RefCountedPtr<const Sector> sec = m_game.GetGalaxy()->GetSector(sec_path);
-				for (std::vector<Sector::System>::size_type s = 0; s < sec->m_systems.size(); s++) {
-					if (start.IsSameSystem(sec->m_systems[s].GetPath()))
-						continue; // start is already nodes[0]
-
-					const float lineDist = MathUtil::DistanceFromLine(start_pos, target_pos, sec->m_systems[s].GetFullPosition());
-
-					if (Sector::DistanceBetweenSqr(start_sec, start.systemIndex, sec, sec->m_systems[s].idx) <= distSqr &&
-						Sector::DistanceBetweenSqr(target_sec, target.systemIndex, sec, sec->m_systems[s].idx) <= distSqr &&
-						lineDist < max_dist_from_straight_line) {
-						nodes.push_back(sec->m_systems[s].GetPath());
-					}
-				}
-			}
-		}
-	}
-	Output("SectorView::AutoRoute, nodes to search = %lu, earlied out sector distance from line: %lu times.\n", nodes.size(), secLineToFar);
-
-	// Optimize for fewest jumps first (so longer-range drives actually use long jumps),
-	// breaking ties by shortest total jump duration, and favoring fuel reserves when tracking fuel stars.
 	struct RouteCost {
 		uint32_t jumps = UINT32_MAX;
 		float duration = INFINITY;
@@ -489,146 +415,365 @@ const std::string SectorView::AutoRoute(const SystemPath &start, const SystemPat
 				return duration < other.duration;
 			return fuel_remaining > other.fuel_remaining;
 		}
+
+		bool operator!=(const RouteCost &other) const
+		{
+			return jumps != other.jumps || duration != other.duration || fuel_remaining != other.fuel_remaining;
+		}
 	};
 
-	// setup initial values and set everything as unvisited
-	std::vector<RouteCost> path_cost;						   // cost from source to node
-	std::vector<std::vector<SystemPath>::size_type> path_prev; // previous node in optimal path
-	std::unordered_set<std::vector<SystemPath>::size_type> unvisited;
-	// we know how big these need to be, to reserve space up front
-	path_cost.reserve(nodes.size());
-	path_prev.reserve(nodes.size());
-	unvisited.reserve(nodes.size());
-	// initialise them
-	for (std::vector<SystemPath>::size_type i = 0; i < nodes.size(); i++) {
-		path_cost.push_back(RouteCost{});
-		path_prev.push_back(0);
-		unvisited.insert(i);
+	struct PQNode {
+		uint32_t f_jumps;
+		RouteCost cost;
+		size_t nodeIdx;
+
+		// Min-heap comparator (priority_queue pops the "largest", so invert <)
+		bool operator>(const PQNode &other) const
+		{
+			if (f_jumps != other.f_jumps)
+				return f_jumps > other.f_jumps;
+			return other.cost < cost;
+		}
+	};
+
+	struct SectorKey {
+		Sint32 x, y, z;
+		bool operator==(const SectorKey &o) const { return x == o.x && y == o.y && z == o.z; }
+	};
+
+	struct SectorKeyHash {
+		size_t operator()(const SectorKey &k) const noexcept
+		{
+			size_t h1 = std::hash<Sint32>{}(k.x);
+			size_t h2 = std::hash<Sint32>{}(k.y);
+			size_t h3 = std::hash<Sint32>{}(k.z);
+			return h1 ^ (h2 * 2654435761u) ^ (h3 * 2246822519u);
+		}
+	};
+
+	Status status = Status::RUNNING;
+	SystemPath start;
+	SystemPath target;
+	float maxJumpDist = 0.0f;
+	bool findFuelStar = false;
+	float maxLawlessness = 1.0f;
+	std::string factionFilter;
+
+	LuaRef hyperdrive;
+	float max_range = 0.0f;
+	float max_range_sqr = 0.0f;
+	float initial_total_fuel = 0.0f;
+	float max_total_fuel_capacity = 0.0f;
+	float distSqr = 0.0f;
+	float max_dist_from_straight_line = 0.0f;
+	int sectorRadius = 1;
+
+	RefCountedPtr<const Sector> start_sec;
+	RefCountedPtr<const Sector> target_sec;
+	vector3f start_pos;
+	vector3f target_pos;
+
+	uint32_t currentHops = 0;
+	std::vector<SystemPath> nodes;
+	std::vector<vector3f> nodePositions;
+	std::vector<RouteCost> path_cost;
+	std::vector<size_t> path_prev;
+	std::unordered_map<SectorKey, std::vector<size_t>, SectorKeyHash> sectorNodesMap;
+	std::priority_queue<PQNode, std::vector<PQNode>, std::greater<PQNode>> pq;
+	std::vector<SystemPath> outRoute;
+};
+
+std::unique_ptr<SectorView::AutoRouteState> SectorView::CreateAutoRouteState(const SystemPath &start, const SystemPath &target, float maxJumpDist, bool findFuelStar, float maxLawlessness, const std::string &factionFilter) const
+{
+	auto state = std::make_unique<AutoRouteState>();
+	state->start = start;
+	state->target = target;
+	state->maxJumpDist = maxJumpDist;
+	state->findFuelStar = findFuelStar;
+	state->maxLawlessness = maxLawlessness;
+	state->factionFilter = factionFilter;
+
+	LuaRef try_hdrive = LuaObject<Player>::CallMethod<LuaRef>(Pi::player, "GetInstalledHyperdrive");
+	if (try_hdrive.IsNil()) {
+		state->status = AutoRouteState::Status::FINISHED_NO_DRIVE;
+		return state;
 	}
 
-	// cost to the start is 0 jumps, 0 duration, initial fuel
-	path_cost[0] = RouteCost{ 0, 0.f, initial_total_fuel };
+	if (start.IsSameSystem(target)) {
+		state->status = AutoRouteState::Status::FINISHED_OKAY;
+		return state;
+	}
 
-	size_t totalSkipped = 0u;
-	while (!unvisited.empty()) {
-		// find the lowest-cost node (for the first loop this will be start)
-		std::vector<SystemPath>::size_type closest_i = *unvisited.begin();
-		for (auto it : unvisited) {
-			if (path_cost[it] < path_cost[closest_i])
-				closest_i = it;
+	state->hyperdrive = try_hdrive;
+	const ScopedTable hyperdrive(try_hdrive);
+	const float drive_max_range = hyperdrive.CallMethod<float>("GetMaximumRange", Pi::player);
+	state->max_range = (maxJumpDist > 0.0f && maxJumpDist < drive_max_range) ? maxJumpDist : drive_max_range;
+	if (state->max_range <= 0.0f) {
+		state->status = AutoRouteState::Status::FINISHED_NO_VALID_ROUTE;
+		return state;
+	}
+	state->max_range_sqr = state->max_range * state->max_range;
+
+	float drive_fuel = 0.0f;
+	hyperdrive.Get("storedFuel", drive_fuel);
+	const float drive_max_fuel = hyperdrive.CallMethod<float>("GetMaxFuel");
+	const float tank_fuel = (Pi::player && Pi::player->GetShipType()) ? float(Pi::player->GetShipType()->fuelTankMass * Pi::player->GetFuel()) : 0.0f;
+	const float tank_max_fuel = (Pi::player && Pi::player->GetShipType()) ? float(Pi::player->GetShipType()->fuelTankMass) : 0.0f;
+	state->initial_total_fuel = drive_fuel + tank_fuel;
+	state->max_total_fuel_capacity = drive_max_fuel + tank_max_fuel;
+
+	state->start_sec = m_game.GetGalaxy()->GetSector(start);
+	state->target_sec = m_game.GetGalaxy()->GetSector(target);
+	state->start_pos = state->start_sec->m_systems[start.systemIndex].GetFullPosition();
+	state->target_pos = state->target_sec->m_systems[target.systemIndex].GetFullPosition();
+
+	state->distSqr = Sector::DistanceBetweenSqr(state->start_sec, start.systemIndex, state->target_sec, target.systemIndex) * 1.10f;
+	state->max_dist_from_straight_line = Sector::SIZE * 3.0f;
+	state->sectorRadius = int(std::ceil(state->max_range / Sector::SIZE)) + 1;
+
+	state->nodes.push_back(start);
+	state->nodePositions.push_back(state->start_pos);
+	state->path_cost.push_back(AutoRouteState::RouteCost{ 0, 0.f, state->initial_total_fuel });
+	state->path_prev.push_back(0);
+
+	const float startDist = (state->target_pos - state->start_pos).Length();
+	const uint32_t h0 = uint32_t(std::ceil(startDist / state->max_range));
+	state->pq.push(AutoRouteState::PQNode{ h0, state->path_cost[0], 0 });
+	state->status = AutoRouteState::Status::RUNNING;
+
+	return state;
+}
+
+void SectorView::StepAutoRoute(AutoRouteState &state, bool runToCompletion) const
+{
+	if (state.status != AutoRouteState::Status::RUNNING)
+		return;
+
+	const ScopedTable hyperdrive(state.hyperdrive);
+	const auto frameStart = std::chrono::steady_clock::now();
+	constexpr int MAX_EXPANSIONS_PER_FRAME = 2;
+	constexpr double TIME_BUDGET_MS = 8.0;
+	int expansions = 0;
+
+	while (!state.pq.empty()) {
+		if (!runToCompletion) {
+			if (expansions >= MAX_EXPANSIONS_PER_FRAME)
+				return;
+			const double elapsedMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - frameStart).count();
+			if (expansions > 0 && elapsedMs >= TIME_BUDGET_MS)
+				return;
 		}
 
-		// Remaining nodes are unreachable
-		if (path_cost[closest_i].jumps == UINT32_MAX)
-			break;
+		const AutoRouteState::PQNode top = state.pq.top();
+		state.pq.pop();
 
-		// mark it as visited
-		unvisited.erase(closest_i);
+		const size_t closest_i = top.nodeIdx;
+		if (top.cost != state.path_cost[closest_i])
+			continue;
 
-		// if this is the target then we have found the route
-		const SystemPath &closest = nodes[closest_i];
-		if (closest.IsSameSystem(target))
-			break;
+		state.currentHops = std::max(state.currentHops, std::min(top.cost.jumps, MAX_ROUTE_HOPS));
 
-		RefCountedPtr<const Sector> closest_sec = m_game.GetGalaxy()->GetSector(closest);
-
-		// loop through all unvisited nodes within jump range
-		for (auto it : unvisited) {
-			const SystemPath &v = nodes[it];
-			// Conservative lower bound on Euclidean distance between two sectors
-			const Sint32 dx = std::max(0, std::abs(closest.sectorX - v.sectorX) - 1);
-			const Sint32 dy = std::max(0, std::abs(closest.sectorY - v.sectorY) - 1);
-			const Sint32 dz = std::max(0, std::abs(closest.sectorZ - v.sectorZ) - 1);
-			const float min_dist_sqr = float(dx * dx + dy * dy + dz * dz) * (Sector::SIZE * Sector::SIZE);
-			if (min_dist_sqr > max_range_sqr) {
-				++totalSkipped;
-				continue;
+		const SystemPath closest = state.nodes[closest_i];
+		if (closest.IsSameSystem(state.target)) {
+			size_t u = closest_i;
+			state.outRoute.reserve(top.cost.jumps);
+			while (u != 0) {
+				state.outRoute.push_back(m_game.GetGalaxy()->GetStarSystem(state.nodes[u])->GetStars()[0]->GetPath());
+				u = state.path_prev[u];
 			}
-
-			RefCountedPtr<const Sector> v_sec = m_game.GetGalaxy()->GetSector(v); // this causes it to generate a sector (slooooooow)
-
-			const float v_dist_ly = Sector::DistanceBetween(closest_sec, closest.systemIndex, v_sec, v.systemIndex);
-			if (v_dist_ly > max_range) {
-				++totalSkipped;
-				continue;
+			if (!state.outRoute.empty()) {
+				state.outRoute.begin()->bodyIndex = state.target.bodyIndex;
+				std::reverse(std::begin(state.outRoute), std::end(state.outRoute));
 			}
+			state.status = AutoRouteState::Status::FINISHED_OKAY;
+			return;
+		}
 
-			// Safety / Threat filter: skip systems with lawlessness higher than maxLawlessness
-			if (maxLawlessness > 0.0f && maxLawlessness < 1.0f && !v.IsSameSystem(target) && !v.IsSameSystem(start)) {
-				RefCountedPtr<StarSystem> sys = m_game.GetGalaxy()->GetStarSystem(v);
-				if (sys && sys->GetSysPolit().lawlessness.ToDouble() > maxLawlessness) {
-					++totalSkipped;
-					continue;
-				}
-			}
+		// Hard stop at MAX_ROUTE_HOPS: do not expand beyond the hop limit
+		if (top.cost.jumps >= MAX_ROUTE_HOPS)
+			continue;
 
-			// Faction filter: skip systems not belonging to the chosen faction
-			if (!factionFilter.empty() && factionFilter != "ALL" && !v.IsSameSystem(target) && !v.IsSameSystem(start)) {
-				const Faction *sysFaction = v_sec->m_systems[v.systemIndex].GetFaction();
-				if (!sysFaction || sysFaction->name != factionFilter) {
-					++totalSkipped;
-					continue;
-				}
-			}
+		++expansions;
+		const vector3f closest_pos = state.nodePositions[closest_i];
+		const int r = state.sectorRadius;
 
-			const float v_duration = hyperdrive.CallMethod<float>("GetDuration", Pi::player, v_dist_ly, max_range);
-			const float v_fuel = hyperdrive.CallMethod<float>("GetFuelUse", Pi::player, v_dist_ly);
+		for (Sint32 sx = closest.sectorX - r; sx <= closest.sectorX + r; ++sx) {
+			const Sint32 dx = std::max(0, std::abs(closest.sectorX - sx) - 1);
+			for (Sint32 sy = closest.sectorY - r; sy <= closest.sectorY + r; ++sy) {
+				const Sint32 dy = std::max(0, std::abs(closest.sectorY - sy) - 1);
+				for (Sint32 sz = closest.sectorZ - r; sz <= closest.sectorZ + r; ++sz) {
+					const Sint32 dz = std::max(0, std::abs(closest.sectorZ - sz) - 1);
+					const float min_dist_sqr = float(dx * dx + dy * dy + dz * dz) * (Sector::SIZE * Sector::SIZE);
+					if (min_dist_sqr > state.max_range_sqr)
+						continue;
 
-			if (findFuelStar) {
-				if (path_cost[closest_i].fuel_remaining < v_fuel) {
-					++totalSkipped;
-					continue;
-				}
-			}
+					const vector3f sec_centre(Sector::SIZE * vector3f(float(sx) + 0.5f, float(sy) + 0.5f, float(sz) + 0.5f));
+					const float secLineDist = MathUtil::DistanceFromLine(state.start_pos, state.target_pos, sec_centre);
+					if ((secLineDist - Sector::SIZE) > state.max_dist_from_straight_line)
+						continue;
 
-			float next_fuel = path_cost[closest_i].fuel_remaining - v_fuel;
-			if (findFuelStar) {
-				bool isFuelStar = false;
-				for (unsigned sIdx = 0; sIdx < v_sec->m_systems[v.systemIndex].GetNumStars(); ++sIdx) {
-					auto st = v_sec->m_systems[v.systemIndex].GetStarType(sIdx);
-					if (st >= SystemBody::TYPE_STAR_M && st <= SystemBody::TYPE_STAR_O_HYPER_GIANT) {
-						isFuelStar = true;
-						break;
+					const AutoRouteState::SectorKey key{ sx, sy, sz };
+					auto mapIt = state.sectorNodesMap.find(key);
+					if (mapIt == state.sectorNodesMap.end()) {
+						RefCountedPtr<const Sector> sec = m_game.GetGalaxy()->GetSector(SystemPath(sx, sy, sz));
+						std::vector<size_t> &secNodes = state.sectorNodesMap[key];
+						secNodes.reserve(sec->m_systems.size());
+
+						for (std::vector<Sector::System>::size_type s = 0; s < sec->m_systems.size(); ++s) {
+							const SystemPath sp = sec->m_systems[s].GetPath();
+							if (state.start.IsSameSystem(sp))
+								continue;
+
+							const vector3f spos = sec->m_systems[s].GetFullPosition();
+							const bool isTarget = state.target.IsSameSystem(sp);
+							if (!isTarget) {
+								const float lineDist = MathUtil::DistanceFromLine(state.start_pos, state.target_pos, spos);
+								if (lineDist >= state.max_dist_from_straight_line)
+									continue;
+								if (Sector::DistanceBetweenSqr(state.start_sec, state.start.systemIndex, sec, sec->m_systems[s].idx) > state.distSqr ||
+									Sector::DistanceBetweenSqr(state.target_sec, state.target.systemIndex, sec, sec->m_systems[s].idx) > state.distSqr)
+									continue;
+							}
+
+							const size_t newIdx = state.nodes.size();
+							state.nodes.push_back(sp);
+							state.nodePositions.push_back(spos);
+							state.path_cost.push_back(AutoRouteState::RouteCost{});
+							state.path_prev.push_back(0);
+							secNodes.push_back(newIdx);
+						}
+						mapIt = state.sectorNodesMap.find(key);
+					}
+
+					const std::vector<size_t> &secNodes = mapIt->second;
+					for (size_t it : secNodes) {
+						if (state.path_cost[it].jumps < top.cost.jumps + 1)
+							continue;
+
+						const float v_dist_sqr = (state.nodePositions[it] - closest_pos).LengthSqr();
+						if (v_dist_sqr > state.max_range_sqr)
+							continue;
+
+						const SystemPath &v = state.nodes[it];
+						const bool isTarget = state.target.IsSameSystem(v);
+
+						// Safety / Threat filter: skip systems with lawlessness higher than maxLawlessness
+						if (state.maxLawlessness > 0.0f && state.maxLawlessness < 1.0f && !isTarget && !v.IsSameSystem(state.start)) {
+							RefCountedPtr<StarSystem> sys = m_game.GetGalaxy()->GetStarSystem(v);
+							if (sys && sys->GetSysPolit().lawlessness.ToDouble() > state.maxLawlessness)
+								continue;
+						}
+
+						// Faction filter: skip systems not belonging to the chosen faction
+						RefCountedPtr<const Sector> v_sec;
+						if (!state.factionFilter.empty() && state.factionFilter != "ALL" && !isTarget && !v.IsSameSystem(state.start)) {
+							v_sec = m_game.GetGalaxy()->GetSector(v);
+							const Faction *sysFaction = v_sec->m_systems[v.systemIndex].GetFaction();
+							if (!sysFaction || sysFaction->name != state.factionFilter)
+								continue;
+						}
+
+						const float v_dist_ly = std::sqrt(v_dist_sqr);
+						const float v_duration = hyperdrive.CallMethod<float>("GetDuration", Pi::player, v_dist_ly, state.max_range);
+						const float v_fuel = hyperdrive.CallMethod<float>("GetFuelUse", Pi::player, v_dist_ly);
+
+						if (state.findFuelStar && top.cost.fuel_remaining < v_fuel)
+							continue;
+
+						float next_fuel = top.cost.fuel_remaining - v_fuel;
+						if (state.findFuelStar) {
+							if (!v_sec)
+								v_sec = m_game.GetGalaxy()->GetSector(v);
+							bool isFuelStar = false;
+							for (unsigned sIdx = 0; sIdx < v_sec->m_systems[v.systemIndex].GetNumStars(); ++sIdx) {
+								auto st = v_sec->m_systems[v.systemIndex].GetStarType(sIdx);
+								if (st >= SystemBody::TYPE_STAR_M && st <= SystemBody::TYPE_STAR_O_HYPER_GIANT) {
+									isFuelStar = true;
+									break;
+								}
+							}
+							if (isFuelStar)
+								next_fuel = state.max_total_fuel_capacity;
+						}
+
+						const AutoRouteState::RouteCost candidate{ top.cost.jumps + 1, top.cost.duration + v_duration, next_fuel };
+						if (candidate < state.path_cost[it]) {
+							state.path_cost[it] = candidate;
+							state.path_prev[it] = closest_i;
+							const uint32_t h = isTarget ? 0 : uint32_t(std::ceil((state.target_pos - state.nodePositions[it]).Length() / state.max_range));
+							state.pq.push(AutoRouteState::PQNode{ candidate.jumps + h, candidate, it });
+						}
 					}
 				}
-				if (isFuelStar) {
-					next_fuel = max_total_fuel_capacity;
-				}
-			}
-
-			const RouteCost candidate{ path_cost[closest_i].jumps + 1, path_cost[closest_i].duration + v_duration, next_fuel };
-
-			if (candidate < path_cost[it]) {
-				path_cost[it] = candidate;
-				path_prev[it] = closest_i;
 			}
 		}
 	}
-	Output("SectorView::AutoRoute, total times that nodes were skipped = %lu\n", totalSkipped);
 
-	bool foundRoute = false;
-	std::vector<SystemPath>::size_type u = 0;
+	state.currentHops = MAX_ROUTE_HOPS;
+	state.status = AutoRouteState::Status::FINISHED_NO_VALID_ROUTE;
+}
 
-	// find the index of our target
-	for (std::vector<SystemPath>::size_type i = 0, numNodes = nodes.size(); i < numNodes; i++) {
-		if (target.IsSameSystem(nodes[i])) {
-			u = i;
-			foundRoute = (path_cost[i].jumps != UINT32_MAX);
-			break;
+void SectorView::StartAutoRoute(const SystemPath &start, const SystemPath &target, float maxJumpDist, bool findFuelStar, float maxLawlessness, const std::string &factionFilter)
+{
+	m_autoRouteState = CreateAutoRouteState(start, target, maxJumpDist, findFuelStar, maxLawlessness, factionFilter);
+	if (m_autoRouteState && m_autoRouteState->status == AutoRouteState::Status::RUNNING) {
+		StepAutoRoute(*m_autoRouteState, false);
+		if (m_autoRouteState->status == AutoRouteState::Status::FINISHED_OKAY) {
+			m_route = m_autoRouteState->outRoute;
+			m_setupLines = true;
 		}
 	}
+}
 
-	// It's posible that there is no valid route
-	if (foundRoute) {
-		outRoute.reserve(nodes.size());
-		// Build the route, in reverse starting with the target
-		while (u != 0) {
-			outRoute.push_back(m_game.GetGalaxy()->GetStarSystem(nodes[u])->GetStars()[0]->GetPath());
-			u = path_prev[u];
-		}
-		//End at given body in multistar systems
-		outRoute.begin()->bodyIndex = target.bodyIndex;
-		std::reverse(std::begin(outRoute), std::end(outRoute));
+void SectorView::CancelAutoRoute()
+{
+	m_autoRouteState.reset();
+}
+
+bool SectorView::IsAutoRouting() const
+{
+	return m_autoRouteState && m_autoRouteState->status == AutoRouteState::Status::RUNNING;
+}
+
+float SectorView::GetAutoRouteProgress() const
+{
+	if (!m_autoRouteState)
+		return 0.0f;
+	return std::min(1.0f, float(m_autoRouteState->currentHops) / float(MAX_ROUTE_HOPS));
+}
+
+std::string SectorView::ConsumeAutoRouteResult()
+{
+	if (!m_autoRouteState || m_autoRouteState->status == AutoRouteState::Status::RUNNING)
+		return "";
+
+	std::string res;
+	switch (m_autoRouteState->status) {
+	case AutoRouteState::Status::FINISHED_OKAY:
+		res = "OKAY";
+		break;
+	case AutoRouteState::Status::FINISHED_NO_DRIVE:
+		res = "NO_DRIVE";
+		break;
+	case AutoRouteState::Status::FINISHED_NO_VALID_ROUTE:
+	default:
+		res = "NO_VALID_ROUTE";
+		break;
+	}
+	m_autoRouteState.reset();
+	return res;
+}
+
+const std::string SectorView::AutoRoute(const SystemPath &start, const SystemPath &target, std::vector<SystemPath> &outRoute, float maxJumpDist, bool findFuelStar, float maxLawlessness, const std::string &factionFilter) const
+{
+	auto state = CreateAutoRouteState(start, target, maxJumpDist, findFuelStar, maxLawlessness, factionFilter);
+	if (state->status == AutoRouteState::Status::RUNNING) {
+		StepAutoRoute(*state, true);
+	}
+	if (state->status == AutoRouteState::Status::FINISHED_NO_DRIVE)
+		return "NO_DRIVE";
+	if (state->status == AutoRouteState::Status::FINISHED_OKAY) {
+		outRoute = std::move(state->outRoute);
 		return "OKAY";
 	}
 	return "NO_VALID_ROUTE";
@@ -759,6 +904,14 @@ void SectorView::Update()
 	}
 
 	m_playerHyperspaceRange = LuaObject<Player>::CallMethod<float>(Pi::player, "GetHyperspaceRange");
+
+	if (m_autoRouteState && m_autoRouteState->status == AutoRouteState::Status::RUNNING) {
+		StepAutoRoute(*m_autoRouteState, false);
+		if (m_autoRouteState->status == AutoRouteState::Status::FINISHED_OKAY) {
+			m_route = m_autoRouteState->outRoute;
+			m_setupLines = true;
+		}
+	}
 }
 
 void SectorView::ResetView()

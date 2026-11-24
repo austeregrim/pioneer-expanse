@@ -501,7 +501,8 @@ function Outfitter:renderCompareRow(label, stat_a, stat_b)
 	ui.text(label)
 
 	local icon_size = Vector2(ui.getTextLineHeight())
-	local default = type((stat_a or stat_b)[3]) == "number" and 0 or ""
+	local ref_val = (stat_a or stat_b)[3]
+	local default = (type(ref_val) == "number" or ref_val == "MILITARY") and 0 or ""
 	local cmp_a, cmp_b = default, default
 
 	if stat_a then
@@ -516,9 +517,6 @@ function Outfitter:renderCompareRow(label, stat_a, stat_b)
 	local icon = (stat_a or stat_b)[2]
 	local format = (stat_a or stat_b)[4]
 
-	local val_a = stat_a and format(stat_a[3]) or format(default)
-	local val_b = stat_b and format(stat_b[3]) or format(default)
-
 	ui.tableNextColumn()
 	ui.icon(icon, icon_size, colors.font)
 	ui.sameLine()
@@ -526,7 +524,7 @@ function Outfitter:renderCompareRow(label, stat_a, stat_b)
 	if stat_a and stat_a[3] == "MILITARY" then
 		ui.icon(icons.shield_other, icon_size, color)
 	else
-		ui.textColored(color, val_a)
+		ui.textColored(color, stat_a and format(stat_a[3]) or format(default))
 	end
 
 	ui.tableNextColumn()
@@ -536,7 +534,7 @@ function Outfitter:renderCompareRow(label, stat_a, stat_b)
 	if stat_b and stat_b[3] == "MILITARY" then
 		ui.icon(icons.shield_other, icon_size, color)
 	else
-		ui.textColored(color, val_b)
+		ui.textColored(color, stat_b and format(stat_b[3]) or format(default))
 	end
 end
 

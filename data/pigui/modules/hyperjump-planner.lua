@@ -163,14 +163,38 @@ function hyperJumpPlanner.moveItemUp(index)
 end
 
 function hyperJumpPlanner.autoRoute(from, to, maxJumpDist, findFuelStar, maxLawlessness, factionFilter)
-	local result = sectorView:AutoRoute(from, to, maxJumpDist or 0, findFuelStar or false, maxLawlessness or 1.0, factionFilter or "")
+	sectorView:StartAutoRoute(from, to, maxJumpDist or 0, findFuelStar or false, maxLawlessness or 1.0, factionFilter or "")
+end
+
+function hyperJumpPlanner.cancelAutoRoute()
+	if sectorView then
+		sectorView:CancelAutoRoute()
+	end
+end
+
+function hyperJumpPlanner.isAutoRouting()
+	return sectorView and sectorView:IsAutoRouting() or false
+end
+
+function hyperJumpPlanner.getAutoRouteProgress()
+	return sectorView and sectorView:GetAutoRouteProgress() or 0.0
+end
+
+function hyperJumpPlanner.updateAutoRoute()
+	if not sectorView then return false end
+	local result = sectorView:ConsumeAutoRouteResult()
+	if not result or result == "" then
+		return false
+	end
 	if result == "NO_DRIVE" then
 		mb.OK(lui.NO_DRIVE)
 	elseif result == "NO_VALID_ROUTE" then
 		mb.OK(lui.NO_VALID_ROUTE)
+	elseif result == "OKAY" then
+		selected_jump = 1
+		updateHyperspaceTarget()
 	end
-	selected_jump = 1
-	updateHyperspaceTarget()
+	return true
 end
 
 function hyperJumpPlanner.setSelectedJump(index)
@@ -223,6 +247,9 @@ function hyperJumpPlanner.onGameStart()
 end
 
 function hyperJumpPlanner.onGameEnd()
+	if sectorView then
+		sectorView:CancelAutoRoute()
+	end
 	-- clear the route out so it doesn't show up if the user starts a new game
 	sectorView:ClearRoute()
 	-- also clear the route list, saved in this module

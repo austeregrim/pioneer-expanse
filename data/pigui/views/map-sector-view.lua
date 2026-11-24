@@ -711,13 +711,22 @@ local infoView = {
 				draw_jump_status(getHyperspaceDetails(path))
 
 				local padding = ui.theme.styles.FramePadding
-				local size = ui.calcTextSize(lui.AUTO_ROUTE).x + padding.x * 2
+				local isPlanning = hyperJumpPlanner.isAutoRouting()
+				local btnLabel = isPlanning and lui.CANCEL or lui.AUTO_ROUTE
+				local size = ui.calcTextSize(btnLabel).x + padding.x * 2
 
 				ui.sameLine(ui.getContentRegion().x - size, 0.0)
 
-				if ui.button(lui.AUTO_ROUTE, Vector2(0, 0), nil, nil, padding) then
-					local maxJump, fuelStar, maxLawless, faction = getAutoRouteParams()
-					hyperJumpPlanner.autoRoute(current, path, maxJump, fuelStar, maxLawless, faction)
+				if isPlanning then
+					if ui.button(btnLabel, Vector2(0, 0), nil, nil, padding) then
+						hyperJumpPlanner.cancelAutoRoute()
+					end
+					ui.progressBar(hyperJumpPlanner.getAutoRouteProgress(), Vector2(-1, ui.rescaleUI(16, Vector2(1920, 1080))), "Planning route...")
+				else
+					if ui.button(btnLabel, Vector2(0, 0), nil, nil, padding) then
+						local maxJump, fuelStar, maxLawless, faction = getAutoRouteParams()
+						hyperJumpPlanner.autoRoute(current, path, maxJump, fuelStar, maxLawless, faction)
+					end
 				end
 
 			end
@@ -1053,9 +1062,16 @@ local routeView = {
 
 			if #route > 0 and current and route[#route] then
 				ui.spacing()
-				if ui.button("Recalculate Route##recalcRouteBtn", Vector2(ui.getContentRegion().x, 24)) then
-					local maxJump, fuelStar, maxLawless, faction = getAutoRouteParams()
-					hyperJumpPlanner.autoRoute(current, route[#route].path, maxJump, fuelStar, maxLawless, faction)
+				if hyperJumpPlanner.isAutoRouting() then
+					if ui.button(lui.CANCEL .. "##cancelRouteBtn", Vector2(ui.getContentRegion().x, 24)) then
+						hyperJumpPlanner.cancelAutoRoute()
+					end
+					ui.progressBar(hyperJumpPlanner.getAutoRouteProgress(), Vector2(-1, ui.rescaleUI(16, Vector2(1920, 1080))), "Planning route...")
+				else
+					if ui.button("Recalculate Route##recalcRouteBtn", Vector2(ui.getContentRegion().x, 24)) then
+						local maxJump, fuelStar, maxLawless, faction = getAutoRouteParams()
+						hyperJumpPlanner.autoRoute(current, route[#route].path, maxJump, fuelStar, maxLawless, faction)
+					end
 				end
 			end
 		end)
@@ -1361,6 +1377,10 @@ end
 
 ui.registerHandler("SectorView", function(delta_t, refresh)
 	player = Game.player
+
+	if hyperJumpPlanner.updateAutoRoute() then
+		refreshData()
+	end
 
 	if refresh then
 		-- Always show system info when entering SectorView, if we can. This helps the player find the hyperspace routing.
