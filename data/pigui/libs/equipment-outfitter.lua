@@ -8,6 +8,7 @@ local Lang      = require 'Lang'
 local utils     = require 'utils'
 local PlayerState = require 'PlayerState'
 local StationProfiles = require 'StationProfiles'
+local StationStorage = require 'modules.StationStorage.StationStorage'
 
 local ui = require 'pigui'
 
@@ -199,6 +200,7 @@ function Outfitter:Constructor()
 	self.replaceEquip = nil ---@type EquipType?
 	self.canReplaceEquip = false
 	self.canSellEquip = false
+	self.sourceMode = "MARKET" -- "MARKET" | "VAULT"
 
 	self.sortId = nil ---@type string?
 	self.sortState = nil ---@type integer?
@@ -208,6 +210,11 @@ function Outfitter:Constructor()
 	self.currentEquip = nil ---@type UI.EquipCard.Data?
 
 	self.compare_stats = nil ---@type { label: string, a: EquipType.UI.Stats?, b: EquipType.UI.Stats? }[]?
+end
+
+function Outfitter:getStoredEquipmentCount()
+	local vault = self.station and StationStorage.GetVault(self.station)
+	return StationStorage.GetVaultModuleCount(vault)
 end
 
 --==================
@@ -299,6 +306,56 @@ function Outfitter:modifyEquipmentStats(data)
 end
 
 function Outfitter:buildEquipmentList()
+	local currentProto = self.replaceEquip and self.replaceEquip:GetPrototype()
+	local equipSet = self.ship:GetComponent("EquipSet")
+	local shipConfig = equipSet.config
+	local money = PlayerState.GetMoney()
+
+	self.currentEquip = self.replaceEquip and EquipCard.getDataForEquip(self.replaceEquip) or nil
+
+	if self.currentEquip then
+		self:modifyEquipmentStats(self.currentEquip)
+	end
+
+	if self.sourceMode == "VAULT" and self.station then
+		local vault = StationStorage.GetVault(self.station)
+		local list = {}
+		for _, rec in ipairs((vault and vault.modules) or {}) do
+			local inst = StationStorage.InstantiateRecordForConfig(rec, shipConfig)
+			if inst then
+				local isCompat = false
+				local canInstall = false
+				if self.filterSlot then
+					local countOk = (self.filterSlot.count == nil) or ((rec.count or 1) == self.filterSlot.count)
+					isCompat = countOk and EquipSet.CompatibleWithSlot(inst, self.filterSlot)
+					canInstall = isCompat and equipSet:CanInstallInSlot(self.filterSlot, inst)
+				else
+					isCompat = not inst.slot
+					canInstall = isCompat and equipSet:CanInstallLoose(inst)
+				end
+
+				if isCompat then
+					local data = EquipCard.getDataForEquip(inst, self.replaceEquip)
+					data.isStored = true
+					data.storedUid = rec.uid
+					data.storedRec = rec
+					data.price = 0
+					data.count = 1
+					data.isCompatible = true
+					data.canInstall = canInstall
+					data.canReplace = not self.replaceEquip or self.canReplaceEquip
+					data.available = data.canInstall and data.canReplace
+					local integPct = math.floor(((rec.integrity or 1.0) * 100) + 0.5)
+					data[#data] = { nil, string.format("VAULT (%d%%)", integPct) }
+					table.insert(list, data)
+				end
+			end
+		end
+		self.equipmentList = list
+		self:sortEquipmentList()
+		return
+	end
+
 	local equipment = self:getAvailableEquipment()
 
 	---@type EquipType[]
@@ -306,16 +363,6 @@ function Outfitter:buildEquipmentList()
 
 	for _, v in pairs(equipment) do
 		table.insert(equipList, v)
-	end
-
-	local currentProto = self.replaceEquip and self.replaceEquip:GetPrototype()
-	local equipSet = self.ship:GetComponent("EquipSet")
-	local money = PlayerState.GetMoney()
-
-	self.currentEquip = self.replaceEquip and EquipCard.getDataForEquip(self.replaceEquip) or nil
-
-	if self.currentEquip then
-		self:modifyEquipmentStats(self.currentEquip)
 	end
 
 	self.equipmentList = utils.map_array(equipList, function(equip)
@@ -425,6 +472,16 @@ function Outfitter:onSellItem(item)
 	self.selectedEquip = nil
 end
 
+---@param item EquipType
+function Outfitter:onStoreItem(item)
+	self.selectedEquip = nil
+end
+
+---@param moduleUid integer
+function Outfitter:onInstallStoredItem(moduleUid)
+	self.selectedEquip = nil
+end
+
 function Outfitter:onSetSort(id, state)
 	self.sortId = id
 	self.sortState = state
@@ -463,6 +520,14 @@ end
 ---@param data UI.EquipmentOutfitter.EquipData
 function Outfitter:drawBuyButton(data)
 	local icon = icons.autopilot_dock
+	if data.isStored then
+		local variant = data.available and ui.theme.buttonColors.selected or ui.theme.buttonColors.disabled
+		if customButton("Install from Vault: " .. (data.name or ""), icon, "FREE", variant) and data.available then
+			self:message("onInstallStoredItem", data.storedUid)
+		end
+		return
+	end
+
 	local price_text = ui.Format.Money(self:getInstallPrice(data.equip))
 
 	-- TODO: currently, you are prevented from buying a duplicate item
@@ -483,6 +548,28 @@ function Outfitter:drawSellButton(data)
 	local variant = self.canSellEquip and ui.theme.buttonColors.dark or ui.theme.buttonColors.disabled
 	if customButton(l.SELL_EQUIP % data, icon, price_text, variant) and self.canSellEquip then
 		self:message("onSellItem", data.equip)
+	end
+end
+
+---@param data UI.EquipCard.Data
+function Outfitter:drawStoreButton(data)
+	if not self.station or not StationStorage.IsDepositAllowed(self.station) then
+		return
+	end
+	local vault = StationStorage.GetVault(self.station)
+	local usedMods = StationStorage.GetVaultModuleCount(vault)
+	local _, maxMods = StationStorage.GetLimits()
+	local okRem, remReason = StationStorage.CanRemoveEquipmentFromShip(self.ship, data.equip)
+	local canStore = self.canSellEquip and okRem and (usedMods < maxMods)
+	local variant = canStore and ui.theme.buttonColors.dark or ui.theme.buttonColors.disabled
+
+	if customButton("Store in Resident Vault", icons.cargo_crate, string.format("VAULT %d/%d", usedMods, maxMods), variant) and canStore then
+		self:message("onStoreItem", data.equip)
+	elseif not canStore and ui.isItemHovered() then
+		local tip = (usedMods >= maxMods and "Resident module vault is full.")
+			or (not okRem and remReason)
+			or "Cannot store a required or occupied slot."
+		ui.setTooltip(tip)
 	end
 end
 
@@ -605,6 +692,13 @@ function Outfitter:render()
 
 	local spacing = ui.getItemSpacing()
 	local panelWidth = (ui.getContentRegion().x - spacing.x * 4.0) / 2
+	local depositAllowed = self.station and StationStorage.IsDepositAllowed(self.station)
+	local storedCount = self:getStoredEquipmentCount()
+
+	if self.sourceMode == "VAULT" and not depositAllowed and storedCount == 0 then
+		self.sourceMode = "MARKET"
+		self:refresh()
+	end
 
 	ui.child("##ListPane", Vector2(panelWidth, 0), function()
 
@@ -617,7 +711,11 @@ function Outfitter:render()
 				ui.sameLine()
 
 				ui.alignTextToFramePadding()
-				ui.text(self.replaceEquip and l.REPLACE_EQUIPMENT or l.AVAILABLE_FOR_PURCHASE)
+				if self.sourceMode == "VAULT" then
+					ui.text("RESIDENT VAULT MODULES")
+				else
+					ui.text(self.replaceEquip and l.REPLACE_EQUIPMENT or l.AVAILABLE_FOR_PURCHASE)
+				end
 			end)
 
 			local profile = self.station and (self.station.GetStationProfile and self.station:GetStationProfile() or StationProfiles.Classify(self.station))
@@ -629,6 +727,22 @@ function Outfitter:render()
 						ui.setTooltip(string.format("%s\n\nOutfitting Focus: %s\nPricing: %s", profile.label, profile.equipFocus, profile.priceHint))
 					end
 				end)
+			end
+
+			if depositAllowed or storedCount > 0 then
+				if ui.button("Market Stock##outfitter_src_mkt", Vector2(0, 0), self.sourceMode == "MARKET" and ui.theme.buttonColors.selected or ui.theme.buttonColors.dark) then
+					if self.sourceMode ~= "MARKET" then
+						self.sourceMode = "MARKET"
+						self:refresh()
+					end
+				end
+				ui.sameLine()
+				if ui.button(string.format("Resident Vault (%d)##outfitter_src_vault", storedCount), Vector2(0, 0), self.sourceMode == "VAULT" and ui.theme.buttonColors.selected or ui.theme.buttonColors.dark) then
+					if self.sourceMode ~= "VAULT" then
+						self.sourceMode = "VAULT"
+						self:refresh()
+					end
+				end
 			end
 
 			self:drawSortRow()
@@ -646,6 +760,9 @@ function Outfitter:render()
 
 		if self.currentEquip then
 			buttonLineHeight = buttonLineHeight + getCustomButtonHeight() + spacing.y
+			if depositAllowed then
+				buttonLineHeight = buttonLineHeight + getCustomButtonHeight() + spacing.y
+			end
 		end
 
 		if buttonLineHeight > 0.0 then
@@ -656,11 +773,22 @@ function Outfitter:render()
 			if #self.equipmentList == 0 then
 				ui.spacing()
 				ui.withStyleColors({ Text = colors.fontDim }, function()
-					ui.textWrapped(StationProfiles.GetRecommendedPurposeForSlot(self.filterSlot))
+					if self.sourceMode == "VAULT" then
+						ui.textWrapped("No compatible modules stored in your Resident Vault for this slot.")
+					else
+						ui.textWrapped(StationProfiles.GetRecommendedPurposeForSlot(self.filterSlot))
+					end
 				end)
 			else
 				for _, data in ipairs(self.equipmentList) do
-					local clicked = self:drawEquipmentItem(data, data == self.selectedEquip)
+					local clicked = false
+					if data.isStored then
+						ui.withID("ov_" .. tostring(data.storedUid), function()
+							clicked = self:drawEquipmentItem(data, data == self.selectedEquip)
+						end)
+					else
+						clicked = self:drawEquipmentItem(data, data == self.selectedEquip)
+					end
 
 					if clicked then
 						self:message("onSelectItem", data)
@@ -669,7 +797,11 @@ function Outfitter:render()
 					local doubleClicked = clicked and ui.isMouseDoubleClicked(0)
 
 					if doubleClicked and data.available then
-						self:message("onBuyItem", data.equip)
+						if data.isStored then
+							self:message("onInstallStoredItem", data.storedUid)
+						else
+							self:message("onBuyItem", data.equip)
+						end
 					end
 				end
 			end
@@ -686,6 +818,7 @@ function Outfitter:render()
 
 		if self.currentEquip then
 			self:drawSellButton(self.currentEquip)
+			self:drawStoreButton(self.currentEquip)
 		end
 
 	end)

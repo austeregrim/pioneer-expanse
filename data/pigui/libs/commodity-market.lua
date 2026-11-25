@@ -7,6 +7,7 @@ local Format = require 'Format'
 local Commodities = require 'Commodities'
 local Economy     = require 'Economy'
 local PlayerState = require 'PlayerState'
+local StationStorage = require 'modules.StationStorage.StationStorage'
 
 local ui = require 'pigui'
 local pionillium = ui.fonts.pionillium
@@ -145,10 +146,10 @@ function CommodityMarketWidget.New(id, title, config)
 		local scrollbarPad = 16
 		local tableW = self.style.size.x - scrollbarPad
 		local col0W = math.floor(commodityIconSize.x + 8)
-		local col2W = 100
-		local col3W = 100
-		local col4W = 75
-		local col5W = 85
+		local col2W = 95
+		local col3W = 95
+		local col4W = 70
+		local col5W = 105
 		local col6W = 1
 		local col1W = math.max(120, tableW - (col0W + col2W + col3W + col4W + col5W + col6W))
 
@@ -229,11 +230,25 @@ function CommodityMarketWidget.New(id, title, config)
 			config.columnText(sellPriceText, "RIGHT")
 			config.columnText(stockText, "RIGHT")
 			local n = self.cargoMgr:CountCommodity(item)
-			config.columnText(n > 0 and n or '', "RIGHT")
+			local vault = self.station and StationStorage.GetVault(self.station)
+			local vQty = (vault and vault.cargo and vault.cargo[item.name]) or 0
+			local holdStr = ""
+			if n > 0 and vQty > 0 then
+				holdStr = string.format("%d [V:%d]", n, vQty)
+			elseif n > 0 then
+				holdStr = tostring(n)
+			elseif vQty > 0 then
+				holdStr = string.format("[V:%d]", vQty)
+			end
+			config.columnText(holdStr, "RIGHT")
 		end)
 	end
 
 	config.canDisplayItem = config.canDisplayItem or function (self, commodity)
+		local vault = self.station and StationStorage.GetVault(self.station)
+		if vault and vault.cargo and (vault.cargo[commodity.name] or 0) > 0 then
+			return true
+		end
 		local okPenal, PenalSystem = pcall(require, 'modules.Penal.PenalSystem')
 		if okPenal and PenalSystem and PenalSystem.IsPrisonStation(self.station) then
 			return PenalSystem.IsPrisonCommodity(commodity.name)
@@ -690,6 +705,68 @@ function CommodityMarketWidget:TradeMenu()
 					ui.button("STATION DOES NOT PURCHASE THIS COMMODITY##disSellAll", Vector2(panelW, 28), nil, reasonBuyDisabled or "Local starport authority does not purchase this commodity")
 				end)
 			end
+			ui.spacing()
+			ui.separator()
+			ui.spacing()
+		end
+
+		-- 3b. Resident Storage Vault Transfer (Home Port or Withdraw-Only Former Residency)
+		local depositAllowed = StationStorage.IsDepositAllowed(self.station)
+		local vault = self.station and StationStorage.GetVault(self.station)
+		local vaultQty = (vault and vault.cargo and vault.cargo[item.name]) or 0
+		if depositAllowed or vaultQty > 0 then
+			local maxVaultCargo = StationStorage.GetLimits()
+			local usedVaultCargo = StationStorage.GetVaultCargoUsed(vault)
+			ui.textColored(ui.theme.colors.uiPrimaryLight, "RESIDENT STORAGE VAULT TRANSFER:")
+			ui.text(string.format("Stored in Vault: %d tons  |  Vault Capacity: %dt / %dt%s",
+				vaultQty, usedVaultCargo, maxVaultCargo,
+				depositAllowed and "" or "  (Withdraw Only)"))
+
+			local vSp = 6
+			local vBtnW = math.floor((panelW - 2 * vSp) / 3)
+			if depositAllowed and owned > 0 then
+				local freeVault = math.max(0, maxVaultCargo - usedVaultCargo)
+				local s1 = math.min(1, owned, freeVault)
+				local s10 = math.min(10, owned, freeVault)
+				local sAll = math.min(owned, freeVault)
+				if ui.button(string.format("STORE %dt##commVaultStore1", s1), Vector2(vBtnW, 28), s1 > 0 and ui.theme.buttonColors.dark or ui.theme.buttonColors.disabled) and s1 > 0 then
+					StationStorage.DepositCargoFromFlagship(self.station, item.name, s1)
+					self:Refresh()
+				end
+				ui.sameLine(nil, vSp)
+				if ui.button(string.format("STORE %dt##commVaultStore10", s10), Vector2(vBtnW, 28), s10 > 0 and ui.theme.buttonColors.dark or ui.theme.buttonColors.disabled) and s10 > 0 then
+					StationStorage.DepositCargoFromFlagship(self.station, item.name, s10)
+					self:Refresh()
+				end
+				ui.sameLine(nil, vSp)
+				if ui.button(string.format("STORE ALL (%dt)##commVaultStoreAll", sAll), Vector2(vBtnW, 28), sAll > 0 and ui.theme.buttonColors.dark or ui.theme.buttonColors.disabled) and sAll > 0 then
+					StationStorage.DepositCargoFromFlagship(self.station, item.name, sAll)
+					self:Refresh()
+				end
+			end
+
+			if vaultQty > 0 then
+				local unitMass = item.mass or 1
+				local maxTake = math.min(vaultQty, math.floor(freeCargo / unitMass))
+				local t1 = math.min(1, maxTake)
+				local t10 = math.min(10, maxTake)
+				local tAll = maxTake
+				if ui.button(string.format("TAKE %dt##commVaultTake1", t1), Vector2(vBtnW, 28), t1 > 0 and ui.theme.buttonColors.default or ui.theme.buttonColors.disabled) and t1 > 0 then
+					StationStorage.WithdrawCargoToFlagship(self.station, item.name, t1)
+					self:Refresh()
+				end
+				ui.sameLine(nil, vSp)
+				if ui.button(string.format("TAKE %dt##commVaultTake10", t10), Vector2(vBtnW, 28), t10 > 0 and ui.theme.buttonColors.default or ui.theme.buttonColors.disabled) and t10 > 0 then
+					StationStorage.WithdrawCargoToFlagship(self.station, item.name, t10)
+					self:Refresh()
+				end
+				ui.sameLine(nil, vSp)
+				if ui.button(string.format("TAKE ALL (%dt)##commVaultTakeAll", tAll), Vector2(vBtnW, 28), tAll > 0 and ui.theme.buttonColors.default or ui.theme.buttonColors.disabled) and tAll > 0 then
+					StationStorage.WithdrawCargoToFlagship(self.station, item.name, tAll)
+					self:Refresh()
+				end
+			end
+
 			ui.spacing()
 			ui.separator()
 			ui.spacing()

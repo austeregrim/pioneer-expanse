@@ -1,8 +1,8 @@
 # Technical Implementation Plan: Engineering, Salvage & Matter Synthesis
 
-**Document Version**: 1.0  
-**Status**: Queued  
-**Priority Tier**: Pillar 2 (Depends on Ring Mining & Pillar 1 SRV Outcrops)  
+**Document Version**: 1.1  
+**Status**: Queued (Pending Design Discussion — Component Catalog, Recipes & Boosts)  
+**Priority Tier**: Pillar 2 (Ready for Design Discussion; Feeds From Ring Mining, Combat Salvage & Scans)  
 **Parent Roadmap**: [`01_EXPANSE_LONG_TERM_ROADMAP.md`](./01_EXPANSE_LONG_TERM_ROADMAP.md)  
 **Target Files**:
 * `src/MaterialsInventory.h`, `src/MaterialsInventory.cpp` *(NEW — zero-mass player material/data ledger)*
@@ -60,10 +60,11 @@ Materials reside in dedicated ship micro-containers and mainframe memory banks s
 
 | Category | Grade Caps | Examples | Acquisition |
 | :--- | :--- | :--- | :--- |
-| **Raw Elements** | G1: 300, G2: 250, G3: 200, G4: 150, G5: 100 | *G1 Iron/Nickel/Carbon/Sulphur*; *G3 Arsenic/Niobium*; *G5 Polonium/Ruthenium/Tellurium* | Ring asteroid laser chipping, SRV plasma outcrops |
-| **Manufactured / Salvage** | Same G1–G5 caps | *Refined Conductors*, *Phase Alloys*, *Polymer Matrices*, *Biomorphic Shield Fragments* | Combat wreck drops (`CargoBody` salvage), Scrap Reclamation Unit |
-| **Encoded Data** | Same G1–G5 caps | *Shield Cycle Recordings*, *FSD Wake Exceptions*, *Encrypted Corporate Firmware* | Target scans, wake scanning, Pillar 3 datalink hacking |
+| **Raw Elements** | G1: 300, G2: 250, G3: 200, G4: 150, G5: 100 | *G1 Iron/Nickel/Carbon/Sulphur*; *G3 Arsenic/Niobium*; *G5 Polonium/Ruthenium/Tellurium* | Ring asteroid laser chipping *(already live in Plan 03)*; expanded later by Plan B SRV outcrops |
+| **Manufactured / Salvage** | Same G1–G5 caps | *Refined Conductors*, *Phase Alloys*, *Polymer Matrices*, *Biomorphic Shield Fragments* | Combat wreck drops (`CargoBody` salvage), Scrap Reclamation Unit *(already supported without SRVs)* |
+| **Encoded Data** | Same G1–G5 caps | *Shield Cycle Recordings*, *FSD Wake Exceptions*, *Encrypted Corporate Firmware* | Target/wake scans (`ScanManager` / Plan I), Cartography scans, and future Plan D datalink hacking |
 
+* **Dependency Note**: Because Ring Mining (Plan 03), Combat salvage, and Plan I / Cartography scans are already live, **Plan C does not require Plan B SRVs to start**—only a design pass defining the exact material catalog, crafting recipes, and boost mechanics.
 * Include **Cross-Category Material Conversion** at major industrial starport Material Brokers (fair deterministic conversion ratios, never predatory) so rare drops remain accessible.
 
 ### 2.2 Atomic Matter Salvage (`ScrapReclamation`)

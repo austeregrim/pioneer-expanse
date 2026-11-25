@@ -2003,6 +2003,202 @@ function PlayerFleet.TransferCargo(uid, commodityName, amount, toFlagship)
 end
 
 -- ============================================================================
+-- Direct Docked Ship-to-Ship Module Transfer (Plan A Polish)
+-- ============================================================================
+
+local function getStationStorageMod()
+	return require 'modules.StationStorage.StationStorage'
+end
+
+local function buildEntrySlotTable(entry, config)
+	local slots = {}
+	if config and config.slots then
+		for _, slot in pairs(config.slots) do
+			slots[slot.id] = slot
+		end
+	end
+	for _, rec in ipairs(entry.equip or {}) do
+		if rec.slotId then
+			local proto = Equipment.Get(rec.id)
+			if proto and proto.provides_slots then
+				for _, subSlot in pairs(proto.provides_slots) do
+					slots[tostring(rec.slotId) .. "##" .. subSlot.id] = subSlot
+				end
+			end
+		end
+	end
+	return slots
+end
+
+local function getEntryEquipUsedVolume(entry, config, StationStorage)
+	local used = 0
+	for _, rec in ipairs(entry.equip or {}) do
+		local inst = StationStorage.InstantiateRecordForConfig(rec, config)
+		if inst and inst.volume then
+			used = used + inst.volume
+		end
+	end
+	return used
+end
+
+local function canFitEquipmentInEntry(entry, rec, StationStorage)
+	local config = HullConfig.GetHullConfig(entry.shipId)
+	if not config then return false, "Unknown hull configuration." end
+
+	local inst = StationStorage.InstantiateRecordForConfig(rec, config)
+	if not inst then return false, "Unknown module prototype." end
+
+	local usedVol = getEntryEquipUsedVolume(entry, config, StationStorage)
+	local freeVol = (config.equipCapacity or 0) - usedVol
+	if freeVol < (inst.volume or 0) then
+		return false, "Insufficient free equipment volume on target ship."
+	end
+
+	if inst.slot then
+		local occupied = {}
+		for _, existing in ipairs(entry.equip or {}) do
+			if existing.slotId then
+				occupied[existing.slotId] = true
+			end
+		end
+
+		local allSlots = buildEntrySlotTable(entry, config)
+		local sortedIds = {}
+		for slotId, _ in pairs(allSlots) do
+			if not occupied[slotId] then
+				table.insert(sortedIds, slotId)
+			end
+		end
+		table.sort(sortedIds)
+
+		for _, slotId in ipairs(sortedIds) do
+			local slot = allSlots[slotId]
+			local countOk = (slot.count == nil) or ((rec.count or 1) == slot.count)
+			if countOk and slot.hardpoint == inst.slot.hardpoint and EquipSet.CompatibleWithSlot(inst, slot) then
+				return true, slotId
+			end
+		end
+		return false, "No compatible free slot on target ship."
+	end
+
+	return true, nil
+end
+
+function PlayerFleet.CanRemoveModuleFromEntry(entry, equipIndex)
+	if not entry or not entry.equip or not entry.equip[equipIndex] then
+		return false, "Module not found on hangar ship."
+	end
+	local rec = entry.equip[equipIndex]
+	local config = HullConfig.GetHullConfig(entry.shipId)
+
+	if rec.slotId and config and config.slots then
+		for _, slot in pairs(config.slots) do
+			if slot.id == rec.slotId and slot.required then
+				return false, "Cannot remove a required hull slot module."
+			end
+		end
+		local prefix = tostring(rec.slotId) .. "##"
+		for idx, other in ipairs(entry.equip) do
+			if idx ~= equipIndex and other.slotId and other.slotId:sub(1, #prefix) == prefix then
+				return false, "Remove child sub-slot equipment first."
+			end
+		end
+	end
+
+	local proto = Equipment.Get(rec.id)
+	local cargoBonus = proto and proto.capabilities and proto.capabilities.cargo_cap or 0
+	if cargoBonus > 0 then
+		local capAfter = (entry.cargoCap or 0) - cargoBonus
+		if capAfter < PlayerFleet.GetCargoUsed(entry) then
+			return false, "Unload cargo from hangar ship before removing cargo rack."
+		end
+	end
+
+	return true
+end
+
+local function recalcEntryCargoCap(entry, StationStorage)
+	local def = ShipDef[entry.shipId]
+	local config = HullConfig.GetHullConfig(entry.shipId)
+	local base = (def and def.cargo) or 0
+	local bonus = 0
+	for _, rec in ipairs(entry.equip or {}) do
+		local inst = StationStorage.InstantiateRecordForConfig(rec, config)
+		if inst and inst.capabilities and inst.capabilities.cargo_cap then
+			bonus = bonus + inst.capabilities.cargo_cap
+		end
+	end
+	entry.cargoCap = math.max(0, base + bonus)
+end
+
+local function resyncEntryLiveShip(entry)
+	if entry.liveShip and entry.liveShip:exists() then
+		clearShipCargo(entry.liveShip)
+		entry.liveShip:SetShipType(entry.shipId)
+		applyShipConfig(entry.liveShip, entry)
+		pcall(function() ComponentIntegrity.SyncShipSubsystems(entry.liveShip) end)
+	end
+end
+
+function PlayerFleet.TransferModule(uid, sourceRef, toFlagship)
+	if Insurance.HasClaim() then
+		return false, "Module transfers are locked while an open insurance claim is pending."
+	end
+	local player = Game.player
+	local station = player and player:GetDockedWith()
+	if not station then
+		return false, "Must be docked at a station to transfer modules."
+	end
+	local _, entry = findShipIndex(uid)
+	if not entry or entry.status ~= "DOCKED" or not samePath(entry.locationPath, station.path) then
+		return false, "Target vessel must be docked at the same station."
+	end
+
+	local StationStorage = getStationStorageMod()
+
+	if toFlagship then
+		local equipIndex = tonumber(sourceRef)
+		local okRem, errRem = PlayerFleet.CanRemoveModuleFromEntry(entry, equipIndex)
+		if not okRem then
+			return false, errRem
+		end
+		local rec = entry.equip[equipIndex]
+		local okInst, instOrErr = StationStorage.InstallRecordOnShip(player, rec)
+		if not okInst then
+			return false, instOrErr
+		end
+		table.remove(entry.equip, equipIndex)
+		recalcEntryCargoCap(entry, StationStorage)
+		resyncEntryLiveShip(entry)
+		return true, string.format("Installed %s onto Flagship.", instOrErr:GetName())
+	else
+		local equip = sourceRef
+		local okRem, errRem = StationStorage.CanRemoveEquipmentFromShip(player, equip)
+		if not okRem then
+			return false, errRem
+		end
+		local rec = StationStorage.PackEquipmentRecord(equip)
+		local okFit, slotIdOrErr = canFitEquipmentInEntry(entry, rec, StationStorage)
+		if not okFit then
+			return false, slotIdOrErr
+		end
+
+		local equipSet = player:GetComponent('EquipSet')
+		if not equipSet:Remove(equip) then
+			return false, "Failed to uninstall module from Flagship."
+		end
+		pcall(function() ComponentIntegrity.SyncShipSubsystems(player) end)
+
+		rec.slotId = slotIdOrErr
+		entry.equip = entry.equip or {}
+		table.insert(entry.equip, rec)
+		recalcEntryCargoCap(entry, StationStorage)
+		resyncEntryLiveShip(entry)
+		return true, string.format("Transferred %s to %s.", equip:GetName(), entry.shipName)
+	end
+end
+
+-- ============================================================================
 -- Crew, Captains, Salary Progression & Payroll (Phase A2+)
 -- ============================================================================
 

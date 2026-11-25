@@ -1,8 +1,8 @@
-# Technical Implementation Plan: Aerospace Manufacturers, Modular Slots & Ship Fleet
+# Technical Implementation Plan: Aerospace Manufacturers, Modular Slots & Combat Systems
 
-**Document Version**: 1.0  
-**Status**: Queued  
-**Priority Tier**: Pillar 5 (Foundational Ship Outfitting & Manufacturer Identity Refactor)  
+**Document Version**: 1.1  
+**Status**: Partially Implemented (6 Manufacturer Dealerships & Station Profiles Completed; Mechanical Refactor Queued for Design Discussion)  
+**Priority Tier**: Pillar 5 (Combat/Outfitting Refactor Queued; `.gltf` Fleet Asset-Gated)  
 **Parent Roadmap**: [`01_EXPANSE_LONG_TERM_ROADMAP.md`](./01_EXPANSE_LONG_TERM_ROADMAP.md)  
 **Target Files**:
 * `src/ship/ShipType.h`, `src/ship/ShipType.cpp` *(manufacturer ID, core slot class definitions, hardpoint mount constraints)*
@@ -22,23 +22,19 @@ Pioneer's original outfitting system mixes fixed equipment sizes, loose slot str
 
 ```mermaid
 graph TD
-    subgraph Corps["1. Aerospace Megacorporations"]
-        C1["Sol-Dynamics Aerospace (Solar Federation: Brutalist Gunships)"]
-        C2["Aethelgard Starworks (Commonwealth: Sleek Luxury & Interceptors)"]
-        C3["Guan-Haber Heavyworks (Haber Corp: Industrial Lattice Miners)"]
-        C4["Frontier Voidcraft Co-op (Independents: Modular Explorers)"]
+    subgraph Corps["1. Aerospace Manufacturers (Completed in Dealerships)"]
+        C1["OPLI Orbital Yards, Kaluri Heavy Industries & Mandarava-Csepel Aero"]
+        C2["ALBR Aerospace, Haber Industrial Works & Auronox Corporation"]
     end
 
-    subgraph Slots["2. Four-Tier Slot Architecture"]
-        T1["Tier 1: Core Internals (Power / Thrusters / FSD / Life Support / PD / Sensors)"]
-        T2["Tier 2: Hardpoints (Class 1-4 Fixed/Gimbal/Turret) & Utility Mounts"]
-        T3["Tier 3: Dedicated Avionics & Computers (SAC Mk2 / Interdictor / DSS)"]
-        T4["Tier 4: Flexible Internal Bays (Cargo / Berths / SRV / HRPs / Fuel)"]
+    subgraph Slots["2. Outfitting & Combat Systems (Queued for Design Discussion)"]
+        T1["Core Internals & Flexible Internal Bays (Optional Slot Cleanup)"]
+        T2["Hardpoints (Fixed/Gimbal/Turret), Deployable Doors & Countermeasures"]
     end
 
-    subgraph Assets["3. Fleet & 3D Asset Pipeline"]
-        A1["Heritage Classic Ships (Weathered Sinonatrix / Nerodia)"]
-        A2["Next-Gen .gltf/.glb Fleet (Gear / Hardpoint Doors / Gimbal Thrusters)"]
+    subgraph Assets["3. Fleet & 3D Asset Pipeline (Asset-Gated)"]
+        A1["Heritage Classic Ships"]
+        A2["Blender -> .gltf/.glb Animated Fleet (Gear / Hardpoint Doors / Gimbal Thrusters)"]
     end
 
     Corps --> Assets
@@ -47,42 +43,28 @@ graph TD
 
 ---
 
-## 2. Aerospace Megacorporations & Lore Identity
+## 2. Aerospace Manufacturers & Dealerships *(Completed)*
 
-Every playable hull belongs to one of four manufacturers (plus **Classic Heritage** yards), represented in shipyard UIs via crisp SVG crests (`data/icons/logos/`):
-
-| Manufacturer | Primary Allegiance | Aesthetic & Engineering Philosophy | Signature Ship Roles |
-| :--- | :--- | :--- | :--- |
-| **Sol-Dynamics Aerospace (SDA)** | Solar Federation | Angular faceted composite armor, exposed radiator ribs, heavy dorsal spines | Military gunships, dropships, armored courier freighters |
-| **Aethelgard Starworks** | Commonwealth | Swept aerodynamic curves, pristine white/navy paneling, luxurious glass canopies | VIP passenger liners, high-speed blockade interceptors, imperial clippers |
-| **Guan-Haber Industrial Heavyworks** | Haber Corporation | Industrial box-truss lattice frames, raw tungsten-steel plating, twin cargo booms | Deep-core ring miners, bulk hauler barges, mobile refinery ships |
-| **Frontier Voidcraft Cooperative** | Independents / Rim | Asymmetric rugged hulls, kit-bashed external fuel pods, unmatched FSD efficiency | Long-range exploration vessels, multi-role mercenary gunboats |
+Six native aerospace manufacturers operate faction- and purpose-weighted starport franchise showrooms alongside independent pre-owned brokers (`data/modules/ShipDealerships/`, `data/modules/SecondHand/`, `data/modules/StationProfiles/`, `data/icons/logos/corp_*.svg`):
+* **OPLI Orbital Yards** (`corp_opli.svg`)
+* **Kaluri Heavy Industries** (`corp_kaluri.svg`)
+* **Mandarava-Csepel Aero** (`corp_mandarava.svg`)
+* **ALBR Aerospace** (`corp_albr.svg`)
+* **Haber Industrial Works** (`corp_haber.svg` / `faction_haber.svg`)
+* **Auronox Corporation** (`corp_auronox.svg`)
 
 ---
 
-## 3. Streamlined Modular Slot Architecture
+## 3. Outfitting & Combat Mechanics *(Queued for Design Discussion)*
 
-### 3.1 Four-Tier Outfitting Model (`ShipType`, `EquipSet`, `Equipment/*.lua`)
-Replace ambiguous legacy volume/mass checks with clear numbered size classes (Class 1..8 Internals, Class 1..4 Weapons):
-
-1. **Tier 1 — Dedicated Core Internals** (Every ship has exactly 1 fixed max-class slot per system, undersizing allowed at performance trade-off):
-   * **Power Plant** (MW capacity & thermal efficiency rating A–E).
-   * **Thrusters** (Optimal mass thrust curves affecting sublight speed, vertical hover thrust on high-g worlds, and pitch/roll rates).
-   * **Frame Shift Drive** (Optimal hull mass curve driving hyperspace jump range & fuel-per-jump).
-   * **Life Support** (Emergency $O_2$ reserve timer: 5m E-rated -> 25m A-rated).
-   * **Power Distributor** (`SYS / ENG / WEP` capacitor capacity & MW/s recharge rates; drives boost cooldown & shield regen).
-   * **Sensors** (Normal-space resolution distance & Supercruise scan speed).
-2. **Tier 2 — External Hardpoints & Utility Mounts**:
-   * **Weapon Hardpoints** rated `Class 1 (Small)`, `Class 2 (Medium)`, `Class 3 (Large)`, `Class 4 (Huge)` supporting three mount architectures (`GunManager`):
-     * **Fixed**: Highest DPS, immune to chaff, zero tracking offset.
-     * **Gimballed**: `~20%` lower base DPS, auto-tracks target inside `±22 deg` forward cone, disrupted by Chaff launchers.
-     * **Turreted**: `~40%` lower base DPS, upper/lower hemisphere `360 deg` tracking under Fire-At-Will / Target-Only AI modes, hardpoint-axis occluded by own hull.
-   * **Utility Mounts** (Size 0 external slots): *Chaff Launcher*, *Heat Sink Launcher*, *Point Defense Turret*, *ECM Pod*, *Kill Warrant / Wake Scanner*.
-3. **Tier 3 — Dedicated Avionics & Computers**:
-   * Small standardized bays preventing autopilot/interdictor bloat from eating cargo slots: *Docking Computer*, *Supercruise Assist Mk 2*, *FSD Interdictor*, *Datalink Scanner*, *Surface Mapping Launcher*.
-4. **Tier 4 — Flexible Internal Compartments**:
-   * Numbered size bays (Size `1` to `8`, capacity $2^{\text{size}}$ tonnes equivalent) freely outfitted with:
-     * *Cargo Racks*, *Shield Generators*, *Passenger Cabins* (Economy / Business / First / Luxury), *Auxiliary Fuel Tanks*, *SRV Hangars*, *Hull/Module Reinforcement Packages*, *Fuel Scoops*, *Scrap Reclaimers*, *Mining Refineries*.
+### 3.1 Modular Slot Architecture (`ShipType`, `EquipSet`, `Equipment/*.lua`)
+* Streamline internal bays across Core Internals, Dedicated Avionics (`Docking Computer`, `Supercruise Assist`, `FSD Interdictor`, `Discovery/Warrant Scanners`), Utility Mounts, and Flexible Internal Compartments.
+* **No Mandatory `SYS/ENG/WEP` Pip Juggling**: Pioneer does not currently implement a capacitor pip distributor, and this plan **omits** manual `SYS/ENG/WEP` pip micromanagement in favor of straightforward power-budget and thermal management.
+* **Weapon Hardpoints & Utility Mounts (`GunManager`)**:
+  * **Fixed**: Highest DPS, immune to chaff, zero tracking offset.
+  * **Gimballed**: `~20%` lower base DPS, auto-tracks target inside `±22 deg` forward cone, disrupted by Chaff launchers.
+  * **Turreted**: `~40%` lower base DPS, upper/lower hemisphere `360 deg` tracking under Fire-At-Will / Target-Only AI modes, hardpoint-axis occluded by own hull.
+  * **Utility Mounts**: *Chaff Launcher*, *Heat Sink Launcher*, *Point Defense Turret*, *ECM Pod*.
 
 ---
 
@@ -101,23 +83,23 @@ Replace ambiguous legacy volume/mass checks with clear numbered size classes (Cl
 
 ## 5. Implementation Milestones
 
-### Milestone 1: Core Slot & Class Refactor (`EquipSet`, `ShipType`, `Equipment/*.lua`)
-* [ ] Migrate all `data/ships/*.json` definitions to explicit Core Internal slots (Power/Thrusters/FSD/LifeSupport/PD/Sensors), Avionics slots, Hardpoint Classes `1–4`, Utilities, and Optional Compartment sizes.
-* [ ] Implement Power Distributor capacitor drain/recharge (`SYS`/`ENG`/`WEP`) and Power Plant priority brownout curve (`< 100%` power budget).
+### Milestone 1: Modular Slot & Power-Budget Cleanup (`EquipSet`, `ShipType`, `Equipment/*.lua`) *(Queued)*
+* [ ] Streamline internal bays across Core Internals, Dedicated Avionics, Utility Mounts, and Flexible Compartments without introducing mandatory `SYS/ENG/WEP` capacitor pip micromanagement.
+* [ ] Add clean power-budget priority shedding (`< 100%` reactor MW capacity) if desired during design discussion.
 
-### Milestone 2: Fixed / Gimballed / Turreted Weapons & Utilities (`GunManager`)
-* [ ] Add gimbal cone auto-aim (`±22 deg`), chaff dispersion noise, and hemisphere turret tracking in `GunManager.cpp` + hardpoint deployment state (`hardpointsDeployed` blocks FSD charge until retracted!).
+### Milestone 2: Fixed / Gimballed / Turreted Weapons & Utilities (`GunManager`) *(Queued)*
+* [ ] Add gimbal cone auto-aim (`±22 deg`), chaff dispersion noise, and hemisphere turret tracking in `GunManager.cpp` + hardpoint deployment state (`hardpointsDeployed` blocks FSD charge until retracted).
 * [ ] Implement *Chaff Launcher*, *Heat Sink Launcher*, *Point Defense* (shoots incoming missiles), and *ECM* utility active abilities.
 
-### Milestone 3: Manufacturer Lore, Shipyard UI & SVG Logos
-* [ ] Create aerospace corporate SVG crests (`sol_dynamics.svg`, `aethelgard.svg`, `guan_haber.svg`, `frontier_voidcraft.svg`) and integrate manufacturer lore/filtering into Station Shipyard & Outfitting PiGui views.
+### Milestone 3: Manufacturer Lore, Shipyard Dealerships & SVG Logos *(Completed)*
+* [x] Implemented 6 aerospace franchise dealerships (*OPLI*, *Kaluri*, *Mandarava-Csepel*, *ALBR*, *Haber*, *Auronox*), independent used brokers, 8 station profiles, and corporate SVG crests (`data/icons/logos/corp_*.svg`).
 
-### Milestone 4: Modern `.gltf`/`.glb` Animated Fleet Rollout
-* [ ] Author/import initial flagship hulls for each manufacturer (1 Starter/Multirole, 1 Miner, 1 Heavy Combat, 1 Explorer) with landing gear, hardpoint doors, and cockpit interiors while retaining Classic Heritage models.
+### Milestone 4: Modern `.gltf`/`.glb` Animated Fleet Rollout *(Asset-Gated)*
+* [ ] Author/import Blender-rigged `.gltf`/`.glb` hulls with landing gear, hardpoint doors, and cockpit interiors while retaining Classic Heritage models.
 
 ---
 
 ## 6. Verification Criteria
-1. **Outfitting Balance Test**: Outfit a Guan-Haber miner vs. Sol-Dynamics gunship; verify size constraints prevent fitting Class 3 weapons in Class 1 hardpoints, while undersizing Core FSD/Thrusters updates jump range and boost speeds in real time.
+1. **Outfitting Balance Test**: Verify slot constraints prevent fitting oversized weapons in smaller hardpoints, while undersizing Core FSD/Thrusters updates jump range and boost speeds cleanly.
 2. **Gimbal / Chaff / Turret Combat Test**: Fire gimballed lasers at an NPC deploying Chaff; confirm tracking jitters briefly during chaff cloud duration while Fixed weapons hold dead-center aim.
 3. **Power Priority & Hardpoints Test**: Deploy hardpoints exceeding `100%` reactor MW capacity and confirm low-priority non-essential modules (Cargo Scoop, FSD) power down automatically until weapons retract.

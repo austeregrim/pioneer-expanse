@@ -16,6 +16,7 @@ local Module = require 'pigui.libs.module'
 local Outfitter = require 'pigui.libs.equipment-outfitter'
 
 local Lang = require 'Lang'
+local StationStorage = require 'modules.StationStorage.StationStorage'
 local l = Lang.GetResource("ui-core")
 local le = Lang.GetResource("equipment-core")
 local ls = Lang.GetResource("ships")
@@ -140,6 +141,57 @@ function EquipmentWidget:onSellItem(equip)
 	self:buildSections()
 end
 
+---@param equip EquipType
+function EquipmentWidget:onStoreItem(equip)
+	assert(self.selectedEquip)
+	assert(self.selectedEquip == equip)
+
+	if not self.station or not StationStorage.IsDepositAllowed(self.station) then
+		return
+	end
+	local ok = StationStorage.DepositModuleFromFlagship(self.station, equip)
+	if ok then
+		ui.playSfx("OK")
+		self.selectedEquip = nil
+		self:buildSections()
+	end
+end
+
+---@param moduleUid integer
+function EquipmentWidget:onInstallStoredItem(moduleUid)
+	local player = Game.player
+	if self.ship == player then
+		local okIns, Insurance = pcall(require, 'modules.Insurance.Insurance')
+		if okIns and Insurance and Insurance.HasClaim and Insurance.HasClaim() then
+			return
+		end
+	end
+
+	local replaced = false
+	if self.selectedEquip then
+		if StationStorage.IsDepositAllowed(self.station)
+			and StationStorage.CanRemoveEquipmentFromShip(self.ship, self.selectedEquip)
+			and StationStorage.DepositModuleFromFlagship(self.station, self.selectedEquip) then
+			replaced = true
+		elseif self.market.canSellEquip then
+			self:onSellItem(self.selectedEquip)
+			replaced = true
+		else
+			return
+		end
+		if replaced then
+			self.selectedEquip = nil
+		end
+	end
+
+	local okInst, instOrErr = StationStorage.InstallModuleToSlot(self.station, moduleUid, self.ship, self.selectedSlot)
+	if okInst then
+		ui.playSfx("OK")
+		self.selectedEquip = self.selectedSlot and instOrErr
+	end
+	self:buildSections()
+end
+
 --
 -- =============================================================================
 --  Ship Equipment Widget Display
@@ -167,6 +219,27 @@ function EquipmentWidget:Constructor(id)
 
 	self.market:hookMessage("onSellItem", function(_, item)
 		self:onSellItem(item)
+
+		self.market.replaceEquip = self.selectedEquip
+		self.market:refresh()
+	end)
+
+	self.market:hookMessage("onStoreItem", function(_, item)
+		self:onStoreItem(item)
+
+		self.market.replaceEquip = self.selectedEquip
+		self.market:refresh()
+	end)
+
+	self.market:hookMessage("onInstallStoredItem", function(_, moduleUid)
+		self:onInstallStoredItem(moduleUid)
+
+		if self.selectedSlot then
+			local nextSlot = self.adjacentSlots[self.selectedSlot]
+			if nextSlot and not nextSlot.equip then
+				self:onSelectSlot(nextSlot)
+			end
+		end
 
 		self.market.replaceEquip = self.selectedEquip
 		self.market:refresh()

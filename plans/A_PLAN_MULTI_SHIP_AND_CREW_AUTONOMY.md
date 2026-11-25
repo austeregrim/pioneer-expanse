@@ -1,9 +1,21 @@
 # Plan A: Multi-Ship Ownership, Station Hangars, Crewed Fleet & X4-Style Autonomy
 
-**Document Version**: 1.0  
-**Status**: Next Up (Zero New Assets Required)  
-**Priority Tier**: Plan A (Immediate Next Priority Ahead of Plan B SRVs)  
+**Document Version**: 1.2  
+**Status**: Completed (Including Resident Station Storage & Docked Module Transfer)  
+**Priority Tier**: Plan A (Completed)  
 **Parent Roadmap**: [`01_EXPANSE_LONG_TERM_ROADMAP.md`](./01_EXPANSE_LONG_TERM_ROADMAP.md)  
+
+---
+
+## 0. Implementation Status Summary
+
+Plan A's core systems are **implemented and live** across `data/modules/PlayerFleet/PlayerFleet.lua`, `data/modules/StationStorage/StationStorage.lua`, `data/pigui/modules/station-view/11-hangar.lua`, `data/pigui/modules/station-view/08-shipMarket.lua`, `data/pigui/modules/station-view/09-equipmentMarket.lua`, `data/pigui/modules/station-view/07-commodityMarket.lua`, `data/pigui/modules/info-view/05-fleet.lua`, `data/pigui/modules/info-view/06-crew.lua`, and `data/pigui/modules/info-view/02-missions.lua`:
+* Multi-ship ownership, **Buy & Switch** / **Buy into Hangar**, flagship swapping, vessel renaming, drydock repairs, cargo transfer, and remote inter-system ferry recalls.
+* NPC Captain promotion, 5-skill progression (`Piloting`, `Navigation`, `Trading`, `Combat`, `Mining`), and automated salary payroll / arrears management.
+* Autonomous `FOLLOW`, `DOCK`, non-blocking Cr/hr `AUTO_TRADE` route scanning, `AUTO_MINE`, `PATROL` / piracy & defense orders, contract mission delegation, and dual In-System (IS) / Out-of-System (OOS) simulation.
+* **Resident Station Storage & Docked Module Transfer *(Completed)***:
+  * Tied station storage vaults (**500t cargo + 50 modules**) to registered civil residency (`TaxAuthority.IsHomeStation`), with **Equipment Market** store/install, **Commodity Market** cargo transfer, withdraw-only former residency vaults + **Courier Transfer**, and **Hangar & Fleet** vault inspection/direct sales.
+  * Direct compatible equipment/module swapping between Flagship and docked fleet vessels in [`11-hangar.lua`](../data/pigui/modules/station-view/11-hangar.lua).
 
 ---
 
@@ -32,15 +44,15 @@ Maintain a serialized `PlayerFleet` registry indexed by persistent `shipUid`:
   * `stats`: lifetime trade profit, ore mined, bounties collected, missions completed.
 
 #### Shipyard & Hangar UI
-* **Shipyard Purchase Modes** ([`04-shipMarket.lua`](../data/pigui/modules/station-view/04-shipMarket.lua)):
+* **Shipyard Purchase Modes** ([`08-shipMarket.lua`](../data/pigui/modules/station-view/08-shipMarket.lua)):
   * **Trade-In Current Ship** (existing flow).
   * **Buy & Switch (Store Current Ship Here)**: Purchases the new hull, transfers the player's current vessel into the current station's Hangar (`PlayerFleet`), and transfers the player directly to the new vessel.
   * **Buy into Hangar**: Purchases the hull directly into the current station's Hangar without leaving the active flagship.
-* **Station Hangar Bay Tab** (`data/pigui/modules/station-view/13-hangar.lua`):
+* **Station Hangar Bay Tab** (`data/pigui/modules/station-view/11-hangar.lua`):
   * Lists all ships stored at the current station and remotely across the galaxy (showing system, station, status, captain, current order, and hull/fuel).
   * **Swap Active Ship**: Board any docked ship at the current station; packs the previous flagship into `PlayerFleet` (retaining its fitted equipment, modules, and cargo) and instantiates the newly boarded ship on pad (`SetShipType`, skin/pattern, `EquipSet`, `CargoManager`, crew roster).
   * **Remote Transfer / Ferry**: Order a ship stored at another station to be ferried to the current port (time-scaled by jump/Supercruise distance, or piloted live if a Captain is assigned and the route is safe).
-  * **Cargo & Module Swap**: Move stored cargo or uninstalled/compatible equipment between ships docked at the same station.
+  * **Cargo Swap *(Done)* & Resident Module/Cargo Storage *(Next Up)***: Cargo transfer between docked ships is implemented; next up is compatible module transfer between docked ships and persistent station storage vaults unlocked via starport civil residency (`TaxAuthority`).
 
 ---
 

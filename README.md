@@ -63,8 +63,9 @@ This unified section provides an at-a-glance comparison against upstream Pioneer
 | Gameplay System | Original Pioneer Baseline | Pioneer: Expanse |
 | :--- | :--- | :--- |
 | **In-System Travel** | Newtonian flight accelerated via manual time-warp buttons ($1\times$ to $10,000\times$). | **FTL Supercruise (Frame Shift Drive)** from $30\text{ km/s}$ to $2,001c$ with real-time gravity well drag, 75% blue-zone regulation, terrain-aware exclusion zones, and approach-vector safe dropouts. |
-| **Flight Pacing & Clock** | Time compression during active flight; offline time can invalidate missions. | **1:1 Real-Time Flight Pacing**; simulation halts when game closes so deadlines guarantee active play time; docked starport "Pass Time" service. |
+| **Flight Pacing & Clock** | Time compression during active flight; offline time can invalidate missions. | **1:1 Real-Time Flight Pacing**; simulation halts when game closes so deadlines guarantee active play time; standard time dilation while docked at stations. |
 | **System NPC Traffic & Registry** | Ephemeral station-bound NPC spawns; static flight trajectories. | **Living Supercruise NPC Traffic & Persistent Regional Ship Registry**; up to 96 persistent regional vessels per hub with unique IDs (`PREFIX-NNNNNL`), shipping lanes, low wakes, and **FSD Interdiction** tug-of-war gameplay. |
+| **Stealth, Transponders & Warrants** | Universal omniscient sensor detection; basic local bounties. | **Transponder On/Off & Dark Running (`< 1c`)**, body-occluded line-of-sight & police witness cones, **Sub-Light Sensor Arrays**, **Scan Detectors**, **Per-Faction Bounty Licences**, and **Warrant Scanners**. |
 | **Planetary Rings & Mining** | Flat 2D billboard ring textures with no physical depth or close-range interaction. | **Volumetric 3D Planetary Rings** with multi-band Roche/frost-line compositions, planetary self-shadowing, 3-tier LOD asteroid fields (up to 2,800 physical rocks), and laser mining. |
 | **Ship Ownership & Fleet** | Single active ship only; buying a new vessel discards your previous ship. | **Multi-Ship Ownership & Station Hangars** (`PlayerFleet.lua`); hire NPC Captains, level 5 skills, delegate missions, and issue autonomous X4-style trade, ring-mining, escort, and patrol orders. |
 | **Combat & Ship Integrity** | Whole-hull hitpoints only; static module reliability until random breakdown. | **Localized 3D Subsystem Targeting & Component Integrity Wear**; sub-target enemy Thrusters, Hyperdrives, Shields, Weapons, and Sensors; progressive combat damage and high-G environmental wear with drydock overhaul. |
@@ -91,17 +92,19 @@ This unified section provides an at-a-glance comparison against upstream Pioneer
   * **Surface Starports**: Drops into the planet's rotating frame at $10\text{ km}$ altitude and $8\text{ km}$ horizontal standoff facing the surface base.
   * **Planetary Orbital Insertion**: Safe disengaging at a planet inserts the vessel into a stable $250\text{ km}$ orbit with matching circular orbital velocity.
 * **Terrain-Aware Exclusion Zones & Emergency Dropout**: Swept ray-sphere and 3D terrain-elevation intersection checks trigger an immediate Emergency Dropout if breached (or if manually dropped at $\ge 1,000\text{ km/s}$), depleting shields ($10\%$ hull damage if unshielded), spiking thermal heat to $92\%$, and enforcing a 25-second FSD cooldown.
-* **Supercruise Assist (Autopilot Mk 2)**: Dedicated avionics module (`misc.autopilot_mk2`) providing automated target alignment, planetary occlusion routing around obstructing bodies, cross-system hyperjump vector alignment, $75\%$ throttle regulation, automatic safe disengage, and seamless handoff to sublight docking (`AIDock`).
+* **Supercruise Assist & Autopilot Suites (`Autopilot Mk 2–4`)**: Dedicated avionics modules (`misc.autopilot_mk2`–`_4`) providing automated target alignment, planetary occlusion routing around obstructing bodies, cross-system hyperjump vector alignment, $75\%$ throttle regulation, automatic safe disengage, and seamless handoff to sublight docking (`AIDock`).
 * **Flight Assist & Surface Takeoff Controls**: Upgraded `PlayerShipController` Flight Assist with target acceleration, centripetal, and Coriolis compensation (`FOLLOW_ORI`), hold-Thrust-Up ($0.35\text{s}$) brisk planetary surface liftoff ($18\text{ m/s}$ ground, $10\text{ m/s}$ orbital), instant forward throttle takeover (`CRUISE_UP` $\to$ `CRUISE_FWD`), and double-click Middle-Mouse-Button internal cockpit **Freelook Lock** with auto-recentering on hyperjump.
 * **Cockpit Supercruise HUD & 3D Overlays**: Vertical throttle gauge, dynamic $\text{km/s}$, $\text{Mm/s}$, and $c$ velocity readouts, gravity strain meter, dual distance/speed alignment bars, 3D orbital path ellipses, spherical exclusion zone silhouette rings, and double-precision cyan FTL warp speed lines.
 
 #### 2. 1:1 Real-Time Flight Pacing & Offline Preservation
 * **1:1 Real-Time Flight Clock**: Active flight simulation runs strictly at `1x` real-time; in-flight time-warp buttons are replaced by FSD Supercruise and Supercruise Assist controls.
 * **Offline Time Freeze**: The simulation clock halts when the game is closed. Mission deadlines represent actual active gameplay hours, ensuring players never fail contracts while away from the game.
-* **Rebalanced Supercruise Mission Economy & Docked "Pass Time"**: Mission travel formulas and payouts (`MissionUtils.lua`) are calibrated for real-time Supercruise transit and system security risk, paired with docked starport clock-advance services for scheduled rendezvous.
+* **Rebalanced Supercruise Mission Economy & Docked Time Dilation**: Mission travel formulas and payouts (`MissionUtils.lua`) are calibrated for real-time Supercruise transit and system security risk, while standard time dilation remains available when docked at any starport.
 
-#### 3. Living NPC Supercruise Traffic, Persistent Ship Registry & FSD Interdiction
-* **Universal NPC Supercruise Transit**: All NPC traders, couriers, bulk freighters, miners, police patrols, and pirates travel between jump clouds, planets, rings, and stations in real `SUPERCRUISE` ($> 2,500\text{ km}$), steering tangentially around planetary and stellar exclusion zones.
+#### 3. Living NPC Supercruise Traffic, Transponders, Stealth & FSD Interdiction
+* **Transponders, Dark Running & Persistent Locks (`Plan I`)**: Toggleable ship transponder on the flight HUD; traveling below $1c$ with transponder off hides ships beyond $1\text{ km}$ unless detected by **Sub-Light Sensor Arrays**, while ships $\ge 1c$ remain visible points of light subject to line-of-sight body occlusion. Target locks persist across speed and mode changes until broken by occlusion, hyperjump, or docking.
+* **Police Witnessing, Bounty Licences & Warrant Scanners**: Police enforce transponder law inside a forward field-of-view cone with two warnings before scanning or interdicting; players and NPCs purchase per-faction **Bounty Hunter Licences** on the station Police terminal and equip **Warrant Scanners** and **Scan Detectors**.
+* **Universal NPC Supercruise Transit**: All NPC traders, couriers, bulk freighters, miners, smugglers, police patrols, and pirates travel between jump clouds, planets, rings, and stations in real `SUPERCRUISE` ($> 2,500\text{ km}$), steering tangentially around planetary and stellar exclusion zones.
 * **Persistent Regional Ship Registry (`ShipRegistry.lua`)**: Generates and tracks up to 96 persistent regional vessels per major system hub operating across $\sim 32\text{ ly}$ trade corridors. Assigns globally unique, non-reusable extended registration IDs (`PREFIX-NNNNNL`, e.g., `GR-48291K`), persistent vessel names (`MSV Alderney`, `OSV Deepcore`), commander identities, home ports, overnight hangar stowage schedules, and permanent casualty logs.
 * **Dynamic Shipping Lane Traffic & Load Reconciliation**: Scales active traffic density by system population and starport count (up to 30 in-flight and 44 docked vessels in hubs like Sol) and reconciles traffic immediately upon loading saved games (`reconcileTrafficOnLoad`).
 * **FTL Point-of-Light Visuals & Supercruise Sensors**: Vessels cruising at FTL ($\ge 1c$) render across the star system as glowing points of light with directional velocity wakes (occluded behind station hulls and terrain, and suppressed while docked). Supercruise sensors resolve ship type, pilot/faction, home port, and `WANTED`/`CLEAN` legal status while hiding cargo manifests and hull/shield percentages until sublight scan.
@@ -223,42 +226,31 @@ This unified section provides an at-a-glance comparison against upstream Pioneer
 
 ---
 
-## Strategic Roadmap: Remaining Expansions (Pillars B–H)
+## Strategic Roadmap: Remaining Expansions (Pillars B–J)
 
-Our strategic long-term development roadmap is documented in detail in the [`plans/`](plans/) directory. The foundation, fleet autonomy (`Plan A`), and initial visual/weather/dealership milestones (`Plans E & F`) are implemented; the remaining expansion work focuses on planetary surface vehicles, engineering depth, covert operations, full 3D cockpit interiors, modular slot outfitting, deep-space alien expeditions, and capital-scale empire building:
+Our strategic long-term development roadmap is documented in detail in the [`plans/`](plans/) directory. The foundation, fleet autonomy (`Plan A`), transponder/dark-running stealth (`Plan I`), and core graphics/weather/dealership/cartography milestones (`Plans E, F, G`) are implemented; upcoming work proceeds in the following sequence:
 
-* **[Plan B: Surface Reconnaissance Vehicles (SRVs) & Planetary Surface Operations](plans/B_PLAN_SRV_SURFACE_OPERATIONS.md)**:
-  * Multi-wheel spring-damper suspension physics on `GroundVehicle` (`DynamicBody` subclass), Ackermann steering, and low-gravity vernier thrusters.
-  * Amphibious waterjet and pontoon buoyancy mode for liquid hydrocarbon/water oceans.
-  * Procedural instanced surface boulder scatter fields with physical Bullet convex colliders.
-  * Acoustic-Spectral Waterfall Wave Scanner (`±90°` sweep) for locating mineral outcrops, crashes, and distress beacons.
-  * Landed ship hangar deployment, boarding ramp transfer, and autonomous ship dismissal (> 2.5 km) & recall landing.
+* **Immediate Polish ([Plan 02](plans/02_PIONEER_EXPANSE_FOUNDATION_PLAN.md) & [Plan A](plans/A_PLAN_MULTI_SHIP_AND_CREW_AUTONOMY.md))**:
+  * Cross-System Target Memory (locking a remote system's station/planet from F2 and auto-targeting on arrival) + F2 Object Info target button.
+  * Resident Station Storage (tied to civil residency) & direct compatible module swapping between docked ships.
+* **[Plan E: Soundscapes, Vacuum Audio & Chemistry Rayleigh/Mie Finish](plans/E_PLAN_GRAPHICS_AUDIO_OVERHAUL.md)**:
+  * Situational hull/weather/debris `.ogg` soundscapes, OpenAL vacuum low-pass acoustic filtering, and a priority-queued Cockpit AI Voice.
+  * Per-planet atmospheric chemistry (`CO2`, `CH4`, `SO2`, `NH3`, ozone) and weather-coupled Rayleigh/Mie scattering.
+  * *(Asset-Gated)* Full 3D cockpit interiors and dynamic canopy glass shaders (frost, rain streaks, glare).
+* **[Plan J: Military Enlistment, Frontline Support & Deputy Charter](plans/J_PLAN_MILITARY_FRONTLINE_AND_DEPUTY.md)**:
+  * Non-combat frontline support (blockade running, supply convoys, troop/refugee extractions, dark-running recon, and Plan A autonomous fleet logistics), optional combat zones, and high-standing Faction Deputy authority.
 * **[Plan C: Engineering, Salvage & Matter Synthesis](plans/C_PLAN_ENGINEERING_CRAFTING.md)**:
-  * Zero-cargo-mass player materials bank (Raw Elements, Manufactured Components, Encoded Data).
-  * Atomic Scrap Reclamation from ship debris and ring mining fragments.
-  * On-the-fly field Matter Synthesis (FSD injection range boosts, emergency life-support $O_2$, munitions re-arm, hull limpets).
-  * Deterministic Grade 1–5 Engineer blueprint progression and unique Experimental Effect overrides.
-* **[Plan D: Electronic Warfare, Infiltration & Megaships](plans/D_PLAN_HACKING_INFILTRATION.md)**:
-  * Non-dockable orbital Megaships, orbital installations, and penal colonies with sub-targetable cargo bays, data relays, and defense grids.
-  * Datalink Scanner with two-phase interactive signal intrusion and frequency-bypass minigames.
-  * Planetary settlement trespass security zones, alarm klaxons, and automated Skimmer defense drone patrols.
-* **[Plan E: Graphics, Atmospheric Shaders & Vacuum Audio Overhaul](plans/E_PLAN_GRAPHICS_AUDIO_OVERHAUL.md)**:
-  * PBR multi-splat terrain shaders (`albedo`, `normal`, `roughness`, `metallic`, `AO`) with slope-based triplanar projection.
-  * Analytical Rayleigh & Mie atmospheric scattering with realistic sunset limb glow and planetary shadow projection.
-  * Dynamic cockpit canopy glass shaders: micro-abrasions, star glare, heat shimmer, and cold-running frost (< 20% heat).
-  * OpenAL vacuum low-pass acoustic filtering (distinguishing exterior vacuum-attenuated detonations from internal hull transducer vibrations).
-  * Synthesized Cockpit AI Voice advisory priority queue ("FSD charging", "Warning: Temperature critical", "Shields offline").
-* **[Plan F: Aerospace Megacorporations & Modular Slot Outfitting](plans/F_PLAN_FLEET_MANUFACTURERS.md)**:
-  * Four major aerospace manufacturers with unique design languages and flight philosophies.
-  * Four-tier outfitting architecture: Core Internals (Class 1–8), Weapon Hardpoints (Class 1–4 Fixed/Gimballed/Turreted) & Utility Mounts, Dedicated Avionics, and Flexible Internal Compartments.
-* **[Plan G: Deep Exploration, Wing Missions & Alien Civilizations](plans/G_PLAN_EXPLORATION_ALIENS.md)**:
-  * Full-Spectrum System (FSS) waveform scanner and orbital Detailed Surface Scanner (DSS) gravity-curved mapping probes.
-  * Wing escort contracts, VIP luxury passenger transport, and burning-station refugee evacuations.
-  * Non-human deep-space civilizations guarding outer nebulae and relics (*Hydrazine Swarm* and *Archon Automata*).
-* **[Plan H: Capital Ships, Station Construction & Grand Strategy](plans/H_PLAN_CAPITAL_SHIPS_AND_EMPIRE_BUILDING.md)**:
-  * Playable and AI-commanded Capital Ships & Fleet Carriers with multi-turret fire control networks.
-  * Modular player starport and orbital station construction.
-  * Closed-loop industrial factories, NPC Station Managers, and sector-wide territorial sovereignty.
+  * Zero-cargo-mass player materials bank (Raw Elements, Manufactured Components, Encoded Data), Atomic Scrap Reclamation, field Matter Synthesis (boosts, O2, ammo), and deterministic G1–G5 Engineer upgrades.
+* **[Plan F: Modular Slots, Turrets & Countermeasures](plans/F_PLAN_FLEET_MANUFACTURERS.md)**:
+  * Optional modular slot cleanup, Fixed/Gimballed/Turreted Class 1–4 mounts, deployable hardpoints, and active countermeasures (Chaff, Heat Sinks, Point Defense, ECM)—without `SYS/ENG/WEP` capacitor pip juggling—plus future Blender `.gltf`/`.glb` hulls.
+* **[Plan G: Deep Exploration, FSS/DSS Probes & Alien Civilizations](plans/G_PLAN_EXPLORATION_ALIENS.md)**:
+  * Full-Spectrum System (FSS) waveform scanner, orbital Detailed Surface Scanner (DSS) probes (surface POIs & ring hotspots), VIP liners, burning-station refugee evacuations, and outer-sector alien fleets (*Hydrazine Swarm* and *Archon Automata*).
+* **[Plan B: Surface Reconnaissance Vehicles (SRVs) & Planetary Surface Operations](plans/B_PLAN_SRV_SURFACE_OPERATIONS.md)** *(Asset-Gated)*:
+  * Multi-wheel spring-damper suspension physics on `GroundVehicle`, amphibious waterjet mode, procedural surface boulder scatter, Acoustic-Spectral Waterfall Wave Scanner, and autonomous ship dismissal/recall.
+* **[Plan D: Electronic Warfare, Infiltration & Megaships](plans/D_PLAN_HACKING_INFILTRATION.md)** *(Asset-Gated)*:
+  * Non-dockable orbital Megaships with sub-targetable cargo bays/relays, Datalink Scanner frequency-bypass hacking minigames, and settlement trespass security with Skimmer drones.
+* **[Plan H: Capital Ships, Station Construction & Grand Strategy](plans/H_PLAN_CAPITAL_SHIPS_AND_EMPIRE_BUILDING.md)** *(Endgame)*:
+  * Playable and AI-commanded Capital Ships & Fleet Carriers, modular player station construction, closed-loop production chains, NPC Station Managers, and sector sovereignty.
 
 ---
 

@@ -1,8 +1,8 @@
 # Technical Implementation Plan: Deep Exploration, Wing Missions & Alien Civilizations
 
-**Document Version**: 1.0  
-**Status**: Queued  
-**Priority Tier**: Pillar 6 (Late-Game Content, Cartography & Non-Human Threats)  
+**Document Version**: 1.1  
+**Status**: Partially Implemented (Universal Cartographics & Discovery Scanner Completed; FSS/DSS, Crisis Evacs & Aliens Queued)  
+**Priority Tier**: Pillar 6 (M1–M3 Queued for Discussion; M4 Aliens Asset-Gated)  
 **Parent Roadmap**: [`01_EXPANSE_LONG_TERM_ROADMAP.md`](./01_EXPANSE_LONG_TERM_ROADMAP.md)  
 **Target Files**:
 * `src/exploration/SystemScanner.h`, `src/exploration/SystemScanner.cpp` *(NEW — FSS waveform discovery & body resolve state)*
@@ -50,9 +50,9 @@ graph TD
 
 ## 2. Exploration Systems: Waveform FSS & Orbital DSS
 
-### 2.1 Discovery State Persistence (`SystemBody`)
-* Add `uint8_t explorationState` (`0 = UNKNOWN_ORBIT`, `1 = FSS_SCANNED`, `2 = DSS_MAPPED`) and `FirstDiscoveredBy` / `FirstMappedBy` metadata in system cache / save JSON (inhabited core systems default pre-mapped).
-* Unvisited fringe systems reveal only the primary star(s) + uncalibrated gravity-band signals on arrival.
+### 2.1 Discovery State Persistence (`SystemBody`) & Implemented Cartography Baseline
+* **Already Implemented**: `data/modules/Cartography/`, `data/pigui/modules/station-view/04-universalCartographics.lua`, 3-second hold-to-charge **Discovery Scanner** system ping, `ScanManager` orbital/surface telemetry scans, Cartography Survey missions, and the $10\text{ ly}$ minimum sale distance broker terminal.
+* **Remaining**: Add `uint8_t explorationState` (`0 = UNKNOWN_ORBIT`, `1 = FSS_SCANNED`, `2 = DSS_MAPPED`) and `FirstDiscoveredBy` / `FirstMappedBy` metadata in system cache / save JSON (inhabited core systems default pre-mapped) so unvisited fringe systems reveal only the primary star(s) + uncalibrated gravity-band signals on arrival.
 
 ### 2.2 Full-Spectrum Waveform Scanner (`SystemScanner`, `fss-scanner.lua`)
 * Operated safely at `0%` throttle in `SUPERCRUISE`:
@@ -109,8 +109,9 @@ Anchored far from inhabited core bubbles (`> 300 ly` outer nebulae, ammonia worl
 ## 5. Implementation Milestones
 
 ### Milestone 1: System Discovery Flags & FSS Waveform Scanner
-* [ ] Persist exploration states per system/body and implement uncalibrated orbital signal generation for unexplored systems.
-* [ ] Build `fss-scanner.lua` spectral waveform alignment UI + `Cartography.lua` discovery payout logic (Universal Cartographics desk).
+* [x] **Baseline Cartography *(Completed)***: `Cartography.lua`, `04-universalCartographics.lua`, Discovery Scanner system ping, and `ScanManager` orbital/surface scans.
+* [ ] Persist exploration states (`UNKNOWN_ORBIT`, `FSS_SCANNED`, `DSS_MAPPED`) per system/body and implement uncalibrated orbital signal generation for unexplored systems.
+* [ ] Build `fss-scanner.lua` spectral waveform alignment UI integrated with `Cartography.lua`.
 
 ### Milestone 2: Orbital DSS Surface Probes & Ring Hotspots
 * [ ] Implement ballistic `SurfaceProbe` orbital arc simulation (`Planet` gravity trajectory), `100%` coverage tracker, and ring hotspot coordinate seeds read by `RingField` mining yields.
@@ -118,7 +119,7 @@ Anchored far from inhabited core bubbles (`> 300 ly` outer nebulae, ammonia worl
 ### Milestone 3: Wing Contracts, VIP Liners & Refugee Evacuations
 * [ ] Add wingman follow/escort Supercruise & combat commands, Passenger Berth UI contracts, and thermal-hazard damaged station evacuation states.
 
-### Milestone 4: Alien Fleets (8 Hulls, Weapons & AI) & Encounter Director
+### Milestone 4: Alien Fleets (8 Hulls, Weapons & AI) & Encounter Director *(Asset-Gated)*
 * [ ] Implement caustic DoT corrosion & zero-inertia omni-directional `AlienBehavior` AI states.
 * [ ] Create/import 4 Hydrazine Swarm + 4 Archon Automata models, unique audio signatures, and outer-sector nebula/relic trigger logic in `EncounterDirector.lua`.
 

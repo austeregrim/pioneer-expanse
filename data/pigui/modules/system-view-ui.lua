@@ -20,6 +20,7 @@ local layout = require 'pigui.libs.window-layout'
 local Sidebar = require 'pigui.libs.sidebar'
 
 local systemEconView = require 'pigui.modules.system-econ-view'.New()
+local CrossSystemNav = require 'modules.System.CrossSystemNav'
 
 local player = nil
 local colors = ui.theme.colors
@@ -640,6 +641,9 @@ local settingsView = {
 	end
 }
 
+local setObjectNavTarget
+local isTargetableObject
+
 ---@type UI.Sidebar.Module
 local infoView = {
 	icon = icons.info,
@@ -670,6 +674,53 @@ local infoView = {
 			ui.separator()
 			ui.spacing()
 
+			if isTargetableObject(obj) then
+				local isRemote = isSystemBody and body.physicsBody == nil
+				local navTarget = player:GetNavTarget()
+				local isNav = isRemote and CrossSystemNav.IsPendingTarget(body)
+					or (not isRemote and ((isSystemBody and navTarget == body.physicsBody) or (not isSystemBody and navTarget == body)))
+
+				if isRemote then
+					local btnLabel = isNav and "✓ QUEUED CROSS-SYSTEM TARGET (CLEAR)##sv_info_nav" or "QUEUE AS CROSS-SYSTEM TARGET##sv_info_nav"
+					local btnStyle = isNav and ui.theme.buttonColors.selected or ui.theme.buttonColors.default
+					if ui.button(btnLabel, Vector2(-1, 0), btnStyle) then
+						if isNav then
+							CrossSystemNav.ClearPendingTarget()
+							ui.playSfx("OK")
+						else
+							setObjectNavTarget(obj)
+						end
+					end
+				else
+					local btnLabel = isNav and "✓ ACTIVE NAVIGATION TARGET (CLEAR)##sv_info_nav" or "SET AS NAVIGATION TARGET##sv_info_nav"
+					local btnStyle = isNav and ui.theme.buttonColors.selected or ui.theme.buttonColors.default
+					if ui.button(btnLabel, Vector2(-1, 0), btnStyle) then
+						if isNav then
+							player:SetNavTarget(nil)
+							ui.playSfx("OK")
+						else
+							setObjectNavTarget(obj)
+						end
+					end
+				end
+
+				if not isSystemBody and body:IsShip() then
+					local isCombat = player:GetCombatTarget() == body
+					local cmbLabel = isCombat and "✓ ACTIVE COMBAT TARGET (CLEAR)##sv_info_cmb" or "SET AS COMBAT TARGET##sv_info_cmb"
+					local cmbStyle = isCombat and ui.theme.buttonColors.selected or ui.theme.buttonColors.dark
+					if ui.button(cmbLabel, Vector2(-1, 0), cmbStyle) then
+						if isCombat then
+							player:SetCombatTarget(nil)
+						else
+							if navTarget == body then player:SetNavTarget(nil) end
+							player:SetCombatTarget(body)
+						end
+						ui.playSfx("OK")
+					end
+				end
+				ui.spacing()
+			end
+
 			if isSystemBody then
 				ui.textWrapped(body.astroDescription)
 
@@ -686,6 +737,18 @@ local infoView = {
 			ui.separator()
 			ui.spacing()
 			ui.textColored(colors.fontDim, lc.SELECT_A_TARGET .. "...")
+		end
+
+		local pending = CrossSystemNav.GetPendingTarget()
+		if pending then
+			ui.spacing()
+			ui.separator()
+			ui.spacing()
+			ui.textColored(colors.navTarget, string.format("Queued Arrival Target: %s (%s)", pending.bodyName or "Body", pending.systemName or "System"))
+			if ui.button("Clear Queued Target##clear_xnav", Vector2(-1, 0), ui.theme.buttonColors.dark) then
+				CrossSystemNav.ClearPendingTarget()
+				ui.playSfx("OK")
+			end
 		end
 	end
 }
@@ -788,7 +851,12 @@ function Windows.systemName.Show()
 	end
 	local isOrrery = systemView:GetDisplayMode() == "Orrery"
 	local modeName = isOrrery and "Orrery View" or "Hierarchical Tree View"
-	ui.text(ui.Format.SystemPath(path) .. "  •  " .. modeName)
+	local title = ui.Format.SystemPath(path) .. "  •  " .. modeName
+	local pending = CrossSystemNav.GetPendingTarget()
+	if pending then
+		title = title .. string.format("  •  Queued Arrival: %s (%s)", pending.bodyName or "Body", pending.systemName or "System")
+	end
+	ui.text(title)
 end
 
 local function drawGroupIcons(coords, icon, color, iconSize, group, isSelected)
@@ -863,7 +931,8 @@ local function checkSurfPorts(sbody)
 		if child.type == "STARPORT_SURFACE" then
 			table.insert(ports, child)
 			local body = child.physicsBody
-			has_indicators = has_indicators or body and body == navTarget or child == selected
+			local isNav = (body and body == navTarget) or CrossSystemNav.IsPendingTarget(child)
+			has_indicators = has_indicators or isNav or child == selected
 		end
 	end
 	if #ports == 0 then return nil end
@@ -893,7 +962,7 @@ local function displaySurfPorts(center, radius, ports, mouseover)
 		local p_center = center + Vector2(math.cos(ang), math.sin(ang)) * icons_radius
 		-- HACK we pretend to be a group, to use drawGroupIcons
 		local body = ports[i].physicsBody
-		local group = { hasNavTarget = body and body == Game.player:GetNavTarget() }
+		local group = { hasNavTarget = (body and body == Game.player:GetNavTarget()) or CrossSystemNav.IsPendingTarget(ports[i]) }
 		local isSelected = ports[i] == systemView:GetSelectedObject().ref
 		if can_show_ring then
 			drawGroupIcons(p_center, _getBodyIcon(ports[i]), svColor.SYSTEMBODY_ICON, bodyIconSize, group, isSelected)
@@ -929,13 +998,17 @@ local popup_object
 local popup_objects = nil
 local select_popup_objects = nil
 
-local function setObjectNavTarget(obj)
+setObjectNavTarget = function(obj)
 	local combatTarget = player:GetCombatTarget()
 	local isSystemBody = obj.base == Projectable.SYSTEMBODY
 	local isCloud = not isSystemBody and obj.ref:IsHyperspaceCloud()
 	if isSystemBody then
 		if obj.ref.physicsBody then
 			player:SetNavTarget(obj.ref.physicsBody)
+			CrossSystemNav.ClearPendingTarget()
+			ui.playSfx("OK")
+		elseif obj.ref.path then
+			CrossSystemNav.SetPendingTarget(obj.ref)
 			ui.playSfx("OK")
 		end
 	elseif isCloud then
@@ -948,10 +1021,10 @@ local function setObjectNavTarget(obj)
 	end
 end
 
-local function isTargetableObject(obj)
+isTargetableObject = function(obj)
 	if not obj or obj.type ~= Projectable.OBJECT or not obj.ref then return false end
 	if obj.base == Projectable.SYSTEMBODY then
-		return obj.ref.physicsBody ~= nil
+		return obj.ref.physicsBody ~= nil or (obj.ref.path ~= nil and obj.ref.type ~= "GRAVPOINT")
 	end
 	return obj.ref:IsShip() or obj.ref:IsHyperspaceCloud()
 end
@@ -998,12 +1071,15 @@ function makePopup()
 					local lbl = getLabel(obj)
 					if #lbl == 0 then lbl = "Unknown" end
 					if isTargetableObject(obj) then
-						local isNav = (obj.base == Projectable.SYSTEMBODY and obj.ref.physicsBody == navTarget) or (obj.ref == navTarget)
+						local isRemote = obj.base == Projectable.SYSTEMBODY and obj.ref.physicsBody == nil
+						local isNav = (isRemote and CrossSystemNav.IsPendingTarget(obj.ref))
+							or (not isRemote and ((obj.base == Projectable.SYSTEMBODY and obj.ref.physicsBody == navTarget) or (obj.ref == navTarget)))
 						ui.icon(getBodyIcon(obj, true, isOrrery), bodyIconSize, getColor(obj))
 						ui.sameLine()
 						ui.alignTextToLineHeight(bodyIconSize.y)
 						local drawTargetItem = function()
-							if ui.selectable(lbl .. "##sv_tgt_" .. tostring(i), isNav, {}) then
+							local itemLbl = isRemote and ((isNav and "✓ Queued: " or "Queue Cross-System: ") .. lbl) or lbl
+							if ui.selectable(itemLbl .. "##sv_tgt_" .. tostring(i), isNav, {}) then
 								setObjectNavTarget(obj)
 							end
 						end
@@ -1073,8 +1149,19 @@ function makePopup()
 			ui.text(getLabel(popup_object))
 		end
 		ui.separator()
-		if isTargetableObject(popup_object) and ui.selectable(lc.SET_AS_TARGET, false, {}) then
-			setObjectNavTarget(popup_object)
+		if isTargetableObject(popup_object) then
+			local isRemote = isSystemBody and popup_object.ref.physicsBody == nil
+			local isNav = (isRemote and CrossSystemNav.IsPendingTarget(popup_object.ref))
+				or (not isRemote and ((isSystemBody and popup_object.ref.physicsBody == navTarget) or (popup_object.ref == navTarget)))
+			local tgtLabel = isRemote and (isNav and "Clear Queued Cross-System Target" or "Queue Cross-System Target") or lc.SET_AS_TARGET
+			if ui.selectable(tgtLabel, isNav, {}) then
+				if isRemote and isNav then
+					CrossSystemNav.ClearPendingTarget()
+					ui.playSfx("OK")
+				else
+					setObjectNavTarget(popup_object)
+				end
+			end
 		end
 		if isShip and ui.selectable(lc.SET_AS_COMBAT_TARGET, false, {}) then
 			if navTarget == popup_object.ref then player:SetNavTarget(nil) end
@@ -1141,7 +1228,26 @@ local function displayOnScreenObjects()
 			if mainObject.ref == expanded_hover_body or should_show_ports then hoverSize = group.screenSize + bodyIconSize.x end
 		end
 
-		drawGroupIcons(mainCoords, getBodyIcon(mainObject, true, isOrrery), getColor(mainObject), bodyIconSize, group, isSelected)
+		local hasPendingNav = false
+		if CrossSystemNav.GetPendingTarget() then
+			if mainObject.type == Projectable.OBJECT and mainObject.base == Projectable.SYSTEMBODY and CrossSystemNav.IsPendingTarget(mainObject.ref) then
+				hasPendingNav = true
+			elseif group.objects then
+				for _, obj in ipairs(group.objects) do
+					if obj.type == Projectable.OBJECT and obj.base == Projectable.SYSTEMBODY and CrossSystemNav.IsPendingTarget(obj.ref) then
+						hasPendingNav = true
+						break
+					end
+				end
+			end
+		end
+		local displayGroup = hasPendingNav and {
+			hasPlayer = group.hasPlayer,
+			hasNavTarget = true,
+			hasCombatTarget = group.hasCombatTarget,
+		} or group
+
+		drawGroupIcons(mainCoords, getBodyIcon(mainObject, true, isOrrery), getColor(mainObject), bodyIconSize, displayGroup, isSelected)
 
 		local mp = ui.getMousePos()
 		local label = getLabel(mainObject)
