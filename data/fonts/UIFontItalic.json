@@ -1,0 +1,18 @@
+{
+	"name": "pionillium_italic",
+	"sizePixels": 13,
+	"loadDefaultRange": true,
+	"faces": [
+		{
+			"fontFile": "DejaVuSans-Oblique.ttf",
+			"scale": 0.928571429
+		},
+		{
+			"fontFile": "wqy-microhei.ttc",
+			"scale": 1.0
+		},
+		{
+			"iconFile": "icons/icons.icondef"
+		}
+	]
+}

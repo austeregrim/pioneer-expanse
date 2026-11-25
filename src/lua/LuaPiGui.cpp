@@ -2612,12 +2612,17 @@ static int l_pigui_get_projected_bodies_grouped(lua_State *l)
 		bool checkTerrainOcclusion = false;
 		if (body->GetType() == ObjectType::SHIP) {
 			const Ship *otherShip = static_cast<const Ship *>(body);
-			if (!SupercruiseController::IsShipVisibleToSensors(Pi::player, otherShip)) continue;
-			const bool alwaysTargetable = SupercruiseController::IsShipFTL(otherShip) ||
-				otherShip->IsTransponderActive() ||
-				SupercruiseController::HasTrackedLock(Pi::player, otherShip);
-			if (!alwaysTargetable && body->GetPositionRelTo(Pi::player).Length() > ship_max_distance) continue;
-			checkTerrainOcclusion = !isExplicitTarget;
+			const bool naturallyVisible = SupercruiseController::IsShipVisibleToSensors(Pi::player, otherShip);
+			if (!naturallyVisible && !SupercruiseController::IsShipVisibleToPlayer(Pi::player, otherShip)) continue;
+			if (naturallyVisible) {
+				const bool alwaysTargetable = SupercruiseController::IsShipFTL(otherShip) ||
+					otherShip->IsTransponderActive() ||
+					SupercruiseController::HasTrackedLock(Pi::player, otherShip);
+				if (!alwaysTargetable && body->GetPositionRelTo(Pi::player).Length() > ship_max_distance) continue;
+				checkTerrainOcclusion = !isExplicitTarget;
+			} else {
+				checkTerrainOcclusion = false;
+			}
 		} else if (body->GetType() == ObjectType::HYPERSPACECLOUD) {
 			const bool isLowWake = static_cast<const HyperspaceCloud *>(body)->IsLowWake();
 			if (!(playerInSC && isLowWake) && body->GetPositionRelTo(Pi::player).Length() > ship_max_distance) continue;
@@ -2728,7 +2733,7 @@ static int l_pigui_get_projected_bodies(lua_State *l)
 		if (body == Pi::game->GetPlayer()) continue;
 		if (body->GetType() == ObjectType::PROJECTILE) continue;
 		if (body->GetType() == ObjectType::SHIP &&
-			!SupercruiseController::IsShipVisibleToSensors(Pi::player, static_cast<const Ship *>(body)))
+			!SupercruiseController::IsShipVisibleToPlayer(Pi::player, static_cast<const Ship *>(body)))
 			continue;
 		const PiGui::TScreenSpace res = lua_world_space_to_screen_space(body); // defined in LuaPiGui.cpp
 		if (!res._onScreen) continue;
@@ -2775,15 +2780,18 @@ static int l_pigui_get_targets_nearby(lua_State *l)
 			continue;
 		if (body->IsType(ObjectType::SHIP)) {
 			const Ship *otherShip = static_cast<const Ship *>(body);
-			if (!SupercruiseController::IsShipVisibleToSensors(Pi::player, otherShip))
+			const bool naturallyVisible = SupercruiseController::IsShipVisibleToSensors(Pi::player, otherShip);
+			if (!naturallyVisible && !SupercruiseController::IsShipVisibleToPlayer(Pi::player, otherShip))
 				continue;
 			const double dist = body->GetPositionRelTo(Pi::player).Length();
 			if (dist > range_max)
 				continue;
-			const bool isFTL = SupercruiseController::IsShipFTL(otherShip);
-			const bool isLocked = SupercruiseController::HasTrackedLock(Pi::player, otherShip);
-			if (!isFTL && !isLocked && otherShip->IsTransponderActive() && dist > radarRange)
-				continue;
+			if (naturallyVisible) {
+				const bool isFTL = SupercruiseController::IsShipFTL(otherShip);
+				const bool isLocked = SupercruiseController::HasTrackedLock(Pi::player, otherShip);
+				if (!isFTL && !isLocked && otherShip->IsTransponderActive() && dist > radarRange)
+					continue;
+			}
 			filtered.push_back(body);
 		} else if (playerInSC && body->IsType(ObjectType::HYPERSPACECLOUD) &&
 			static_cast<const HyperspaceCloud *>(body)->IsLowWake()) {
@@ -2816,21 +2824,25 @@ static int l_pigui_get_targets_nearby(lua_State *l)
 
 		std::string displayLabel = body->GetLabel();
 		bool isHostile = false;
+		bool isDebugOnly = false;
 		if (body->IsType(ObjectType::SHIP)) {
 			const Ship *otherShip = static_cast<const Ship *>(body);
+			const bool naturallyVisible = SupercruiseController::IsShipVisibleToSensors(Pi::player, otherShip);
+			isDebugOnly = !naturallyVisible;
 			const bool idReadable = Visibility::CanReadShipIdentity(Pi::player, otherShip);
-			if (!idReadable) {
+			if (!idReadable && !isDebugOnly) {
 				displayLabel = "UNIDENTIFIED";
 			}
 			const bool interdictingPlayer = otherShip->GetSupercruise() && otherShip->GetSupercruise()->IsInterdictingPeer(Pi::player);
 			isHostile = otherShip->IsAIAttacking(Pi::player) ||
 				interdictingPlayer ||
-				(idReadable && Pi::player->GetRelations(const_cast<Ship *>(otherShip)) == 0);
+				((idReadable || isDebugOnly) && Pi::player->GetRelations(const_cast<Ship *>(otherShip)) == 0);
 		}
 
 		object.Set("distance", distance);
 		object.Set("label", displayLabel);
 		object.Set("is_hostile", isHostile);
+		object.Set("debug_only", isDebugOnly);
 		object.Set("rel_position", shipSpacePosition);
 
 		//		object.Set("type", EnumStrings::GetString("PhysicsObjectType", (*i)->GetType()));

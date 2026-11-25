@@ -81,6 +81,7 @@ public:
 	int GetNearbyTraffic(double radius);
 
 	bool GetDockingClearance(Ship *s);
+	void RefreshDockingClearance(const Ship *s);
 	int GetDockingPortCount() const { return m_type->NumDockingPorts(); }
 	int GetFreeDockingPort(const Ship *s) const; // returns -1 if none free
 	int GetFreeDockingPortCount() const;

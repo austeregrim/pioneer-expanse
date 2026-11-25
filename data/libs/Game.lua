@@ -8,7 +8,11 @@ Game.comms_log_lines = {}
 Game.AddCommsLogLine = function(text, sender, priority)
 	table.insert(Game.comms_log_lines, { text=text, time=Game.time, sender=sender, priority = priority or 'normal'})
 	if type(priority) == "number" and priority > 0 then
-		Game.SetTimeAcceleration("1x")
+		local player = Game.player
+		local safelyDocked = player and (player:IsDocked() or player:IsLanded())
+		if (not safelyDocked) or priority >= 2 then
+			Game.SetTimeAcceleration("1x")
+		end
 	end
 end
 

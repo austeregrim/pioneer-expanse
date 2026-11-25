@@ -234,7 +234,16 @@ void DynamicBody::TimeStepUpdate(const float timeStep)
 {
 	m_oldPos = GetPosition();
 	if (m_isMoving) {
-		m_force += m_externalForce;
+		vector3d effectiveExtForce = m_externalForce;
+		if (m_atmosForce.LengthSqr() > 1e-12 && double(timeStep) > 0.05) {
+			const double speed = m_vel.Length();
+			const double dragDv = m_atmosForce.Length() * double(timeStep) / m_mass;
+			if (dragDv > speed) {
+				const double scale = (speed > 1e-9) ? (speed / dragDv) : 0.0;
+				effectiveExtForce -= m_atmosForce * (1.0 - scale);
+			}
+		}
+		m_force += effectiveExtForce;
 
 		m_vel += double(timeStep) * m_force * (1.0 / m_mass);
 		m_angVel += double(timeStep) * m_torque * (1.0 / m_angInertia);

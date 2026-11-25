@@ -182,6 +182,13 @@ local newsTable = Table.New("NewsDispatchTable", false, {
 			local catColor = getCategoryColor(art.category)
 			local catText = "[" .. art.category .. "]"
 			if art.urgent then catText = "[FLASH] " .. catText end
+			local okDbg, DebugGalaxySim = pcall(require, 'modules.Debug.DebugGalaxySim')
+			if okDbg and DebugGalaxySim and DebugGalaxySim.flags and DebugGalaxySim.flags.showNewsEffects then
+				local fx = InterCast.GetArticleDebugEffects and InterCast.GetArticleDebugEffects(art)
+				if fx and ((fx.stocks and #fx.stocks > 0) or (fx.commodities and #fx.commodities > 0) or fx.tax or fx.piracy) then
+					catText = "[FX] " .. catText
+				end
+			end
 			local catW = ui.calcTextSize(catText).x
 			if region.x > catW + 40 then
 				ui.sameLine(region.x - catW)
@@ -190,7 +197,7 @@ local newsTable = Table.New("NewsDispatchTable", false, {
 				end)
 			end
 
-			-- Line 2: Metadata (Clock + Date, Location + System, Bureau)
+			-- Line 2: Metadata (Clock + Date/Time, Location + System, Bureau)
 			ui.withFont(pionillium.details, function()
 				local textHeight = ui.getTextLineHeight()
 				local iconSize = Vector2(textHeight)
@@ -200,7 +207,8 @@ local newsTable = Table.New("NewsDispatchTable", false, {
 
 				ui.icon(icons.clock, iconSize, metaColor)
 				ui.sameLine()
-				ui.textColored(metaColor, art.date)
+				local dtStr = art.timeStr and (art.date .. " " .. art.timeStr) or art.date
+				ui.textColored(metaColor, dtStr)
 
 				ui.sameLine(nil, 10)
 				ui.icon(icons.distance, iconSize, metaColor)
@@ -443,7 +451,7 @@ local function drawInterCastNews()
 						ui.textColored(colors.alertRed, "·  [FLASH]")
 					end
 
-					local rightText = "SUB-SPACE RELAY   ·   " .. activeArticle.date
+					local rightText = "SUB-SPACE RELAY   ·   " .. activeArticle.date .. (activeArticle.timeStr and (" " .. activeArticle.timeStr) or "")
 					local avail = ui.getContentRegion().x
 					local rightW = ui.calcTextSize(rightText).x
 					if avail > rightW + frameSize + 10 then
@@ -464,7 +472,8 @@ local function drawInterCastNews()
 				ui.child("NewsArticleText", Vector2(textWidth, 0), function()
 					-- Metadata line
 					ui.withFont(pionillium.details, function()
-						ui.textColored(colors.fontDim, string.format("TRANSMISSION DATE: %s   |   ORIGIN: %s", activeArticle.date, formatSystemWithDistance(activeArticle)))
+						local dtHdr = activeArticle.date .. (activeArticle.timeStr and (" " .. activeArticle.timeStr) or "")
+						ui.textColored(colors.fontDim, string.format("TRANSMISSION DATE: %s   |   ORIGIN: %s", dtHdr, formatSystemWithDistance(activeArticle)))
 						ui.textColored(colors.fontDim, string.format("REPORTING BUREAU: %s", activeArticle.bureau))
 					end)
 
@@ -545,6 +554,55 @@ local function drawInterCastNews()
 								ui.textColored(colors.white, string.format("· Active Regional Crisis: %s (Severity Level %d)", sysCrisis.type, sysCrisis.severity or 1))
 							end
 						end)
+					end
+
+					-- Hidden Debug Details Overlay (toggled from Debug Screen -> News & Galaxy Sim)
+					local okDbg, DebugGalaxySim = pcall(require, 'modules.Debug.DebugGalaxySim')
+					if okDbg and DebugGalaxySim and DebugGalaxySim.flags and DebugGalaxySim.flags.showNewsEffects then
+						local fx = InterCast.GetArticleDebugEffects and InterCast.GetArticleDebugEffects(activeArticle)
+						if fx then
+							ui.spacing()
+							ui.child("NewsDebugEffectsCard", Vector2(textWidth, 0), nil, ui.ChildFlags { 'AlwaysUseWindowPadding', 'Borders', 'AutoResizeY' }, function()
+								ui.textColored(colors.alertYellow, "[DEBUG] HIDDEN GALAXY & STOCK EFFECTS")
+								ui.separator()
+								ui.textColored(colors.fontDim, "Dispatch Source: " .. tostring(fx.source or "InterCast Wire"))
+								if fx.crisis then
+									ui.textColored(colors.uiPrimaryLight, string.format("Linked Crisis: %s in %s | Stage %d | Progress %.1f%% (+%.1f%%/day)",
+										fx.crisis.type or "?", fx.crisis.system or "?", fx.crisis.severity or 1, fx.crisis.progress or 0, fx.crisis.progressRate or 0))
+								end
+								local hasAny = false
+								if fx.stocks and #fx.stocks > 0 then
+									hasAny = true
+									ui.textColored(colors.white, "Affected Stocks:")
+									for _, sf in ipairs(fx.stocks) do
+										local dPct = sf.dailyDriftPct or 0
+										local iPct = sf.instantPct or 0
+										local col = ((dPct + iPct) >= 0) and colors.econProfit or colors.econLoss
+										ui.textColored(col, string.format("  • %s (%s): Now %.2f Cr (Base %.2f) | %s",
+											sf.ticker, sf.name or "", sf.currentPrice or 0, sf.basePrice or 0, sf.note or string.format("%+.2f%%/day", dPct)))
+									end
+								end
+								if fx.commodities and #fx.commodities > 0 then
+									hasAny = true
+									ui.textColored(colors.white, "Affected Commodities:")
+									for _, cf in ipairs(fx.commodities) do
+										ui.textWrapped(string.format("  • %s: Buy %.2fx / Sell %.2fx (%s)",
+											cf.label or "Commodities", cf.buyMult or 1.0, cf.sellMult or 1.0, cf.note or ""))
+									end
+								end
+								if fx.tax then
+									hasAny = true
+									ui.textColored(colors.alertYellow, "Tax Modifier: " .. (fx.tax.note or string.format("%+.1f%%", fx.tax.rateDeltaPct or 0)))
+								end
+								if fx.piracy then
+									hasAny = true
+									ui.textColored(colors.alertRed, "Piracy / Security Modifier: " .. (fx.piracy.note or string.format("%+.1f%%", fx.piracy.threatDeltaPct or 0)))
+								end
+								if not hasAny and not fx.crisis then
+									ui.textColored(colors.fontDim, "No mechanical modifiers (atmospheric wire dispatch).")
+								end
+							end)
+						end
 					end
 
 					ui.spacing()

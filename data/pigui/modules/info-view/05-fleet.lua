@@ -333,6 +333,31 @@ local function drawCommandDeck(entry)
 			end
 		end
 
+		if PlayerFleet.DEFENSE_ORDERS then
+			ui.spacing()
+			ui.textColored(colors.fontDim, "Pirate Defense Order:")
+			local curDef = PlayerFleet.GetDefenseOrder and PlayerFleet.GetDefenseOrder(entry) or "FLEE"
+			local defTips = {
+				SUBMIT = "Always drop cargo when interdicted to avoid combat and hull damage.",
+				FLEE   = "Attempt to evade/outrun pirates; may jettison partial cargo to escape.",
+				DEFEND = "Never drop cargo; engage pirates if armed (emergency retreat at ~15% hull if outgunned).",
+			}
+			for _, opt in ipairs(PlayerFleet.DEFENSE_ORDERS) do
+				ui.sameLine()
+				local isSel = (curDef == opt.id)
+				if ui.button(opt.label .. "##def_ord_" .. opt.id, Vector2(0, 0), isSel and ui.theme.buttonColors.selected or nil) then
+					local _, msg = PlayerFleet.SetDefenseOrder(entry.uid, opt.id)
+					statusMsg = msg
+				end
+				if ui.isItemHovered() then
+					ui.setTooltip(defTips[opt.id] or opt.label)
+				end
+			end
+			local hasNull = PlayerFleet.HasInterdictionNullifier and PlayerFleet.HasInterdictionNullifier(entry)
+			ui.sameLine()
+			ui.textColored(hasNull and colors.econProfit or colors.fontDim, hasNull and "  |  Nullifier: Ready" or "  |  Nullifier: None")
+		end
+
 		if not hasCaptain then
 			ui.textColored(colors.alertYellow, "Note: Assign or recruit a Captain (below or at any Station Hangar) to enable autonomous orders.")
 		end
@@ -447,10 +472,32 @@ local function drawCommandDeck(entry)
 			Format.Money((entry.stats and entry.stats.maintenancePaid) or 0, false),
 			Format.Money((entry.stats and entry.stats.taxesGenerated) or 0, false)
 		))
+		local st = entry.stats or {}
+		ui.textColored(colors.fontDim, string.format("Pirates: %d Encounters  |  %d Evaded  |  %d Destroyed  |  %dt Lost",
+			st.pirateEncounters or 0,
+			st.piratesEvaded or 0,
+			st.piratesDestroyed or 0,
+			st.cargoLostToPirates or 0
+		))
 		local shipNet = (entry.stats and entry.stats.netProfit) or 0
 		ui.text("Vessel Lifetime Net: ")
 		ui.sameLine(0, 0)
 		ui.textColored(shipNet >= 0 and colors.econProfit or colors.econLoss, Format.Money(shipNet, false))
+
+		local okDbg, DebugGalaxySim = pcall(require, 'modules.Debug.DebugGalaxySim')
+		if okDbg and DebugGalaxySim and DebugGalaxySim.flags and DebugGalaxySim.flags.showFleetDebug then
+			ui.spacing()
+			ui.textColored(colors.alertYellow, "[DEBUG] Fleet Trade Saturation (Top 4):")
+			local satList = PlayerFleet.GetMarketSaturationSnapshot and PlayerFleet.GetMarketSaturationSnapshot() or {}
+			if #satList == 0 then
+				ui.textColored(colors.fontDim, "  No active market saturation entries.")
+			else
+				for i = 1, math.min(4, #satList) do
+					local s = satList[i]
+					ui.textColored(colors.fontDim, string.format("  %s · %s: %+.0ft", s.stationName, s.commodity, s.netSupply))
+				end
+			end
+		end
 
 		ui.nextColumn()
 

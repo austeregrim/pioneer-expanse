@@ -37,11 +37,17 @@ local NPC_SYSTEMS = {
 	"Epsilon Eridani", "Sirius", "Achenar", "Alioth", "Procyon", "Altair", "Vega", "Tau Ceti"
 }
 
+local TOTAL_COMBINATIONS = 90720000000000.0 -- 100 * 14 * 3600 * 1800 * 10000 (90.72 Trillion)
+local TICKET_PRICE = 10.0
+
 local drawNumber = 1420
 local lastDrawTime = 0
 local nextDrawTime = 0
-local jackpotPool = 684500000.0 -- Starts at ~684.5 Million Credits
-local baselineJackpot = 500000000.0
+-- Scaled to real-world Powerball odds-to-jackpot ratio:
+-- Real Powerball: 1 in 292.2M odds at $2 ticket ($584.4M EV scale), $20M baseline (~3.42%), $300M-$2B+ jackpots.
+-- Nav-Locus: 1 in 90.72T odds at 10 Cr ticket (907.2T Cr EV scale) -> 30 Trillion Cr baseline (~3.31%).
+local baselineJackpot = 30000000000000.0
+local jackpotPool = 42500000000000.0 -- Starts mid-rollover at 42.5 Trillion Credits
 
 local winningLocus = {
 	ring = 42,
@@ -55,9 +61,46 @@ local lastWinner = nil -- Stores info on previous grand jackpot winner
 local playerTickets = {} -- List of active tickets/batches
 local ticketHistory = {} -- Settled tickets
 local totalWinningsCollected = 0
+local lotteryTimerActive = false
+
+local function formatCount(val)
+	val = math.floor((tonumber(val) or 0) + 0.5)
+	local str = string.format("%.0f", math.abs(val))
+	local formatted = str:reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+	if val < 0 then formatted = "-" .. formatted end
+	return formatted
+end
 
 local function formatCr(val)
-	return string.format("%.0f Cr", val)
+	return formatCount(val) .. " Cr"
+end
+
+local function formatCompactCr(val)
+	val = tonumber(val) or 0
+	local absVal = math.abs(val)
+	local sign = (val < 0) and "-" or ""
+	if absVal >= 1e15 then
+		return string.format("%s%.2f Quadrillion Cr", sign, absVal / 1e15)
+	elseif absVal >= 1e12 then
+		return string.format("%s%.2f Trillion Cr", sign, absVal / 1e12)
+	elseif absVal >= 1e9 then
+		return string.format("%s%.2f Billion Cr", sign, absVal / 1e9)
+	elseif absVal >= 1e6 then
+		return string.format("%s%.2f Million Cr", sign, absVal / 1e6)
+	end
+	return formatCr(val)
+end
+
+local function formatTicketVolume(count)
+	count = tonumber(count) or 0
+	if count >= 1e12 then
+		return string.format("%.2fT", count / 1e12)
+	elseif count >= 1e9 then
+		return string.format("%.1fB", count / 1e9)
+	elseif count >= 1e6 then
+		return string.format("%.0fM", count / 1e6)
+	end
+	return formatCount(count)
 end
 
 -- Calculates the upcoming Tuesday 18:00:00 GST timestamp relative to time `t`
@@ -100,6 +143,18 @@ function NavLocusLottery.GetLastWinner()
 	return lastWinner
 end
 
+function NavLocusLottery.GetConfig()
+	return {
+		baselineJackpot = baselineJackpot,
+		totalCombinations = TOTAL_COMBINATIONS,
+		ticketPrice = TICKET_PRICE,
+		tier2Payout = 3000000000.0,
+		tier3Payout = 500000.0,
+		tier4Payout = 1500.0,
+		tier5Payout = 40.0,
+	}
+end
+
 -- Evaluates a single coordinate vector against winning locus
 function NavLocusLottery.EvaluateSingleLocus(locus, targetWinning)
 	local matches = 0
@@ -134,10 +189,10 @@ function NavLocusLottery.EvaluateSingleLocus(locus, targetWinning)
 		payout = jackpotPool
 	elseif matches == 4 then
 		tierName = "TIER 2: 4-VECTOR ALIGNMENT"
-		payout = 2500000.0
+		payout = 3000000000.0
 	elseif matches == 3 then
 		tierName = "TIER 3: 3-VECTOR ALIGNMENT"
-		payout = 75000.0
+		payout = 500000.0
 	elseif matches == 2 then
 		tierName = "TIER 4: 2-VECTOR ALIGNMENT"
 		payout = 1500.0
@@ -419,37 +474,33 @@ local function executeScheduledDraw(drawTimestamp)
 		InterCast.AddArticle({
 			id = "art_lotto_draw_" .. tostring(drawNumber),
 			category = "MARKET",
-			headline = string.format("COMMANDER %s CLAIMS %s CR NAV-LOCUS GRAND JACKPOT!", string.upper(playerName), formatCr(jackpotPool)),
+			headline = string.format("COMMANDER %s CLAIMS %s NAV-LOCUS GRAND JACKPOT!", string.upper(playerName), string.upper(formatCompactCr(jackpotPool))),
 			system = currentSys,
 			date = dateStr,
 			bureau = "Interstellar Sweepstakes Authority",
-			summary = string.format("Commander %s has aligned all 5 astrogation vectors in %s, claiming the historic %s Credits grand jackpot!", playerName, currentSys, formatCr(jackpotPool)),
-			body = string.format("In a historic galactic astrogation event, Commander %s operating in the %s system has successfully verified winning coordinate vector [%s] for Cycle #%d! The entire grand progressive pool of %s Credits has been credited. The baseline progressive jackpot resets to 500,000,000 Credits for next Tuesday's drawing.", playerName, currentSys, locusStr, drawNumber, formatCr(jackpotPool)),
+			summary = string.format("Commander %s has aligned all 5 astrogation vectors in %s, claiming the historic %s grand jackpot!", playerName, currentSys, formatCompactCr(jackpotPool)),
+			body = string.format("In a historic galactic astrogation event, Commander %s operating in the %s system has successfully verified winning coordinate vector [%s] for Cycle #%d! The entire grand progressive pool of %s (%s) has been credited. The baseline progressive jackpot resets to %s (%s) for next Tuesday's drawing.", playerName, currentSys, locusStr, drawNumber, formatCompactCr(jackpotPool), formatCr(jackpotPool), formatCompactCr(baselineJackpot), formatCr(baselineJackpot)),
 			urgent = true,
 		})
 
 		jackpotPool = baselineJackpot
 	else
-		-- Real-World Dynamic Lottery Economics:
+		-- Real-World Dynamic Lottery Economics (scaled to 1 in 90.72 Trillion galactic odds & Powerball EV ratio):
 		-- 1. Base ticket sales scale with the size of the progressive jackpot pool (jackpot frenzy).
-		--    At baseline 500M Cr: ~25M to 35M tickets sold across settled space.
-		--    At 1.5B+ Cr: up to 120M+ tickets sold.
+		--    At baseline 30T Cr: ~1.4T to 2.2T tickets sold across settled space (~5% -> ~2% win probability).
+		--    At 150T+ Cr: ~15T+ tickets sold (~16% win probability).
 		local poolRatio = math.max(1.0, jackpotPool / baselineJackpot)
-		local baseSales = rand:Number(25000000, 35000000)
+		local baseSales = rand:Number(1400000000000.0, 2200000000000.0)
 		local salesMultiplier = poolRatio ^ 1.35
 		local simulatedTicketsSold = math.floor(baseSales * salesMultiplier)
 
 		-- 2. Real-world mechanics: 50% of gross ticket sales (10 Cr/ticket) are contributed to the progressive pool
-		local ticketPrice = 10.0
+		local ticketPrice = TICKET_PRICE
 		local poolContributionPercent = 0.50
 		local poolContribution = simulatedTicketsSold * ticketPrice * poolContributionPercent
 
-		-- 3. Grand Jackpot probability calculation:
-		--    Probability that at least 1 ticket matches is 1 - (1 - p)^N
-		--    Expected winners = N * p. We model Poisson-distributed winners based on tickets sold.
-		--    We calibrate single ticket match odds so that baseline 500M pool has ~5% win chance:
-		--    p ≈ 0.05 / 30,000,000 ≈ 1 / 600,000,000.
-		local singleTicketWinProb = 1.0 / 600000000.0
+		-- 3. Exact 5-vector combinatorial probability: 1 in 90,720,000,000,000 (90.72 Trillion)
+		local singleTicketWinProb = 1.0 / TOTAL_COMBINATIONS
 		local expectedWinners = simulatedTicketsSold * singleTicketWinProb
 
 		-- Determine number of NPC winners (multiple winners possible when jackpot is massive)
@@ -497,17 +548,18 @@ local function executeScheduledDraw(drawTimestamp)
 			local winnerHeadline
 			local winnerSummaryText
 			local winnerBodyText
+			local ticketVolStr = formatTicketVolume(simulatedTicketsSold)
 			if numWinners == 1 then
-				winnerHeadline = string.format("NAV-LOCUS CYCLE #%d GRAND JACKPOT CLAIMED: %s CR", drawNumber, formatCr(jackpotPool))
-				winnerSummaryText = string.format("Grand jackpot of %s Cr claimed by %s. Pool resets to 500M Cr.", formatCr(jackpotPool), winnerNames[1])
-				winnerBodyText = string.format("The Interstellar Sweepstakes Authority confirms that the Cycle #%d Grand Progressive Jackpot of %s Credits was officially claimed by a single winning chit: %s. An estimated %s tickets were purchased pan-galactic. With winning coordinate vector [%s] ratified, the pool resets to 500,000,000 Credits for next Tuesday's drawing.",
-					drawNumber, formatCr(jackpotPool), winnerNames[1], string.format("%.0fM", simulatedTicketsSold / 1e6), locusStr)
+				winnerHeadline = string.format("NAV-LOCUS CYCLE #%d GRAND JACKPOT CLAIMED: %s", drawNumber, string.upper(formatCompactCr(jackpotPool)))
+				winnerSummaryText = string.format("Grand jackpot of %s claimed by %s. Pool resets to 30.00 Trillion Cr.", formatCompactCr(jackpotPool), winnerNames[1])
+				winnerBodyText = string.format("The Interstellar Sweepstakes Authority confirms that the Cycle #%d Grand Progressive Jackpot of %s (%s) was officially claimed by a single winning chit: %s. An estimated %s tickets were purchased pan-galactic. With winning coordinate vector [%s] ratified, the pool resets to %s (%s) for next Tuesday's drawing.",
+					drawNumber, formatCompactCr(jackpotPool), formatCr(jackpotPool), winnerNames[1], ticketVolStr, locusStr, formatCompactCr(baselineJackpot), formatCr(baselineJackpot))
 			else
-				winnerHeadline = string.format("NAV-LOCUS CYCLE #%d: %s CR JACKPOT SPLIT AMONG %d WINNERS", drawNumber, formatCr(jackpotPool), numWinners)
-				winnerSummaryText = string.format("Grand jackpot of %s Cr split across %d winning chits (%s Cr each). Pool resets to 500M Cr.",
-					formatCr(jackpotPool), numWinners, formatCr(splitAmount))
-				winnerBodyText = string.format("The Interstellar Sweepstakes Authority confirms that unprecedented ticket volume (%s tickets sold) yielded %d separate grand winning chits for Cycle #%d. Each winner receives an equal share of %s Credits: %s. Coordinate vector [%s] has been ratified, and the jackpot resets to 500,000,000 Credits.",
-					string.format("%.0fM", simulatedTicketsSold / 1e6), numWinners, drawNumber, formatCr(splitAmount), table.concat(winnerNames, "; "), locusStr)
+				winnerHeadline = string.format("NAV-LOCUS CYCLE #%d: %s JACKPOT SPLIT AMONG %d WINNERS", drawNumber, string.upper(formatCompactCr(jackpotPool)), numWinners)
+				winnerSummaryText = string.format("Grand jackpot of %s split across %d winning chits (%s each). Pool resets to 30.00 Trillion Cr.",
+					formatCompactCr(jackpotPool), numWinners, formatCompactCr(splitAmount))
+				winnerBodyText = string.format("The Interstellar Sweepstakes Authority confirms that unprecedented ticket volume (%s tickets sold) yielded %d separate grand winning chits for Cycle #%d. Each winner receives an equal share of %s (%s): %s. Coordinate vector [%s] has been ratified, and the jackpot resets to %s (%s).",
+					ticketVolStr, numWinners, drawNumber, formatCompactCr(splitAmount), formatCr(splitAmount), table.concat(winnerNames, "; "), locusStr, formatCompactCr(baselineJackpot), formatCr(baselineJackpot))
 			end
 
 			InterCast.AddArticle({
@@ -527,6 +579,7 @@ local function executeScheduledDraw(drawTimestamp)
 			-- No Grand Winner — Real-world dynamic progressive rollover:
 			-- Pool increases by 50% of the simulated ticket revenue plus base carryover
 			jackpotPool = jackpotPool + poolContribution
+			local ticketVolStr = formatTicketVolume(simulatedTicketsSold)
 
 			InterCast.AddArticle({
 				id = "art_lotto_draw_" .. tostring(drawNumber),
@@ -535,11 +588,11 @@ local function executeScheduledDraw(drawTimestamp)
 				system = "Pan-Galactic Relay",
 				date = dateStr,
 				bureau = "Interstellar Sweepstakes Authority",
-				summary = string.format("Winning Locus: [%s]. %s tickets sold, no grand match verified — pool rolls over to %s Cr!",
-					locusStr, string.format("%.0fM", simulatedTicketsSold / 1e6), formatCr(jackpotPool)),
-				body = string.format("The Interstellar Sweepstakes Authority has ratified winning coordinate vector [%s] for Cycle #%d. With %s tickets entered pan-galactic and no grand 5-vector match verified, 50%% of gross sales (%s Cr) has been added to the progressive reserve. The jackpot has rolled over to %s Credits for next Tuesday's drawing at 18:00:00 GST.",
-					locusStr, drawNumber, string.format("%.0fM", simulatedTicketsSold / 1e6), formatCr(poolContribution), formatCr(jackpotPool)),
-				urgent = (jackpotPool > 1000000000.0),
+				summary = string.format("Winning Locus: [%s]. %s tickets sold, no grand match verified — pool rolls over to %s!",
+					locusStr, ticketVolStr, formatCompactCr(jackpotPool)),
+				body = string.format("The Interstellar Sweepstakes Authority has ratified winning coordinate vector [%s] for Cycle #%d. With %s tickets entered pan-galactic and no grand 5-vector match verified, 50%% of gross sales (%s) has been added to the progressive reserve. The jackpot has rolled over to %s (%s) for next Tuesday's drawing at 18:00:00 GST.",
+					locusStr, drawNumber, ticketVolStr, formatCompactCr(poolContribution), formatCompactCr(jackpotPool), formatCr(jackpotPool)),
+				urgent = (jackpotPool >= 150000000000000.0),
 			})
 		end
 	end
@@ -549,7 +602,7 @@ local function executeScheduledDraw(drawTimestamp)
 	if okComms and Comms and Comms.Message then
 		if playerTotalWon > 0 then
 			Comms.Message(
-				string.format("NAV-LOCUS CYCLE #%d: Winning Vector [%s]. Prize: %s Cr credited to your account!",
+				string.format("NAV-LOCUS CYCLE #%d: Winning Vector [%s]. Prize: %s credited to your account!",
 					drawNumber, locusStr, formatCr(playerTotalWon)),
 				"Sweepstakes Authority"
 			)
@@ -626,11 +679,17 @@ local function checkDrawTick()
 end
 
 Event.Register("onGameStart", function()
+	if lotteryTimerActive then return end
 	local okTimer, Timer = pcall(require, 'Timer')
 	if okTimer and Timer and Timer.CallEvery then
-		-- Check every 2 seconds of game flight time in real-time
-		Timer:CallEvery(2, checkDrawTick)
+		lotteryTimerActive = true
+		-- Check hourly in game time; UI & MacroGalaxyEngine catch up on demand
+		Timer:CallEvery(3600, checkDrawTick)
 	end
+end)
+
+Event.Register("onGameEnd", function()
+	lotteryTimerActive = false
 end)
 
 Event.Register("onEnterSystem", checkDrawTick)
@@ -654,7 +713,12 @@ local function unserialize(data)
 		drawNumber = data.drawNumber or 1420
 		lastDrawTime = data.lastDrawTime or 0
 		nextDrawTime = data.nextDrawTime or 0
-		jackpotPool = data.jackpotPool or 684500000.0
+		jackpotPool = data.jackpotPool or 42500000000000.0
+		-- Smoothly migrate legacy pre-rebalance saves (500M-2B scale) up to Powerball-scaled 30T+ scale
+		if jackpotPool < baselineJackpot then
+			local extra = math.max(0.0, jackpotPool - 500000000.0) * 60000.0
+			jackpotPool = math.min(120000000000000.0, baselineJackpot + extra)
+		end
 		winningLocus = data.winningLocus or winningLocus
 		lastWinner = data.lastWinner
 		playerTickets = data.playerTickets or {}

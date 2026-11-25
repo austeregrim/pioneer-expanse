@@ -239,57 +239,107 @@ static int l_starsystem_get_nearby_systems(lua_State *l)
 	}
 
 	const SystemPath &here = s->GetPath();
+	const SystemPath hereSys = here.SystemOnly();
+	const int distMilliLy = int(std::llround(dist_ly * 1000.0));
 
-	const int here_x = here.sectorX;
-	const int here_y = here.sectorY;
-	const int here_z = here.sectorZ;
-	const Uint32 here_idx = here.systemIndex;
-	RefCountedPtr<const Sector> here_sec = s->m_galaxy->GetSector(here);
-	if (here_idx >= here_sec->m_systems.size()) {
-		LUA_DEBUG_END(l, 1);
-		return 1;
+	struct NearbySysCacheKey {
+		const Galaxy *galaxy;
+		int seed;
+		SystemPath here;
+		int distMilliLy;
+		bool operator==(const NearbySysCacheKey &o) const
+		{
+			return galaxy == o.galaxy && seed == o.seed && distMilliLy == o.distMilliLy && here == o.here;
+		}
+	};
+	struct NearbySysCacheEntry {
+		NearbySysCacheKey key;
+		std::vector<SystemPath> systems;
+		uint64_t lastUsed = 0;
+	};
+	static std::vector<NearbySysCacheEntry> s_nearbyCache;
+	static uint64_t s_nearbyUseSeq = 0;
+	static constexpr size_t NEARBY_CACHE_MAX = 32;
+
+	const NearbySysCacheKey reqKey { s->m_galaxy.Get(), s->GetSeed(), hereSys, distMilliLy };
+	const std::vector<SystemPath> *cachedPaths = nullptr;
+	for (NearbySysCacheEntry &entry : s_nearbyCache) {
+		if (entry.key == reqKey) {
+			entry.lastUsed = ++s_nearbyUseSeq;
+			cachedPaths = &entry.systems;
+			break;
+		}
 	}
 
-	const vector3f here_pos = here_sec->m_systems[here_idx].GetFullPosition();
-	const float dist_sqr = float(dist_ly * dist_ly);
-	const float sec_dist_sqr = float((dist_ly + 0.01) * (dist_ly + 0.01));
+	if (!cachedPaths) {
+		std::vector<SystemPath> discovered;
+		const int here_x = here.sectorX;
+		const int here_y = here.sectorY;
+		const int here_z = here.sectorZ;
+		const Uint32 here_idx = here.systemIndex;
+		RefCountedPtr<const Sector> here_sec = s->m_galaxy->GetSector(here);
+		if (here_idx >= here_sec->m_systems.size()) {
+			LUA_DEBUG_END(l, 1);
+			return 1;
+		}
 
-	const int diff_sec = int(ceil(dist_ly / Sector::SIZE));
+		const vector3f here_pos = here_sec->m_systems[here_idx].GetFullPosition();
+		const float dist_sqr = float(dist_ly * dist_ly);
+		const float sec_dist_sqr = float((dist_ly + 0.01) * (dist_ly + 0.01));
 
-	uint32_t numSystems = 0;
-	for (int x = here_x - diff_sec; x <= here_x + diff_sec; x++) {
-		for (int y = here_y - diff_sec; y <= here_y + diff_sec; y++) {
-			for (int z = here_z - diff_sec; z <= here_z + diff_sec; z++) {
-				if (sectorMinDistSqr(here_pos, x, y, z) > sec_dist_sqr)
-					continue;
+		const int diff_sec = int(ceil(dist_ly / Sector::SIZE));
 
-				RefCountedPtr<const Sector> sec = s->m_galaxy->GetSector(SystemPath(x, y, z));
-
-				for (unsigned int idx = 0; idx < sec->m_systems.size(); idx++) {
-					if (x == here_x && y == here_y && z == here_z && idx == here_idx)
+		for (int x = here_x - diff_sec; x <= here_x + diff_sec; x++) {
+			for (int y = here_y - diff_sec; y <= here_y + diff_sec; y++) {
+				for (int z = here_z - diff_sec; z <= here_z + diff_sec; z++) {
+					if (sectorMinDistSqr(here_pos, x, y, z) > sec_dist_sqr)
 						continue;
 
-					if (Sector::DistanceBetweenSqr(here_sec, here_idx, sec, idx) > dist_sqr)
-						continue;
+					RefCountedPtr<const Sector> sec = s->m_galaxy->GetSector(SystemPath(x, y, z));
 
-					RefCountedPtr<StarSystem> sys = s->m_galaxy->GetStarSystem(SystemPath(x, y, z, idx));
-					if (filter) {
-						lua_pushvalue(l, 3);
-						LuaObject<StarSystem>::PushToLua(sys.Get());
-						lua_call(l, 1, 1);
-						if (!lua_toboolean(l, -1)) {
-							lua_pop(l, 1);
+					for (unsigned int idx = 0; idx < sec->m_systems.size(); idx++) {
+						if (x == here_x && y == here_y && z == here_z && idx == here_idx)
 							continue;
-						}
-						lua_pop(l, 1);
-					}
 
-					lua_pushinteger(l, ++numSystems);
-					LuaObject<StarSystem>::PushToLua(sys.Get());
-					lua_rawset(l, -3);
+						if (Sector::DistanceBetweenSqr(here_sec, here_idx, sec, idx) > dist_sqr)
+							continue;
+
+						discovered.emplace_back(x, y, z, idx);
+					}
 				}
 			}
 		}
+
+		if (s_nearbyCache.size() >= NEARBY_CACHE_MAX) {
+			auto victim = std::min_element(s_nearbyCache.begin(), s_nearbyCache.end(),
+				[](const NearbySysCacheEntry &a, const NearbySysCacheEntry &b) {
+					return a.lastUsed < b.lastUsed;
+				});
+			*victim = NearbySysCacheEntry { reqKey, std::move(discovered), ++s_nearbyUseSeq };
+			cachedPaths = &victim->systems;
+		} else {
+			s_nearbyCache.push_back(NearbySysCacheEntry { reqKey, std::move(discovered), ++s_nearbyUseSeq });
+			cachedPaths = &s_nearbyCache.back().systems;
+		}
+	}
+
+	uint32_t numSystems = 0;
+	for (const SystemPath &sysPath : *cachedPaths) {
+		RefCountedPtr<StarSystem> sys = s->m_galaxy->GetStarSystem(sysPath);
+		if (filter) {
+			lua_pushvalue(l, 3);
+			LuaObject<StarSystem>::PushToLua(sys.Get());
+			lua_call(l, 1, 1);
+			if (!lua_toboolean(l, -1)) {
+				lua_pop(l, 1);
+				continue;
+			}
+			lua_pop(l, 1);
+		}
+
+		lua_pushinteger(l, ++numSystems);
+		LuaObject<StarSystem>::PushToLua(sys.Get());
+		lua_rawset(l, -3);
 	}
 
 	LUA_DEBUG_END(l, 1);

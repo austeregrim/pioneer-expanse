@@ -21,10 +21,12 @@ local MissionUtils = require 'modules.MissionUtils'
 -- controlled space and this is set in the onGameStart() function.
 -- In the case of a saved game, serialized data already has the value.
 local playerInControlledSpace = false
+local stcTimerActive = false
 
 local enteringFlavors = MissionUtils.getNumberOfFlavours(l, "YOU_ARE_ENTERING_STATION_SPACE")
 local leavingFlavors = MissionUtils.getNumberOfFlavours(l, "YOU_ARE_LEAVING_STATION_SPACE")
 local function notifyControlledSpace ()
+	if not Game.player or not Game.player:exists() then return end
 	if Game.player.flightState == "HYPERSPACE" then
 		playerInControlledSpace = false
 		return
@@ -193,6 +195,7 @@ local function enforceStationSafetyZone()
 				local hasDepartureClearance = (departureClearance[ship] and Game.time < departureClearance[ship])
 				local aiCmd = (ship.GetCurrentAICommand and ship:GetCurrentAICommand()) or ""
 				local isDeparting = (aiCmd == "CMD_DEPART") or hasDepartureClearance
+				local isActivelyDockingHold = (aiCmd == "CMD_DOCK") and (dist > (isSurface and 350.0 or (station:GetPhysicalRadius() * 1.05)))
 
 				if dist > exclusionRadius and departureClearance[ship] then
 					departureClearance[ship] = nil
@@ -204,11 +207,11 @@ local function enforceStationSafetyZone()
 
 				-- An unauthorized obstruction is a vessel inside the active exclusion zone that:
 				-- 1. Does not have bay clearance (hasClearance == false)
-				-- 2. Does not have departure clearance (isDeparting == false)
+				-- 2. Does not have departure clearance (isDeparting == false) and is not holding in a queue outside the immediate airlock/pad throat
 				-- 3. Is not moving away from the station (isMovingAway == false)
 				-- 4. Is essentially motionless / stalled / derelict (speed < 1.0 m/s)
-				-- Active ships departing, transiting, or flying normally are NOT obstructions!
-				local isObstructing = isInside and not isDeparting and not hasClearance and not isMovingAway and (speed < 1.0)
+				-- Active ships departing, queuing at APPROACH1, transiting, or flying normally are NOT obstructions!
+				local isObstructing = isInside and not isDeparting and not isActivelyDockingHold and not hasClearance and not isMovingAway and (speed < 1.0)
 
 				if isObstructing then
 					activeShips[ship] = true
@@ -262,8 +265,31 @@ local onGameStart = function ()
 		playerInControlledSpace = true
 	end
 	loaded_data = nil
-	Timer:CallEvery(5, notifyControlledSpace)
-	Timer:CallEvery(2, enforceStationSafetyZone)
+	if not stcTimerActive then
+		stcTimerActive = true
+		Timer:CallEvery(5, function()
+			if not Game.player then
+				stcTimerActive = false
+				return true
+			end
+			notifyControlledSpace()
+			return false
+		end)
+		Timer:CallEvery(2, function()
+			if not Game.player then
+				stcTimerActive = false
+				return true
+			end
+			enforceStationSafetyZone()
+			return false
+		end)
+	end
+end
+
+local onGameEnd = function ()
+	stcTimerActive = false
+	loiterTrack = {}
+	departureClearance = {}
 end
 
 
@@ -280,6 +306,7 @@ local unserialize = function (data)
 end
 
 Event.Register("onGameStart", onGameStart)
+Event.Register("onGameEnd", onGameEnd)
 Event.Register("onDockingClearanceGranted", onDockingClearanceGranted)
 Event.Register("onDockingClearanceDenied", onDockingClearanceDenied)
 Event.Register("onDockingClearanceExpired", onDockingClearanceExpired)

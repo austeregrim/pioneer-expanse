@@ -482,6 +482,16 @@ local function drawStockExchange()
 				ui.sameLine(nil, 20)
 				ui.textColored(colors.fontDim, string.format("52W: %s - %s", formatMoney(stats.low52w), formatMoney(stats.high52w)))
 
+				local okDbg, DebugGalaxySim = pcall(require, 'modules.Debug.DebugGalaxySim')
+				if okDbg and DebugGalaxySim and DebugGalaxySim.flags and DebugGalaxySim.flags.showStockDrivers and StockExchange.GetStockDebugBreakdown then
+					local bd = StockExchange.GetStockDebugBreakdown(corp.ticker)
+					if bd then
+						ui.textColored(colors.alertYellow, string.format("[DEBUG] Base: %s (%+.1f%%) | Crisis: %+.2f%%/d | News: %+.2f%%/d | MeanRev: %+.2f%%/d | %s",
+							formatMoney(bd.basePrice), bd.pctVsBase or 0, bd.crisisDriftPct or 0, bd.newsDriftPct or 0, bd.meanReversionPct or 0,
+							#bd.drivers > 0 and table.concat(bd.drivers, "; ") or "No active drivers"))
+					end
+				end
+
 				ui.spacing()
 
 				-- Chart Controls (Timeframe & Mode)
@@ -780,6 +790,16 @@ local function drawStockExchange()
 				ui.sameLine(nil, 24)
 				ui.textColored(colors.fontDim, string.format("24h Vol: %s shares", formatVol(stats.volume24h)))
 
+				local okDbg, DebugGalaxySim = pcall(require, 'modules.Debug.DebugGalaxySim')
+				if okDbg and DebugGalaxySim and DebugGalaxySim.flags and DebugGalaxySim.flags.showStockDrivers and StockExchange.GetStockDebugBreakdown then
+					local bd = StockExchange.GetStockDebugBreakdown(selectedLocal.ticker)
+					if bd then
+						ui.textColored(colors.alertYellow, string.format("[DEBUG] Base: %s (%+.1f%%) | Crisis: %+.2f%%/d | News: %+.2f%%/d | MeanRev: %+.2f%%/d | %s",
+							formatMoney(bd.basePrice), bd.pctVsBase or 0, bd.crisisDriftPct or 0, bd.newsDriftPct or 0, bd.meanReversionPct or 0,
+							#bd.drivers > 0 and table.concat(bd.drivers, "; ") or "No active drivers"))
+					end
+				end
+
 				ui.spacing()
 
 				-- Chart Controls (Timeframe & Mode)
@@ -1069,6 +1089,16 @@ local function drawStockExchange()
 				ui.textColored(colors.fontDim, string.format("24h Vol: %s shares", formatVol(stats.volume24h)))
 				ui.sameLine(nil, 20)
 				ui.textColored(colors.fontDim, string.format("52W: %s - %s", formatMoney(stats.low52w), formatMoney(stats.high52w)))
+
+				local okDbg, DebugGalaxySim = pcall(require, 'modules.Debug.DebugGalaxySim')
+				if okDbg and DebugGalaxySim and DebugGalaxySim.flags and DebugGalaxySim.flags.showStockDrivers and StockExchange.GetStockDebugBreakdown then
+					local bd = StockExchange.GetStockDebugBreakdown(selectedHolding.ticker)
+					if bd then
+						ui.textColored(colors.alertYellow, string.format("[DEBUG] Base: %s (%+.1f%%) | Crisis: %+.2f%%/d | News: %+.2f%%/d | MeanRev: %+.2f%%/d | %s",
+							formatMoney(bd.basePrice), bd.pctVsBase or 0, bd.crisisDriftPct or 0, bd.newsDriftPct or 0, bd.meanReversionPct or 0,
+							#bd.drivers > 0 and table.concat(bd.drivers, "; ") or "No active drivers"))
+					end
+				end
 
 				ui.spacing()
 

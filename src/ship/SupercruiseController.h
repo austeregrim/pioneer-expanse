@@ -84,6 +84,9 @@ public:
 	static bool IsShipFTL(const Ship *ship);
 	static bool HasTrackedLock(const Ship *observer, const Ship *target);
 	static bool IsShipVisibleToSensors(const Ship *observer, const Ship *target);
+	static bool IsShipVisibleToPlayer(const Ship *observer, const Ship *target);
+	static void SetDebugShowAllShips(bool enable) { s_debugShowAllShips = enable; }
+	static bool GetDebugShowAllShips() { return s_debugShowAllShips; }
 	float GetEntryFlashTimer() const { return m_entryFlashTimer; }
 	const vector3d &GetEntryFlashRootPos() const { return m_entryFlashRootPos; }
 	bool IsCharging() const { return m_charging; }
@@ -536,6 +539,7 @@ private:
 	double m_fuelScoopProximity = 0.0;
 	double m_fuelScoopAccum = 0.0;
 	float m_fuelScoopDispatchTimer = 0.0f;
+	static bool s_debugShowAllShips;
 	float m_idleAITimer = 0.0f;
 };
 

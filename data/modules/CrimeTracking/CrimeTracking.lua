@@ -18,6 +18,7 @@ local maxFineTolerated = 5500
 
 -- store which station sent them out
 local policeDispatched = false
+local crimeTimerActive = false
 
 -- Weapons discharge warning tracking
 local weaponsWarningGiven = false
@@ -30,6 +31,7 @@ local WARNING_RESET_INTERVAL = 30.0 -- if player stops firing for 30s, reset war
 
 -- check if we should dispatch police, or call them back
 local function doLawAndOrder ()
+	if not Game.player or not Game.player:exists() then return end
 	if Game.player.flightState == "HYPERSPACE" then return end
 
 	local crimes, fine = PlayerState.GetCrimeOutstanding()
@@ -70,7 +72,17 @@ local onGameStart = function ()
 		policeDispatched = loaded_data.policeDispatched
 	end
 	loaded_data = nil
-	Timer:CallEvery(5, doLawAndOrder)
+	if not crimeTimerActive then
+		crimeTimerActive = true
+		Timer:CallEvery(5, function()
+			if not Game.player then
+				crimeTimerActive = false
+				return true
+			end
+			doLawAndOrder()
+			return false
+		end)
+	end
 end
 
 
@@ -205,6 +217,7 @@ end
 
 local onGameEnd = function ()
 	policeDispatched = nil
+	crimeTimerActive = false
 	weaponsWarningGiven = false
 	weaponsWarningTime = 0
 	lastDischargeReportTime = 0

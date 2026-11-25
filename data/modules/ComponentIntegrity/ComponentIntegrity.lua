@@ -9,6 +9,7 @@ local Timer      = require 'Timer'
 local Comms      = require 'Comms'
 
 local ComponentIntegrity = {}
+local integrityTimerActive = false
 
 -- Very gradual environmental wear constants:
 -- 1.0% integrity loss per 100 hours of continuous 1G flight (~2.778e-8 per second at 1G)
@@ -554,6 +555,10 @@ local function tickWearAndReboot()
 	lastGravityTickTime = now
 	if dt <= 0 then return end
 
+	if player:IsDocked() and not rebootActive then
+		return
+	end
+
 	-- Field reboot countdown runs over active gameplay intervals
 	if rebootActive then
 		if player:GetFlightState() ~= "FLYING" then
@@ -658,17 +663,31 @@ local function onGameStart()
 		ComponentIntegrity.SyncShipSubsystems(Game.player)
 	end
 
-	Timer:CallEvery(2, function()
-		if not Game.player then return true end
-		tickWearAndReboot()
-		return false
-	end)
+	if not integrityTimerActive then
+		integrityTimerActive = true
+		Timer:CallEvery(2, function()
+			if not Game.player then
+				integrityTimerActive = false
+				return true
+			end
+			tickWearAndReboot()
+			return false
+		end)
+	end
+end
+
+local function onGameEnd()
+	integrityTimerActive = false
+	rebootActive = false
+	rebootRemaining = 0.0
+	lastGravityTickTime = nil
 end
 
 Event.Register("onShipCreated", onShipCreated)
 Event.Register("onShipTypeChanged", onShipTypeChanged)
 Event.Register("onShipSubsystemHit", onShipSubsystemHit)
 Event.Register("onGameStart", onGameStart)
+Event.Register("onGameEnd", onGameEnd)
 
 Serializer:Register("ComponentIntegrity",
 	function()

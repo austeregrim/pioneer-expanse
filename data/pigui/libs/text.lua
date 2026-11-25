@@ -59,6 +59,24 @@ ui.fonts = {
 		reticle_md  = { name = "pionillium", size = fontScale(15) },
 		reticle_sm  = { name = "pionillium", size = fontScale(13) },
 	},
+	pionillium_italic = {
+		xlarge	= { name = "pionillium_italic", size = fontScale(28) },
+		large	= { name = "pionillium_italic", size = fontScale(22) },
+		medlarge = { name = "pionillium_italic", size = fontScale(18) },
+		medium	= { name = "pionillium_italic", size = fontScale(15) },
+		small	= { name = "pionillium_italic", size = fontScale(13) },
+		tiny	= { name = "pionillium_italic", size = fontScale(10) },
+
+		-- alternate font breakpoints
+		title    = { name = "pionillium_italic", size = fontScale(22) },
+		heading  = { name = "pionillium_italic", size = fontScale(18) },
+		body     = { name = "pionillium_italic", size = fontScale(15) },
+		details  = { name = "pionillium_italic", size = fontScale(13) },
+
+		-- application-specific fonts
+		reticle_md  = { name = "pionillium_italic", size = fontScale(15) },
+		reticle_sm  = { name = "pionillium_italic", size = fontScale(13) },
+	},
 	orbiteer = {
 		xlarge	= { name = "orbiteer", size = fontScale(28) },
 		large	= { name = "orbiteer", size = fontScale(22) },

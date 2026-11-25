@@ -9,6 +9,7 @@
 #include "MathUtil.h"
 #include "Pi.h"
 #include "Planet.h"
+#include "gameconsts.h"
 #include "Player.h"
 #include "PlayerShipController.h"
 #include "SectorView.h"
@@ -20,11 +21,14 @@
 #include "galaxy/SystemBody.h"
 #include "lua/LuaEvent.h"
 #include "ship/OrbitalDockingGeometry.h"
+#include "ship/Propulsion.h"
 #include "ship/Visibility.h"
 #include "sound/Sound.h"
 
 #include <algorithm>
 #include <cmath>
+
+bool SupercruiseController::s_debugShowAllShips = false;
 
 SupercruiseController::SupercruiseController(Ship *ship) :
 	m_ship(ship)
@@ -241,6 +245,16 @@ bool SupercruiseController::IsShipVisibleToSensors(const Ship *observer, const S
 	params.distance = observer->GetPositionRelTo(target).Length();
 	params.darkSensorRange = Visibility::GetDarkSensorRange(observer);
 	return Visibility::EvaluateSensorVisibility(params);
+}
+
+bool SupercruiseController::IsShipVisibleToPlayer(const Ship *observer, const Ship *target)
+{
+	if (IsShipVisibleToSensors(observer, target))
+		return true;
+	if (s_debugShowAllShips && observer && observer->IsType(ObjectType::PLAYER) && target && observer != target) {
+		return !target->IsDead() && target->GetFrame().valid() && (target->IsInSpace() || target->IsDocked());
+	}
+	return false;
 }
 
 double SupercruiseController::GetExclusionZoneRadius(const Body *body)
@@ -808,6 +822,59 @@ void SupercruiseController::EnterSupercruiseOnHyperspaceExit()
 	ShowStatusMessage("HYPERSPACE EXIT — FSD COOLDOWN ACTIVE", 5.0f);
 }
 
+static void StabilizeNPCAfterSupercruiseDrop(Ship *ship, bool alignNoseAwayFromGravity)
+{
+	if (!ship || ship->IsType(ObjectType::PLAYER) || !Pi::game)
+		return;
+
+	// High-G / stellar drop rescue: ensure NPCs never stall motionless inside a star or gas giant
+	// gravity well where local gravity overwhelms thrusters or traps them in permanent mass lock.
+	Frame *frame = Frame::GetFrame(ship->GetFrame());
+	Body *fb = frame ? frame->GetBody() : nullptr;
+	Propulsion *prop = ship->GetComponent<Propulsion>();
+	if (fb && fb->IsType(ObjectType::TERRAINBODY) && prop) {
+		const SystemBody *sb = fb->GetSystemBody();
+		const vector3d pos = ship->GetPosition();
+		const double r = pos.Length();
+		const double localGrav = (r > 1.0) ? (G * fb->GetMass() / (r * r)) : 0.0;
+		const bool isStarOrGas = sb && (sb->GetSuperType() == SystemBody::SUPERTYPE_STAR || sb->GetSuperType() == SystemBody::SUPERTYPE_GAS_GIANT);
+		if (isStarOrGas || localGrav > prop->GetAccelUp() * 0.75) {
+			const double minSafeR = std::max(SupercruiseController::GetExclusionZoneRadius(fb) * 1.06, fb->GetPhysRadius() * 1.15);
+			const vector3d unitR = (r > 1.0) ? (pos / r) : vector3d(0.0, 1.0, 0.0);
+			double safeR = r;
+			if (safeR < minSafeR) {
+				safeR = minSafeR;
+				ship->SetPosition(unitR * safeR);
+				ship->SnapInterpTransform();
+			}
+			const double vOrb = std::sqrt(G * fb->GetMass() / std::max(1.0, safeR));
+			const vector3d tangent = MathUtil::OrthogonalDirection(unitR).NormalizedSafe();
+			if (tangent.LengthSqr() > 0.25) {
+				ship->SetVelocity(tangent * vOrb);
+			}
+			ship->CalcExternalForce();
+		}
+	}
+
+	if (Pi::game->GetTimeStep() <= 0.05f)
+		return;
+
+	if (alignNoseAwayFromGravity && ship->GetExternalForce().LengthSqr() > 1e-6) {
+		const vector3d radialUp = (-ship->GetExternalForce()).NormalizedSafe();
+		const vector3d zAxis = -radialUp;
+		const vector3d right = MathUtil::OrthogonalDirection(zAxis).NormalizedSafe();
+		const vector3d up = zAxis.Cross(right).NormalizedSafe();
+		ship->SetOrient(matrix3x3d::FromVectors(right, up, zAxis));
+		ship->SetAngVelocity(vector3d(0.0));
+		ship->SnapInterpTransform();
+	}
+
+	if (prop) {
+		prop->SuspendAISequentialThrusters();
+		prop->AIMatchVel(ship->GetVelocity());
+	}
+}
+
 void SupercruiseController::DropIntoRing(Planet *planet, const std::string &reason)
 {
 	ClearInterdiction();
@@ -851,6 +918,7 @@ void SupercruiseController::DropIntoRing(Planet *planet, const std::string &reas
 	m_ship->SetAngVelocity(vector3d(0.0));
 	m_ship->ClearThrusterState();
 	m_ship->CalcExternalForce();
+	StabilizeNPCAfterSupercruiseDrop(m_ship, false);
 	m_trailPositions.clear();
 	ResetFuelScoopState();
 	ClearStaleSupercruiseTarget();
@@ -1044,6 +1112,7 @@ void SupercruiseController::SafeDisengage()
 	m_ship->SnapInterpTransform();
 	m_ship->ClearThrusterState();
 	m_ship->CalcExternalForce();
+	StabilizeNPCAfterSupercruiseDrop(m_ship, false);
 	m_trailPositions.clear();
 	ResetFuelScoopState();
 	ClearStaleSupercruiseTarget();
@@ -1068,15 +1137,15 @@ void SupercruiseController::ClearStaleSupercruiseTarget()
 		return;
 	Player *p = static_cast<Player *>(m_ship);
 	if (Body *ct = p->GetCombatTarget()) {
-		if (ct->IsType(ObjectType::SHIP) && !IsShipVisibleToSensors(m_ship, static_cast<const Ship *>(ct)))
+		if (ct->IsType(ObjectType::SHIP) && !IsShipVisibleToPlayer(m_ship, static_cast<const Ship *>(ct)))
 			p->SetCombatTarget(nullptr);
 	}
 	if (Body *nt = p->GetNavTarget()) {
-		if (nt->IsType(ObjectType::SHIP) && !IsShipVisibleToSensors(m_ship, static_cast<const Ship *>(nt)))
+		if (nt->IsType(ObjectType::SHIP) && !IsShipVisibleToPlayer(m_ship, static_cast<const Ship *>(nt)))
 			p->SetNavTarget(nullptr);
 	}
 	if (Body *ft = p->GetFollowTarget()) {
-		if (ft->IsType(ObjectType::SHIP) && !IsShipVisibleToSensors(m_ship, static_cast<const Ship *>(ft)))
+		if (ft->IsType(ObjectType::SHIP) && !IsShipVisibleToPlayer(m_ship, static_cast<const Ship *>(ft)))
 			p->SetFollowTarget(nullptr);
 	}
 }
@@ -1107,6 +1176,7 @@ void SupercruiseController::NormalDrop(const std::string &reason)
 	m_ship->SetAngVelocity(vector3d(0.0));
 	m_ship->ClearThrusterState();
 	m_ship->CalcExternalForce();
+	StabilizeNPCAfterSupercruiseDrop(m_ship, false);
 	m_trailPositions.clear();
 	ResetFuelScoopState();
 	ClearStaleSupercruiseTarget();
@@ -1138,9 +1208,11 @@ void SupercruiseController::EmergencyDrop(const std::string &reason)
 	m_ship->SetFlightState(Ship::FLYING);
 	EnsureShipAboveTerrainAndSyncFrame();
 	m_ship->SetVelocity(vector3d(0.0));
-	m_ship->SetAngVelocity(vector3d(0.18, -0.09, 0.14));
+	const bool suppressHighAccelTumble = !m_ship->IsType(ObjectType::PLAYER) && Pi::game && Pi::game->GetTimeStep() > 0.05f;
+	m_ship->SetAngVelocity(suppressHighAccelTumble ? vector3d(0.0) : vector3d(0.18, -0.09, 0.14));
 	m_ship->ClearThrusterState();
 	m_ship->CalcExternalForce();
+	StabilizeNPCAfterSupercruiseDrop(m_ship, true);
 	m_trailPositions.clear();
 	ResetFuelScoopState();
 	ClearStaleSupercruiseTarget();
@@ -1543,7 +1615,10 @@ void SupercruiseController::ComputeAISteering(const vector3d &targetPosRelToShip
 			}
 
 			// Keep a tighter buffer when approaching the target body (or a station on/orbiting it) vs an intervening body
-			const double margin = (b == targetBody) ? (exclR + std::min(200000.0, SAFE_DISENGAGE_DIST * 0.25)) : (targetOnOrNearBody ? (exclR + 15000.0) : (exclR * 1.35 + 80000.0));
+			double margin = (b == targetBody) ? (exclR + std::min(200000.0, SAFE_DISENGAGE_DIST * 0.25)) : (targetOnOrNearBody ? (exclR + 15000.0) : (exclR * 1.35 + 80000.0));
+			if (!m_ship->IsType(ObjectType::PLAYER) && Pi::game && Pi::game->GetTimeStep() > 0.05f && b != targetBody) {
+				margin += std::min(exclR * 0.5, m_speed * double(Pi::game->GetTimeStep()) * 0.15);
+			}
 			const vector3d toBody = b->GetPositionRelTo(m_ship);
 			const double bodyDist = toBody.Length();
 			if (bodyDist < 1.0)
@@ -2248,15 +2323,37 @@ void SupercruiseController::TimeStepUpdate(float timeStep, const vector3d &desir
 		}
 	}
 
-	const double rotLen = angCmd.Length();
+	vector3d angVelWorld = m_ship->GetOrient() * angCmd;
 	vector3d forwardDir = -m_ship->GetOrient().VectorZ();
-	if (rotLen > 1e-6) {
+	const double rotLen = angCmd.Length();
+	if (!m_ship->IsType(ObjectType::PLAYER) && double(timeStep) > 0.25) {
+		vector3d npcTargetRel;
+		if (GetActiveTargetPosRelToShip(npcTargetRel) && npcTargetRel.LengthSqr() > 1.0) {
+			const vector3d curFwd = (-m_ship->GetOrient().VectorZ()).NormalizedSafe();
+			const vector3d desiredDir = npcTargetRel.NormalizedSafe();
+			const double dot = Clamp(curFwd.Dot(desiredDir), -1.0, 1.0);
+			const double errAngle = std::acos(dot);
+			const vector3d axis = curFwd.Cross(desiredDir);
+			const double axisLen = axis.Length();
+			const double maxStepTurn = std::min(errAngle, 0.85 * double(timeStep));
+			if (maxStepTurn > 1e-4 && axisLen > 1e-6) {
+				const vector3d unitAxis = axis / axisLen;
+				angVelWorld = unitAxis * (maxStepTurn / double(timeStep));
+				forwardDir = -(matrix3x3d::Rotate(maxStepTurn, unitAxis) * m_ship->GetOrient()).VectorZ();
+			} else {
+				angVelWorld = vector3d(0.0);
+				forwardDir = desiredDir;
+			}
+		} else {
+			angVelWorld = vector3d(0.0);
+		}
+	} else if (rotLen > 1e-6) {
 		const double angle = rotLen * timeStep;
 		const vector3d worldAxis = m_ship->GetOrient() * (angCmd * (1.0 / rotLen));
 		const matrix3x3d rotMat = matrix3x3d::Rotate(angle, worldAxis);
 		forwardDir = -(rotMat * m_ship->GetOrient()).VectorZ();
 	}
-	m_ship->SetAngVelocity(m_ship->GetOrient() * angCmd);
+	m_ship->SetAngVelocity(angVelWorld);
 
 	// Swept ray-sphere / ray-terrain exclusion zone check along forward vector (-Z)
 	const vector3d startPos = m_ship->GetPosition();
@@ -2372,6 +2469,38 @@ void SupercruiseController::TimeStepUpdate(float timeStep, const vector3d &desir
 		}
 
 		if (hitBody) {
+			const SystemBody *hitSB = hitBody->GetSystemBody();
+			const bool hitIsRocky = hitSB && (hitSB->GetSuperType() == SystemBody::SUPERTYPE_ROCKY_PLANET);
+			if (!m_ship->IsType(ObjectType::PLAYER) && !hitIsRocky) {
+				// Deflect NPCs tangentially around stars and gas giants so high-time-accel Supercruise
+				// never drops them stationary into a lethal stellar gravity well.
+				const double safeR = std::max(GetExclusionZoneRadius(hitBody) * 1.12, hitBody->GetPhysRadius() * 1.15);
+				const vector3d bodyPosInShipFrame = hitBody->GetPositionRelTo(m_ship->GetFrame());
+				const vector3d startRelBody = startPos - bodyPosInShipFrame;
+				const vector3d endRelBody = startRelBody + forwardDir * stepDist;
+				vector3d radial = endRelBody.NormalizedSafe();
+				if (radial.LengthSqr() < 0.25)
+					radial = startRelBody.NormalizedSafe();
+				if (radial.LengthSqr() < 0.25)
+					radial = MathUtil::OrthogonalDirection(forwardDir).NormalizedSafe();
+
+				m_ship->SetPosition(bodyPosInShipFrame + radial * safeR);
+
+				vector3d tangentDir = forwardDir - radial * forwardDir.Dot(radial);
+				if (tangentDir.LengthSqr() < 1e-6)
+					tangentDir = MathUtil::OrthogonalDirection(radial);
+				tangentDir = tangentDir.NormalizedSafe();
+				forwardDir = tangentDir;
+
+				const vector3d zAxis = -tangentDir;
+				vector3d rightAxis = radial.Cross(zAxis).NormalizedSafe();
+				if (rightAxis.LengthSqr() < 0.1)
+					rightAxis = MathUtil::OrthogonalDirection(zAxis).NormalizedSafe();
+				const vector3d upAxis = zAxis.Cross(rightAxis).NormalizedSafe();
+				m_ship->SetOrient(matrix3x3d::FromVectors(rightAxis, upAxis, zAxis));
+				m_ship->SetVelocity(forwardDir * m_speed);
+				return;
+			}
 			m_ship->SetPosition(startPos + forwardDir * std::max(0.0, earliestHitDist));
 			EmergencyDrop("EMERGENCY DROP — EXCLUSION ZONE IMPACT (" + hitBody->GetLabel() + ")");
 			return;

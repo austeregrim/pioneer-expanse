@@ -72,7 +72,7 @@ Propulsion::Propulsion()
 
 void Propulsion::BeginAISequentialThrusters()
 {
-	m_aiSequentialThrusters = Pi::game->GetTimeAccel() == Game::TIMEACCEL_1X;
+	m_aiSequentialThrusters = (Pi::game && Pi::game->GetTimeStep() <= 0.05f);
 	m_aiPitchActive = false;
 	m_aiYawActive = false;
 	m_aiRollActive = false;
@@ -183,7 +183,7 @@ vector3d Propulsion::ClampLinThrusterState(const vector3d &levels) const
 
 void Propulsion::SetLinThrusterState(int axis, double level)
 {
-	if (AICurrentlyTurning())
+	if (AICurrentlyTurning() && (!Pi::game || Pi::game->GetTimeStep() <= 0.05f))
 		return;
 	if (m_disabled || m_thrusterFuel <= 0.f) level = 0.0;
 	m_linThrusters[axis] = ClampLinThrusterState(axis, level);
@@ -191,7 +191,7 @@ void Propulsion::SetLinThrusterState(int axis, double level)
 
 void Propulsion::SetLinThrusterState(const vector3d &levels)
 {
-	if (AICurrentlyTurning())
+	if (AICurrentlyTurning() && (!Pi::game || Pi::game->GetTimeStep() <= 0.05f))
 		return;
 	if (m_disabled || m_thrusterFuel <= 0.f) {
 		m_linThrusters = vector3d(0.0);
@@ -372,8 +372,24 @@ bool Propulsion::AIChangeVelBy(const vector3d &diffvel, const vector3d &powerLim
 		ClearLinThrusterState();
 		return false;
 	}
-	if (AICurrentlyTurning())
+	if (AICurrentlyTurning() && (!Pi::game || Pi::game->GetTimeStep() <= 0.05f)) {
+		// Compensate external gravity/drag forces while turning so ships do not freefall in gravity wells
+		const vector3d extForce = m_dBody->GetExternalForce();
+		if (Pi::game && extForce.LengthSqr() > 1e-6) {
+			const vector3d extf = extForce * (Pi::game->GetTimeStep() / m_dBody->GetMass());
+			const vector3d hoverDiff = -(extf * m_dBody->GetOrient());
+			const vector3d maxThrust = GetThrust(hoverDiff);
+			const vector3d maxFrameAccel = maxThrust * (Pi::game->GetTimeStep() / m_dBody->GetMass());
+			const vector3d hoverThrust(
+				(maxFrameAccel.x > 1e-9) ? Clamp(hoverDiff.x / maxFrameAccel.x, -powerLimit.x, powerLimit.x) : 0.0,
+				(maxFrameAccel.y > 1e-9) ? Clamp(hoverDiff.y / maxFrameAccel.y, -powerLimit.y, powerLimit.y) : 0.0,
+				(maxFrameAccel.z > 1e-9) ? Clamp(hoverDiff.z / maxFrameAccel.z, -powerLimit.z, powerLimit.z) : 0.0);
+			m_linThrusters = (m_thrusterFuel <= 0.f) ? vector3d(0.0) : ClampLinThrusterState(hoverThrust);
+		} else {
+			ClearLinThrusterState();
+		}
 		return false;
+	}
 
 	// counter external forces
 	vector3d extf = m_dBody->GetExternalForce() * (Pi::game->GetTimeStep() / m_dBody->GetMass());

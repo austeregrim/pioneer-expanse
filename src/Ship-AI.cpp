@@ -39,7 +39,9 @@ static SpaceStation *FindContainingOrbitalStation(const Ship *ship)
 bool Ship::AITimeStep(float timeStep)
 {
 	PROFILE_SCOPED()
-	// allow the launch thruster thing to happen
+	// allow the launch thruster thing to happen (never skip AI for multi-second high-accel steps)
+	if (!IsType(ObjectType::PLAYER) && timeStep > 0.25f && m_launchLockTimeout > 0.0f)
+		m_launchLockTimeout = 0.0f;
 	if (m_launchLockTimeout > 0.0) return false;
 
 	m_decelerating = false;

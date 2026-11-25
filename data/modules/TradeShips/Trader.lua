@@ -145,13 +145,34 @@ Trader.doOrbit = function (ship)
 	Core.log:add(ship, 'Ordering orbit of '..body.label)
 end
 
+local nearbySystemsCache = { sysKey = nil, byRange = {} }
+
+local function getCachedNearbySystems(rangeLy)
+	if not Game.system or not Game.system.path then return {} end
+	local p = Game.system.path
+	local curKey = string.format("%d,%d,%d,%d", p.sectorX or 0, p.sectorY or 0, p.sectorZ or 0, p.systemIndex or 0)
+	if nearbySystemsCache.sysKey ~= curKey then
+		nearbySystemsCache.sysKey = curKey
+		nearbySystemsCache.byRange = {}
+	end
+	local rKey = math.floor((tonumber(rangeLy) or 0) + 0.5)
+	local cached = nearbySystemsCache.byRange[rKey]
+	if cached then
+		return cached
+	end
+	local systems = Game.system:GetNearbySystems(rangeLy) or {}
+	nearbySystemsCache.byRange[rKey] = systems
+	return systems
+end
+
 local getSystem = function (ship)
 	local max_range = ship:GetInstalledHyperdrive():GetMaximumRange(ship)
 	max_range = math.min(max_range, 30)
 	local min_range = max_range / 2;
-	local systems_in_range = Game.system:GetNearbySystems(min_range)
+	local systems_half_range = getCachedNearbySystems(min_range)
+	local systems_in_range = systems_half_range
 	if #systems_in_range == 0 then
-		systems_in_range = Game.system:GetNearbySystems(max_range)
+		systems_in_range = getCachedNearbySystems(max_range)
 	end
 	if #systems_in_range == 0 then
 		return nil end
@@ -182,9 +203,6 @@ local getSystem = function (ship)
 	if target_system == nil then
 		-- pick a random system as fallback
 		target_system = systems_in_range[Engine.rand:Integer(1, #systems_in_range)]
-
-		-- get closer systems
-		local systems_half_range = Game.system:GetNearbySystems(min_range)
 
 		if #systems_half_range > 1 then
 			target_system = systems_half_range[Engine.rand:Integer(1, #systems_half_range)]

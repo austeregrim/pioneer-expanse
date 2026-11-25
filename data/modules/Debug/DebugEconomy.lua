@@ -200,7 +200,7 @@ local function drawConditions(sbody)
 
 end
 
-debugView.registerTab("Loader", {
+debugView.registerTab("debug-economy", {
 	label = "Economy/Industry Debug",
 	icon = icons.spacestation,
 	show = function() return Game.player end,

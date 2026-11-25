@@ -1,11 +1,13 @@
 -- Copyright © 2008-2026 Pioneer Developers. See AUTHORS.txt for details
 -- Licensed under the terms of the GPL v3. See licenses/GPL-3.txt
 
+local Engine = require 'Engine'
 local ui = require 'pigui'
 local Vector2 = _G.Vector2
 
 -- cache ui
 local font_heading = ui.fonts.pionillium.heading
+local font_heading_italic = ui.fonts.pionillium_italic.heading
 local font_content = ui.fonts.pionillium.body
 local colors = ui.theme.colors
 local icons = ui.theme.icons
@@ -30,7 +32,7 @@ local function formatMass(massInTonnes)
 end
 
 -- draw a 2-column table of name/value data with optional headings
-local function drawTable(data, heading1, heading2)
+local function drawTable(data, heading1, heading2, headingFont)
 	-- data is a table containing:
 	-- - name of item
 	-- - value of item
@@ -38,7 +40,7 @@ local function drawTable(data, heading1, heading2)
 		ui.tableSetupColumn(heading1 or "", { "WidthStretch" })
 		ui.tableSetupColumn(heading2 or "", { "WidthFixed" } )
 		if heading1 or heading2 then
-			ui.withFont(font_heading, function()
+			ui.withFont(headingFont or font_heading, function()
 				ui.tableHeadersRow()
 			end)
 		end
@@ -169,14 +171,16 @@ local function displayTargetScannerFor(target, maxWidth)
 	local playerInSC = player:GetFlightState() == "SUPERCRUISE"
 	local targetInSC = target:GetFlightState() == "SUPERCRUISE"
 	local inSupercruise = playerInSC or targetInSC
-	local canIdentify = (not player.CanIdentify) or player:CanIdentify(target)
+	local isDebugOnly = target:IsShip() and Engine.GetDebugShowAllShips and Engine.GetDebugShowAllShips() and player.CanSeeShip and not player:CanSeeShip(target)
+	local canIdentify = isDebugOnly or (not player.CanIdentify) or player:CanIdentify(target)
 	local headerLeft = canIdentify and target.label or "UNIDENTIFIED"
 	local headerRight = canIdentify and target:GetShipType() or "UNKNOWN VESSEL"
+	local headingFont = isDebugOnly and font_heading_italic or font_heading
 	local data = buildTargetScannerRows(target, inSupercruise)
 
 	if inSupercruise then
 		ui.withFont(font_content, function()
-			drawTable(data, headerLeft, headerRight)
+			drawTable(data, headerLeft, headerRight, headingFont)
 		end)
 		return
 	end
@@ -185,7 +189,7 @@ local function displayTargetScannerFor(target, maxWidth)
 	local shield = target:GetShieldsPercent() or 0
 
 	ui.withFont(font_content, function()
-		drawTable(data, headerLeft, headerRight)
+		drawTable(data, headerLeft, headerRight, headingFont)
 	end)
 
 	local spacing = ui.gauge_height * 1.4

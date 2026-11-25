@@ -13,6 +13,7 @@
 #include "SectorView.h"
 #include "Space.h"
 #include "gameconsts.h"
+#include "ship/SupercruiseController.h"
 #include "graphics/VertexBuffer.h"
 #include "matrix4x4.h"
 #include "core/Log.h"
@@ -147,6 +148,8 @@ void SystemView::RefreshShips(void)
 			(*s)->GetType() == ObjectType::SHIP) {
 
 			const auto c = static_cast<Ship *>(*s);
+			if (!SupercruiseController::IsShipVisibleToPlayer(Pi::player, c))
+				continue;
 			m_contacts.push_back(std::make_pair(c, c->ComputeOrbit()));
 		}
 	}

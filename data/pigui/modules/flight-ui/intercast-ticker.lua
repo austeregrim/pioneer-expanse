@@ -99,10 +99,11 @@ gameView.registerSidebarModule("intercast-news", {
 							ui.sameLine()
 						end
 
-						-- Category Badge & Date
+						-- Category Badge & Date/Time
 						ui.textColored(catCol, string.format("[%s]", art.category))
 						ui.sameLine()
-						ui.textColored(colors.fontDim, art.date or "3200.01.01")
+						local dtDisp = (art.date or "3200-01-01") .. (art.timeStr and (" " .. art.timeStr) or "")
+						ui.textColored(colors.fontDim, dtDisp)
 						ui.sameLine()
 						if art.system then
 							ui.textColored(colors.uiPrimaryLight, "• " .. art.system)

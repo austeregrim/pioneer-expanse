@@ -22,6 +22,9 @@ local SERIAL_SUFFIX_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ"
 local MAX_CASUALTIES = 500
 local CORRIDOR_RANGE_LY = 32.0
 
+local corridorNeighborKeysCache = {}
+local corridorNeighborCacheCount = 0
+
 local VESSEL_PREFIXES = {
 	TRADER    = { "MSV", "CSV", "FTV", "GCV" },
 	FREIGHT   = { "FTV", "CSV", "MSV" },
@@ -240,23 +243,40 @@ end
 local function collectRouteSystems(system)
 	local sKey = ShipRegistry.SystemKey(system.path)
 	local keys = { sKey }
-	local ok, nearby = pcall(function()
-		return system:GetNearbySystems(CORRIDOR_RANGE_LY, function(s)
-			return (s.population or 0) > 0 and #(s:GetStationPaths() or {}) > 0
+	local neighborKeys = sKey and corridorNeighborKeysCache[sKey] or nil
+	if not neighborKeys then
+		neighborKeys = {}
+		local ok, nearby = pcall(function()
+			return system:GetNearbySystems(CORRIDOR_RANGE_LY, function(s)
+				return (s.population or 0) > 0 and #(s:GetStationPaths() or {}) > 0
+			end)
 		end)
-	end)
-	if ok and nearby and #nearby > 0 then
-		local count = math.min(#nearby, Engine.rand:Integer(2, 4))
+		if ok and nearby then
+			for _, ns in ipairs(nearby) do
+				local nKey = ShipRegistry.SystemKey(ns.path)
+				if nKey and nKey ~= sKey then
+					table.insert(neighborKeys, nKey)
+				end
+			end
+		end
+		if sKey then
+			if corridorNeighborCacheCount >= 64 then
+				corridorNeighborKeysCache = {}
+				corridorNeighborCacheCount = 0
+			end
+			corridorNeighborKeysCache[sKey] = neighborKeys
+			corridorNeighborCacheCount = corridorNeighborCacheCount + 1
+		end
+	end
+	if #neighborKeys > 0 then
+		local count = math.min(#neighborKeys, Engine.rand:Integer(2, 4))
 		local picked = {}
 		for _ = 1, count * 2 do
 			if #keys >= 1 + count then break end
-			local idx = Engine.rand:Integer(1, #nearby)
+			local idx = Engine.rand:Integer(1, #neighborKeys)
 			if not picked[idx] then
 				picked[idx] = true
-				local nKey = ShipRegistry.SystemKey(nearby[idx].path)
-				if nKey and nKey ~= sKey then
-					table.insert(keys, nKey)
-				end
+				table.insert(keys, neighborKeys[idx])
 			end
 		end
 	end
@@ -753,6 +773,8 @@ Event.Register("onGameStart", function()
 	end
 	local s = ensureState()
 	liveLabels = {}
+	corridorNeighborKeysCache = {}
+	corridorNeighborCacheCount = 0
 
 	if Game.player and Game.player:exists() then
 		ShipRegistry.RegisterUsedLabel(Game.player:GetLabel())
@@ -777,6 +799,8 @@ end)
 Event.Register("onGameEnd", function()
 	state = nil
 	liveLabels = {}
+	corridorNeighborKeysCache = {}
+	corridorNeighborCacheCount = 0
 	loaded_data = nil
 end)
 

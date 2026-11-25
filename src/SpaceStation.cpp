@@ -745,8 +745,19 @@ bool SpaceStation::IsCorridorOccupied(const Ship *excludeShip) const
 		return false;
 
 	if (m_corridorShip && (m_corridorShip->IsDead() || m_corridorShip->GetFlightState() == Ship::HYPERSPACE ||
-		m_corridorShip->GetFlightState() == Ship::DOCKED)) {
+		m_corridorShip->GetFlightState() == Ship::DOCKED || m_corridorShip->GetFlightState() == Ship::LANDED ||
+		m_corridorShip->GetFlightState() == Ship::JUMPING || m_corridorShip->GetFlightState() == Ship::SUPERCRUISE)) {
 		const_cast<SpaceStation*>(this)->m_corridorShip = nullptr;
+	}
+
+	if (m_corridorShip && !m_corridorShip->IsType(ObjectType::PLAYER) &&
+		m_corridorShip->GetFlightState() == Ship::FLYING) {
+		const AICommand *corridorCmd = m_corridorShip->GetAICommand();
+		const bool validCorridorCmd = corridorCmd &&
+			(corridorCmd->GetType() == AICommand::CMD_DOCK || corridorCmd->GetType() == AICommand::CMD_DEPART);
+		if (!validCorridorCmd) {
+			const_cast<SpaceStation*>(this)->m_corridorShip = nullptr;
+		}
 	}
 
 	if (Pi::game && m_corridorShip) {
@@ -823,9 +834,11 @@ bool SpaceStation::IsCorridorOccupied(const Ship *excludeShip) const
 						return true;
 					}
 
-					// Priority in the APPROACH1 holding queue: larger waiting ships have right of way over smaller waiting ships
+					// Priority in the APPROACH1 holding queue: larger ships that are actually holding/ready with valid bay clearance have right of way
 					const double otherDist = other->GetPositionRelTo(this).Length();
-					if (otherDist < 2600.0 && excludeDist > 1200.0) {
+					if (otherDist < 2000.0 && excludeDist > 1200.0 &&
+						GetMyDockingPort(other) >= 0 &&
+						other->GetVelocityRelTo(this).Length() < 40.0) {
 						const bool otherIsLarge = IsLargeCorridorShip(other);
 						const double otherSize = std::max(other->GetClipRadius(), other->GetShipType() ? double(other->GetShipType()->hullMass) * 0.12 : 0.0);
 						if ((otherIsLarge && !excludeIsLarge) || (otherSize > excludeSize * 1.30 + 3.0)) {
@@ -1163,6 +1176,15 @@ bool SpaceStation::GetDockingClearance(Ship *s)
 	LuaEvent::Queue("onDockingClearanceDenied", this, s,
 		EnumStrings::GetString("DockingRefusedReason", int(DockingRefusedReason::NoBaysAvailable)));
 	return false;
+}
+
+void SpaceStation::RefreshDockingClearance(const Ship *s)
+{
+	if (!s) return;
+	const int bay = GetMyDockingPort(s);
+	if (bay >= 0 && m_shipDocking[bay].stage == DockStage::CLEARANCE_GRANTED) {
+		m_shipDocking[bay].stagePos = 0.0;
+	}
 }
 
 bool SpaceStation::BeginOrbitalDockingSequence(Ship *s)
@@ -1529,14 +1551,11 @@ bool SpaceStation::LevelShip(Ship *ship, int bay, const float timeStep)
 	vector3d dist = dt.fromPos;
 	vector3d dockingNormal(0.0, 1.0, 0.0);
 
-	double cosUp = dockingNormal.Dot(shipOrient.VectorY());
+	double cosUp = Clamp(dockingNormal.Dot(shipOrient.VectorY()), -1.0, 1.0);
 	if (cosUp < 0.999999) {
 		// need level ship
-		double angle;
-		if (cosUp < 0.985)
-			angle = -0.8 * timeStep;
-		else
-			angle = -acos(cosUp);
+		const double remainingAngle = acos(cosUp);
+		const double angle = -std::min(remainingAngle, 0.8 * double(timeStep));
 		vector3d rotAxis = dockingNormal.Cross(shipOrient.VectorY());
 		rotAxis = rotAxis.NormalizedSafe();
 
@@ -1676,8 +1695,13 @@ void SpaceStation::TimeStepUpdate(const float timeStep)
 
 	// Any NPC ship that finds itself inside an orbital space station without docking orders
 	// should immediately exit by recentering on the axis and exiting through the airlock.
+	// Also verify no NPC ship is idling without orders in the exterior approach/departure corridor.
+	// Combined into a single spatial query to avoid duplicate checks per station.
 	if (m_type && m_type->IsOrbitalStation() && Pi::game && Pi::game->GetSpace()) {
-		Space::BodyNearList nearby = Pi::game->GetSpace()->GetBodiesMaybeNear(this, GetClipRadius() * 1.5);
+		const double queryRadius = std::max(5000.0, GetClipRadius() * 1.5);
+		Space::BodyNearList nearby = Pi::game->GetSpace()->GetBodiesMaybeNear(this, queryRadius);
+		vector3d pPos, cDir, lDir;
+		const bool hasCorridor = GetCorridorGeometry(pPos, cDir, lDir);
 		for (Body *b : nearby) {
 			if (!b || !b->IsType(ObjectType::SHIP)) continue;
 			Ship *s = static_cast<Ship *>(b);
@@ -1691,21 +1715,11 @@ void SpaceStation::TimeStepUpdate(const float timeStep)
 
 				if (!hasDockingClearance && !isDeparting) {
 					s->AIDepart(this);
+					continue;
 				}
 			}
-		}
 
-		// Also verify that no NPC ship is idling or stranded without orders (CMD_NONE)
-		// directly in the exterior approach/departure corridor cylinder outside the mail slot:
-		vector3d pPos, cDir, lDir;
-		if (GetCorridorGeometry(pPos, cDir, lDir)) {
-			Space::BodyNearList corridorNearby = Pi::game->GetSpace()->GetBodiesMaybeNear(this, 5000.0);
-			for (Body *b : corridorNearby) {
-				if (!b || !b->IsType(ObjectType::SHIP)) continue;
-				Ship *s = static_cast<Ship *>(b);
-				if (s->IsDead() || s->IsType(ObjectType::PLAYER)) continue;
-				if (s->GetFlightState() != Ship::FLYING) continue;
-
+			if (hasCorridor) {
 				const vector3d relPosInSt = s->GetPositionRelTo(this) * GetOrient();
 				const double axDist = (relPosInSt - pPos).Dot(cDir);
 				const vector3d latVec = relPosInSt - (pPos + axDist * cDir);

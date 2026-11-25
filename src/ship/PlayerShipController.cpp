@@ -1132,13 +1132,16 @@ void PlayerShipController::SelectTarget()
 		if (it->body->GetType() == ObjectType::PROJECTILE) continue;
 		if (it->body->GetType() == ObjectType::SHIP) {
 			const Ship *otherShip = static_cast<const Ship *>(it->body);
-			if (!SupercruiseController::IsShipVisibleToSensors(m_ship, otherShip))
+			const bool naturallyVisible = SupercruiseController::IsShipVisibleToSensors(m_ship, otherShip);
+			if (!naturallyVisible && !SupercruiseController::IsShipVisibleToPlayer(m_ship, otherShip))
 				continue;
-			const bool alwaysTargetable = SupercruiseController::IsShipFTL(otherShip) ||
-				otherShip->IsTransponderActive() ||
-				SupercruiseController::HasTrackedLock(m_ship, otherShip);
-			if (!alwaysTargetable && it->dist > ship_detect_dist)
-				continue;
+			if (naturallyVisible) {
+				const bool alwaysTargetable = SupercruiseController::IsShipFTL(otherShip) ||
+					otherShip->IsTransponderActive() ||
+					SupercruiseController::HasTrackedLock(m_ship, otherShip);
+				if (!alwaysTargetable && it->dist > ship_detect_dist)
+					continue;
+			}
 		} else if ((it->body->GetType() == ObjectType::CARGOBODY || it->body->GetType() == ObjectType::HYPERSPACECLOUD)
 			&& it->dist > ship_detect_dist)
 			continue;
@@ -1409,7 +1412,7 @@ Body *PlayerShipController::GetFollowTarget() const
 void PlayerShipController::SetCombatTarget(Body *const target, bool setFollowTo)
 {
 	if (target && target->IsType(ObjectType::SHIP) &&
-		!SupercruiseController::IsShipVisibleToSensors(m_ship, static_cast<const Ship *>(target))) {
+		!SupercruiseController::IsShipVisibleToPlayer(m_ship, static_cast<const Ship *>(target))) {
 		return;
 	}
 
@@ -1432,7 +1435,7 @@ void PlayerShipController::SetCombatTarget(Body *const target, bool setFollowTo)
 void PlayerShipController::SetNavTarget(Body *const target)
 {
 	if (target && target->IsType(ObjectType::SHIP) &&
-		!SupercruiseController::IsShipVisibleToSensors(m_ship, static_cast<const Ship *>(target))) {
+		!SupercruiseController::IsShipVisibleToPlayer(m_ship, static_cast<const Ship *>(target))) {
 		return;
 	}
 

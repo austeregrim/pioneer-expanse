@@ -14,11 +14,17 @@ local height_fraction = 1.6
 
 local systemOverview = require 'pigui.modules.system-overview-window'.New()
 systemOverview.shouldDisplayPlayerDistance = true
+systemOverview.shouldAllowShips = true
+systemOverview.shouldShowShips = true
 
 local icons = ui.theme.icons
 
 function systemOverview:onBodySelected(sbody, body)
-	Game.player:SetNavTarget(body)
+	if body and body:IsShip() then
+		Game.player:SetCombatTarget(body)
+	else
+		Game.player:SetNavTarget(body)
+	end
 	ui.playSfx("OK")
 end
 
@@ -58,7 +64,11 @@ gameView.registerSidebarModule("system-overview", {
 		systemOverview.size.y = math.max(ui.getContentRegion().y, ui.screenHeight / height_fraction)
 
 		local root = Space.rootSystemBody
-		local selected = { [Game.player:GetNavTarget() or 0] = true }
+		local selected = {}
+		local nt = Game.player:GetNavTarget()
+		local ct = Game.player:GetCombatTarget()
+		if nt then selected[nt] = true end
+		if ct then selected[ct] = true end
 
 		systemOverview:display(Game.system, root, selected)
 	end

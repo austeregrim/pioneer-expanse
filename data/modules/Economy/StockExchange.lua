@@ -127,6 +127,7 @@ local totalDividendsCollected = 0
 local daysSinceLastDividend = 0
 local lastProcessedDay = nil
 local stockTimerActive = false
+local activeNewsShocks = {} -- list of { ticker, instantPct, dailyDriftPct, reason, expiresAt }
 
 -- Station Market Volume Boost Calculation
 function StockExchange.GetStationMarketVolumeMultiplier(sector, ticker)
@@ -703,18 +704,185 @@ function StockExchange.SellSharesByCredits(stock, creditAmount)
 	end
 end
 
+local function pruneExpiredNewsShocks(curTime)
+	local now = curTime or Game.time or 0
+	for i = #activeNewsShocks, 1, -1 do
+		local s = activeNewsShocks[i]
+		if not s or (s.expiresAt and now >= s.expiresAt) then
+			table.remove(activeNewsShocks, i)
+		end
+	end
+end
+
+function StockExchange.GetActiveNewsShocks()
+	pruneExpiredNewsShocks(Game.time or 0)
+	return activeNewsShocks
+end
+
+function StockExchange.ApplyNewsShock(ticker, instantPct, dailyDriftPct, durationHours, reason)
+	local stock = StockExchange.GetStock(ticker)
+	if not stock then return false end
+
+	local now = Game.time or 0
+	pruneExpiredNewsShocks(now)
+
+	local inst = math.clamp(tonumber(instantPct) or 0, -0.045, 0.045)
+	local drift = math.clamp(tonumber(dailyDriftPct) or 0, -0.035, 0.035)
+	local durSec = math.max(3600, (tonumber(durationHours) or 24) * 3600)
+
+	if math.abs(inst) > 0.0001 then
+		local base = stock.basePrice or stock.price or 100
+		local newP = math.max(base * 0.30, math.min(base * 3.0, (stock.price or base) * (1.0 + inst)))
+		newP = math.floor(newP * 100) / 100
+		stock.price = newP
+		local hist = stockHistory[stock.ticker]
+		if hist and #hist > 0 then
+			local latest = hist[#hist]
+			latest.close = newP
+			if newP > latest.high then latest.high = newP end
+			if newP < latest.low then latest.low = newP end
+			latest.volume = math.floor((latest.volume or 100000) * (1.0 + math.abs(inst) * 4.0))
+		end
+	end
+
+	table.insert(activeNewsShocks, 1, {
+		ticker = stock.ticker,
+		name = stock.name,
+		instantPct = inst,
+		dailyDriftPct = drift,
+		reason = reason or "InterCast Wire Dispatch",
+		createdAt = now,
+		expiresAt = now + durSec,
+	})
+	if #activeNewsShocks > 80 then
+		table.remove(activeNewsShocks)
+	end
+	return true
+end
+
+function StockExchange.GetCrisisStockImpacts(crisis)
+	local out = {}
+	if not crisis then return out end
+	local sev = crisis.severity or 1
+	local stageFactor = (sev == 1 and 0.75) or (sev == 2 and 1.30) or -0.55
+
+	for _, corp in ipairs(MEGACORPS) do
+		local sens = corp.crisisSensitivity and corp.crisisSensitivity[crisis.type]
+		if sens then
+			local dailyDriftPct = sens * stageFactor * 0.026 * 100.0
+			table.insert(out, {
+				ticker = corp.ticker,
+				name = corp.name,
+				sensitivity = sens,
+				stageFactor = stageFactor,
+				dailyDriftPct = dailyDriftPct,
+				currentPrice = corp.price,
+				basePrice = corp.basePrice,
+				note = string.format("Macro Crisis (%s Stg %d): %+.2f%%/day", crisis.type, sev, dailyDriftPct),
+			})
+		end
+	end
+
+	if crisis.system and localEnterprisesCache[crisis.system] then
+		for _, ent in ipairs(localEnterprisesCache[crisis.system]) do
+			local parent = StockExchange.GetStock(ent.parent)
+			local sens = parent and parent.crisisSensitivity and parent.crisisSensitivity[crisis.type]
+			if sens then
+				local dailyDriftPct = sens * stageFactor * 0.026 * 100.0
+				table.insert(out, {
+					ticker = ent.ticker,
+					name = ent.name,
+					sensitivity = sens,
+					stageFactor = stageFactor,
+					dailyDriftPct = dailyDriftPct,
+					currentPrice = ent.price,
+					basePrice = ent.basePrice,
+					note = ent.crisisNote or string.format("Local Exposure (%s): %+.2f%%/day", crisis.type, dailyDriftPct),
+				})
+			end
+		end
+	end
+
+	return out
+end
+
+function StockExchange.GetStockDebugBreakdown(ticker, activeCrisesOverride)
+	local stock = StockExchange.GetStock(ticker)
+	if not stock then return nil end
+
+	local curTime = Game.time or 0
+	pruneExpiredNewsShocks(curTime)
+
+	local activeCrises = activeCrisesOverride
+	if activeCrises == nil then
+		local okMacro, MacroEngine = pcall(require, 'modules.MacroGalaxy.MacroGalaxyEngine')
+		if okMacro and MacroEngine and MacroEngine.GetActiveCrises then
+			activeCrises = MacroEngine.GetActiveCrises()
+		end
+	end
+
+	local drivers = {}
+	local crisisDrift = 0.0
+	local sensMap = stock.crisisSensitivity
+	if not sensMap and stock.parent then
+		local p = StockExchange.GetStock(stock.parent)
+		sensMap = p and p.crisisSensitivity or nil
+	end
+	if activeCrises and sensMap then
+		for _, c in ipairs(activeCrises) do
+			local sens = sensMap[c.type]
+			if sens then
+				local sev = c.severity or 1
+				local stageFactor = (sev == 1 and 0.75) or (sev == 2 and 1.30) or -0.55
+				local d = sens * stageFactor * 0.026
+				crisisDrift = crisisDrift + d
+				table.insert(drivers, string.format("%s in %s (Stg %d): %+.2f%%/day", c.type, c.system, sev, d * 100.0))
+			end
+		end
+	end
+
+	local newsDrift = 0.0
+	for _, s in ipairs(activeNewsShocks) do
+		if s.ticker == stock.ticker then
+			newsDrift = newsDrift + (s.dailyDriftPct or 0)
+			table.insert(drivers, string.format("News Shock (%+.2f%%/day): %s", (s.dailyDriftPct or 0) * 100.0, s.reason or "Wire"))
+		end
+	end
+
+	local base = stock.basePrice or stock.price or 100
+	local priceRatio = ((stock.price or base) - base) / math.max(1e-6, base)
+	local meanRev = -0.022 * priceRatio * (1.0 + math.abs(priceRatio) * 0.5)
+
+	return {
+		ticker = stock.ticker,
+		name = stock.name,
+		price = stock.price,
+		basePrice = base,
+		pctVsBase = priceRatio * 100.0,
+		crisisDriftPct = crisisDrift * 100.0,
+		newsDriftPct = newsDrift * 100.0,
+		meanReversionPct = meanRev * 100.0,
+		drivers = drivers,
+	}
+end
+
 -- Advance a single stock by 1 daily close-of-day step
-local function advanceStockDay(stock, dayNum, rand, activeCrises)
+local function advanceStockDay(stock, dayNum, rand, activeCrises, curTime)
 	local hist = stockHistory[stock.ticker]
 	if not hist or #hist == 0 then return end
 	local prev = hist[#hist]
 
 	-- 1. Emergent GalNet Crisis Impact with Stage Progression Dynamics
 	local crisisImpact = 0.0
-	if activeCrises then
+	local sensMap = stock.crisisSensitivity
+	if not sensMap and stock.parent then
+		local p = StockExchange.GetStock(stock.parent)
+		sensMap = p and p.crisisSensitivity or nil
+	end
+	if activeCrises and sensMap then
 		for _, c in ipairs(activeCrises) do
-			if stock.crisisSensitivity and stock.crisisSensitivity[c.type] then
-				local sens = stock.crisisSensitivity[c.type]
+			if sensMap[c.type] then
+				local sens = sensMap[c.type]
 				local sev = c.severity or 1
 
 				-- Stage progression factor:
@@ -735,6 +903,16 @@ local function advanceStockDay(stock, dayNum, rand, activeCrises)
 		end
 	end
 
+	-- 1b. Active InterCast News Shock Drift
+	local newsImpact = 0.0
+	local nowT = curTime or Game.time or 0
+	for _, s in ipairs(activeNewsShocks) do
+		if s.ticker == stock.ticker and (not s.expiresAt or nowT < s.expiresAt) then
+			newsImpact = newsImpact + (s.dailyDriftPct or 0)
+		end
+	end
+	newsImpact = math.clamp(newsImpact, -0.055, 0.055)
+
 	-- 2. Valuation Mean Reversion (Valuation Gravity & Value Bargain Hunting)
 	local priceRatio = (prev.close - stock.basePrice) / stock.basePrice
 	-- Ornstein-Uhlenbeck gravitational pull accelerating when overextended:
@@ -752,7 +930,7 @@ local function advanceStockDay(stock, dayNum, rand, activeCrises)
 		shock = rand:Number(0.03, 0.065)  -- Positive beat / patent / export contract
 	end
 
-	local totalDrift = noise + meanReversion + crisisImpact + shock
+	local totalDrift = noise + meanReversion + crisisImpact + newsImpact + shock
 	local openP = prev.close
 	local newClose = math.max(stock.basePrice * 0.30, math.min(stock.basePrice * 3.0, openP * (1.0 + totalDrift)))
 	newClose = math.floor(newClose * 100) / 100
@@ -844,17 +1022,19 @@ function StockExchange.UpdateToCurrentTime(activeCrisesOverride)
 	if randSeed == 0 then randSeed = 1234567 end
 	local rand = Rand.New(randSeed)
 
+	pruneExpiredNewsShocks(curTime)
+
 	-- Process all elapsed calendar days (capped at 30 days per step)
 	local daysToStep = math.min(30, daysDiff)
 	for step = 1, daysToStep do
 		local dayNum = currentDay - (daysToStep - step)
 
 		for _, corp in ipairs(MEGACORPS) do
-			advanceStockDay(corp, dayNum, rand, activeCrises)
+			advanceStockDay(corp, dayNum, rand, activeCrises, curTime)
 		end
 
 		for _, idx in ipairs(FACTION_INDICES) do
-			advanceStockDay(idx, dayNum, rand, nil)
+			advanceStockDay(idx, dayNum, rand, nil, curTime)
 			local h = stockHistory[idx.ticker]
 			if h and #h >= 2 then
 				idx.change = math.floor((h[#h].close - h[#h - 1].close) * 100) / 100
@@ -863,7 +1043,7 @@ function StockExchange.UpdateToCurrentTime(activeCrisesOverride)
 
 		for _, sysList in pairs(localEnterprisesCache) do
 			for _, ent in ipairs(sysList) do
-				advanceStockDay(ent, dayNum, rand, activeCrises)
+				advanceStockDay(ent, dayNum, rand, activeCrises, curTime)
 			end
 		end
 	end
@@ -924,8 +1104,11 @@ Event.Register("onGameStart", function()
 	syncStockPricesFromHistory()
 	if not stockTimerActive then
 		stockTimerActive = true
-		Timer:CallEvery(60, function()
-			if not Game.player then return false end
+		Timer:CallEvery(3600, function()
+			if not Game.player then
+				stockTimerActive = false
+				return true
+			end
 			StockExchange.UpdateToCurrentTime(nil)
 			return false
 		end)
@@ -942,6 +1125,7 @@ Event.Register("onGameEnd", function()
 	playerPortfolio = {}
 	totalDividendsCollected = 0
 	daysSinceLastDividend = 0
+	activeNewsShocks = {}
 	localEnterprisesCache = {}
 	stockHistory = {}
 	for _, corp in ipairs(MEGACORPS) do
@@ -960,6 +1144,7 @@ local function serialize()
 	for _, c in ipairs(MEGACORPS) do
 		corpPrices[c.ticker] = c.price
 	end
+	pruneExpiredNewsShocks(Game.time or 0)
 	return {
 		corpPrices = corpPrices,
 		playerPortfolio = playerPortfolio,
@@ -967,11 +1152,13 @@ local function serialize()
 		daysSinceLastDividend = daysSinceLastDividend,
 		stockHistory = stockHistory,
 		lastProcessedDay = lastProcessedDay,
+		activeNewsShocks = activeNewsShocks,
 	}
 end
 
 local function unserialize(data)
 	if data then
+		activeNewsShocks = (type(data.activeNewsShocks) == "table") and data.activeNewsShocks or {}
 		if data.corpPrices then
 			for _, c in ipairs(MEGACORPS) do
 				if data.corpPrices[c.ticker] then

@@ -1,7 +1,9 @@
 -- Copyright © 2008-2026 Pioneer Developers. See AUTHORS.txt for details
 -- Licensed under the terms of the GPL v3. See licenses/GPL-3.txt
 
+local Engine = require 'Engine'
 local Game = require 'Game'
+local Space = require 'Space'
 local Format = require 'Format'
 local Lang = require 'Lang'
 local utils = require "libs.utils"
@@ -37,6 +39,8 @@ function SystemOverviewWidget:Constructor()
 	self.shouldSortByPlayerDistance = false
 	self.shouldShowStations = false
 	self.shouldShowMoons = false
+	self.shouldAllowShips = false
+	self.shouldShowShips = true
 	self.focusSearchResults = false
 	self.visible = false
 	self.filterText = ""
@@ -44,18 +48,37 @@ function SystemOverviewWidget:Constructor()
 	self.buttonSize = nil
 end
 
+local function getEntryDistanceToPlayer(entry)
+	if not entry or not Game.player then return math.huge end
+	if entry.isShip then
+		if entry.dockedStation and entry.dockedStation:exists() then
+			return entry.dockedStation:DistanceTo(Game.player)
+		elseif entry.body and entry.body:exists() then
+			return entry.body:DistanceTo(Game.player)
+		end
+		return math.huge
+	end
+	return entry.body and entry.body:DistanceTo(Game.player) or math.huge
+end
+
 local function sortByPlayerDistance(a,b)
-	return (a.body and b.body) and a.body:DistanceTo(Game.player) < b.body:DistanceTo(Game.player)
+	return getEntryDistanceToPlayer(a) < getEntryDistanceToPlayer(b)
 end
 
 local function sortBySystemDistance(a,b)
+	if a.isShip and b.isShip then
+		return getEntryDistanceToPlayer(a) < getEntryDistanceToPlayer(b)
+	elseif a.isShip ~= b.isShip then
+		return not a.isShip
+	end
 	return (a.systemBody.periapsis + a.systemBody.apoapsis) < (b.systemBody.periapsis + b.systemBody.apoapsis)
 end
 
-local function make_result(systemBody, label, isSelected)
+local function make_result(systemBody, label, isSelected, parent)
 	return {
 		systemBody = systemBody,
 		body = systemBody.body,
+		parent = parent,
 		label = label,
 		children = {},
 		visible = true,
@@ -64,6 +87,8 @@ local function make_result(systemBody, label, isSelected)
 		has_space_stations = false,
 		has_ground_stations = false,
 		has_moons = false,
+		has_ships = false,
+		has_hidden_ships = false,
 	}
 end
 
@@ -71,12 +96,15 @@ end
 -- Each entry will have { children_visible = true } if they are a parent of, or are a selected object
 -- Entries that are excluded by the current filter will have { visible = false }
 ---@return table @ information about a given SystemBody
-local function calculateEntry(systemBody, parent, selected, filter)
+local function calculateEntry(systemBody, parent, selected, filter, sbodyToEntry)
 	local result = nil
 	local isSelected = selected[systemBody] or (systemBody.body and selected[systemBody.body]) or false
 
-	result = make_result(systemBody, systemBody.name, isSelected)
+	result = make_result(systemBody, systemBody.name, isSelected, parent)
 	result.visible = isSelected or filter(systemBody)
+	if sbodyToEntry then
+		sbodyToEntry[systemBody] = result
+	end
 
 	-- Set show-flags on the direct parent of this body
 	if systemBody.isSpaceStation then
@@ -88,7 +116,7 @@ local function calculateEntry(systemBody, parent, selected, filter)
 	end
 
 	for _, child in pairs(systemBody.children or {}) do
-		table.insert(result.children, calculateEntry(child, result, selected, filter))
+		table.insert(result.children, calculateEntry(child, result, selected, filter, sbodyToEntry))
 	end
 
 	-- propagate children_visible and visible upwards
@@ -114,14 +142,32 @@ end
 
 -- Render a row for an entry in the system overview
 function SystemOverviewWidget:renderEntry(entry, indent)
-	local sbody = entry.systemBody ---@type SystemBody
+	local sbody = entry.systemBody ---@type SystemBody?
 	local label = entry.label or "UNKNOWN"
-	-- Handle the case where there is more than one body with the same name (e.g. New Hope in Epsilon Eridani)
-	local id = "##" .. label .. "#" .. sbody.path.bodyIndex
+	local id
+	local icon
+	local iconColor = colors.font
+
+	if entry.isShip then
+		local ship = entry.body
+		id = "##ship_" .. label .. "_" .. tostring(ship)
+		icon = getBodyIcon(ship, false)
+		if Game.player then
+			if ship == Game.player:GetCombatTarget() then
+				iconColor = colors.combatTarget
+			elseif ship == Game.player:GetNavTarget() then
+				iconColor = colors.navTarget
+			end
+		end
+	else
+		-- Handle the case where there is more than one body with the same name (e.g. New Hope in Epsilon Eridani)
+		id = "##" .. label .. "#" .. sbody.path.bodyIndex
+		icon = getBodyIcon(sbody)
+	end
 
 	ui.dummy(Vector2(style.iconSize.x * indent / 2.0, style.iconSize.y))
 	ui.sameLine()
-	ui.icon(getBodyIcon(sbody), style.iconSize, colors.font)
+	ui.icon(icon, style.iconSize, iconColor)
 	ui.sameLine()
 
 	local pos = ui.getCursorPos()
@@ -137,20 +183,32 @@ function SystemOverviewWidget:renderEntry(entry, indent)
 
 	ui.setCursorPos(pos)
 	ui.alignTextToLineHeight(style.iconSize.y)
-	ui.text(label)
+	if entry.isShip and entry.isDebugOnly then
+		ui.withFont(ui.fonts.pionillium_italic.medium, function()
+			ui.text(label)
+		end)
+	else
+		ui.text(label)
+	end
 	ui.sameLine()
 
-	if entry.has_moons then
-		ui.icon(icons.moon, style.bodyIconSize, colors.font)
-		ui.sameLine(0,0.01)
-	end
-	if entry.has_ground_stations then
-		ui.icon(icons.starport, style.bodyIconSize, colors.font)
-		ui.sameLine(0,0.01)
-	end
-	if entry.has_space_stations then
-		ui.icon(icons.spacestation, style.bodyIconSize, colors.font)
-		ui.sameLine(0,0.01)
+	if not entry.isShip then
+		if entry.has_moons then
+			ui.icon(icons.moon, style.bodyIconSize, colors.font)
+			ui.sameLine(0,0.01)
+		end
+		if entry.has_ground_stations then
+			ui.icon(icons.starport, style.bodyIconSize, colors.font)
+			ui.sameLine(0,0.01)
+		end
+		if entry.has_space_stations then
+			ui.icon(icons.spacestation, style.bodyIconSize, colors.font)
+			ui.sameLine(0,0.01)
+		end
+		if (entry.has_ships or entry.has_hidden_ships) and self.shouldAllowShips and (not self.shouldShowShips or entry.has_hidden_ships or not entry.children_visible) then
+			ui.icon(icons.ship, style.bodyIconSize, colors.font)
+			ui.sameLine(0,0.01)
+		end
 	end
 
 	ui.nextColumn()
@@ -159,7 +217,9 @@ function SystemOverviewWidget:renderEntry(entry, indent)
 	ui.alignTextToLineHeight(style.iconSize.y)
 
 	local distance
-	if entry.body and self.shouldDisplayPlayerDistance then
+	if entry.isShip then
+		distance = getEntryDistanceToPlayer(entry)
+	elseif entry.body and self.shouldDisplayPlayerDistance then
 		distance = entry.body:DistanceTo(Game.player)
 	else
 		distance = (sbody.apoapsis + sbody.periapsis) / 2.0
@@ -169,7 +229,9 @@ function SystemOverviewWidget:renderEntry(entry, indent)
 end
 
 function SystemOverviewWidget:showEntry(entry, indent, sortFunction)
-	if entry.systemBody.type ~= 'GRAVPOINT' then self:renderEntry(entry, indent) end
+	if entry.isShip or (entry.systemBody and entry.systemBody.type ~= 'GRAVPOINT') then
+		self:renderEntry(entry, indent)
+	end
 
 	local isVisible = entry.children_visible and not self.focusSearchResults
 	table.sort(entry.children, sortFunction)
@@ -197,6 +259,12 @@ function SystemOverviewWidget:drawControlButtons()
 	if ui.iconButton("show_stations", icons.filter_stations, lui.TOGGLE_OVERVIEW_SHOW_STATIONS, self.shouldShowStations, buttonSize) then
 		self.shouldShowStations = not self.shouldShowStations
 	end
+	if self.shouldAllowShips then
+		ui.sameLine()
+		if ui.iconButton("show_ships", icons.ship, "Toggle Ships in Overview", self.shouldShowShips, buttonSize) then
+			self.shouldShowShips = not self.shouldShowShips
+		end
+	end
 end
 
 function SystemOverviewWidget:displaySearch()
@@ -210,7 +278,7 @@ end
 
 function SystemOverviewWidget:displaySidebarControls()
 	local spacing = styles.ItemInnerSpacing
-	local numButtons = self.shouldDisplayPlayerDistance and 3 or 2
+	local numButtons = 2 + (self.shouldDisplayPlayerDistance and 1 or 0) + (self.shouldAllowShips and 1 or 0)
 	local button_width = (ui.getLineHeight() + spacing.x) * numButtons - spacing.x
 
 	local pos = ui.getCursorPos() + Vector2(ui.getContentRegion().x - button_width, 0)
@@ -222,6 +290,54 @@ function SystemOverviewWidget:displaySidebarControls()
 			self:drawControlButtons()
 		end)
 	end)
+end
+
+local function findNearestStationChild(parentSBody, ship)
+	if not parentSBody or not parentSBody.children then return nil end
+	local bestStation = nil
+	local bestDist = 50000 -- 50 km surface/local station grouping radius
+	for _, child in pairs(parentSBody.children) do
+		if child.isStation then
+			local stBody = child.body or child.physicsBody
+			if stBody and stBody:exists() then
+				local d = ship:DistanceTo(stBody)
+				if d < bestDist then
+					bestDist = d
+					bestStation = child
+				end
+			end
+		end
+	end
+	return bestStation
+end
+
+local function resolveShipParentEntry(ship, tree, sbodyToEntry)
+	local dockedStation = (ship.IsDocked and ship:IsDocked()) and ship:GetDockedWith() or nil
+	if dockedStation and dockedStation:exists() and dockedStation.GetSystemBody then
+		local stSBody = dockedStation:GetSystemBody()
+		if stSBody and sbodyToEntry[stSBody] then
+			return sbodyToEntry[stSBody], dockedStation
+		end
+	end
+
+	local fb = ship.frameBody
+	if fb and fb:exists() and fb.GetSystemBody then
+		local fbSBody = fb:GetSystemBody()
+		if fbSBody then
+			if fb:IsStation() and sbodyToEntry[fbSBody] then
+				return sbodyToEntry[fbSBody], nil
+			end
+			local nearStation = findNearestStationChild(fbSBody, ship)
+			if nearStation and sbodyToEntry[nearStation] then
+				return sbodyToEntry[nearStation], nil
+			end
+			if sbodyToEntry[fbSBody] then
+				return sbodyToEntry[fbSBody], nil
+			end
+		end
+	end
+
+	return tree, nil
 end
 
 function SystemOverviewWidget:display(system, root, selected)
@@ -244,7 +360,65 @@ function SystemOverviewWidget:display(system, root, selected)
 	end
 
 	ui.child("spaceTargets", self.size, function()
-		local tree = calculateEntry(root, nil, selected, filterFunction)
+		local sbodyToEntry = {}
+		local tree = calculateEntry(root, nil, selected, filterFunction, sbodyToEntry)
+
+		if tree and self.shouldAllowShips and Game and Game.system and system == Game.system and Game.player and not Game.InHyperspace() then
+			local player = Game.player
+			local debugShowAll = Engine.GetDebugShowAllShips and Engine.GetDebugShowAllShips() or false
+			local filterLower = (filterText and filterText ~= "") and filterText:lower() or nil
+
+			for _, ship in ipairs(Space.GetBodies("Ship")) do
+				if ship and ship ~= player and ship:exists() then
+					local naturallyVisible = player.CanSeeShip and player:CanSeeShip(ship) or false
+					if naturallyVisible or debugShowAll then
+						local isDebugOnly = not naturallyVisible
+						local label = ship:GetLabel() or "SHIP"
+						if not isDebugOnly and player.CanIdentify and not player:CanIdentify(ship) then
+							label = (ship:GetFlightState() == "SUPERCRUISE") and "UNIDENTIFIED LIGHT" or "UNIDENTIFIED"
+						end
+						local isSelected = selected[ship] or false
+						local matchesFilter = (not filterLower) or (string.find(label:lower(), filterLower, 1, true) ~= nil)
+						local shipVisible = isSelected or (matchesFilter and (self.shouldShowShips or self.focusSearchResults))
+
+						local parentEntry, dockedStation = resolveShipParentEntry(ship, tree, sbodyToEntry)
+						parentEntry.has_ships = true
+						local anc = parentEntry
+						while anc and not anc.visible do
+							anc = anc.parent
+							if anc then
+								anc.has_hidden_ships = true
+							end
+						end
+
+						if shipVisible then
+							if isSelected or self.focusSearchResults then
+								local p = parentEntry
+								while p do
+									p.visible = true
+									p = p.parent
+								end
+							end
+
+							local shipEntry = {
+								isShip = true,
+								ship = ship,
+								body = ship,
+								dockedStation = dockedStation,
+								label = label,
+								isDebugOnly = isDebugOnly,
+								parent = parentEntry,
+								children = {},
+								visible = true,
+								children_visible = isSelected,
+								selected = isSelected,
+							}
+							table.insert(parentEntry.children, shipEntry)
+						end
+					end
+				end
+			end
+		end
 
 		if tree then
 			ui.columns(2, "spaceTargetColumnsOn", false) -- no border
@@ -260,7 +434,7 @@ end
 
 function SystemOverviewWidget:displaySidebarTitle(system)
 	local spacing = styles.ItemInnerSpacing
-	local numButtons = self.shouldDisplayPlayerDistance and 3 or 2
+	local numButtons = 2 + (self.shouldDisplayPlayerDistance and 1 or 0) + (self.shouldAllowShips and 1 or 0)
 	local button_width = (ui.getLineHeight() + spacing.x) * numButtons - spacing.x
 
 	local pos = ui.getCursorPos() + Vector2(ui.getContentRegion().x - button_width, 0)

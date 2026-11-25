@@ -1072,6 +1072,7 @@ end
 
 Flow.run = function()
 	if not Core.params or not Core.params.ship_names or #Core.params.ship_names == 0 then return end
+
 	Flow.cleanTradeShipsTable()
 	Flow.recoverIdleTraders()
 	Flow.processHangars()

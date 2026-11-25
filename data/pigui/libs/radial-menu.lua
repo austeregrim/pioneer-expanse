@@ -108,6 +108,51 @@ local radial_menu_actions_hyperspace_cloud = {
 	}
 }
 
+local function engageAutopilotTo(target, mode, sublightFn)
+	local player = Game.player
+	if not hasAutopilotLevel(1) then
+		Game.AddCommsLogLine(lc.NO_AUTOPILOT_INSTALLED)
+		return
+	end
+
+	player:SetNavTarget(target)
+
+	local inSC = (player.IsSupercruiseActive and player:IsSupercruiseActive())
+		or (player.IsSupercruiseCharging and player:IsSupercruiseCharging())
+	local hasSCAssist = player.HasSupercruiseAssist and player:HasSupercruiseAssist()
+	local dist = target:DistanceTo(player)
+
+	local useSCAssist = false
+	if mode == "dock" then
+		useSCAssist = inSC or (hasSCAssist and dist > 50000)
+	elseif mode == "flyto" then
+		useSCAssist = inSC or (hasSCAssist and dist > 100000)
+	elseif mode == "orbit" then
+		local sbody = target.GetSystemBody and target:GetSystemBody() or nil
+		local orbThreshold = math.max(2500000, (sbody and sbody.radius or 0) * 6)
+		useSCAssist = inSC or (hasSCAssist and dist > orbThreshold)
+	end
+
+	if useSCAssist then
+		if not hasSCAssist then
+			Game.AddCommsLogLine("Supercruise Assist requires Autopilot Mk 2+ (drop to normal space for sublight autopilot)")
+			return
+		end
+		if player.CancelAI then
+			player:CancelAI()
+		end
+		player:SetSupercruiseAssist(true, mode == "dock")
+		ui.playSfx("OK")
+	else
+		if player.IsSupercruiseAssistActive and player:IsSupercruiseAssistActive() then
+			player:SetSupercruiseAssist(false, false)
+		end
+		player:SetFlightControlState("CONTROL_AUTOPILOT")
+		sublightFn(player, target)
+		ui.playSfx("OK")
+	end
+end
+
 local radial_menu_actions_station = {
 	{
 		icon=ui.theme.icons.comms, tooltip=lc.REQUEST_DOCKING_CLEARANCE,
@@ -121,30 +166,78 @@ local radial_menu_actions_station = {
 	{
 		icon=ui.theme.icons.autopilot_dock, tooltip=lc.AUTOPILOT_DOCK_WITH_STATION,
 		action=function(target)
-	 		if hasAutopilotLevel(1) then
-		 		Game.player:SetFlightControlState("CONTROL_AUTOPILOT")
-		 		Game.player:AIDockWith(target)
-		 		Game.player:SetNavTarget(target)
-				ui.playSfx("OK")
+			engageAutopilotTo(target, "dock", function(p, t)
+				p:AIDockWith(t)
+			end)
+		end
+	},
+}
+
+local radial_menu_actions_ship = {
+	{
+		icon = ui.theme.icons.combattarget,
+		tooltip = lc.SET_AS_COMBAT_TARGET or "Target {target}",
+		action = function(target)
+			Game.player:SetCombatTarget(target)
+			ui.playSfx("OK")
+		end
+	},
+	{
+		icon = ui.theme.icons.navtarget,
+		tooltip = lc.SET_AS_TARGET or "Set {target} as Navigation Target",
+		action = function(target)
+			Game.player:SetNavTarget(target)
+			ui.playSfx("OK")
+		end
+	},
+	{
+		icon = ui.theme.icons.follow_pos,
+		tooltip = "Follow / Match Velocity with {target}",
+		action = function(target)
+			local player = Game.player
+			player:SetFollowTarget(target)
+			local inSC = player.IsSupercruiseActive and player:IsSupercruiseActive()
+			local hasSCAssist = player.HasSupercruiseAssist and player:HasSupercruiseAssist()
+			if inSC or (hasSCAssist and target:DistanceTo(player) > 100000) then
+				engageAutopilotTo(target, "flyto", function(p, t)
+					p:AIFlyTo(t)
+				end)
 			else
-				Game.AddCommsLogLine(lc.NO_AUTOPILOT_INSTALLED)
+				player:SetFlightControlState("CONTROL_FIXSPEED")
+				ui.playSfx("OK")
 			end
 		end
 	},
+	{
+		icon = ui.theme.icons.autopilot_fly_to,
+		tooltip = lc.AUTOPILOT_FLY_TO_VICINITY_OF,
+		action = function(target)
+			engageAutopilotTo(target, "flyto", function(p, t)
+				p:AIFlyTo(t)
+			end)
+		end
+	},
+}
+
+local radial_menu_action_interdict = {
+	icon = ui.theme.icons.bullseye,
+	tooltip = "Interdict {target}",
+	action = function(target)
+		Game.player:SetCombatTarget(target)
+		if Game.player.StartInterdiction then
+			Game.player:StartInterdiction(target)
+		end
+		ui.playSfx("OK")
+	end
 }
 
 local radial_menu_actions_all_bodies = {
 	{
 		icon=ui.theme.icons.autopilot_fly_to, tooltip=lc.AUTOPILOT_FLY_TO_VICINITY_OF,
 		action=function(target)
-			if hasAutopilotLevel(1) then
-		 		Game.player:SetFlightControlState("CONTROL_AUTOPILOT")
-		 		Game.player:AIFlyTo(target)
-		 		Game.player:SetNavTarget(target)
-				ui.playSfx("OK")
-			else
-				Game.AddCommsLogLine(lc.NO_AUTOPILOT_INSTALLED)
-			end
+			engageAutopilotTo(target, "flyto", function(p, t)
+				p:AIFlyTo(t)
+			end)
 		end
 	},
 }
@@ -153,40 +246,25 @@ local radial_menu_actions_systembody = {
 	{
 		icon=ui.theme.icons.autopilot_low_orbit, tooltip=lc.AUTOPILOT_ENTER_LOW_ORBIT_AROUND,
 		action=function(target)
-	 		if hasAutopilotLevel(1) then
-		 		Game.player:SetFlightControlState("CONTROL_AUTOPILOT")
-		 		Game.player:AIEnterLowOrbit(target)
-		 		Game.player:SetNavTarget(target)
-				ui.playSfx("OK")
-			else
-				Game.AddCommsLogLine(lc.NO_AUTOPILOT_INSTALLED)
-			end
+			engageAutopilotTo(target, "orbit", function(p, t)
+				p:AIEnterLowOrbit(t)
+			end)
 		end
 	},
 	{
 		icon=ui.theme.icons.autopilot_medium_orbit, tooltip=lc.AUTOPILOT_ENTER_MEDIUM_ORBIT_AROUND,
 		action=function(target)
-	 		if hasAutopilotLevel(1) then
-		 		Game.player:SetFlightControlState("CONTROL_AUTOPILOT")
-		 		Game.player:AIEnterMediumOrbit(target)
-		 		Game.player:SetNavTarget(target)
-				ui.playSfx("OK")
-			else
-				Game.AddCommsLogLine(lc.NO_AUTOPILOT_INSTALLED)
-			end
+			engageAutopilotTo(target, "orbit", function(p, t)
+				p:AIEnterMediumOrbit(t)
+			end)
 		end
 	},
 	{
 		icon=ui.theme.icons.autopilot_high_orbit, tooltip=lc.AUTOPILOT_ENTER_HIGH_ORBIT_AROUND,
 		action=function(target)
-	 		if hasAutopilotLevel(1) then
-		 		Game.player:SetFlightControlState("CONTROL_AUTOPILOT")
-		 		Game.player:AIEnterHighOrbit(target)
-		 		Game.player:SetNavTarget(target)
-				ui.playSfx("OK")
-			else
-				Game.AddCommsLogLine(lc.NO_AUTOPILOT_INSTALLED)
-			end
+			engageAutopilotTo(target, "orbit", function(p, t)
+				p:AIEnterHighOrbit(t)
+			end)
 		end
 	},
 }
@@ -194,13 +272,22 @@ local radial_menu_actions_systembody = {
 function ui.openDefaultRadialMenu(id, body, pos, action_binding)
 	if body then
 		local actions = {}
-		table.append(actions, radial_menu_actions_all_bodies)
-		if body:IsStation() then
-			table.append(actions, radial_menu_actions_station)
-		elseif body:IsHyperspaceCloud() then
-			table.append(actions, radial_menu_actions_hyperspace_cloud)
-		elseif body:GetSystemBody() then
-			table.append(actions, radial_menu_actions_systembody)
+		if body:IsShip() then
+			table.append(actions, radial_menu_actions_ship)
+			if Game.player and Game.player.IsSupercruiseActive and Game.player:IsSupercruiseActive()
+				and Game.player.HasFSDInterdictor and Game.player:HasFSDInterdictor()
+				and body:GetFlightState() == "SUPERCRUISE" then
+				table.insert(actions, radial_menu_action_interdict)
+			end
+		else
+			table.append(actions, radial_menu_actions_all_bodies)
+			if body:IsStation() then
+				table.append(actions, radial_menu_actions_station)
+			elseif body:IsHyperspaceCloud() then
+				table.append(actions, radial_menu_actions_hyperspace_cloud)
+			elseif body:GetSystemBody() then
+				table.append(actions, radial_menu_actions_systembody)
+			end
 		end
 		ui.openRadialMenu(id, body, 1, defaultRadialMenuIconSize, actions, defaultRadialMenuPadding, pos, action_binding)
 	end

@@ -338,6 +338,168 @@ local function formatSystemText(template, sysName)
 	return template
 end
 
+function MacroGalaxyEngine.GetRegionalSystems()
+	return REGIONAL_SYSTEMS
+end
+
+function MacroGalaxyEngine.GetCommodityEffectsForCrisis(crisis)
+	if not crisis then return {} end
+	local cType = crisis.type
+	local sev = crisis.severity or 1
+	local isRes = (sev >= 3)
+
+	if cType == "TARIFF_WAR" then
+		local tariffMult = (sev >= 2) and 1.40 or 1.25
+		return {
+			{
+				label = "Machinery, Computers, Robotics, Consumer Goods, Plastics",
+				patterns = { "MACHINERY", "COMPUTER", "ROBOT", "CONSUMER", "PLASTIC" },
+				buyMult = tariffMult,
+				sellMult = 1.0 / tariffMult,
+				note = string.format("CUSTOMS TARIFF: +%.0f%% Import Buy Surcharge / -%.0f%% Sell Margin", (tariffMult - 1.0) * 100, (1.0 - 1.0 / tariffMult) * 100),
+			}
+		}
+	elseif cType == "BLOCKADE" then
+		local mult = (sev >= 2) and 2.10 or 1.65
+		return {
+			{
+				label = "Weapons, Medicines, Grain, Meat, Air Processors, Fuel",
+				patterns = { "WEAPON", "MEDICINE", "GRAIN", "MEAT", "AIR", "FUEL" },
+				buyMult = mult,
+				sellMult = mult,
+				note = string.format("BLOCKADE SHORTAGE: +%.0f%% Runner Relief Premium", (mult - 1.0) * 100),
+			}
+		}
+	elseif cType == "SUPPLY_GLUT" then
+		local mult = isRes and 0.85 or 0.45
+		return {
+			{
+				label = "Ores, Metals, Metal Alloys, Minerals",
+				patterns = { "ORE", "METAL", "ALLOY", "MINERAL" },
+				buyMult = mult,
+				sellMult = mult,
+				note = isRes and "INVENTORY REBALANCE: -15% Residual Overhang" or "SUPPLY OVERHANG: -55% Smelting Glut Spot Crash",
+			}
+		}
+	elseif cType == "OUTBREAK" then
+		local mult = isRes and 0.80 or (1.80 + sev * 0.40)
+		return {
+			{
+				label = "Medicines, Air Processors, Water",
+				patterns = { "MEDICINE", "AIR", "WATER" },
+				buyMult = mult,
+				sellMult = mult,
+				note = isRes and "POST-EPIDEMIC COOLING: -20% Medical Stockpile Surfeit" or string.format("OUTBREAK EPIDEMIC: +%.0f%% Vaccine & Medical Premium", (mult - 1.0) * 100),
+			}
+		}
+	elseif cType == "FAMINE" then
+		local mult = isRes and 0.85 or (1.80 + sev * 0.40)
+		return {
+			{
+				label = "Grain, Animal Meat, Fruit & Veg, Fertilizer, Live Animals",
+				patterns = { "GRAIN", "MEAT", "FRUIT", "FERTILIZER", "ANIMAL" },
+				buyMult = mult,
+				sellMult = mult,
+				note = isRes and "RELIEF STABILIZING: -15% Grain Reserve Normalization" or string.format("FAMINE RELIEF: +%.0f%% Emergency Caloric Subsidy", (mult - 1.0) * 100),
+			}
+		}
+	elseif cType == "MINERAL_RUSH" then
+		local mult = isRes and 0.70 or (1.50 + sev * 0.30)
+		return {
+			{
+				label = "Mining Machinery, Precious Metals",
+				patterns = { "MINING_MACHINERY", "PRECIOUS_METALS" },
+				buyMult = mult,
+				sellMult = mult,
+				note = isRes and "VEINS DEPLETED: -30% Speculation Retraction" or string.format("MINERAL RUSH: +%.0f%% Extraction Speculation Surge", (mult - 1.0) * 100),
+			}
+		}
+	elseif cType == "LABOR_STRIKE" then
+		return {
+			{
+				label = "Industrial Machinery, Consumer Goods, Metal Alloys",
+				patterns = { "INDUSTRIAL_MACHINERY", "CONSUMER", "ALLOY" },
+				buyMult = 1.18,
+				sellMult = 1.18,
+				note = "DOCKWORKERS STRIKE: +18% Port Throughput Bottleneck",
+			}
+		}
+	elseif cType == "INDUSTRIAL_DISASTER" then
+		return {
+			{
+				label = "Hydrogen, Liquid Oxygen, Industrial Machinery",
+				patterns = { "HYDROGEN", "OXYGEN", "INDUSTRIAL_MACHINERY" },
+				buyMult = isRes and 1.10 or 1.45,
+				sellMult = isRes and 1.10 or 1.45,
+				note = isRes and "RECERTIFICATION RECOVERY: +10% Supply Tightness" or "REFINERY CORE BREACH: +45% Propellant & Parts Shortage",
+			}
+		}
+	end
+	return {}
+end
+
+function MacroGalaxyEngine.GetCommodityMultiplier(systemName, commodityName, isBuy)
+	if not systemName or not commodityName then return 1.0, nil end
+	local crisis = MacroGalaxyEngine.GetCrisisForSystem(systemName)
+	if not crisis then return 1.0, nil end
+	local cName = string.upper(commodityName)
+	local effects = MacroGalaxyEngine.GetCommodityEffectsForCrisis(crisis)
+	for _, eff in ipairs(effects) do
+		for _, pat in ipairs(eff.patterns or {}) do
+			if cName:find(pat, 1, true) then
+				return (isBuy and eff.buyMult or eff.sellMult) or 1.0, eff.note
+			end
+		end
+	end
+	return 1.0, nil
+end
+
+function MacroGalaxyEngine.GetTaxEffectForCrisis(crisis)
+	if not crisis then return nil end
+	if crisis.type == "TARIFF_WAR" then
+		return { rateDeltaPct = 10.0, note = "Retaliatory Import Customs Surcharge (+10.0% system tax)" }
+	elseif crisis.type == "BLOCKADE" then
+		return { rateDeltaPct = 5.0, note = "Emergency Naval Blockade Defense Levy (+5.0% system tax)" }
+	elseif crisis.type == "SUPPLY_GLUT" then
+		return { rateDeltaPct = -2.0, note = "Emergency Trade Stimulus Tax Rebate (-2.0% system tax)" }
+	end
+	return nil
+end
+
+function MacroGalaxyEngine.GetPiracyEffectForCrisis(crisis)
+	if not crisis then return nil end
+	if crisis.type == "INSURGENCY" then
+		return { threatDeltaPct = 6.0, note = "Insurgent Raiding Activity (+6% effective lawlessness / interdiction risk)" }
+	elseif crisis.type == "BLOCKADE" then
+		return { threatDeltaPct = 6.0, note = "Contested Exclusion Zone (+6% interdiction & hostile patrol risk)" }
+	end
+	return nil
+end
+
+local function buildCrisisArticleEffects(crisis)
+	if not crisis then return nil end
+	local stocks = {}
+	local okStock, StockExchange = pcall(require, 'modules.Economy.StockExchange')
+	if okStock and StockExchange and StockExchange.GetCrisisStockImpacts then
+		stocks = StockExchange.GetCrisisStockImpacts(crisis)
+	end
+	return {
+		source = "MacroGalaxy Crisis Engine",
+		crisis = {
+			id = crisis.id,
+			system = crisis.system,
+			type = crisis.type,
+			severity = crisis.severity,
+			progress = crisis.progress,
+			progressRate = crisis.progressRate,
+		},
+		stocks = stocks,
+		commodities = MacroGalaxyEngine.GetCommodityEffectsForCrisis(crisis),
+		tax = MacroGalaxyEngine.GetTaxEffectForCrisis(crisis),
+		piracy = MacroGalaxyEngine.GetPiracyEffectForCrisis(crisis),
+	}
+end
+
 local function seedEmergentCrisis(preferredSystem)
 	local usedSystems = {}
 	for _, c in ipairs(activeCrises) do
@@ -396,6 +558,7 @@ local function seedEmergentCrisis(preferredSystem)
 		summary = crisis.summary,
 		body = crisis.body,
 		urgent = crisis.urgent,
+		effects = buildCrisisArticleEffects(crisis),
 	})
 
 	return crisis
@@ -452,6 +615,7 @@ function MacroGalaxyEngine.AdvanceMacroTick(deltaDays)
 						summary = crisis.summary,
 						body = crisis.body,
 						urgent = crisis.urgent,
+						effects = buildCrisisArticleEffects(crisis),
 					})
 				end
 			end

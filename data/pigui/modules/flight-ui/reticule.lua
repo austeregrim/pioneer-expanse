@@ -10,6 +10,7 @@ local bindManager = require 'bind-manager'
 
 -- cache ui
 local pionillium = ui.fonts.pionillium
+local pionillium_italic = ui.fonts.pionillium_italic
 local pionicons = ui.fonts.pionicons
 local colors = ui.theme.colors
 local icons = ui.theme.icons
@@ -456,14 +457,15 @@ local function displayDetailData(target, data, radius, tooltip)
 	ui.setCursorPos(uiPos - Vector2(0, pionillium.heading.size * 3))
 
 	ui.group(function()
-		ui.withFont(pionillium.heading, function()
+		local isDebugOnly = target:isa("Ship") and Engine.GetDebugShowAllShips and Engine.GetDebugShowAllShips() and player.CanSeeShip and not player:CanSeeShip(target)
+		ui.withFont(isDebugOnly and pionillium_italic.heading or pionillium.heading, function()
 			local color = target == targets.combatTarget and colors.combatTarget
 				or target == targets.navTarget and colors.navTarget
 				or colors.font
 
 			ui.withStyleColors({ Text = color }, function()
 				local displayLabel = target.label
-				if target:isa("Ship") and player.CanIdentify and not player:CanIdentify(target) then
+				if target:isa("Ship") and not isDebugOnly and player.CanIdentify and not player:CanIdentify(target) then
 					displayLabel = "UNIDENTIFIED"
 				end
 				ui.textShadowed(displayLabel)

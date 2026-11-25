@@ -1772,7 +1772,12 @@ void Ship::DoThrusterSounds() const
 // either adds half of current accel if decelerating
 void Ship::TimeAccelAdjust(const float timeStep)
 {
-	if (!AIIsActive()) return;
+	if (!AIIsActive() || GetFlightState() != Ship::FLYING)
+		return;
+	if (timeStep > 0.25f)
+		return;
+	if (m_curAICmd && (m_curAICmd->GetType() == AICommand::CMD_DOCK || m_curAICmd->GetType() == AICommand::CMD_DEPART))
+		return;
 #ifdef DEBUG_AUTOPILOT
 	if (this->IsType(ObjectType::PLAYER))
 		Output("Time accel adjustment, step = %.1f, decel = %s\n", double(timeStep),
@@ -1780,6 +1785,10 @@ void Ship::TimeAccelAdjust(const float timeStep)
 #endif
 	vector3d vdiff = double(timeStep) * GetLastForce() * (1.0 / GetMass());
 	if (!m_decelerating) vdiff = -2.0 * vdiff;
+	const double maxKick = std::min(25.0, GetVelocity().Length() * 0.25);
+	const double vLen = vdiff.Length();
+	if (vLen > maxKick && vLen > 1e-6)
+		vdiff *= (maxKick / vLen);
 	SetVelocity(GetVelocity() + vdiff);
 }
 

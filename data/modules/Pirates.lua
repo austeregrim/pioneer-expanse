@@ -485,6 +485,7 @@ local onAICompleted = function (ship, error)
 end
 
 local loaded_data
+local piratesTimerActive = false
 
 local onGameStart = function ()
 	local wasLoaded = loaded_data ~= nil
@@ -508,8 +509,14 @@ local onGameStart = function ()
 		"Don't bother running — my FSD interdictor is already spinning up!"
 	}
 
+	if piratesTimerActive then return end
+	piratesTimerActive = true
 	Timer:CallEvery(4, function ()
-		if not Game.system or not Game.player or not Game.player:exists() or systemBeyondInhabited then return end
+		if not Game.player then
+			piratesTimerActive = false
+			return true
+		end
+		if not Game.system or not Game.player:exists() or systemBeyondInhabited then return false end
 		local policeId = Game.system.faction and Game.system.faction.policeShip
 		local allShips = Space.GetBodies("Ship")
 		local playerInSC = Game.player:GetFlightState() == "SUPERCRUISE"
@@ -719,6 +726,7 @@ end
 local onGameEnd = function ()
 	pirates = {}
 	planets = {}
+	piratesTimerActive = false
 	playerSCStartTime = nil
 	nextPlayerSCCheckTime = 0
 	nextPlayerInterdictTime = 0

@@ -1,6 +1,7 @@
 -- Copyright © 2008-2026 Pioneer Developers. See AUTHORS.txt for details
 -- Licensed under the terms of the GPL v3. See licenses/GPL-3.txt
 
+local Engine = require 'Engine'
 local Game = require 'Game'
 local Event = require 'Event'
 local Input = require 'Input'
@@ -12,6 +13,7 @@ local ui = require 'pigui'
 
 local player = nil
 local pionillium = ui.fonts.pionillium
+local pionillium_italic = ui.fonts.pionillium_italic
 local colors = ui.theme.colors
 local icons = ui.theme.icons
 
@@ -171,6 +173,33 @@ local radar3d = {
 	isAutoZoom = function(self) return self.auto_zoom end,
 }
 
+local function showRadarTooltip(entries)
+	if #entries == 0 then return end
+	local hasDebugOnly = false
+	for _, t in ipairs(entries) do
+		if t.debug_only then
+			hasDebugOnly = true
+			break
+		end
+	end
+	if not hasDebugOnly then
+		local labels = {}
+		for _, t in ipairs(entries) do
+			table.insert(labels, t.label)
+		end
+		ui.setTooltip(table.concat(labels, "\n"))
+	else
+		ui.customTooltip(function()
+			for _, t in ipairs(entries) do
+				local font = t.debug_only and pionillium_italic.small or pionillium.small
+				ui.withFont(font, function()
+					ui.text(t.label)
+				end)
+			end
+		end)
+	end
+end
+
 -- display the 2D radar
 radar2d.draw = function(self, center)
 	local inSC = player and player:GetFlightState() == "SUPERCRUISE"
@@ -231,13 +260,13 @@ radar2d.draw = function(self, center)
 			end
 			local mouse_position = ui.getMousePos()
 			if (mouse_position - position):length() < 4 then
-				table.insert(tooltip, v.label)
+				table.insert(tooltip, { label = v.label, debug_only = v.debug_only })
 				table.insert(mouseTargets, v)
 			end
 		end
 	end
 	if not radar_popup_displayed and #tooltip > 0 then
-		ui.setTooltip(table.concat(tooltip, "\n"))
+		showRadarTooltip(tooltip)
 	end
 end
 
@@ -253,7 +282,7 @@ local function drawTarget(target, scale, center, color)
 	ui.addRectFilled(blobPos - blobHalfSize, blobPos + blobHalfSize, color, 0, ui.RoundCornersNone)
 	local mouse_position = ui.getMousePos()
 	if (mouse_position - blobPos):length() < 4 then
-		table.insert(tooltip, target.label)
+		table.insert(tooltip, { label = target.label, debug_only = target.debug_only })
 	end
 	return tooltip
 end
@@ -385,7 +414,7 @@ radar3d.draw = function(self, center)
 
 	-- display tooltip if mouse is over a target pip
 	if not radar_popup_displayed and #tooltip > 0 then
-		ui.setTooltip(table.concat(tooltip, "\n"))
+		showRadarTooltip(tooltip)
 	end
 
 	-- handle automatic radar zoom based on player surroundings
@@ -475,10 +504,12 @@ local function displayRadar()
 	--
 	ui.popup("radartargetselector", function()
 		for k,v in pairs(popup_targets) do
-			if ui.selectable(v.label) then
-				onTargetClicked(v)
-				radar_popup_displayed = false
-			end
+			ui.withFont(v.debug_only and pionillium_italic.medium or pionillium.medium, function()
+				if ui.selectable(v.label) then
+					onTargetClicked(v)
+					radar_popup_displayed = false
+				end
+			end)
 		end
 	end)
 

@@ -24,6 +24,7 @@ local QUARTER_END_MONTHS = { 3, 6, 9, 12 }
 local TaxAuthority = {}
 
 local cachedEpochOffsetSec = nil
+local taxTimerActive = false
 
 local function makeEmptyBreakdown()
 	return {
@@ -1352,11 +1353,17 @@ Event.Register("onGameStart", function()
 	cachedEpochOffsetSec = nil
 	TaxAuthority.ProcessQuarterlyRollover()
 	TaxAuthority.SyncHomeBookmark()
-	Timer:CallEvery(15, function()
-		if not Game.player then return true end
-		TaxAuthority.ProcessQuarterlyRollover()
-		return false
-	end)
+	if not taxTimerActive then
+		taxTimerActive = true
+		Timer:CallEvery(3600, function()
+			if not Game.player then
+				taxTimerActive = false
+				return true
+			end
+			TaxAuthority.ProcessQuarterlyRollover()
+			return false
+		end)
+	end
 end)
 
 Event.Register("onEnterSystem", function()
@@ -1372,6 +1379,7 @@ end)
 
 Event.Register("onGameEnd", function()
 	cachedEpochOffsetSec = nil
+	taxTimerActive = false
 	state = makeDefaultState()
 end)
 

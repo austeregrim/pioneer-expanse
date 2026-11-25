@@ -52,8 +52,8 @@ local STELLAR_COLORS = {
 }
 
 local function formatCount(val)
-	val = math.floor(tonumber(val) or 0)
-	local str = tostring(math.abs(val))
+	val = math.floor((tonumber(val) or 0) + 0.5)
+	local str = string.format("%.0f", math.abs(val))
 	local formatted = str:reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
 	if val < 0 then formatted = "-" .. formatted end
 	return formatted
@@ -61,6 +61,22 @@ end
 
 local function formatCr(val)
 	return formatCount(val) .. " Cr"
+end
+
+local function formatCompactCr(val)
+	val = tonumber(val) or 0
+	local absVal = math.abs(val)
+	local sign = (val < 0) and "-" or ""
+	if absVal >= 1e15 then
+		return string.format("%s%.2f Quadrillion Cr", sign, absVal / 1e15)
+	elseif absVal >= 1e12 then
+		return string.format("%s%.2f Trillion Cr", sign, absVal / 1e12)
+	elseif absVal >= 1e9 then
+		return string.format("%s%.2f Billion Cr", sign, absVal / 1e9)
+	elseif absVal >= 1e6 then
+		return string.format("%s%.2f Million Cr", sign, absVal / 1e6)
+	end
+	return formatCr(val)
 end
 
 -- Renders a comprehensive 3D Astrolabe sphere on the PiGui canvas
@@ -293,7 +309,7 @@ local function drawNavLocusLottery()
 	-- Giant Progressive Jackpot Banner with Scheduled Tuesday 18:00 GST Countdown
 	ui.child("##jackpotBanner", Vector2(ui.getContentRegion().x, 0), bannerWinFlags, bannerChildFlags, function()
 		ui.withFont(orbiteer.heading, function()
-			ui.textColored(Color(255, 215, 50, 255), string.format("Grand Progressive Jackpot: %s", formatCr(drawState.jackpotPool)))
+			ui.textColored(Color(255, 215, 50, 255), string.format("Grand Progressive Jackpot: %s (%s)", formatCompactCr(drawState.jackpotPool), formatCr(drawState.jackpotPool)))
 		end)
 
 		local timeStr = string.format("Next Synchronized Drawing in: %dD %02dH %02dM %02dS (Cycle #%d — Tuesday 18:00 GST)",
@@ -325,7 +341,7 @@ local function drawNavLocusLottery()
 			end)
 		else
 			ui.withStyleColors({ Text = colors.fontDim }, function()
-				ui.textWrapped("Cycle Status: Progressive Pool Rollover Active (+75M–150M Cr / week)")
+				ui.textWrapped("Cycle Status: Progressive Pool Rollover Active (+7T–11T+ Cr / week, scaling with galactic ticket volume)")
 			end)
 		end
 	end)
@@ -700,7 +716,7 @@ local function drawNavLocusLottery()
 			ui.withFont(orbiteer.heading, function()
 				ui.textColored(colors.uiPrimaryLight, "Official Astrogation Locus Payout Schedule")
 			end)
-			ui.textColored(colors.fontDim, "Mathematical Vector Odds calculated across 90,770,400,000,000 Total Combinations:")
+			ui.textColored(colors.fontDim, "Mathematical Vector Odds calculated across 90,720,000,000,000 Total Combinations (10 Cr / Chit — Powerball-Scaled Progressive Pool):")
 			ui.separator()
 			ui.spacing()
 
@@ -712,10 +728,10 @@ local function drawNavLocusLottery()
 			ui.separator()
 
 			local schedule = {
-				{ tier = "Tier 1", criteria = "All 5 Vectors Matched Exactly", odds = "1 in 90.7 Trillion", payout = "Grand Progressive Pool (500M+ Cr)" },
-				{ tier = "Tier 2", criteria = "Any 4 of 5 Vectors Matched", odds = "1 in 50 Million", payout = "2,500,000 Cr" },
-				{ tier = "Tier 3", criteria = "Any 3 of 5 Vectors Matched", odds = "1 in 5,040,000", payout = "75,000 Cr" },
-				{ tier = "Tier 4", criteria = "Any 2 Vectors Matched", odds = "1 in 140,000", payout = "1,500 Cr" },
+				{ tier = "Tier 1", criteria = "All 5 Vectors Matched Exactly", odds = "1 in 90.72 Trillion", payout = "Grand Progressive Pool (30T+ Cr)" },
+				{ tier = "Tier 2", criteria = "Any 4 of 5 Vectors Matched", odds = "1 in 7.8 Billion", payout = "3,000,000,000 Cr (3B Cr)" },
+				{ tier = "Tier 3", criteria = "Any 3 of 5 Vectors Matched", odds = "1 in 1.54 Million", payout = "500,000 Cr" },
+				{ tier = "Tier 4", criteria = "Any 2 Vectors Matched", odds = "1 in 1,300", payout = "1,500 Cr" },
 				{ tier = "Tier 5", criteria = "Sector Ring Matched Exactly", odds = "1 in 100", payout = "40 Cr (4 to 1 Return)" },
 			}
 
@@ -733,8 +749,8 @@ local function drawNavLocusLottery()
 
 			ui.textColored(colors.uiPrimaryLight, "Drawing Synchronisation Directives:")
 			ui.textWrapped("1. DRAW SCHEDULE: Synchronized pan-galactic draws occur weekly every Tuesday at 18:00:00 GST across all relay transponders. Draws advance seamlessly whether flying in real-time, waiting docked, or executing hyperspace jumps.")
-			ui.textWrapped("2. CITIZEN & CONSORTIUM PARTICIPATION: Billions of interstellar pilots, mining syndicates, and corporate trusts participate in each cycle. When a participating citizen or consortium verifies a Tier 1 match, the grand pool is claimed and resets to 500M Cr.")
-			ui.textWrapped("3. PROGRESSIVE ROLLOVER: If no grand vector alignment is verified across pan-galactic transponders, the jackpot pool compounds by +75,000,000 to +150,000,000 Credits for the following Tuesday's draw.")
+			ui.textWrapped("2. CITIZEN & CONSORTIUM PARTICIPATION: ~1.4T–2.2T+ pan-galactic tickets are staked each cycle at baseline, scaling with pool frenzies. Jackpot payouts are calibrated to the real-world Powerball odds-to-prize ratio (~3.3% starting pool of the 907.2T Cr single-ticket scale), resetting to 30 Trillion Cr when claimed.")
+			ui.textWrapped("3. PROGRESSIVE ROLLOVER: If no grand vector alignment is verified across pan-galactic transponders, 50% of gross ticket sales (+7T–11T+ Credits/week at baseline) compounds directly into the progressive reserve for next Tuesday's draw.")
 		end)
 	end
 end

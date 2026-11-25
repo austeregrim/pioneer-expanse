@@ -19,6 +19,7 @@ local Sidebar = require 'pigui.libs.sidebar'
 
 -- cache ui
 local pionillium = ui.fonts.pionillium
+local pionillium_italic = ui.fonts.pionillium_italic
 local colors = ui.theme.colors
 
 local reticuleCircleRadius = math.min(ui.screenWidth, ui.screenHeight) / 8
@@ -125,22 +126,24 @@ local function displayOnScreenObjects()
 		local isHovered = (mp - mainCoords):length() < click_radius
 		local isTargeted = group.hasNavTarget or (combatTarget == mainBody)
 		local isSCShip = mainBody:IsShip() and mainBody:GetFlightState() == "SUPERCRUISE"
+		local isDebugOnly = mainBody:IsShip() and Engine.GetDebugShowAllShips and Engine.GetDebugShowAllShips() and player.CanSeeShip and not player:CanSeeShip(mainBody)
 		local isFarSCShip = isSCShip and not isTargeted and not isHovered and (mainBody:DistanceTo(player) > scLabelRange)
 
 		-- Let Supercruise ships shine as sharp points of light with glare; only draw the HUD bracket icon over them when targeted or hovered
-		if not isSCShip or isTargeted or isHovered then
+		if not isSCShip or isTargeted or isHovered or isDebugOnly then
 			ui.addIcon(mainCoords, getBodyIcon(mainBody, true), colors.frame, iconsize, ui.anchor.center, ui.anchor.center)
 		end
 
-		if should_show_label and (not isSCShip or isTargeted or isHovered) then
+		if should_show_label and (not isSCShip or isTargeted or isHovered or isDebugOnly) then
 			local label = mainBody:GetLabel()
-			if mainBody:IsShip() and player.CanIdentify and not player:CanIdentify(mainBody) then
+			if mainBody:IsShip() and not isDebugOnly and player.CanIdentify and not player:CanIdentify(mainBody) then
 				label = isSCShip and "UNIDENTIFIED LIGHT" or "UNIDENTIFIED"
 			end
 			if group.multiple then
 				label = label .. " (" .. #group.bodies .. ")"
 			end
-			ui.addStyledText(mainCoords + Vector2(label_offset,0), ui.anchor.left, ui.anchor.center, label , colors.frame, pionillium.small)
+			local labelFont = isDebugOnly and pionillium_italic.small or pionillium.small
+			ui.addStyledText(mainCoords + Vector2(label_offset,0), ui.anchor.left, ui.anchor.center, label , colors.frame, labelFont)
 		end
 		-- mouse release handler for radial menu
 		if (mp - mainCoords):length() < click_radius then
@@ -178,22 +181,25 @@ local function displayOnScreenObjects()
 				ui.icon(getBodyIcon(b, true), small_iconsize, colors.frame)
 				ui.sameLine()
 				ui.alignTextToLineHeight(small_iconsize.y)
+				local bDebugOnly = b:IsShip() and Engine.GetDebugShowAllShips and Engine.GetDebugShowAllShips() and player.CanSeeShip and not player:CanSeeShip(b)
 				local itemLabel = b:GetLabel()
-				if b:IsShip() and player.CanIdentify and not player:CanIdentify(b) then
+				if b:IsShip() and not bDebugOnly and player.CanIdentify and not player:CanIdentify(b) then
 					itemLabel = (b:GetFlightState() == "SUPERCRUISE") and "UNIDENTIFIED LIGHT" or "UNIDENTIFIED"
 				end
-				if ui.selectable(itemLabel, b == navTarget, {}) then
-					if b:IsShip() then
-						player:SetCombatTarget(b)
-					else
-						player:SetNavTarget(b)
-						ui.playSfx("OK")
+				ui.withFont(bDebugOnly and pionillium_italic.medium or pionillium.medium, function()
+					if ui.selectable(itemLabel, b == navTarget, {}) then
+						if b:IsShip() then
+							player:SetCombatTarget(b)
+						else
+							player:SetNavTarget(b)
+							ui.playSfx("OK")
+						end
+						if ui.ctrlHeld() then
+							-- also set follow-target target on ctrl-click
+							player:SetFollowTarget(b)
+						end
 					end
-					if ui.ctrlHeld() then
-						-- also set follow-target target on ctrl-click
-						player:SetFollowTarget(b)
-					end
-				end
+				end)
 			end
 		end)
 	end

@@ -57,11 +57,14 @@ local function displayTimeWindow()
 		ui.sameLine()
 	end
 
+	local player = Game.player
+	local inFlight = player and not player:IsDocked() and not player:IsLanded()
 	local text_size
 	ui.withFont(timefont.name, timefont.size, function()
 		text_size = ui.calcTextSize(date)
 	end)
-	local buttons_width = button_size.x * 6 + ui.getItemSpacing().x * 5
+	local numButtons = inFlight and 2 or 6
+	local buttons_width = button_size.x * numButtons + ui.getItemSpacing().x * (numButtons - 1)
 	local window_width = math.max(text_size.x, buttons_width) + ui.getWindowPadding().x * 2
 	window_height = timefont.size + button_size.y + ui.getItemSpacing().y + ui.getWindowPadding().y * 2
 	local window_size = Vector2(window_width, window_height)
@@ -73,35 +76,9 @@ local function displayTimeWindow()
 		ui.withFont(timefont.name, timefont.size, function()
 			ui.textShadowed(date)
 		end)
-		local player = Game.player
-		local inFlight = player and not player:IsDocked() and not player:IsLanded()
 		accelButton("paused", ui.keys.escape)
 		accelButton("1x", ui.keys.f1)
-		if inFlight then
-			local scActive = player:IsSupercruiseActive()
-			local scCharging = player:IsSupercruiseCharging()
-			local scStatus, scReason = player:GetSupercruiseStatus()
-			local btnState = scActive or scCharging
-			if scStatus ~= "READY" and not scActive and not scCharging then
-				btnState = ui.theme.buttonColors.disabled
-			end
-			local scTooltip = scActive and "Disengage Supercruise [J]" or ("Frameshift Drive Supercruise [J] — " .. (scReason or "FSD Ready"))
-			if ui.mainMenuButton(icons.hyperspace, scTooltip, btnState) then
-				player:ToggleSupercruise()
-			end
-			if player:HasSupercruiseAssist() then
-				ui.sameLine()
-				local assistActive = player:IsSupercruiseAssistActive()
-				local level = player.GetSupercruiseAssistLevel and player:GetSupercruiseAssistLevel() or 1
-				local assistLabel = (level >= 3 and "Autopilot Mk 4: Smart Cruise & Survey Orbit")
-					or (level == 2 and "Autopilot Mk 3: Smart Cruise & Planetary Orbit")
-					or "Supercruise Assist (Autopilot Mk 2)"
-				local assistTip = assistActive and ("Disengage " .. assistLabel) or ("Engage " .. assistLabel)
-				if ui.mainMenuButton(icons.autopilot_fly_to, assistTip, assistActive) then
-					player:ToggleSupercruiseAssist()
-				end
-			end
-		else
+		if not inFlight then
 			accelButton("10x", ui.keys.f2)
 			accelButton("100x", ui.keys.f3)
 			accelButton("1000x", ui.keys.f4)

@@ -9,6 +9,7 @@ local Vector2 = _G.Vector2
 local Color = _G.Color
 
 local pionillium = ui.fonts.pionillium
+local pionillium_italic = ui.fonts.pionillium_italic
 local gameView = require 'pigui.views.game'
 
 local LIGHT_SPEED = 299792458.0
@@ -499,16 +500,18 @@ local function drawSupercruiseTargetPanel(player, center, reticuleRadius)
 	ui.addRectFilled(tl, br, colPanelBg, 5, ui.RoundCornersAll)
 	ui.addRect(tl, br, colBorder, 5, ui.RoundCornersAll, 1.0)
 
+	local isDebugOnly = isShipTarget and Engine.GetDebugShowAllShips and Engine.GetDebugShowAllShips() and player.CanSeeShip and not player:CanSeeShip(target)
 	local rawLabel = target:GetLabel() or "TARGET"
-	if isShipTarget and player.CanIdentify and not player:CanIdentify(target) then
+	if isShipTarget and not isDebugOnly and player.CanIdentify and not player:CanIdentify(target) then
 		rawLabel = "UNIDENTIFIED"
 	end
-	local targetName = truncateTextToWidth(rawLabel, pionillium.small, panelW - padX * 2)
+	local nameFont = isDebugOnly and pionillium_italic.small or pionillium.small
+	local targetName = truncateTextToWidth(rawLabel, nameFont, panelW - padX * 2)
 
 	ui.addStyledText(Vector2(panelX + padX, panelY + math.round(6 * s)), ui.anchor.left, ui.anchor.top,
 		"FSD NAV LOCK", colCyan, pionillium.small)
 	ui.addStyledText(Vector2(panelX + padX, panelY + math.round(24 * s)), ui.anchor.left, ui.anchor.top,
-		targetName, colWhite, pionillium.small)
+		targetName, colWhite, nameFont)
 
 	-- Distance & ETA row (guaranteed non-overlapping)
 	local rowDistY = panelY + math.round(44 * s)

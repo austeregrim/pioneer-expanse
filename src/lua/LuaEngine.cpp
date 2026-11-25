@@ -27,6 +27,7 @@
 #include "graphics/Graphics.h"
 #include "pigui/PiGui.h"
 #include "scenegraph/Model.h"
+#include "ship/SupercruiseController.h"
 #include "sound/Sound.h"
 #include "sound/SoundMusic.h"
 #include "utils.h"
@@ -1132,6 +1133,18 @@ static int l_browse_user_folders(lua_State *l)
 	return 0;
 }
 
+static int l_engine_get_debug_show_all_ships(lua_State *l)
+{
+	lua_pushboolean(l, SupercruiseController::GetDebugShowAllShips());
+	return 1;
+}
+
+static int l_engine_set_debug_show_all_ships(lua_State *l)
+{
+	SupercruiseController::SetDebugShowAllShips(lua_toboolean(l, 1) != 0);
+	return 0;
+}
+
 void LuaEngine::Register()
 {
 	lua_State *l = Lua::manager->GetLuaState();
@@ -1142,6 +1155,8 @@ void LuaEngine::Register()
 		{ "Quit", l_engine_quit },
 
 		{ "SetShowDebugInfo", l_engine_set_show_debug_info },
+		{ "GetDebugShowAllShips", l_engine_get_debug_show_all_ships },
+		{ "SetDebugShowAllShips", l_engine_set_debug_show_all_ships },
 
 		{ "SettingsGetBool", l_engine_settings_get_bool },
 		{ "SettingsGetInt", l_engine_settings_get_int },

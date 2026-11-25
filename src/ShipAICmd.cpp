@@ -1316,6 +1316,18 @@ bool AICmdFlyTo::TimeStepUpdate()
 							if (ang < 0.8) {
 								const double fwd = -Clamp(1.0 - (ang / 0.8), 0.25, 0.85);
 								m_prop->SetLinThrusterState(vector3d(0.0, 0.0, fwd));
+							} else if (ship->GetExternalForce().LengthSqr() > 1e-6) {
+								m_prop->SuspendAISequentialThrusters();
+								const vector3d curVel = ship->GetVelocity();
+								vector3d holdVel = curVel;
+								if (frameBody && frameBody->IsType(ObjectType::TERRAINBODY)) {
+									const vector3d radialUp = ship->GetPosition().NormalizedSafe();
+									const double inward = -curVel.Dot(radialUp);
+									if (inward > 0.0) {
+										holdVel = curVel + radialUp * inward;
+									}
+								}
+								m_prop->AIMatchVel(holdVel);
 							} else {
 								m_prop->SetLinThrusterState(vector3d(0.0));
 							}
@@ -1326,9 +1338,9 @@ bool AICmdFlyTo::TimeStepUpdate()
 					if (st == SupercruiseController::SC_READY)
 						sc->StartCharge();
 
-					// Steer clear of nearby planet/station and accelerate past MIN_ENGAGE_SPEED
+					// Steer clear of nearby planet/star/station and accelerate past MIN_ENGAGE_SPEED
 					vector3d escapeDir = rawRel.NormalizedSafe();
-					if (frameBody && (frameBody->IsType(ObjectType::PLANET) || frameBody->IsType(ObjectType::SPACESTATION))) {
+					if (frameBody && (frameBody->IsType(ObjectType::PLANET) || frameBody->IsType(ObjectType::STAR) || frameBody->IsType(ObjectType::SPACESTATION))) {
 						const vector3d away = ship->GetPosition().NormalizedSafe();
 						if (away.LengthSqr() > 0.1) {
 							const double bodyDist = ship->GetPosition().Length();
@@ -1378,9 +1390,28 @@ bool AICmdFlyTo::TimeStepUpdate()
 							m_prop->SetLinThrusterState(vector3d(evasionRel.x, evasionRel.y, 0.0));
 						}
 					} else if (ang < 0.35) {
-						m_prop->SetLinThrusterState(vector3d(0.0, 0.0, -1.0));
+						if (timestep > 0.05 && m_dBody->GetExternalForce().LengthSqr() > 1e-6) {
+							m_prop->SuspendAISequentialThrusters();
+							const double targetEscSpeed = std::max(SupercruiseController::MIN_ENGAGE_SPEED * 1.25, mySpeed + 50.0);
+							m_prop->AIMatchVel(escapeDir * targetEscSpeed);
+						} else {
+							m_prop->SetLinThrusterState(vector3d(0.0, 0.0, -1.0));
+						}
 					} else {
-						m_prop->SetLinThrusterState(vector3d(0.0));
+						if (m_dBody->GetExternalForce().LengthSqr() > 1e-6) {
+							m_prop->SuspendAISequentialThrusters();
+							vector3d holdVel = myVel;
+							if (frameBody && frameBody->IsType(ObjectType::TERRAINBODY)) {
+								const vector3d radialUp = ship->GetPosition().NormalizedSafe();
+								const double inward = -myVel.Dot(radialUp);
+								if (inward > 0.0) {
+									holdVel = myVel + radialUp * inward;
+								}
+							}
+							m_prop->AIMatchVel(holdVel);
+						} else {
+							m_prop->SetLinThrusterState(vector3d(0.0));
+						}
 					}
 					return false;
 				}
@@ -1455,6 +1486,14 @@ bool AICmdFlyTo::TimeStepUpdate()
 
 			// Radial up direction away from planet center:
 			const vector3d radialUp = (-obspos).NormalizedSafe();
+			if (timestep > 0.05) {
+				const double altAboveSurf = std::max(0.0, m_dBody->GetPosition().Length() - MaxFeatureRad(planetNear));
+				const double climbSpeed = std::min(150.0, std::max(5.0, (altAboveSurf * 0.25) / timestep));
+				m_prop->AIFaceDirection(radialUp);
+				m_prop->AIFaceUpdir(radialUp);
+				m_prop->AIMatchVel(radialUp * climbSpeed);
+				return false;
+			}
 			const vector3d myVel = m_dBody->GetVelocity();
 			vector3d retroDir = -myVel.NormalizedSafe();
 			if (retroDir.LengthSqr() < 0.1) retroDir = radialUp;
@@ -1509,8 +1548,10 @@ bool AICmdFlyTo::TimeStepUpdate()
 				m_child.reset();
 			}
 		} else if (coll == 1) { // below feature height, target not below
+			m_prop->SuspendAISequentialThrusters();
+			const double escSpeed = (timestep > 0.05) ? std::min(1000.0, 200.0 / std::max(1.0, timestep)) : 1000.0;
 			double ang = m_prop->AIFaceDirection(m_dBody->GetPosition());
-			m_prop->AIMatchVel(ang < 0.05 ? 1000.0 * m_dBody->GetPosition().Normalized() : vector3d(0.0));
+			m_prop->AIMatchVel(ang < 0.05 ? escSpeed * m_dBody->GetPosition().Normalized() : vector3d(0.0));
 		} else { // same thing for 2/3/4
 			if (!m_child) m_child.reset(new AICmdFlyAround(m_dBody, body, erad * 1.05, 0.0));
 			static_cast<AICmdFlyAround *>(m_child.get())->SetTargPos(targpos);
@@ -1526,11 +1567,19 @@ bool AICmdFlyTo::TimeStepUpdate()
 
 	double maxdecel = m_state ? m_prop->GetAccelFwd() : m_prop->GetAccelRev();
 	double gravdir = -reldir.Dot(m_dBody->GetPosition().Normalized());
-	maxdecel -= gravdir * GetGravityAtPos(m_dBody->GetFrame(), m_dBody->GetPosition());
+	const double localGrav = GetGravityAtPos(m_dBody->GetFrame(), m_dBody->GetPosition());
+	maxdecel -= gravdir * localGrav;
 	bool bZeroDecel = false;
 	if (maxdecel < 0) {
-		maxdecel = 0.0;
-		bZeroDecel = true;
+		if (!m_state) {
+			// Reverse thrusters cannot overcome local gravity: flip to main forward thrusters
+			m_state = 1;
+			maxdecel = m_prop->GetAccelFwd() - gravdir * localGrav;
+		}
+		if (maxdecel < 0) {
+			maxdecel = 0.0;
+			bZeroDecel = true;
+		}
 	}
 
 	// target ship acceleration adjustment
@@ -1609,7 +1658,23 @@ bool AICmdFlyTo::TimeStepUpdate()
 	// Prevent discrete time-step tunneling/overshoot during time acceleration
 	if (timestep > 0.05 && targdist > 0.0) {
 		const double maxStepSpeed = (targdist * 0.45) / timestep;
-		ispeed = std::min(ispeed, std::max(5.0, maxStepSpeed));
+		ispeed = std::min(ispeed, std::max(0.25, maxStepSpeed));
+		if (body && body->IsType(ObjectType::TERRAINBODY)) {
+			const vector3d spos = m_dBody->GetPosition();
+			const double rLen = spos.Length();
+			if (rLen > 1.0) {
+				double surfRad = MaxFeatureRad(body);
+				if (body->GetSystemBody() && body->GetSystemBody()->GetSuperType() == SystemBody::SUPERTYPE_ROCKY_PLANET) {
+					surfRad = std::max(body->GetPhysRadius(), static_cast<const TerrainBody *>(body)->GetTerrainHeight(spos / rLen));
+				}
+				const double altAboveSurf = std::max(0.0, rLen - surfRad);
+				const double inward = -reldir.Dot(spos / rLen);
+				if (inward > 0.05) {
+					const double maxRadialStepSpeed = std::max(2.0, (altAboveSurf * 0.40) / timestep) / inward;
+					ispeed = std::min(ispeed, maxRadialStepSpeed);
+				}
+			}
+		}
 	}
 
 	// Adaptive cruise control & obstacle avoidance: avoid ramming into vessels ahead on the travel path
@@ -1677,6 +1742,8 @@ bool AICmdFlyTo::TimeStepUpdate()
 
 	// face appropriate direction
 	if (m_state >= 3) {
+		m_prop->SuspendAISequentialThrusters();
+		m_prop->AIMatchVel(targvel);
 		if (Pi::game->GetTimeAccelRate() <= 100.0 && m_is_flyto) {
 			vector3d pos;
 			if (m_target) {
@@ -1857,9 +1924,21 @@ bool AICmdDock::TimeStepUpdate()
 		const vector3d shipPosInSt = ship->GetPositionRelTo(m_target->GetFrame());
 		const double distToDockStart = (shipPosInSt - m_dockpos).Length();
 		const double relSpeedToTarget = ship->GetVelocityRelTo(m_target).Length();
-		if (distToDockStart <= 45.0 && relSpeedToTarget <= 20.0 && m_target->ClaimCorridor(ship)) {
-			m_child.reset();
-			IncrementState();
+		if (distToDockStart <= 45.0 && relSpeedToTarget <= 20.0) {
+			int port = m_target->GetMyDockingPort(ship);
+			if (port == -1) {
+				if (!m_target->GetDockingClearance(ship) || m_target->GetMyDockingPort(ship) == -1) {
+					m_child.reset();
+					ship->AIMessage(Ship::AIERROR_REFUSED_PERM);
+					return true;
+				}
+			} else {
+				m_target->RefreshDockingClearance(ship);
+			}
+			if (m_target->ClaimCorridor(ship)) {
+				m_child.reset();
+				IncrementState();
+			}
 		}
 	}
 	if (!ProcessChild()) return false;
@@ -1870,6 +1949,15 @@ bool AICmdDock::TimeStepUpdate()
 		const double distToDockStart = (shipPosInSt - m_dockpos).Length();
 		const double relSpeedToTarget = ship->GetVelocityRelTo(m_target).Length();
 		if (distToDockStart <= 60.0 && relSpeedToTarget <= 25.0) {
+			int port = m_target->GetMyDockingPort(ship);
+			if (port == -1) {
+				if (!m_target->GetDockingClearance(ship) || m_target->GetMyDockingPort(ship) == -1) {
+					ship->AIMessage(Ship::AIERROR_REFUSED_PERM);
+					return true;
+				}
+			} else {
+				m_target->RefreshDockingClearance(ship);
+			}
 			if (m_target->GetStationType()->IsOrbitalStation()) {
 				// Require corridor queue clearance before proceeding to final ingress
 				if (!m_target->ClaimCorridor(ship)) {
@@ -2068,7 +2156,7 @@ bool AICmdDock::TimeStepUpdate()
 	const double dockTimestep = Pi::game->GetTimeStep();
 	if (dockTimestep > 0.05 && distToTarg > 0.0) {
 		const double maxStepSpeed = (distToTarg * 0.45) / dockTimestep;
-		ispeed = std::min(ispeed, std::max(2.0, maxStepSpeed));
+		ispeed = std::min(ispeed, std::max(0.15, maxStepSpeed));
 	}
 	vector3d vdiff = ispeed * reldir - relvel;
 
@@ -2115,8 +2203,12 @@ bool AICmdDock::TimeStepUpdate()
 		const vector3d horizRel = relpos - padUpDir * vertOffset;
 		const double horizDist = horizRel.Length();
 		if (horizDist > 12.0) {
-			const double horizSpeed = std::min(speedCap, std::max(5.0, horizDist * 0.8));
-			const double vertHoldVel = (vertOffset > 0.0) ? std::min(6.0, vertOffset * 1.2) : 0.0;
+			double horizSpeed = std::min(speedCap, std::max(5.0, horizDist * 0.8));
+			double vertHoldVel = (vertOffset > 0.0) ? std::min(6.0, vertOffset * 1.2) : 0.0;
+			if (dockTimestep > 0.05) {
+				horizSpeed = std::min(horizSpeed, std::max(0.15, (horizDist * 0.45) / dockTimestep));
+				vertHoldVel = std::min(vertHoldVel, (vertOffset * 0.45) / dockTimestep);
+			}
 			const vector3d desiredVel = horizRel.NormalizedSafe() * horizSpeed + padUpDir * vertHoldVel;
 			vdiff = desiredVel - relvel;
 		}
@@ -2328,7 +2420,8 @@ bool AICmdDepart::TimeStepUpdate()
 			// Rotate in place on the station axis to face the exit waypoint before accelerating forward
 			const double ang = m_prop->AIFaceDirection(wantDir);
 
-			vector3d returnVel = -offPathVec.NormalizedSafe() * std::min(16.0, offPathDist * 2.0);
+			const double maxReturnSpeed = (timestep > 0.05) ? std::max(0.1, (offPathDist * 0.45) / timestep) : 16.0;
+			vector3d returnVel = -offPathVec.NormalizedSafe() * std::min(16.0, std::min(offPathDist * 2.0, maxReturnSpeed));
 			double fwdSpeed = 0.0;
 			if (ang < 0.25 && offPathDist < 8.0) {
 				fwdSpeed = 10.0 * trafficSpeedMult;
@@ -2349,7 +2442,8 @@ bool AICmdDepart::TimeStepUpdate()
 			const double ang = m_prop->AIFaceDirection(wantDir);
 
 			// If off course from the path between station axis and exit waypoint, return to path before advancing through doorway
-			vector3d returnVel = -offPathVec.NormalizedSafe() * std::min(22.0, offPathDist * 2.2);
+			const double maxReturnSpeed = (timestep > 0.05) ? std::max(0.1, (offPathDist * 0.45) / timestep) : 22.0;
+			vector3d returnVel = -offPathVec.NormalizedSafe() * std::min(22.0, std::min(offPathDist * 2.2, maxReturnSpeed));
 			double courseAlignFactor = Clamp(1.0 - (offPathDist - 6.0) / 10.0, 0.0, 1.0);
 			if (ang > 0.35) {
 				courseAlignFactor = 0.0;
@@ -2379,7 +2473,8 @@ bool AICmdDepart::TimeStepUpdate()
 
 			// Navigate along the path from the station axis to the outside waypoint m_clearPos.
 			// If knocked off course, return to the path line between the station axis and the waypoint!
-			vector3d returnVel = -offPathVec.NormalizedSafe() * std::min(25.0, offPathDist * 2.0);
+			const double maxReturnSpeed = (timestep > 0.05) ? std::max(0.1, (offPathDist * 0.45) / timestep) : 25.0;
+			vector3d returnVel = -offPathVec.NormalizedSafe() * std::min(25.0, std::min(offPathDist * 2.0, maxReturnSpeed));
 			const double courseAlignFactor = Clamp(1.0 - (offPathDist - 12.0) / 28.0, 0.0, 1.0);
 			const double targetSpeed = 65.0 * trafficSpeedMult * courseAlignFactor;
 
@@ -2708,6 +2803,9 @@ bool AICmdFlyAround::TimeStepUpdate()
 
 	// limit m_vel by target proximity & distance covered per frame
 	double vel = (m_targmode) ? m_vel : MaxVel(targetDist, targpos.Length());
+	if (timestep > 0.05) {
+		vel = std::min(vel, std::max(10.0, (obsdist * 0.08) / timestep));
+	}
 
 	// all calculations in ship's frame
 	vector3d fwddir = (obsdir.Cross(relpos).Cross(obsdir)).NormalizedSafe();
@@ -2715,15 +2813,26 @@ bool AICmdFlyAround::TimeStepUpdate()
 
 	// max feature avoidance check, response
 	if (obsdist < MaxFeatureRad(m_obstructor)) {
+		m_prop->SuspendAISequentialThrusters();
+		const double escSpeed = (timestep > 0.05) ? std::min(1000.0, 200.0 / std::max(1.0, timestep)) : 1000.0;
 		double ang = m_prop->AIFaceDirection(-obsdir);
-		m_prop->AIMatchVel(ang < 0.05 ? 1000.0 * -obsdir : vector3d(0.0));
+		m_prop->AIMatchVel(ang < 0.05 ? escSpeed * -obsdir : vector3d(0.0));
 		return false;
 	}
 
 	// calculate target velocity
 	double alt = (tanvel * timestep + obspos).Length(); // unnecessary?
 	double ivel = calc_ivel(alt - m_alt, 0.0, m_prop->GetAccelMin());
+	if (timestep > 0.05 && ivel > 0.0) {
+		if (obsdist <= m_alt * 1.02) {
+			ivel = 0.0;
+		} else {
+			ivel = std::min(ivel, ((obsdist - m_alt) * 0.45) / timestep);
+		}
+	}
 
+	if (timestep > 0.05)
+		m_prop->SuspendAISequentialThrusters();
 	vector3d finalvel = tanvel + ivel * obsdir;
 	m_prop->AIFaceDirection(fwddir);
 	m_prop->AIFaceUpdir(-obsdir);

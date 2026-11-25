@@ -35,6 +35,10 @@ local selectedObject -- object, centered in SystemView
 
 local hudfont = ui.fonts.pionillium.small
 local hudfont_highlight = ui.fonts.pionillium.medium
+local hudfont_italic = ui.fonts.pionillium_italic.small
+local hudfont_highlight_italic = ui.fonts.pionillium_italic.medium
+local popupfont_italic = ui.fonts.pionillium_italic.medium
+local infofont_italic = ui.fonts.pionillium_italic.small
 local detailfont = ui.fonts.pionillium.medium
 local winfont = ui.fonts.pionillium.medlarge
 
@@ -273,17 +277,35 @@ local rightSidebar = Sidebar.New("##SystemMapRight", "right")
 
 local systemOverviewWidget = require 'pigui.modules.system-overview-window'.New()
 systemOverviewWidget.visible = true
+systemOverviewWidget.shouldAllowShips = true
+systemOverviewWidget.shouldShowShips = true
 
-function systemOverviewWidget:onBodySelected(sBody)
-	systemView:SetSelectedObject(Projectable.OBJECT, Projectable.SYSTEMBODY, sBody)
+local function isDebugOnlyShip(obj)
+	return obj and obj.type == Projectable.OBJECT and obj.base == Projectable.SHIP and obj.ref
+		and Engine.GetDebugShowAllShips and Engine.GetDebugShowAllShips()
+		and player and player.CanSeeShip and not player:CanSeeShip(obj.ref)
 end
 
-function systemOverviewWidget:onBodyDoubleClicked(sBody)
+function systemOverviewWidget:onBodySelected(sBody, body)
+	if sBody then
+		systemView:SetSelectedObject(Projectable.OBJECT, Projectable.SYSTEMBODY, sBody)
+	elseif body and body:IsShip() then
+		systemView:SetSelectedObject(Projectable.OBJECT, Projectable.SHIP, body)
+	end
+end
+
+function systemOverviewWidget:onBodyDoubleClicked(sBody, body)
 	systemView:ViewSelectedObject()
 end
 
-function systemOverviewWidget:onBodyContextMenu(sBody)
-	popup_object = { type = Projectable.OBJECT, base = Projectable.SYSTEMBODY, ref = sBody }
+function systemOverviewWidget:onBodyContextMenu(sBody, body)
+	if sBody then
+		popup_object = { type = Projectable.OBJECT, base = Projectable.SYSTEMBODY, ref = sBody }
+	elseif body and body:IsShip() then
+		popup_object = { type = Projectable.OBJECT, base = Projectable.SHIP, ref = body }
+	else
+		return
+	end
 	popup_objects = nil
 	ui.openPopup("system-view-ui-popup")
 end
@@ -639,7 +661,11 @@ local infoView = {
 			local iconGlyph = ui.get_icon_glyph(getBodyIcon(obj))
 			local objName = isSystemBody and body.name or body.label
 			ui.withFont(ui.fonts.pionillium.small, function()
-				ui.textColored(colors.fontDim, iconGlyph .. "  " .. objName)
+				ui.textColored(colors.fontDim, iconGlyph)
+			end)
+			ui.sameLine()
+			ui.withFont(isDebugOnlyShip(obj) and infofont_italic or ui.fonts.pionillium.small, function()
+				ui.textColored(colors.fontDim, objName)
 			end)
 			ui.separator()
 			ui.spacing()
@@ -941,9 +967,16 @@ local function makeSelectPopup()
 				ui.icon(getBodyIcon(obj, true, true), bodyIconSize, getColor(obj))
 				ui.sameLine()
 				ui.alignTextToLineHeight(bodyIconSize.y)
-				if ui.selectable(lbl .. "##sv_sel_" .. tostring(i), obj.ref == currentSelRef, {}) then
-					selectedObject = obj.ref
-					systemView:SetSelectedObject(obj.type, obj.base, obj.ref)
+				local drawSelectable = function()
+					if ui.selectable(lbl .. "##sv_sel_" .. tostring(i), obj.ref == currentSelRef, {}) then
+						selectedObject = obj.ref
+						systemView:SetSelectedObject(obj.type, obj.base, obj.ref)
+					end
+				end
+				if isDebugOnlyShip(obj) then
+					ui.withFont(popupfont_italic, drawSelectable)
+				else
+					drawSelectable()
 				end
 			end
 		end
@@ -969,8 +1002,15 @@ function makePopup()
 						ui.icon(getBodyIcon(obj, true, isOrrery), bodyIconSize, getColor(obj))
 						ui.sameLine()
 						ui.alignTextToLineHeight(bodyIconSize.y)
-						if ui.selectable(lbl .. "##sv_tgt_" .. tostring(i), isNav, {}) then
-							setObjectNavTarget(obj)
+						local drawTargetItem = function()
+							if ui.selectable(lbl .. "##sv_tgt_" .. tostring(i), isNav, {}) then
+								setObjectNavTarget(obj)
+							end
+						end
+						if isDebugOnlyShip(obj) then
+							ui.withFont(popupfont_italic, drawTargetItem)
+						else
+							drawTargetItem()
 						end
 					end
 					if obj.base ~= Projectable.SYSTEMBODY and obj.ref:IsShip() then
@@ -983,9 +1023,16 @@ function makePopup()
 				for i, obj in ipairs(popup_objects) do
 					if obj.type == Projectable.OBJECT and obj.base ~= Projectable.SYSTEMBODY and obj.ref and obj.ref:IsShip() then
 						local lbl = getLabel(obj)
-						if ui.selectable(lc.SET_AS_COMBAT_TARGET .. ": " .. lbl .. "##sv_cmb_" .. tostring(i), obj.ref == combatTarget, {}) then
-							if navTarget == obj.ref then player:SetNavTarget(nil) end
-							player:SetCombatTarget(obj.ref)
+						local drawCombatItem = function()
+							if ui.selectable(lc.SET_AS_COMBAT_TARGET .. ": " .. lbl .. "##sv_cmb_" .. tostring(i), obj.ref == combatTarget, {}) then
+								if navTarget == obj.ref then player:SetNavTarget(nil) end
+								player:SetCombatTarget(obj.ref)
+							end
+						end
+						if isDebugOnlyShip(obj) then
+							ui.withFont(popupfont_italic, drawCombatItem)
+						else
+							drawCombatItem()
 						end
 					end
 				end
@@ -996,10 +1043,17 @@ function makePopup()
 					if obj.type == Projectable.OBJECT and obj.ref then
 						local lbl = getLabel(obj)
 						if #lbl == 0 then lbl = "Unknown" end
-						if ui.selectable(lc.CENTER .. ": " .. lbl .. "##sv_ctr_" .. tostring(i), false, {}) then
-							selectedObject = obj.ref
-							systemView:SetSelectedObject(obj.type, obj.base, obj.ref)
-							systemView:ViewSelectedObject()
+						local drawCenterItem = function()
+							if ui.selectable(lc.CENTER .. ": " .. lbl .. "##sv_ctr_" .. tostring(i), false, {}) then
+								selectedObject = obj.ref
+								systemView:SetSelectedObject(obj.type, obj.base, obj.ref)
+								systemView:ViewSelectedObject()
+							end
+						end
+						if isDebugOnlyShip(obj) then
+							ui.withFont(popupfont_italic, drawCenterItem)
+						else
+							drawCenterItem()
 						end
 					end
 				end
@@ -1013,7 +1067,11 @@ function makePopup()
 		ui.icon(getBodyIcon(popup_object, true, isOrrery), bodyIconSize, getColor(popup_object))
 		ui.sameLine()
 		ui.alignTextToLineHeight(bodyIconSize.y)
-		ui.text(getLabel(popup_object))
+		if isDebugOnlyShip(popup_object) then
+			ui.withFont(popupfont_italic, function() ui.text(getLabel(popup_object)) end)
+		else
+			ui.text(getLabel(popup_object))
+		end
 		ui.separator()
 		if isTargetableObject(popup_object) and ui.selectable(lc.SET_AS_TARGET, false, {}) then
 			setObjectNavTarget(popup_object)
@@ -1098,7 +1156,13 @@ local function displayOnScreenObjects()
 			if isOrrery then
 				local pos = mainCoords + Vector2(label_offset, 0)
 				local hovered = mouseover and mainObject.type == Projectable.OBJECT
-				local font = (hovered or isSelected) and hudfont_highlight or hudfont
+				local debugItalic = isDebugOnlyShip(mainObject)
+				local font
+				if debugItalic then
+					font = (hovered or isSelected) and hudfont_highlight_italic or hudfont_italic
+				else
+					font = (hovered or isSelected) and hudfont_highlight or hudfont
+				end
 				ui.addStyledText(pos + Vector2(2, 1), ui.anchor.left, ui.anchor.center, label , ui.theme.colors.black, font)
 				ui.addStyledText(pos, ui.anchor.left, ui.anchor.center, label , getColor(mainObject), font)
 			else

@@ -841,7 +841,15 @@ function SpaceStation.CleanAllExpiredAdverts (now)
 	end
 end
 
+local expiryTimerActive = false
+local systemUpdateTimerActive = false
+
 local function updateSystem ()
+	if not Game.player then
+		systemUpdateTimerActive = false
+		return true
+	end
+
 	SpaceStation.CleanAllExpiredAdverts()
 	local stations = Space.GetBodies("SpaceStation")
 	for i, station in ipairs(stations) do
@@ -853,6 +861,7 @@ local function updateSystem ()
 			updateAdverts(station)
 		end
 	end
+	return false
 end
 
 local function createStationData (station)
@@ -917,7 +926,6 @@ end
 
 
 local loaded_data
-local expiryTimerActive = false
 
 Event.Register("_ensureDockedBB", function (station)
 	if station:exists() then
@@ -997,11 +1005,17 @@ Event.Register("onGameStart", function ()
 		end
 	end
 
-	Timer:CallEvery(3600, updateSystem)
+	if not systemUpdateTimerActive then
+		systemUpdateTimerActive = true
+		Timer:CallEvery(3600, updateSystem)
+	end
 	if not expiryTimerActive then
 		expiryTimerActive = true
-		Timer:CallEvery(30, function ()
-			if not Game.player then return false end
+		Timer:CallEvery(300, function ()
+			if not Game.player then
+				expiryTimerActive = false
+				return true
+			end
 			SpaceStation.CleanAllExpiredAdverts()
 			return false
 		end)
@@ -1044,6 +1058,7 @@ end)
 
 Event.Register("onGameEnd", function ()
 	expiryTimerActive = false
+	systemUpdateTimerActive = false
 	destroySystem()
 
 	-- XXX clean up for next game

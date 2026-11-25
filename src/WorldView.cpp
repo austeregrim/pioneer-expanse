@@ -1127,7 +1127,7 @@ void WorldView::DrawSupercruiseShips()
 		const SupercruiseController *sc = ship->GetSupercruise();
 		// Brief FSD Supercruise entry optical flash (only when visible to player sensors)
 		if (sc && rootFrame && sc->GetEntryFlashTimer() > 0.0f &&
-			SupercruiseController::IsShipVisibleToSensors(Pi::player, ship)) {
+			SupercruiseController::IsShipVisibleToPlayer(Pi::player, ship)) {
 			const vector3d flashCamPos = rootCamPos + rootCamOrient * sc->GetEntryFlashRootPos();
 			if (flashCamPos.z <= zClip) {
 				const double flashDist = flashCamPos.Length();

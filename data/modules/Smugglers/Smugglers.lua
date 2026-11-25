@@ -24,6 +24,7 @@ local SUB_LIGHT_SC_CAP = 0.85 * LIGHT_SPEED
 
 local smugglers = {}
 local loaded_data = nil
+local smugglerTimerActive = false
 
 local function findIllegalCommodities(system)
 	local illegal = {}
@@ -107,7 +108,13 @@ local function spawnSmugglers(system)
 end
 
 local function updateSmugglers()
-	if not Game.system then return end
+	if not Game.player then
+		smugglerTimerActive = false
+		return true
+	end
+	if not Game.system or Game.InHyperspace() or next(smugglers) == nil then
+		return false
+	end
 	local policeId = Game.system.faction and Game.system.faction.policeShip
 	local allShips = Space.GetBodies("Ship")
 
@@ -191,12 +198,16 @@ Event.Register("onGameStart", function()
 	elseif Game.system then
 		spawnSmugglers(Game.system)
 	end
-	Timer:CallEvery(5, updateSmugglers)
+	if not smugglerTimerActive then
+		smugglerTimerActive = true
+		Timer:CallEvery(5, updateSmugglers)
+	end
 end)
 
 Event.Register("onGameEnd", function()
 	smugglers = {}
 	loaded_data = nil
+	smugglerTimerActive = false
 end)
 
 Serializer:Register("Smugglers", function()
