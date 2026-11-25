@@ -15,6 +15,7 @@
 
 #include "core/TaskGraph.h"
 
+#include "galaxy/Galaxy.h"
 #include "galaxy/GalaxyGenerator.h"
 #include "galaxy/StarSystem.h"
 
@@ -212,7 +213,7 @@ namespace Background {
 		Graphics::RenderStateDesc stateDesc;
 		stateDesc.depthTest = false;
 		stateDesc.depthWrite = false;
-		stateDesc.blendMode = Graphics::BLEND_ALPHA;
+		stateDesc.blendMode = Graphics::BLEND_ADDITIVE;
 		stateDesc.primitiveType = Graphics::POINTS;
 
 		m_material.Reset(m_renderer->CreateMaterial("starfield", desc, stateDesc, m_pointSprites->GetVertexFormat()));
@@ -389,21 +390,20 @@ namespace Background {
 			for (size_t i = 0; i < numStars; ++i) {
 				// dividing through the median helps bringing the logarithmic brightnesses to a scale that is easier to work with
 				const float ratio = (medianBrightness > 0.0) ? Clamp(stars.brightness[i] / float(medianBrightness), 0.0f, 2.3f) : 1.0f;
-				// the exponentiation helps to emphasize very bright stars
-				constexpr float brightnessPower = 3.5f;
+				constexpr float brightnessPower = 2.4f;
 				const float brightness = std::pow(ratio, brightnessPower);
 
-				// 0.0f filters out NaNs from previous operations
-				// Brightness now stores the size value used by the shader
-				stars.brightness[i] = std::max(0.0f, brightness * info.brightnessFactor);
+				// Keep almost all stars as exact 1px pinpoints (0.0); only brightest landmark stars get a subtle halo
+				stars.brightness[i] = (brightness > 1.8f) ? Clamp(std::pow(brightness - 1.75f, 0.45f) * 0.65f * info.brightnessFactor, 0.3f, 1.6f) : 0.0f;
 
 				// convert temporarily to floats to prevent narrowing errors
 				Color4f colorF = stars.color[i].ToColor4f();
 
-				// find a color scaling factor that doesn't make a colored star look white or overflow Uint8
+				// Keep dense stars delicate & balanced in brightness while preserving true spectral hue
 				float colorMax = std::max({ colorF.r, colorF.g, colorF.b });
 				if (colorMax > 0.0f) {
-					float scaledColorMax = colorMax * brightness;
+					float lumBoost = Clamp(0.09f + 0.80f * brightness, 0.09f, 0.92f);
+					float scaledColorMax = colorMax * lumBoost;
 					const float colorFactor = std::min(scaledColorMax, 1.0f) / colorMax;
 					colorF *= colorFactor;
 				}
@@ -443,14 +443,12 @@ namespace Background {
 	{
 		PROFILE_SCOPED()
 
-		const Uint32 NUM_BG_STARS = MathUtil::mix(BG_STAR_MIN, BG_STAR_MAX, Pi::GetAmountBackgroundStars());
+		// Statically calibrated astronomical starfield (~9,000 crisp stars per 65 deg FOV):
+		// samples real nearby galaxy catalog stars plus abundant distant 1px pinpoints.
+		constexpr Uint32 NUM_BG_STARS = 115000;
 		m_animMesh.reset();
 
-		// user doesn't want to see stars
-		if (NUM_BG_STARS == BG_STAR_MIN) return;
-
-		const float brightnessApparentSizeFactor = Pi::GetStarFieldStarSizeFactor() / 7.0;
-		// dividing by 7 to make sure that 100% star size isn't too big to clash with UI elements
+		constexpr float brightnessApparentSizeFactor = 1.0f;
 
 		m_hyperVtx.reset(new vector3f[NUM_HYPERSPACE_STARS * 3]);
 		m_hyperCol.reset(new Color[NUM_HYPERSPACE_STARS * 3]);
@@ -574,28 +572,111 @@ namespace Background {
 		stars.brightness.resize(totalStars);
 
 		PROFILE_START_DESC("Generate Random Stars")
-		// fill out the remaining target count with generated points and also fill hyperspace stars
+		// Lock procedural galactic plane, core bulge, and clusters to skybox.dds
+		// Measured skybox.dds: plane normal = (0.052, 0.999, 0.000), core = (0.985, -0.061, 0.161).
+		// Under Container::Draw's Zup_to_Yup transform (x_sky=y_star, y_sky=z_star, z_sky=x_star):
+		const float coreAzimuth = std::atan2(0.985f, 0.161f);
+		const float coreLat = -0.061f;
+
+		// Pre-generate 14 open star clusters / stellar nurseries along the aligned galactic plane
+		struct StarCluster {
+			float theta;
+			float lat;
+			float spread;
+			bool blueTint;
+		};
+		constexpr int NUM_CLUSTERS = 14;
+		StarCluster clusters[NUM_CLUSTERS];
+		for (int c = 0; c < NUM_CLUSTERS; ++c) {
+			clusters[c].theta = float(rand.Double(0.0, 2.0 * M_PI));
+			clusters[c].lat = Clamp(float(rand.Double(-0.16, 0.16)) - 0.052f * std::sin(clusters[c].theta), -1.55f, 1.55f);
+			clusters[c].spread = float(rand.Double(0.06, 0.14));
+			clusters[c].blueTint = (c % 3 != 0);
+		}
+
+		// Fill remaining sky with galactic disc, central bulge, and open cluster 1px pinpoints
 		Output("Generating %d random stars\n", totalStars - num);
 		for (Uint32 i = num; i < totalStars; i++) {
-			const double size = rand.Double(0.2, 0.9);
-			const Uint8 colScale = size * 255;
+			const double pop = rand.Double(0.0, 1.0);
+			float theta = 0.0f;
+			float lat = 0.0f;
+			double magBias = 1.0;
+			bool warmBulge = false;
+			bool coolCluster = false;
+
+			if (pop < 0.705) {
+				// Galactic disc: tight exponential falloff toward galactic north/south poles
+				const float sign = (rand.Double(0.0, 1.0) < 0.5) ? -1.0f : 1.0f;
+				const float scale = (rand.Double(0.0, 1.0) < 0.70) ? 0.095f : 0.26f;
+				const float uLat = float(std::max(rand.Double(0.0, 1.0), 1e-4));
+
+				// Stronger longitudinal concentration from outer rim toward galactic core
+				theta = float(rand.Double(0.0, 2.0 * M_PI));
+				if (rand.Double(0.0, 1.0) < 0.48) {
+					const float dCore = std::cos(theta - coreAzimuth) * 0.5f + 0.5f;
+					if (rand.Double(0.0, 1.0) > 0.25 + 0.75 * dCore)
+						theta = coreAzimuth + float(rand.Double(-0.85, 0.85));
+				}
+				lat = Clamp(sign * (-std::log(uLat)) * scale - 0.052f * std::sin(theta), -1.55f, 1.55f);
+			} else if (pop < 0.985) {
+				// Galactic core bulge locked to skybox.dds (+0.985, -0.061, +0.161)
+				const float uLon = float(rand.Double(-1.0, 1.0) + rand.Double(-1.0, 1.0)) * 0.5f;
+				const float uLat = float(rand.Double(-1.0, 1.0) + rand.Double(-1.0, 1.0)) * 0.5f;
+				theta = coreAzimuth + uLon * 0.55f;
+				lat = Clamp(coreLat + uLat * 0.17f, -1.55f, 1.55f);
+				magBias = 1.18;
+				warmBulge = true;
+			} else {
+				// Open star clusters / stellar nurseries with radial Gaussian falloff
+				const StarCluster &cl = clusters[i % NUM_CLUSTERS];
+				const float ang = float(rand.Double(0.0, 2.0 * M_PI));
+				const float uR = float(std::max(rand.Double(0.0, 1.0), 1e-4));
+				const float r = Clamp(cl.spread * std::sqrt(-2.0f * std::log(uR)) * 0.42f, 0.0f, cl.spread * 1.8f);
+				theta = cl.theta + std::cos(ang) * r;
+				lat = Clamp(cl.lat + std::sin(ang) * r * 0.85f, -1.55f, 1.55f);
+				magBias = 1.05;
+				coolCluster = cl.blueTint;
+			}
+
+			const float cosLat = std::cos(lat);
+			const vector3f unitDir(cosLat * std::cos(theta), cosLat * std::sin(theta), std::sin(lat));
+			const vector3f skyDir(unitDir.y, unitDir.z, unitDir.x);
+
+			// Dark equatorial dust rift attenuation matching skybox-space plane
+			double dustAtten = 1.0;
+			const double planeDist = std::abs(double(skyDir.x) * 0.052 + double(skyDir.y) * 0.999);
+			if (planeDist < 0.18) {
+				const double riftN = noise(vector3d(skyDir * 5.0));
+				if (riftN > 0.15) {
+					const double latW = 1.0 - planeDist / 0.18;
+					dustAtten = Clamp(1.0 - ((riftN - 0.15) / 0.55) * 0.78 * latW, 0.18, 1.0);
+				}
+			}
+
+			const double uMag = rand.Double(0.0, 1.0);
+			const double mag = std::pow(uMag, 3.6);
+			const double colScale = Clamp((16.0 + mag * 155.0) * magBias * dustAtten, 12.0, 200.0);
+
+			double rW = rand.Double(m_rMin, m_rMax);
+			double gW = rand.Double(m_gMin, m_gMax);
+			double bW = rand.Double(m_bMin, m_bMax);
+			if (warmBulge) {
+				rW = Clamp(rW * 1.10, 0.2, 1.0);
+				bW = Clamp(bW * 0.86, 0.2, 1.0);
+			} else if (coolCluster) {
+				bW = Clamp(bW * 1.12, 0.2, 1.0);
+				rW = Clamp(rW * 0.88, 0.2, 1.0);
+			}
 
 			const Color col(
-				rand.Double(m_rMin, m_rMax) * colScale,
-				rand.Double(m_gMin, m_gMax) * colScale,
-				rand.Double(m_bMin, m_bMax) * colScale,
+				Uint8(rW * colScale),
+				Uint8(gW * colScale),
+				Uint8(bW * colScale),
 				255);
 
-			// this is proper random distribution on a sphere's surface
-			const float theta = float(rand.Double(0.0, 2.0 * M_PI));
-			const float u = float(rand.Double(-1.0, 1.0));
-
-			// squeeze the starfield a bit to get more density near horizon using matrix3x3f::Scale
-			const auto star = matrix3x3f::Scale(1.0, 1.0, 0.4) * (vector3f(sqrt(1.0f - u * u) * cos(theta), u, sqrt(1.0f - u * u) * sin(theta)).Normalized() * 1000.0f);
-
-			stars.pos[i] = star;
+			stars.pos[i] = unitDir * 1000.0f;
 			stars.color[i] = col;
-			stars.brightness[i] = size;
+			stars.brightness[i] = 0.0f;
 			num++;
 		}
 		PROFILE_STOP()
@@ -631,9 +712,13 @@ namespace Background {
 				surge = Pi::game->GetHyperspaceEntryFovFactor();
 			}
 			const float s2 = surge * surge;
-			const float sizeScale = 1.0f;
-			const float emitBoost = 1.0f + 3.0f * s2;
-			const float faintLift = Clamp(surge, 0.0f, 1.0f);
+			const float baseFov = Clamp(Pi::config ? Pi::config->Float("FOVVertical") : 65.0f, 30.0f, 120.0f);
+			const float curFov = Clamp(Graphics::GetFov(), 10.0f, 150.0f);
+			const float zoomMag = Clamp(baseFov / curFov, 0.70f, 2.50f);
+			const float sizeScale = std::pow(zoomMag, 0.35f);
+			const float zoomLift = 1.0f + 0.22f * std::max(0.0f, zoomMag - 1.0f);
+			const float emitBoost = (0.95f * zoomLift) + 3.0f * s2;
+			const float faintLift = Clamp(surge + 0.08f * std::max(0.0f, zoomMag - 1.0f), 0.0f, 1.0f);
 			m_material->SetPushConstant("starBoost"_hash, vector3f(sizeScale, emitBoost, faintLift), 0.0f);
 			m_pointSprites->Draw(m_renderer, m_material.Get());
 		}

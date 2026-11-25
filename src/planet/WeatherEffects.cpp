@@ -53,10 +53,12 @@ namespace {
 WeatherEffects::WeatherEffects(Ship *ship) :
 	m_ship(ship),
 	m_precipVerts(Graphics::ATTRIB_POSITION | Graphics::ATTRIB_DIFFUSE, NUM_PARTICLES * 2),
+	m_volcanicVerts(Graphics::ATTRIB_POSITION | Graphics::ATTRIB_DIFFUSE, NUM_VOLCANIC_PARTICLES * 2),
 	m_lightningVerts(Graphics::ATTRIB_POSITION | Graphics::ATTRIB_DIFFUSE, 1600),
 	m_lightningBloomVerts(Graphics::ATTRIB_POSITION | Graphics::ATTRIB_DIFFUSE | Graphics::ATTRIB_UV0, 24),
 	m_transform(matrix4x4d::Identity),
 	m_precipVisible(false),
+	m_volcanicVisible(false),
 	m_lightningVisible(false)
 {
 	PROFILE_SCOPED();
@@ -71,6 +73,14 @@ WeatherEffects::WeatherEffects(Ship *ship) :
 			LcgSigned(rng) * bounds,
 			LcgSigned(rng) * bounds,
 			LcgSigned(rng) * bounds);
+	}
+
+	m_volcanicParticles.reserve(NUM_VOLCANIC_PARTICLES);
+	for (int i = 0; i < NUM_VOLCANIC_PARTICLES; ++i) {
+		m_volcanicParticles.emplace_back(
+			LcgSigned(rng) * VOLCANIC_BOUNDS,
+			LcgSigned(rng) * VOLCANIC_BOUNDS,
+			LcgSigned(rng) * VOLCANIC_BOUNDS);
 	}
 }
 
@@ -298,6 +308,7 @@ void WeatherEffects::Update(float timeStep)
 	PROFILE_SCOPED();
 	if (!m_ship || m_ship->IsDead()) {
 		m_precipVisible = false;
+		m_volcanicVisible = false;
 		m_lightningVisible = false;
 		return;
 	}
@@ -305,6 +316,7 @@ void WeatherEffects::Update(float timeStep)
 	const Ship::FlightState fs = m_ship->GetFlightState();
 	if (fs == Ship::SUPERCRUISE || fs == Ship::HYPERSPACE) {
 		m_precipVisible = false;
+		m_volcanicVisible = false;
 		m_lightningVisible = false;
 		return;
 	}
@@ -313,6 +325,7 @@ void WeatherEffects::Update(float timeStep)
 		const SpaceStation *station = m_ship->GetDockedWith();
 		if (!station || !station->IsGroundStation()) {
 			m_precipVisible = false;
+			m_volcanicVisible = false;
 			m_lightningVisible = false;
 			return;
 		}
@@ -322,6 +335,7 @@ void WeatherEffects::Update(float timeStep)
 	const Body *astro = frame ? frame->GetBody() : nullptr;
 	if (!frame || !frame->IsRotFrame() || !astro || !astro->IsType(ObjectType::PLANET)) {
 		m_precipVisible = false;
+		m_volcanicVisible = false;
 		m_lightningVisible = false;
 		return;
 	}
@@ -330,6 +344,7 @@ void WeatherEffects::Update(float timeStep)
 	const SystemBody *sbody = planet->GetSystemBody();
 	if (!sbody) {
 		m_precipVisible = false;
+		m_volcanicVisible = false;
 		m_lightningVisible = false;
 		return;
 	}
@@ -340,8 +355,9 @@ void WeatherEffects::Update(float timeStep)
 		? weather.lowerCloudAltM
 		: Clamp(sbody->GetRadius() * 0.0012, 2400.0, 5500.0);
 
-	if (!weather.hasAtmosphere || weather.altitudeM > cloudCeiling * 1.18) {
+	if (!weather.hasAtmosphere) {
 		m_precipVisible = false;
+		m_volcanicVisible = false;
 		m_lightningVisible = false;
 		return;
 	}
@@ -350,127 +366,194 @@ void WeatherEffects::Update(float timeStep)
 	WeatherSystem::BuildLocalENU(m_ship->GetPosition(), east, north, up);
 
 	const bool isPaused = (Pi::game && Pi::game->IsPaused()) || (timeStep <= 0.0f);
+	const double agl = m_ship->GetAltitudeRelTo(planet, AltitudeType::ABOVE_TERRAIN);
+	const vector3d shipVel = (fs == Ship::DOCKED || fs == Ship::LANDED) ? vector3d(0.0) : m_ship->GetVelocity();
 
 	// 1. Forked lightning bolts in storms
 	m_lightningVisible = false;
-	if (weather.lightningActivity > 0.05) {
+	if (weather.altitudeM <= cloudCeiling * 1.18 && weather.lightningActivity > 0.05) {
 		const LightningFlash flash = WeatherSystem::SampleLightningFlash(sbody->GetSeed(), gameTime, weather.lightningActivity);
 		if (flash.intensity > 0.02f) {
-			const double agl = m_ship->GetAltitudeRelTo(planet, AltitudeType::ABOVE_TERRAIN);
 			BuildLightningBolt(east, north, up, agl, cloudCeiling, flash.distanceM, flash.azimuthRad, flash.boltSeed, flash.intensity);
 		}
 	}
 
 	// 2. Precipitation & blowing dust streaks
-	if (weather.precipType == PrecipitationType::NONE || weather.precipIntensity <= 0.05) {
-		m_precipVisible = false;
-		return;
-	}
+	m_precipVisible = false;
+	if (weather.altitudeM <= cloudCeiling * 1.18 && weather.precipType != PrecipitationType::NONE && weather.precipIntensity > 0.05) {
+		vector3d fallVel(0.0);
+		vector3d windMult = weather.windVec;
+		Color baseCol(198, 222, 245, 232);
+		float minStreak = 0.5f;
+		float maxStreak = 6.0f;
+		float streakTimeScale = 0.052f;
+		bool hasValidPrecip = true;
 
-	vector3d fallVel(0.0);
-	vector3d windMult = weather.windVec;
-	Color baseCol(198, 222, 245, 232);
-	float minStreak = 0.5f;
-	float maxStreak = 6.0f;
-	float streakTimeScale = 0.052f;
-
-	switch (weather.precipType) {
-	case PrecipitationType::RAIN:
-		fallVel = -up * (15.5 + 5.5 * weather.stormIntensity);
-		baseCol = Color(198, 222, 245, 232);
-		minStreak = 0.75f;
-		maxStreak = 6.2f;
-		streakTimeScale = 0.052f;
-		break;
-	case PrecipitationType::SNOW:
-		fallVel = -up * 2.4;
-		baseCol = Color(235, 242, 252, 215);
-		minStreak = 0.18f;
-		maxStreak = 1.2f;
-		streakTimeScale = 0.032f;
-		break;
-	case PrecipitationType::DUST: {
-		fallVel = -up * 1.2;
-		windMult = weather.windVec * 1.15;
-		const Color dust = sbody->CalcSurfaceDustColor();
-		baseCol = Color(dust.r, dust.g, dust.b, 200);
-		minStreak = 0.40f;
-		maxStreak = 3.8f;
-		streakTimeScale = 0.040f;
-		break;
-	}
-	case PrecipitationType::ASH:
-		fallVel = -up * 2.0;
-		baseCol = Color(95, 88, 84, 195);
-		minStreak = 0.22f;
-		maxStreak = 1.6f;
-		streakTimeScale = 0.035f;
-		break;
-	default:
-		m_precipVisible = false;
-		return;
-	}
-
-	const vector3d shipVel = (fs == Ship::DOCKED || fs == Ship::LANDED) ? vector3d(0.0) : m_ship->GetVelocity();
-	const vector3d relVelD = fallVel + windMult - shipVel;
-	const double relSpeedD = relVelD.Length();
-	const vector3f relVel = vector3f(relVelD);
-	const vector3f relDir = (relSpeedD > 1e-4) ? vector3f(relVelD / relSpeedD) : vector3f(-up);
-
-	const float altFade = float(1.0 - Clamp((weather.altitudeM - cloudCeiling * 0.85) / std::max(1.0, cloudCeiling * 0.33), 0.0, 1.0));
-	const int activeCount = Clamp(int(180.0 + 1620.0 * std::pow(weather.precipIntensity, 0.85)), 0, NUM_PARTICLES);
-	const float streakLen = Clamp(float(relSpeedD) * streakTimeScale, minStreak, maxStreak);
-	const vector3f streakVec = relDir * streakLen;
-	const float intensityAlpha = float(Clamp(0.36 + 0.62 * weather.precipIntensity + 0.12 * weather.stormIntensity, 0.0, 0.98)) * altFade;
-
-	if (activeCount <= 0 || intensityAlpha <= 0.02f) {
-		m_precipVisible = false;
-		return;
-	}
-
-	m_precipVerts.Clear();
-	const vector3f step = relVel * timeStep;
-	const vector3f swirlAxis = vector3f(east);
-
-	for (int i = 0; i < activeCount; ++i) {
-		const float bounds = (i < NEAR_PARTICLES) ? NEAR_BOUNDS : BOX_BOUNDS;
-		vector3f &pt = m_particles[i];
-		if (!isPaused) {
-			vector3f curStep = step;
-			if (weather.precipType == PrecipitationType::SNOW || weather.precipType == PrecipitationType::ASH) {
-				const float swirl = std::sin(float(gameTime * 2.2) + float(i) * 0.73f) * 1.4f * timeStep;
-				curStep += swirlAxis * swirl;
-			}
-			pt.x = WrapCoord(pt.x + curStep.x, bounds);
-			pt.y = WrapCoord(pt.y + curStep.y, bounds);
-			pt.z = WrapCoord(pt.z + curStep.z, bounds);
+		switch (weather.precipType) {
+		case PrecipitationType::RAIN:
+			fallVel = -up * (15.5 + 5.5 * weather.stormIntensity);
+			baseCol = Color(198, 222, 245, 232);
+			minStreak = 0.75f;
+			maxStreak = 6.2f;
+			streakTimeScale = 0.052f;
+			break;
+		case PrecipitationType::SNOW:
+			fallVel = -up * 2.4;
+			baseCol = Color(235, 242, 252, 215);
+			minStreak = 0.18f;
+			maxStreak = 1.2f;
+			streakTimeScale = 0.032f;
+			break;
+		case PrecipitationType::DUST: {
+			fallVel = -up * 1.2;
+			windMult = weather.windVec * 1.15;
+			const Color dust = sbody->CalcSurfaceDustColor();
+			baseCol = Color(dust.r, dust.g, dust.b, 200);
+			minStreak = 0.40f;
+			maxStreak = 3.8f;
+			streakTimeScale = 0.040f;
+			break;
+		}
+		case PrecipitationType::ASH:
+			fallVel = -up * 2.0;
+			baseCol = Color(95, 88, 84, 195);
+			minStreak = 0.22f;
+			maxStreak = 1.6f;
+			streakTimeScale = 0.035f;
+			break;
+		default:
+			hasValidPrecip = false;
+			break;
 		}
 
-		const float distFade = Clamp(1.0f - pt.Length() / bounds, 0.0f, 1.0f);
-		Color cHead = baseCol;
-		cHead.a = Uint8(Clamp(float(baseCol.a) * intensityAlpha * distFade, 0.0f, 255.0f));
-		if (cHead.a < 4)
-			continue;
-		Color cTail = cHead;
-		cTail.a = Uint8(float(cHead.a) * 0.35f);
+		if (hasValidPrecip) {
+			const vector3d relVelD = fallVel + windMult - shipVel;
+			const double relSpeedD = relVelD.Length();
+			const vector3f relVel = vector3f(relVelD);
+			const vector3f relDir = (relSpeedD > 1e-4) ? vector3f(relVelD / relSpeedD) : vector3f(-up);
 
-		m_precipVerts.Add(pt, cHead);
-		m_precipVerts.Add(pt - streakVec, cTail);
+			const float altFade = float(1.0 - Clamp((weather.altitudeM - cloudCeiling * 0.85) / std::max(1.0, cloudCeiling * 0.33), 0.0, 1.0));
+			const int activeCount = Clamp(int(180.0 + 1620.0 * std::pow(weather.precipIntensity, 0.85)), 0, NUM_PARTICLES);
+			const float streakLen = Clamp(float(relSpeedD) * streakTimeScale, minStreak, maxStreak);
+			const vector3f streakVec = relDir * streakLen;
+			const float intensityAlpha = float(Clamp(0.36 + 0.62 * weather.precipIntensity + 0.12 * weather.stormIntensity, 0.0, 0.98)) * altFade;
+
+			if (activeCount > 0 && intensityAlpha > 0.02f) {
+				m_precipVerts.Clear();
+				const vector3f step = relVel * timeStep;
+				const vector3f swirlAxis = vector3f(east);
+
+				for (int i = 0; i < activeCount; ++i) {
+					const float bounds = (i < NEAR_PARTICLES) ? NEAR_BOUNDS : BOX_BOUNDS;
+					vector3f &pt = m_particles[i];
+					if (!isPaused) {
+						vector3f curStep = step;
+						if (weather.precipType == PrecipitationType::SNOW || weather.precipType == PrecipitationType::ASH) {
+							const float swirl = std::sin(float(gameTime * 2.2) + float(i) * 0.73f) * 1.4f * timeStep;
+							curStep += swirlAxis * swirl;
+						}
+						pt.x = WrapCoord(pt.x + curStep.x, bounds);
+						pt.y = WrapCoord(pt.y + curStep.y, bounds);
+						pt.z = WrapCoord(pt.z + curStep.z, bounds);
+					}
+
+					const float distFade = Clamp(1.0f - pt.Length() / bounds, 0.0f, 1.0f);
+					Color cHead = baseCol;
+					cHead.a = Uint8(Clamp(float(baseCol.a) * intensityAlpha * distFade, 0.0f, 255.0f));
+					if (cHead.a < 4)
+						continue;
+					Color cTail = cHead;
+					cTail.a = Uint8(float(cHead.a) * 0.35f);
+
+					m_precipVerts.Add(pt, cHead);
+					m_precipVerts.Add(pt - streakVec, cTail);
+				}
+
+				m_precipVisible = (m_precipVerts.GetNumVerts() >= 2);
+			}
+		}
 	}
 
-	m_precipVisible = (m_precipVerts.GetNumVerts() >= 2);
+	// 3. Atmosphere-dependent volcanic steam / smoke / rising embers at low altitude
+	m_volcanicVisible = false;
+	const double volc = sbody->GetVolcanicity();
+	if (volc >= 0.40 && agl < 2000.0) {
+		double pressure = 0.0, density = 0.0;
+		planet->GetAtmosphericState(m_ship->GetPosition().Length(), &pressure, &density);
+		if (pressure >= 0.005) {
+			const float volcFactor = Clamp(float((volc - 0.35) / 0.65), 0.15f, 1.0f);
+			const float altFade = Clamp(float(1.0 - agl / 2000.0), 0.0f, 1.0f);
+			const float atmScale = Clamp(float(pressure / 0.18), 0.20f, 1.0f);
+			const bool humidSteam = (sbody->GetVolatileLiquid() > 0.05) ||
+				(weather.precipType == PrecipitationType::RAIN) ||
+				(weather.climateZone == ClimateZone::TROPICAL) ||
+				(weather.climateZone == ClimateZone::TEMPERATE);
+
+			const vector3d plumeVelD = up * (humidSteam ? 3.2 : 2.6) + weather.windVec * 0.85 - shipVel;
+			const double relSpeedD = plumeVelD.Length();
+			const vector3f plumeVel = vector3f(plumeVelD);
+			const vector3f plumeDir = (relSpeedD > 1e-4) ? vector3f(plumeVelD / relSpeedD) : vector3f(up);
+			const float streakLen = Clamp(float(relSpeedD) * 0.045f, 0.28f, 2.2f);
+			const vector3f streakVec = plumeDir * streakLen;
+
+			const int activeCount = Clamp(int(120.0f + 240.0f * volcFactor), 0, NUM_VOLCANIC_PARTICLES);
+			const float alphaScale = volcFactor * altFade * atmScale;
+			if (activeCount > 0 && alphaScale > 0.02f) {
+				m_volcanicVerts.Clear();
+				const vector3f baseStep = plumeVel * timeStep;
+				const vector3f swirlEast = vector3f(east);
+				const vector3f swirlNorth = vector3f(north);
+
+				for (int i = 0; i < activeCount; ++i) {
+					vector3f &pt = m_volcanicParticles[i];
+					if (!isPaused) {
+						const float swirlA = std::sin(float(gameTime * 1.4) + float(i) * 0.61f) * 0.85f * timeStep;
+						const float swirlB = std::cos(float(gameTime * 1.1) + float(i) * 0.43f) * 0.85f * timeStep;
+						const vector3f curStep = baseStep + swirlEast * swirlA + swirlNorth * swirlB;
+						pt.x = WrapCoord(pt.x + curStep.x, VOLCANIC_BOUNDS);
+						pt.y = WrapCoord(pt.y + curStep.y, VOLCANIC_BOUNDS);
+						pt.z = WrapCoord(pt.z + curStep.z, VOLCANIC_BOUNDS);
+					}
+
+					const float distFade = Clamp(1.0f - pt.Length() / VOLCANIC_BOUNDS, 0.0f, 1.0f);
+					Color cHead;
+					if (humidSteam) {
+						cHead = Color(210, 206, 198, 120);
+					} else if ((i & 3) == 0) {
+						cHead = Color(255, 135, 38, 210);
+					} else {
+						cHead = Color(72, 66, 62, 130);
+					}
+					cHead.a = Uint8(Clamp(float(cHead.a) * alphaScale * distFade, 0.0f, 255.0f));
+					if (cHead.a < 4)
+						continue;
+
+					Color cTail = cHead;
+					cTail.a = Uint8(float(cHead.a) * 0.25f);
+					m_volcanicVerts.Add(pt, cHead);
+					m_volcanicVerts.Add(pt - streakVec * (((i & 3) == 0 && !humidSteam) ? 0.55f : 1.0f), cTail);
+				}
+
+				m_volcanicVisible = (m_volcanicVerts.GetNumVerts() >= 2);
+			}
+		}
+	}
 }
 
 void WeatherEffects::Render(Graphics::Renderer *r)
 {
 	PROFILE_SCOPED();
-	if (!r || (!m_precipVisible && !m_lightningVisible))
+	if (!r || (!m_precipVisible && !m_lightningVisible && !m_volcanicVisible))
 		return;
 
 	r->SetTransform(matrix4x4f(m_transform));
 
 	if (m_precipVisible && m_precipMaterial.Valid() && m_precipVerts.GetNumVerts() >= 2) {
 		r->DrawBuffer(&m_precipVerts, m_precipMaterial.Get());
+	}
+
+	if (m_volcanicVisible && m_precipMaterial.Valid() && m_volcanicVerts.GetNumVerts() >= 2) {
+		r->DrawBuffer(&m_volcanicVerts, m_precipMaterial.Get());
 	}
 
 	if (m_lightningVisible) {

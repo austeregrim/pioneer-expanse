@@ -5,12 +5,15 @@
 #include "lib.glsl"
 
 out vec4 v_color;
+out float v_pointSize;
 
 uniform vec4 starBoost;
 
 void main(void)
 {
 	gl_Position = uViewProjectionMatrix * a_vertex;
-	gl_PointSize = (1.0 + pow(a_normal.z, 3.0)) * max(starBoost.x, 1.0);
+	float ptSize = (a_normal.z > 0.05) ? (1.0 + a_normal.z * max(starBoost.x, 0.75)) : 1.0;
+	gl_PointSize = ptSize;
+	v_pointSize = ptSize;
 	v_color = a_color;
 }

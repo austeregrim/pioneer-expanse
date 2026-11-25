@@ -29,8 +29,13 @@ struct BaseSphereDataBlock {
 	alignas(16) vector3f srad;
 	alignas(16) vector3f lrad;
 	alignas(16) vector3f sdivlrad;
+
+	// Per-planet atmospheric chemistry & live weather scattering
+	alignas(16) float atmosRayleighBeta[4];
+	alignas(16) float atmosMieParams[4];
+	alignas(16) float atmosWeatherParams[4];
 };
-static_assert(sizeof(BaseSphereDataBlock) == 144, "");
+static_assert(sizeof(BaseSphereDataBlock) == 192, "");
 
 std::unique_ptr<Graphics::Drawables::Sphere3D> BaseSphere::m_atmos;
 
@@ -102,6 +107,23 @@ void BaseSphere::SetMaterialParameters(const matrix4x4d &trans, const float radi
 	matData.geosphereAtmosFogDensity = ap.atmosDensity;
 	matData.geosphereAtmosInvScaleHeight = ap.atmosInvScaleHeight;
 	matData.atmosColor = ap.atmosCol.ToColor4f();
+
+	const bool enhanced = Pi::renderer && Pi::renderer->IsEnhancedGraphicsEnabled();
+	matData.atmosRayleighBeta[0] = ap.rayleighBeta.x;
+	matData.atmosRayleighBeta[1] = ap.rayleighBeta.y;
+	matData.atmosRayleighBeta[2] = ap.rayleighBeta.z;
+	matData.atmosRayleighBeta[3] = ap.ozoneStrength;
+
+	const vector3f effMie = ap.mieBeta * ap.weatherMieTint;
+	matData.atmosMieParams[0] = effMie.x;
+	matData.atmosMieParams[1] = effMie.y;
+	matData.atmosMieParams[2] = effMie.z;
+	matData.atmosMieParams[3] = ap.mieG;
+
+	matData.atmosWeatherParams[0] = ap.weatherMieMult;
+	matData.atmosWeatherParams[1] = ap.weatherOvercast;
+	matData.atmosWeatherParams[2] = enhanced ? 1.0f : 0.0f;
+	matData.atmosWeatherParams[3] = 0.0f;
 
 	// we handle up to three shadows at a time
 	auto it = shadows.cbegin(), itEnd = shadows.cend();

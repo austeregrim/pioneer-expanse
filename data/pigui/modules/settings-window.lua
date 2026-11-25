@@ -32,10 +32,6 @@ local binding_pages
 local keyCaptureBind
 local keyCaptureNum
 
-local needBackgroundStarRefresh = false
-local starDensity = Engine.GetAmountStars() * 100
-local starFieldStarSizeFactor = Engine.GetStarFieldStarSizeFactor() * 100
-
 local function combo(label, selected, items, tooltip)
 	local color = colors.buttonBlue
 	local changed, ret = 0, nil
@@ -330,17 +326,6 @@ local function showVideoOptions()
 		Engine.SetDisplayHudTrails(displayHudTrails)
 	end
 	ui.columns(1,"",false)
-
-	c,starDensity = slider(lui.STAR_FIELD_DENSITY, starDensity, 0, 100)
-	if c then
-		needBackgroundStarRefresh = true
-	end
-
-	c,starFieldStarSizeFactor = slider(lui.STAR_FIELD_STAR_SIZE_FACTOR, starFieldStarSizeFactor, 0, 100)
-	if c then
-		-- TODO: lua somtimes gets very small slider changes, even though I didn't touch the slider
-		needBackgroundStarRefresh = true
-	end
 
 	ui.separator()
 	optionTextButton("Debug Info", nil, true, function()
@@ -889,11 +874,6 @@ ui.optionsWindow = ModalWindow.New("Options", function()
 	ui.sameLine()
 	optionTextButton(lui.CLOSE, nil, true, function()
 		ui.optionsWindow:close()
-		if needBackgroundStarRefresh then
-			Engine.SetAmountStars(starDensity/100)
-			Engine.SetStarFieldStarSizeFactor(starFieldStarSizeFactor/100)
-			needBackgroundStarRefresh = false
-		end
 		if selectedJoystick then
 			Input.SaveJoystickConfig(selectedJoystick)
 		end

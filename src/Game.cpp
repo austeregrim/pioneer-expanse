@@ -1036,6 +1036,9 @@ void Game::RequestTimeAccel(TimeAccel t, bool force)
 void Game::RequestTimeAccelInc(bool force)
 {
 	switch (m_requestedTimeAccel) {
+	case Game::TIMEACCEL_PAUSED:
+		m_requestedTimeAccel = Game::TIMEACCEL_1X;
+		break;
 	case Game::TIMEACCEL_1X:
 		m_requestedTimeAccel = Game::TIMEACCEL_10X;
 		break;
@@ -1049,7 +1052,7 @@ void Game::RequestTimeAccelInc(bool force)
 		m_requestedTimeAccel = Game::TIMEACCEL_10000X;
 		break;
 	default:
-		// ignore if paused, hyperspace or 10000X
+		// ignore if hyperspace or 10000X
 		break;
 	}
 	m_forceTimeAccel = force;
@@ -1058,6 +1061,9 @@ void Game::RequestTimeAccelInc(bool force)
 void Game::RequestTimeAccelDec(bool force)
 {
 	switch (m_requestedTimeAccel) {
+	case Game::TIMEACCEL_1X:
+		m_requestedTimeAccel = Game::TIMEACCEL_PAUSED;
+		break;
 	case Game::TIMEACCEL_10X:
 		m_requestedTimeAccel = Game::TIMEACCEL_1X;
 		break;
@@ -1071,7 +1077,7 @@ void Game::RequestTimeAccelDec(bool force)
 		m_requestedTimeAccel = Game::TIMEACCEL_1000X;
 		break;
 	default:
-		// ignore if paused, hyperspace or 1X
+		// ignore if paused or hyperspace
 		break;
 	}
 	m_forceTimeAccel = force;

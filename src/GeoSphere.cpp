@@ -428,42 +428,6 @@ void GeoSphere::Render(Graphics::Renderer *renderer, const matrix4x4d &modelView
 	if (!m_surfaceMaterial)
 		SetUpMaterials();
 
-	//Update material parameters
-	SetMaterialParameters(trans, radius, shadows, m_atmosphereParameters);
-
-	if (m_atmosphereMaterial.Valid() && m_atmosphereParameters.atmosDensity > 0.0) {
-		// make atmosphere sphere slightly bigger than required so
-		// that the edges of the pixel shader atmosphere jizz doesn't
-		// show ugly polygonal angles
-		DrawAtmosphereSurface(renderer, trans, campos,
-			m_atmosphereParameters.atmosRadius * 1.02,
-			m_atmosphereMaterial);
-	}
-
-	Color ambient;
-	Color &emission = m_surfaceMaterial->emissive;
-
-	// save old global ambient
-	const Color oldAmbient = renderer->GetAmbientColor();
-
-	if ((GetSystemBody()->GetSuperType() == SystemBody::SUPERTYPE_STAR) || (GetSystemBody()->GetType() == SystemBody::TYPE_BROWN_DWARF)) {
-		// stars should emit light and terrain should be visible from distance
-		ambient.r = ambient.g = ambient.b = 51;
-		ambient.a = 255;
-		emission = GetSystemBody()->GetStarColor();
-		emission.a = 255;
-	} else {
-		// give planet some ambient lighting if the viewer is close to it
-		double camdist = 0.1 / campos.LengthSqr();
-		// why the fuck is this returning 0.1 when we are sat on the planet??
-		// JJ: Because campos is relative to a unit-radius planet - 1.0 at the surface
-		// XXX oh well, it is the value we want anyway...
-		ambient.r = ambient.g = ambient.b = camdist * 255;
-		ambient.a = 255;
-	}
-
-	renderer->SetAmbientColor(ambient);
-
 	const SystemBody *sbody = GetSystemBody();
 	const double hydro = sbody ? sbody->GetVolatileLiquid() : 0.0;
 	const double atmo = sbody ? std::max(0.0, sbody->GetAtmSurfaceDensity()) : 0.0;
@@ -501,6 +465,83 @@ void GeoSphere::Render(Graphics::Renderer *renderer, const matrix4x4d &modelView
 		? float(1.0 - altFadeT * altFadeT * (3.0 - 2.0 * altFadeT))
 		: 0.0f;
 
+	float localOvercast = 0.0f;
+	float stormVal = 0.0f;
+	float surfWeight = 0.0f;
+	float lightningAmb = 0.0f;
+	if (hasWeatherAtmo && weather.hasAtmosphere && coverage > 0.05f && m_atmos && renderer->IsEnhancedGraphicsEnabled()) {
+		const float lowCov = Clamp(float(weather.lowerCloudCover), 0.0f, 1.0f);
+		const float highCov = Clamp(float(weather.upperCloudCover), 0.0f, 1.0f);
+		const float rawCover = Clamp(lowCov + 0.40f * highCov * (1.0f - lowCov), 0.0f, 1.0f);
+		localOvercast = Clamp((rawCover - 0.18f) / 0.72f, 0.0f, 1.0f);
+		stormVal = Clamp(float(weather.stormIntensity), 0.0f, 1.0f);
+		surfWeight = nearSurfaceWeight;
+		lightningAmb = Clamp(flash.intensity, 0.0f, 1.0f) * nearSurfaceWeight * (0.35f + 0.65f * localOvercast);
+	}
+
+	// Couple live WeatherSystem haze & aerosols to atmospheric Rayleigh/Mie UBO
+	m_atmosphereParameters.weatherMieMult = 1.0f;
+	m_atmosphereParameters.weatherOvercast = 0.0f;
+	m_atmosphereParameters.weatherMieTint = vector3f(1.0f, 1.0f, 1.0f);
+	if (hasWeatherAtmo && weather.hasAtmosphere && renderer->IsEnhancedGraphicsEnabled()) {
+		const float stormW = Clamp(float(weather.stormIntensity), 0.0f, 1.0f) * nearSurfaceWeight;
+		const float overcastW = localOvercast * nearSurfaceWeight;
+		const float precipW = Clamp(float(weather.precipIntensity), 0.0f, 1.0f) * nearSurfaceWeight;
+		float mieMult = 1.0f + 0.45f * overcastW + 0.75f * stormW;
+		vector3f mieTint(1.0f, 1.0f, 1.0f);
+
+		if (weather.precipType == PrecipitationType::DUST) {
+			mieMult += 0.85f * precipW;
+			mieTint = mieTint * (1.0f - precipW) + vector3f(1.28f, 0.96f, 0.62f) * precipW;
+		} else if (weather.precipType == PrecipitationType::ASH) {
+			mieMult += 0.95f * precipW;
+			mieTint = mieTint * (1.0f - precipW) + vector3f(1.10f, 0.86f, 0.68f) * precipW;
+		} else if (weather.precipType == PrecipitationType::RAIN || weather.precipType == PrecipitationType::SNOW) {
+			mieMult += 0.40f * precipW;
+			mieTint = mieTint * (1.0f - 0.5f * precipW) + vector3f(0.94f, 0.98f, 1.05f) * (0.5f * precipW);
+		}
+
+		m_atmosphereParameters.weatherMieMult = Clamp(mieMult, 1.0f, 2.8f);
+		m_atmosphereParameters.weatherOvercast = overcastW;
+		m_atmosphereParameters.weatherMieTint = mieTint;
+	}
+
+	//Update material parameters
+	SetMaterialParameters(trans, radius, shadows, m_atmosphereParameters);
+
+	if (m_atmosphereMaterial.Valid() && m_atmosphereParameters.atmosDensity > 0.0) {
+		// make atmosphere sphere slightly bigger than required so
+		// that the edges of the pixel shader atmosphere jizz doesn't
+		// show ugly polygonal angles
+		DrawAtmosphereSurface(renderer, trans, campos,
+			m_atmosphereParameters.atmosRadius * 1.02,
+			m_atmosphereMaterial);
+	}
+
+	Color ambient;
+	Color &emission = m_surfaceMaterial->emissive;
+
+	// save old global ambient
+	const Color oldAmbient = renderer->GetAmbientColor();
+
+	if ((GetSystemBody()->GetSuperType() == SystemBody::SUPERTYPE_STAR) || (GetSystemBody()->GetType() == SystemBody::TYPE_BROWN_DWARF)) {
+		// stars should emit light and terrain should be visible from distance
+		ambient.r = ambient.g = ambient.b = 51;
+		ambient.a = 255;
+		emission = GetSystemBody()->GetStarColor();
+		emission.a = 255;
+	} else {
+		// give planet some ambient lighting if the viewer is close to it
+		double camdist = 0.1 / campos.LengthSqr();
+		// why the fuck is this returning 0.1 when we are sat on the planet??
+		// JJ: Because campos is relative to a unit-radius planet - 1.0 at the surface
+		// XXX oh well, it is the value we want anyway...
+		ambient.r = ambient.g = ambient.b = camdist * 255;
+		ambient.a = 255;
+	}
+
+	renderer->SetAmbientColor(ambient);
+
 	// Physically scaled ocean turbulence from local atmosphere density (wind forcing) & surface gravity (restoring force)
 	if (m_surfaceMaterial.Valid()) {
 		const double gNorm = Clamp(sbody->CalcSurfaceGravity() / 9.80665, 0.15, 4.0);
@@ -513,19 +554,6 @@ void GeoSphere::Render(Graphics::Renderer *renderer, const matrix4x4d &modelView
 		static const size_t s_waterParamsHash = "WaterParams"_hash;
 		m_surfaceMaterial->SetPushConstant(s_waterParamsHash, vector3f(turbulence, waveSpeed, whitecapFactor), waterQuality);
 
-		float localOvercast = 0.0f;
-		float stormVal = 0.0f;
-		float surfWeight = 0.0f;
-		float lightningAmb = 0.0f;
-		if (hasWeatherAtmo && weather.hasAtmosphere && coverage > 0.05f && m_atmos && renderer->IsEnhancedGraphicsEnabled()) {
-			const float lowCov = Clamp(float(weather.lowerCloudCover), 0.0f, 1.0f);
-			const float highCov = Clamp(float(weather.upperCloudCover), 0.0f, 1.0f);
-			const float rawCover = Clamp(lowCov + 0.40f * highCov * (1.0f - lowCov), 0.0f, 1.0f);
-			localOvercast = Clamp((rawCover - 0.18f) / 0.72f, 0.0f, 1.0f);
-			stormVal = Clamp(float(weather.stormIntensity), 0.0f, 1.0f);
-			surfWeight = nearSurfaceWeight;
-			lightningAmb = Clamp(flash.intensity, 0.0f, 1.0f) * nearSurfaceWeight * (0.35f + 0.65f * localOvercast);
-		}
 		static const size_t s_cloudWeatherHash = "CloudWeather"_hash;
 		m_surfaceMaterial->SetPushConstant(s_cloudWeatherHash, vector3f(localOvercast, stormVal, surfWeight), lightningAmb);
 	}

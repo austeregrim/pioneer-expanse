@@ -1,8 +1,8 @@
 # Technical Implementation Plan: Graphics, Planetary Engine, Weather & Audio Overhaul
 
-**Document Version**: 2.3  
-**Status**: In Progress (M1–2, M4–6 Completed; M3 & M7 Next Up; M8 Asset-Gated)  
-**Priority Tier**: Active Pillar (Next Major Effort After Core Polish)  
+**Document Version**: 2.4  
+**Status**: In Progress (M1–6 Completed; M7 Next Up; M8 Asset-Gated)  
+**Priority Tier**: Active Pillar (Audio Finish Next Up)  
 **Parent Roadmap**: [`01_EXPANSE_LONG_TERM_ROADMAP.md`](./01_EXPANSE_LONG_TERM_ROADMAP.md)  
 
 ---
@@ -25,7 +25,7 @@ graph TD
     subgraph Track1["Track 1: Toggleable Enhanced Graphics (Classic Fallback)"]
         T1M1["Milestone 1: Enhanced Graphics Toggle + Ship/Station PBR + Glare & Lens Flare (Completed)"]
         T1M2["Milestone 2: Stars (Plumes/Corona), Gas Giants, Terrestrial Clouds, Water & Ice Reflections (Completed)"]
-        T1M3["Milestone 3: Chemistry-Driven & Weather-Coupled Rayleigh/Mie Atmospheres (Next Up)"]
+        T1M3["Milestone 3: Chemistry-Driven & Weather-Coupled Rayleigh/Mie Atmospheres (Completed)"]
     end
 
     subgraph Track2["Track 2: Always-On Planetary Terrain & World Gen (SRV Prep)"]
@@ -70,12 +70,11 @@ graph TD
 * **Terrestrial Cloud Layers (`planet_clouds.frag`)**: Dual-layer animated cloud shells (cumulus/stratus + high cirrus) with wind-drift parallax, storm darkening, and terrain cloud shadows.
 * **Water & Ice Surface Shaders**: Animated ocean swell/chop normal detail with true atmospheric LUT sky reflections and coastal surf foam, plus crystalline specular glint on frozen worlds.
 
-### 2.3 Milestone 3 *(Next Up)*: Per-Planet Chemistry & Weather-Coupled Rayleigh/Mie Atmospheres
-* **Current Baseline (`data/shaders/opengl/rayleigh-lib.glsl`, `src/GeoSphere.cpp`)**: Pioneer's `RealisticScattering` mode already implements a 2D LUT raymarcher (`rayleigh_geosphere_sky_fast/full`, `rayleigh_geosphere_terrain`), **but** `rayleigh-lib.glsl` currently hardcodes Earth's scattering constants (`betaR = 1e-6 * vec3(3.8, 13.5, 33.1)` and `betaM = 1e-6 * vec3(21.0)`) for every planet.
-* **Upgrades**:
-  * Drive `betaR`, `betaM`, scale-height falloff, and Mie anisotropy `g` from each planet's actual `SystemBody` atmospheric chemistry (`N2/O2` + ozone absorption for terrestrial twilight, `CO2` rust/amber haze, `CH4` teal/golden photochemical haze, `SO2`/`NH3` alien tints).
-  * Couple Mie aerosol haze density and horizon scattering tint dynamically to `WeatherSystem` (storm fronts, dust storms, volcanic ash).
-  * Tie cleanly into the live-toggleable `EnhancedGraphics` pipeline so all worlds benefit out-of-the-box without requiring a separate restart-gated scattering toggle.
+### 2.3 Milestone 3 *(Completed)*: Per-Planet Chemistry & Weather-Coupled Rayleigh/Mie Atmospheres
+* **Implemented (`src/galaxy/AtmosphereParameters.h`, `src/galaxy/SystemBody.cpp`, `src/BaseSphere.cpp`, `src/GeoSphere.cpp`, `src/GameConfig.cpp`, `data/shaders/opengl/basesphere_uniforms.glsl`, `rayleigh-lib.glsl`, `geosphere_sky.frag`)**:
+  * Enabled `RealisticScattering = 2` (Full Rayleigh/Mie) by default in `GameConfig`.
+  * Computed per-planet `rayleighBeta`, `mieBeta`, `mieG`, and `ozoneStrength` across all 9 atmospheric chemistry classes (`O2/N2` + Chappuis ozone twilight, dusty `CO2` Mars vs. greenhouse `CO2` Venus, `CO`, photochemical `CH4` Titan vs. clear `CH4`, `H2`, `He`, `Ar`, `S/SO2`, `N2`), plus volcanicity ash aerosol blending and hand-authored `atmosCol` hue tinting.
+  * Coupled live `WeatherSystem` storm intensity, overcast cover, and precipitation aerosols (`DUST`, `ASH`, `RAIN`, `SNOW`) into the `BaseSphereData` UBO each frame while preserving identical Classic fallback when `EnhancedGraphics == 0`.
 
 ---
 

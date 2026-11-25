@@ -89,7 +89,7 @@ GeoPatch::GeoPatch(const RefCountedPtr<GeoPatchContext> &ctx_, GeoSphere *gs,
 
 	double distMult;
 	if (m_geosphere->GetSystemBody()->GetType() < SystemBody::TYPE_PLANET_ASTEROID) {
-		distMult = 10.0 / Clamp(m_depth, 1, 10);
+		distMult = 14.5 / Clamp(m_depth, 1, 10);
 	} else {
 		distMult = 5.0 / Clamp(m_depth, 1, 5);
 	}

@@ -21,7 +21,7 @@ void main(void)
 
 	float edge = pow(abs(dot(N, V)), 1.55);
 	float lengthFade = smoothstep(0.0, 0.06, vAlong) * pow(max(1.0 - vAlong, 0.0), 1.80);
-	float cockpitFade = (nearFade > 0.5) ? smoothstep(2.5, 9.5, dist) : smoothstep(0.25, 1.4, dist);
+	float cockpitFade = (nearFade > 0.5) ? smoothstep(5.5, 16.0, dist) : smoothstep(0.25, 1.4, dist);
 
 	float intensity = clamp(edge * lengthFade * cockpitFade * beamColor.a, 0.0, 1.0);
 	if (intensity <= 0.002)

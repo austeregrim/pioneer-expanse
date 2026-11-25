@@ -299,19 +299,26 @@ void Camera::Draw(const Body *excludeBody)
 			planet->GetAtmosphericState(altitude, &pressure, &density);
 			if (pressure >= 0.001) {
 				m_inAtmosphere = true;
-				//go through all lights to calculate something resembling light intensity
-				float intensity = 0.f;
+				const vector3f localUp = (-relpos).Normalized();
+				float skyWashout = 0.f;
 				const Body *pBody = Pi::game->GetPlayer();
 				for (Uint32 i = 0; i < m_lightSources.size(); i++) {
 					// Set up data for eclipses. All bodies are assumed to be spheres.
 					const LightSource &it = m_lightSources[i];
 					const vector3f lightDir(it.GetLight().GetPosition().Normalized());
-					intensity += ShadowedIntensity(i, pBody) * std::max(0.f, lightDir.Dot(-relpos.Normalized())) * (it.GetLight().GetDiffuse().GetLuminance() / 255.0f);
+					const float shadow = ShadowedIntensity(i, pBody);
+					const float starLum = Clamp((it.GetLight().GetDiffuse().GetLuminance() / 255.0f) * 1.6f, 0.35f, 1.0f);
+					const float sunSinElev = lightDir.Dot(localUp);
+					const float t = Clamp((sunSinElev - (-0.24f)) / ((-0.015f) - (-0.24f)), 0.0f, 1.0f);
+					const float twilightDay = t * t * (3.0f - 2.0f * t);
+					skyWashout = Clamp(skyWashout + shadow * starLum * twilightDay, 0.0f, 1.0f);
 				}
-				intensity = Clamp(intensity, 0.0f, 1.0f);
 
-				//calculate background intensity with some hand-tweaked fuzz applied
-				bgIntensity = Clamp(1.f - std::min(1.f, powf(density, 0.25f)) * (0.3f + powf(intensity, 0.25f)), 0.f, 1.f);
+				const float pT = Clamp((float(pressure) - 0.001f) / (0.05f - 0.001f), 0.0f, 1.0f);
+				const float atmoOpacity = pT * pT * (3.0f - 2.0f * pT);
+				const float daylightSuppression = Clamp(atmoOpacity * skyWashout * 1.15f, 0.0f, 1.0f);
+				const float nightExtinction = Clamp(float(density) * 0.08f, 0.0f, 0.18f);
+				bgIntensity = Clamp((1.0f - nightExtinction) * (1.0f - daylightSuppression), 0.0f, 1.0f);
 			}
 		}
 	}
@@ -353,7 +360,7 @@ void Camera::Draw(const Body *excludeBody)
 			const float distFade = float(Clamp(1.0 / (1.0 + std::pow(effDistRadii / 55.0, 2.2)), 0.0, 1.0));
 			const float shadow = pBody ? float(ShadowedIntensity(i, pBody)) : 1.0f;
 
-			const float glare = Clamp(distFade * (0.35f + 0.95f * fovWeight) * shadow, 0.0f, 1.0f);
+			const float glare = Clamp(distFade * (0.08f + 0.95f * fovWeight) * shadow, 0.0f, 1.0f);
 			maxStarGlare = std::max(maxStarGlare, glare);
 		}
 		bgIntensity = Clamp(bgIntensity * (1.0f - maxStarGlare), 0.0f, 1.0f);

@@ -555,6 +555,108 @@ void SystemBody::CalcAtmosphereParams(AtmosphereParameters &params) const
 
 	params.atmosDensity = static_cast<float>(atmosDensity);
 
+	// Derive per-planet Rayleigh/Mie spectral scattering coefficients from atmospheric chemistry
+	const double ox = m_atmosOxidizing.ToDouble();
+	const double volc = m_volcanicity.ToDouble();
+	const double gas = m_volatileGas.ToDouble();
+	const double temp = static_cast<double>(m_averageTemp);
+
+	vector3f betaR(3.8e-6f, 13.5e-6f, 33.1e-6f);
+	vector3f betaM(21.0e-6f, 21.0e-6f, 21.0e-6f);
+	float ozone = 0.0f;
+	float mieG = 0.76f;
+
+	if (ox > 0.95) {
+		// O2 / N2 terrestrial world with Chappuis ozone absorption
+		betaR = vector3f(4.2e-6f, 13.5e-6f, 33.1e-6f);
+		betaM = vector3f(21.0e-6f, 21.0e-6f, 21.0e-6f);
+		ozone = 1.0f;
+		mieG = 0.78f;
+	} else if (ox > 0.70) {
+		// CO2 atmosphere (Venusian super-greenhouse vs dusty Mars-like)
+		if (gas > 2.0 || temp > 380.0) {
+			betaR = vector3f(6.8e-6f, 14.2e-6f, 24.0e-6f);
+			betaM = vector3f(34.0e-6f, 29.0e-6f, 16.5e-6f);
+			mieG = 0.62f;
+		} else {
+			betaR = vector3f(11.5e-6f, 14.5e-6f, 21.0e-6f);
+			betaM = vector3f(29.0e-6f, 17.5e-6f, 9.5e-6f);
+			mieG = 0.65f;
+		}
+	} else if (ox > 0.65) {
+		// CO atmosphere
+		betaR = vector3f(5.5e-6f, 14.0e-6f, 26.5e-6f);
+		betaM = vector3f(23.0e-6f, 20.0e-6f, 15.0e-6f);
+		mieG = 0.70f;
+	} else if (ox > 0.55) {
+		// CH4 methane world (Titan photochemical haze vs clearer teal-cyan methane)
+		if (gas > 1.2 || temp < 150.0) {
+			betaR = vector3f(3.5e-6f, 15.0e-6f, 28.0e-6f);
+			betaM = vector3f(33.0e-6f, 22.5e-6f, 8.5e-6f);
+			mieG = 0.60f;
+		} else {
+			betaR = vector3f(2.4e-6f, 16.5e-6f, 31.0e-6f);
+			betaM = vector3f(16.0e-6f, 22.0e-6f, 18.0e-6f);
+			mieG = 0.72f;
+		}
+	} else if (ox > 0.30) {
+		// H2 hydrogen atmosphere
+		betaR = vector3f(2.8e-6f, 11.5e-6f, 36.0e-6f);
+		betaM = vector3f(17.0e-6f, 18.0e-6f, 21.0e-6f);
+		mieG = 0.80f;
+	} else if (ox > 0.20) {
+		// He helium atmosphere
+		betaR = vector3f(5.0e-6f, 12.0e-6f, 29.0e-6f);
+		betaM = vector3f(16.0e-6f, 16.5e-6f, 19.0e-6f);
+		mieG = 0.80f;
+	} else if (ox > 0.15) {
+		// Ar argon atmosphere
+		betaR = vector3f(8.0e-6f, 11.0e-6f, 35.0e-6f);
+		betaM = vector3f(19.0e-6f, 18.0e-6f, 23.0e-6f);
+		mieG = 0.75f;
+	} else if (ox > 0.10) {
+		// S / SO2 sulfurous atmosphere
+		betaR = vector3f(9.0e-6f, 15.5e-6f, 19.0e-6f);
+		betaM = vector3f(31.0e-6f, 26.5e-6f, 7.5e-6f);
+		mieG = 0.64f;
+	} else {
+		// N2 nitrogen atmosphere
+		betaR = vector3f(4.0e-6f, 13.0e-6f, 32.0e-6f);
+		betaM = vector3f(19.5e-6f, 20.5e-6f, 21.5e-6f);
+		mieG = 0.76f;
+	}
+
+	if (volc > 0.35) {
+		const float volcWeight = float(Clamp((volc - 0.35) * 0.65, 0.0, 0.45));
+		const vector3f volcanicAshBeta(30.0e-6f, 21.0e-6f, 10.0e-6f);
+		betaM = betaM * (1.0f - volcWeight) + volcanicAshBeta * volcWeight;
+		mieG = std::max(0.52f, mieG - 0.06f * volcWeight);
+	}
+
+	// Honor hand-authored atmosCol (Sol & custom systems) with a subtle 20% normalized hue tint
+	const Color4f col4 = params.atmosCol.ToColor4f();
+	const float colLum = 0.2126f * col4.r + 0.7152f * col4.g + 0.0722f * col4.b;
+	if (colLum > 0.01f) {
+		const float betaAvg = (betaR.x + betaR.y + betaR.z) / 3.0f;
+		const float colAvg = std::max((col4.r + col4.g + col4.b) / 3.0f, 1e-4f);
+		const vector3f normHue(col4.r / colAvg, col4.g / colAvg, col4.b / colAvg);
+		betaR = betaR * 0.80f + (normHue * betaAvg) * 0.20f;
+	}
+
+	params.rayleighBeta = vector3f(
+		Clamp(betaR.x, 1.5e-6f, 48.0e-6f),
+		Clamp(betaR.y, 1.5e-6f, 48.0e-6f),
+		Clamp(betaR.z, 1.5e-6f, 48.0e-6f));
+	params.mieBeta = vector3f(
+		Clamp(betaM.x, 4.0e-6f, 48.0e-6f),
+		Clamp(betaM.y, 4.0e-6f, 48.0e-6f),
+		Clamp(betaM.z, 4.0e-6f, 48.0e-6f));
+	params.ozoneStrength = ozone;
+	params.mieG = Clamp(mieG, 0.45f, 0.90f);
+	params.weatherMieMult = 1.0f;
+	params.weatherOvercast = 0.0f;
+	params.weatherMieTint = vector3f(1.0f, 1.0f, 1.0f);
+
 	// Calculate parameters used in the atmospheric model for shaders
 	// Isothermal atmospheric model
 	// See http://en.wikipedia.org/wiki/Atmospheric_pressure#Altitude_atmospheric_pressure_variation

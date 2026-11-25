@@ -19,6 +19,7 @@
 #include "graphics/VertexBuffer.h"
 #include "perlin.h"
 #include "planet/RingField.h"
+#include "planet/SurfaceScatter.h"
 #include "profiler/Profiler.h"
 
 #ifdef _MSC_VER
@@ -59,6 +60,12 @@ void Planet::InitParams(const SystemBody *sbody)
 	} else {
 		SetClipRadius(GetPhysRadius());
 		m_ringField.reset();
+	}
+
+	if (sbody->GetSuperType() == SystemBody::SUPERTYPE_ROCKY_PLANET) {
+		m_surfaceScatter.reset(new SurfaceScatter(this));
+	} else {
+		m_surfaceScatter.reset();
 	}
 }
 
@@ -248,6 +255,9 @@ void Planet::DrawGasGiantRings(Renderer *renderer, const matrix4x4d &modelView)
 
 void Planet::SubRender(Renderer *r, const matrix4x4d &viewTran, const vector3d &camPos)
 {
+	if (m_surfaceScatter) {
+		m_surfaceScatter->Render(r, viewTran, camPos);
+	}
 	if (GetSystemBody()->HasRings()) {
 		if (m_ringField) {
 			m_ringField->Render(r, viewTran, camPos);

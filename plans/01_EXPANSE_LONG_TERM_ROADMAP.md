@@ -17,7 +17,7 @@ Transforming **Pioneer: Expanse** into a deep single-player space simulation com
 
 ```mermaid
 graph TD
-    subgraph Completed["Completed Core & Systems (Plans 02-04, A, I, E M1-2/M4-6)"]
+    subgraph Completed["Completed Core & Systems (Plans 02-04, A, I, E M1-6)"]
         F1["FSD Supercruise, Autopilot Mk 2-4 & Dual-Tank Routing"]
         F2["Macro 3D Galactic Map (100k ly), Cross-System Targets & Panning"]
         F3["NPC Supercruise Traffic, ShipRegistry & FSD Interdiction"]
@@ -25,11 +25,11 @@ graph TD
         F5["Dynamic Crises, InterCast, ISX Stocks, Lottery, Taxes & Penal"]
         F6["Plan A: Multi-Ship Hangars, Resident Vaults, Captains & Fleet Autonomy"]
         F7["Plan I: Transponder, Dark Running, Licences & Warrant Scanner"]
-        F8["Plan E (M1-2, M4-6): PBR, Flares, Weather, Terrain & 4-Tier Chimes"]
+        F8["Plan E (M1-6): PBR, Flares, Chemistry Rayleigh/Mie, Weather, Terrain & Chimes"]
     end
 
     subgraph NextSequence["Active Priority Sequence"]
-        S2["1. Plan E Finish (Next Up): M3 Chemistry Rayleigh/Mie + M7 Soundscapes/Vacuum/AI Voice"]
+        S2["1. Plan E Finish (Next Up): M7 Soundscapes, Vacuum Audio & Cockpit AI Voice"]
         S3["2. Plan J: Military Enlistment, Non-Combat Frontline Support & Deputy Charter"]
     end
 
@@ -63,7 +63,7 @@ graph TD
 | **Core** | **[`04_NPC_SUPERCRUISE_INTERDICTION_PLAN.md`](./04_NPC_SUPERCRUISE_INTERDICTION_PLAN.md)** | Universal NPC Supercruise traffic, station occlusion, ambient patrol/pirate spawns, Low Wakes, FSD Interdictor tug-of-war, NPC evasion & security pacing | Plan 02 | **Completed** |
 | **Plan A** | **[`A_PLAN_MULTI_SHIP_AND_CREW_AUTONOMY.md`](./A_PLAN_MULTI_SHIP_AND_CREW_AUTONOMY.md)** | Multi-ship ownership, hangars, ship swap, cargo/module transfer, Resident Station Storage Vaults (500t/50 modules), captains/5 skills/payroll, `FOLLOW`/`DOCK`/`AUTO_TRADE` Cr/hr/`AUTO_MINE`/`PATROL`/piracy, mission delegation, IS/OOS sim | Plans 02–04 | **Completed** |
 | **Plan I** | **[`I_PLAN_TRANSPONDER_AND_STEALTH.md`](./I_PLAN_TRANSPONDER_AND_STEALTH.md)** | Transponder on/off, dark running `<1c`, persistent locks, police witness FOV + occlusion, bounty licences, Warrant Scanner, sub-light sensors & smugglers | Plan 04 | **Completed** |
-| **Plan E** | **[`E_PLAN_GRAPHICS_AUDIO_OVERHAUL.md`](./E_PLAN_GRAPHICS_AUDIO_OVERHAUL.md)** | **Completed (M1–2, M4–6)**: Enhanced Graphics toggle, PBR, terrain-occluded flares, plumes, gas giants, dual clouds, ocean waves, dwarf planets, 20m tri-planar terrain, 3D weather/lightning, ship lights, 4-tier chimes. **Next Up**: **M3** (per-planet chemistry & weather Rayleigh/Mie) & **M7** (situational hull/weather audio, OpenAL vacuum low-pass, Cockpit AI voice). **Asset-Gated**: **M8** (3D cockpits & canopy glass). | Plan 02 | **In Progress (M3 & M7 Next Up; M8 Asset-Gated)** |
+| **Plan E** | **[`E_PLAN_GRAPHICS_AUDIO_OVERHAUL.md`](./E_PLAN_GRAPHICS_AUDIO_OVERHAUL.md)** | **Completed (M1–6)**: Enhanced Graphics toggle, PBR, terrain-occluded flares, plumes, gas giants, dual clouds, ocean waves, chemistry/weather Rayleigh/Mie, dwarf planets, 20m tri-planar terrain, 3D weather/lightning, ship lights, 4-tier chimes. **Next Up**: **M7** (situational hull/weather audio, OpenAL vacuum low-pass, Cockpit AI voice). **Asset-Gated**: **M8** (3D cockpits & canopy glass). | Plan 02 | **In Progress (M7 Next Up; M8 Asset-Gated)** |
 | **Plan J** | **[`J_PLAN_MILITARY_FRONTLINE_AND_DEPUTY.md`](./J_PLAN_MILITARY_FRONTLINE_AND_DEPUTY.md)** | Military enlistment, non-combat frontline support (blockade running, supply convoys, evacuations, recon, Plan A fleet support), optional combat zones, and high-standing **Faction Deputy Charter** | Plan I & Crises | **Queued (After Plan E M3/M7)** |
 | **Plan C** | **[`C_PLAN_ENGINEERING_CRAFTING.md`](./C_PLAN_ENGINEERING_CRAFTING.md)** | Zero-mass raw/manufactured/encoded material ledger, Scrap Reclamation, in-field matter synthesis (boosts/O2/ammo) & deterministic G1–G5 Engineers with Experimental overrides | Plan 03 & Plan I | **Queued (Design Discussion)** |
 | **Plan F** | **[`F_PLAN_FLEET_MANUFACTURERS.md`](./F_PLAN_FLEET_MANUFACTURERS.md)** | **Completed**: 6 Manufacturer franchise dealerships (`corp_*.svg`) & 8 station profiles. **Queued**: Modular slot cleanup, Fixed/Gimballed/Turreted weapons, deployable hardpoints & countermeasures *(no `SYS/ENG/WEP` pips)*; **Asset-Gated**: `.gltf` fleet | Plan 02 | **Partially Done (Combat/Slots Queued)** |

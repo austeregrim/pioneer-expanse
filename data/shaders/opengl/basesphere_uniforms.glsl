@@ -27,6 +27,11 @@ layout(std140) uniform BaseSphereData {
 
 	// Eclipse data
 	Eclipse eclipse;
+
+	// Per-planet atmospheric chemistry & live weather scattering
+	vec4 atmosRayleighBeta;
+	vec4 atmosMieParams;
+	vec4 atmosWeatherParams;
 };
 
 // NOTE: you must include attributes.glsl first!

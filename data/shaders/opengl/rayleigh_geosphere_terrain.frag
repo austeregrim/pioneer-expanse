@@ -54,7 +54,7 @@ float rgeoNoise3D(vec3 p)
 {
 	vec3 i = floor(p);
 	vec3 f = fract(p);
-	f = f * f * (3.0 - 2.0 * f);
+	f = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
 
 	float n000 = rgeoHash31(i + vec3(0.0, 0.0, 0.0));
 	float n100 = rgeoHash31(i + vec3(1.0, 0.0, 0.0));
@@ -77,12 +77,12 @@ float rgeoFbm3D(vec3 p)
 {
 	float sum = 0.0;
 	float amp = 0.5;
-	for (int i = 0; i < 2; ++i) {
+	for (int i = 0; i < 3; ++i) {
 		sum += amp * rgeoNoise3D(p);
 		p = p * 2.12 + vec3(7.3, 13.7, 5.1);
 		amp *= 0.5;
 	}
-	return sum * (1.0 / 0.75);
+	return sum * (1.0 / 0.875);
 }
 
 void main(void)
@@ -151,36 +151,22 @@ void main(void)
 		float bumpMeters = 0.0;
 		float triAlbedoMod = 1.0;
 		vec3 triTint = vec3(1.0);
+		float lavaMask = 0.0;
+		float charredRim = 0.0;
+		float lavaTemp = 0.0;
+		float lavaFine = 0.5;
+		float lavaCrust = 0.5;
 
 		// Skip expensive 3D FBM & tri-planar land lookups on pure open-ocean pixels
 		if (rawWater < 0.985) {
 			macroGrad = rgeoFbm3D(sDir * 9.0);
 			microDetail = rgeoFbm3D(sDir * 36.0 + vec3(macroGrad * 1.4));
 
-			// 4-octave seamless world-locked tri-planar detail (1024m, 256m, 32m, 8m)
-			vec3 uvMacro = worldM * (1.0 / 1024.0);
-			vec3 uvMid = worldM * (1.0 / 256.0);
-			vec3 uvClose = worldM * (1.0 / 32.0);
-			vec3 uvMicro = worldM * (1.0 / 8.0);
-
-			float t1024 = texture(texture1, uvMacro.yz).r * triW.x +
-				texture(texture1, uvMacro.xz).r * triW.y +
-				texture(texture1, uvMacro.xy).r * triW.z;
-			float t256 = texture(texture1, uvMid.yz).r * triW.x +
-				texture(texture1, uvMid.xz).r * triW.y +
-				texture(texture1, uvMid.xy).r * triW.z;
-			float t32 = texture(texture0, uvClose.yz).r * triW.x +
-				texture(texture0, uvClose.xz).r * triW.y +
-				texture(texture0, uvClose.xy).r * triW.z;
-			float t8 = texture(texture0, uvMicro.yz).r * triW.x +
-				texture(texture0, uvMicro.xz).r * triW.y +
-				texture(texture0, uvMicro.xy).r * triW.z;
-
-			// Re-center and contrast-stretch DDS detail maps (low.dds mean 0.502, high.dds mean 0.673)
-			float triMacro = clamp((t1024 - 0.502) * 3.2, -1.0, 1.0);
-			triMid = clamp((t256 - 0.502) * 3.4, -1.0, 1.0);
-			float triClose = clamp((t32 - 0.673) * 3.8, -1.0, 1.0);
-			float triMicro = clamp((t8 - 0.673) * 3.6, -1.0, 1.0);
+			// Pure 4-scale 3D quintic FBM geological detail (zero BC1 block compression artifacts at any distance or angle)
+			float triMacro = rgeoFbm3D(worldM * (1.0 / 680.0)) * 2.0 - 1.0;
+			triMid = rgeoFbm3D(worldM * (1.0 / 160.0) + vec3(triMacro * 0.65)) * 2.0 - 1.0;
+			float triClose = rgeoFbm3D(worldM * (1.0 / 28.0) + vec3(triMid * 0.65)) * 2.0 - 1.0;
+			float triMicro = rgeoFbm3D(worldM * (1.0 / 5.5) + vec3(triClose * 0.75)) * 2.0 - 1.0;
 
 #ifdef TERRAIN_WITH_WATER
 			// Multi-scale organic shoreline breakup (breaks straight triangle edges into natural coves)
@@ -196,18 +182,64 @@ void main(void)
 
 			float radialElevM = (length(eyeposScaled - geosphereCenter) - 1.0) * geosphereRadius;
 			float strata = 0.5 + 0.5 * sin(radialElevM * 0.18 + triMid * 2.6 + macroGrad * 3.5);
+			float rippleWave = sin(dot(worldM, vec3(0.38, 0.09, 0.31)) + triClose * 2.4);
+			float flatMask = (1.0 - cliffMask) * (1.0 - screeMask * 0.5) * (1.0 - waterMask);
 
-			bumpMeters = (triMacro * 14.0 * macroFade + triMid * 4.5 * midFade + triClose * 0.75 * closeFade + triMicro * 0.16 * microFade) *
+			bumpMeters = (triMacro * 12.0 * macroFade + triMid * 3.6 * midFade + triClose * 0.85 * closeFade + triMicro * 0.20 * microFade) *
 				(0.80 + 0.55 * screeMask + 0.85 * cliffMask) +
-				(strata - 0.5) * 2.4 * cliffMask * midFade;
+				(strata - 0.5) * 2.4 * cliffMask * midFade +
+				rippleWave * 0.06 * closeFade * flatMask;
 
-			float detailSigned = triMacro * 0.14 * macroFade + triMid * 0.20 * midFade + triClose * 0.18 * closeFade + triMicro * 0.11 * microFade;
+			float detailSigned = triMacro * 0.12 * macroFade + triMid * 0.16 * midFade + triClose * 0.17 * closeFade + triMicro * 0.11 * microFade + rippleWave * 0.03 * closeFade * flatMask;
 			float cliffStrataDelta = (strata - 0.5) * 0.28 * cliffMask * midFade;
 			float creviceAO = mix(1.0, 0.88, smoothstep(0.15, 0.85, -triMid) * midFade);
 			triAlbedoMod = clamp((1.0 + detailSigned + cliffStrataDelta) * creviceAO, 0.62, 1.38);
 
 			vec3 cliffBedrockTint = mix(vec3(0.86, 0.88, 0.92), vec3(1.04, 0.99, 0.94), strata);
 			triTint = mix(vec3(1.0), cliffBedrockTint, cliffMask * midFade * 0.75);
+
+#ifdef TERRAIN_WITH_LAVA
+			if (waterMask < 0.5) {
+				float rawLava = smoothstep(0.38, 0.72, rawAlbedo.r)
+					* (1.0 - smoothstep(0.06, 0.18, rawAlbedo.g))
+					* (1.0 - smoothstep(0.06, 0.18, rawAlbedo.b))
+					* (1.0 - waterMask);
+				if (rawLava > 0.01) {
+					float lavaEdgeFade = exp(-0.00004 * distMeters);
+					float lavaDetailFade = exp(-0.00012 * distMeters);
+					float edgeN = (lavaEdgeFade > 0.02)
+						? (rgeoFbm3D(worldM * 0.0085) * 0.58 + rgeoFbm3D(worldM * 0.036) * 0.42)
+						: 0.5;
+					float lavaZone = smoothstep(0.02, 0.36, rawLava) * (1.0 - smoothstep(0.64, 0.98, rawLava));
+					float coastLava = triMid * 0.42 + triClose * 0.24 + (edgeN - 0.5) * 0.55;
+					float lavaField = clamp(rawLava + coastLava * lavaZone * (0.45 + 0.55 * lavaEdgeFade), 0.0, 1.0);
+					lavaMask = smoothstep(0.30, 0.46, lavaField);
+					charredRim = smoothstep(0.10, 0.32, lavaField) * (1.0 - lavaMask) * smoothstep(0.02, 0.18, rawLava);
+
+					if (lavaMask > 0.002 || charredRim > 0.002) {
+						float interior = smoothstep(0.34, 0.78, lavaField);
+						float baseTemp = 0.42 + 0.45 * interior;
+						float detailedTemp = baseTemp;
+						if (lavaDetailFade > 0.02) {
+							vec3 flowP = worldM * 0.016 + vec3(uTime * 0.020, 0.0, -uTime * 0.014);
+							float warp = rgeoFbm3D(flowP * 0.65) * 1.5;
+							lavaCrust = rgeoFbm3D(flowP + vec3(warp, -warp * 0.7, warp * 0.5));
+							lavaFine = rgeoFbm3D(worldM * 0.088 + vec3(uTime * 0.032, 0.0, -uTime * 0.024));
+							float cracks = pow(1.0 - abs(lavaCrust * 2.0 - 1.0), 3.0) * 0.85 + pow(1.0 - abs(lavaFine * 2.0 - 1.0), 3.8) * 0.45;
+							float pulse = 0.90 + 0.10 * sin(uTime * 0.65 + lavaCrust * 6.2831);
+							detailedTemp = clamp((cracks * (0.80 + 0.45 * interior) + interior * 0.48 - smoothstep(0.54, 0.84, lavaCrust) * 0.44) * pulse, 0.0, 1.0);
+
+							float plateBump = (smoothstep(0.35, 0.72, lavaCrust) * 1.4 - cracks * 0.8) * closeFade;
+							bumpMeters = mix(bumpMeters, plateBump, lavaMask * 0.85 * lavaDetailFade);
+						} else {
+							lavaCrust = 0.5;
+							lavaFine = 0.5;
+						}
+						lavaTemp = mix(baseTemp, detailedTemp, lavaDetailFade);
+					}
+				}
+			}
+#endif
 		}
 
 		vec3 waterSurfNorm = tnorm;
@@ -321,6 +353,13 @@ void main(void)
 		landColor *= microShade;
 #endif
 
+#ifdef TERRAIN_WITH_LAVA
+		// Suppress bright vertex-yellow diffuse inside molten basins & charred shorelines in favor of dark cooled basalt
+		float landLum = dot(landColor, vec3(0.2126, 0.7152, 0.0722));
+		vec3 cooledBasalt = vec3(max(landLum * 0.075, 0.003), max(landLum * 0.070, 0.003), max(landLum * 0.072, 0.0035)) * triAlbedoMod;
+		landColor = mix(landColor, cooledBasalt, clamp(lavaMask + charredRim * 0.82, 0.0, 1.0));
+#endif
+
 #ifdef ATMOSPHERE
 		float cloudShade = clamp(CloudWeather.x * CloudWeather.z, 0.0, 1.0);
 		float stormShade = clamp(CloudWeather.y * CloudWeather.z, 0.0, 1.0);
@@ -402,6 +441,9 @@ void main(void)
 		// Matte soil/grass roughness (0.96), scree (0.90), exposed cliff rock (0.68), ice (0.24), water (0.08)
 		float rockRough = mix(0.96, 0.68, cliffMask) - 0.06 * screeMask;
 		float matRoughness = mix(mix(rockRough, 0.24, iceMask), 0.08, waterMask);
+#ifdef TERRAIN_WITH_LAVA
+		matRoughness = mix(matRoughness, mix(0.42, 0.68, lavaCrust), lavaMask * 0.85);
+#endif
 
 #if (NUM_LIGHTS > 0)
 		vec3 viewDir = -eyenorm;
@@ -460,6 +502,32 @@ void main(void)
 
 		final.rgb += specAccum;
 
+#ifdef TERRAIN_WITH_LAVA
+		if (lavaMask > 0.002 || charredRim > 0.002) {
+			vec3 fissureCol = mix(
+				vec3(0.02, 0.015, 0.016),
+				mix(vec3(1.8, 0.10, 0.01),
+					mix(vec3(5.8, 1.25, 0.06), vec3(12.5, 6.5, 1.2), smoothstep(0.76, 1.0, lavaTemp)),
+					smoothstep(0.46, 0.76, lavaTemp)),
+				smoothstep(0.16, 0.46, lavaTemp)
+			);
+			vec3 rimBounce = vec3(1.35, 0.24, 0.02) * charredRim * (0.45 + 0.55 * lavaFine);
+			float lavaDistAtten = 0.72 + 0.28 * exp(-0.000018 * distMeters);
+			vec3 lavaGlow = (fissureCol * lavaMask + rimBounce) * lavaDistAtten;
+#ifdef ATMOSPHERE
+			float smokeFade = exp(-0.00014 * distMeters) * smoothstep(0.05, 0.35, lavaMask + charredRim * 0.6);
+			if (smokeFade > 0.01) {
+				vec3 smokeP = worldM * 0.022 + vec3(uTime * 0.065, uTime * 0.035, -uTime * 0.048);
+				float sFbm = rgeoFbm3D(smokeP);
+				float smokeDensity = smoothstep(0.42, 0.80, sFbm) * smokeFade * 0.48;
+				vec3 smokeTint = mix(vec3(0.04, 0.038, 0.042), vec3(0.75, 0.22, 0.04), clamp(lavaTemp * 1.15, 0.0, 1.0));
+				lavaGlow = mix(lavaGlow, smokeTint, smokeDensity);
+			}
+#endif
+			final.rgb += lavaGlow;
+		}
+#endif
+
 #ifdef ATMOSPHERE
 		// Add atmospheric Rayleigh aerial perspective after surface detail and micro-shading (dampened over overcast ocean)
 		final.rgb += varyingInscatter * (1.0 - waterMask * cloudShade * 0.65);
@@ -487,7 +555,9 @@ void main(void)
 
 	frag_color = final;
 #ifdef TERRAIN_WITH_LAVA
-	frag_color += vertexColor;
+	if (!enhanced) {
+		frag_color += vertexColor;
+	}
 #endif
 
 	frag_color = toSRGB(1 - exp(-frag_color));

@@ -283,11 +283,17 @@ local function spawnSystemPirates(player)
 				local stPath = stationPaths[Engine.rand:Integer(1, #stationPaths)]
 				local stBody = Space.GetBody(stPath.bodyIndex)
 				if stBody then
+					local stSb = stBody:GetSystemBody()
+					local orbitTarget = (stSb and stSb.parent and stSb.parent.body) or (hostSb and hostSb.body)
 					local minR = math.max((stBody:GetPhysicalRadius() or 1000) + 18000, 22000)
 					local maxR = minR + 40000
 					ship = ShipBuilder.MakeShipOrbit(stBody, pirateTemplate, threat, minR, maxR)
 					if ship then
-						ship:AIEnterLowOrbit(stBody)
+						if orbitTarget and (orbitTarget:isa("Planet") or orbitTarget:isa("Star")) then
+							ship:AIEnterLowOrbit(orbitTarget)
+						else
+							ship:AIFlyTo(stBody)
+						end
 						placedOnLane = true
 					end
 				end

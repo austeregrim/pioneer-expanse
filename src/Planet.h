@@ -17,6 +17,7 @@ namespace Graphics {
 } // namespace Graphics
 
 class RingField;
+class SurfaceScatter;
 
 class Planet : public TerrainBody {
 public:
@@ -49,6 +50,7 @@ private:
 	std::unique_ptr<Graphics::Material> m_ringMaterial;
 	std::unique_ptr<Graphics::MeshObject> m_ringMesh;
 	std::unique_ptr<RingField> m_ringField;
+	std::unique_ptr<SurfaceScatter> m_surfaceScatter;
 };
 
 #endif /* _PLANET_H */

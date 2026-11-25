@@ -398,7 +398,7 @@ WeatherState WeatherSystem::SampleFromParams(const WeatherPlanetParams &params, 
 		out.condition = WeatherCondition::RAIN;
 	} else if (out.windSpeed >= 17.0) {
 		out.condition = WeatherCondition::WINDY;
-	} else if (out.cloudCover >= 0.65) {
+	} else if (out.cloudCover >= 0.48 || out.lowerCloudCover >= 0.42) {
 		out.condition = WeatherCondition::OVERCAST;
 	} else if (out.windSpeed >= 8.0) {
 		out.condition = WeatherCondition::BREEZY;

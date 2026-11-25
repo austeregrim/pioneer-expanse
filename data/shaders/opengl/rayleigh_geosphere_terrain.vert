@@ -123,9 +123,9 @@ void main(void)
 		}
 #endif // ATMOSPHERE
 
-		// add lava glow
+		// add lava glow (Classic mode only; Enhanced renders procedural basalt crust & glowing fissures per-pixel)
 #ifdef TERRAIN_WITH_LAVA
-		if ( vertexColor.r > 0.4 && vertexColor.g < 0.2 && vertexColor.b < 0.4 ) {
+		if (enhancedGraphics < 0.5 && vertexColor.r > 0.4 && vertexColor.g < 0.2 && vertexColor.b < 0.4) {
 			terrain += 3.0 * vertexColor.xyz * (vertexColor.r + vertexColor.g + vertexColor.b);
 		} else {
 			terrain += material.emission.xyz;

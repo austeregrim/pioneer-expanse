@@ -251,7 +251,7 @@ ShipLights::ShipLights(SceneGraph::Model *model, double fallbackRadius) :
 		for (size_t i = 0; i < std::min<size_t>(2, taggedLanding.size()); ++i)
 			addLandingFixture(taggedLanding[i]);
 	} else {
-		const float bellyZ = bmin.z + size.z * 0.28f;
+		const float bellyZ = bmin.z + size.z * 0.16f;
 		const float bellyHalfW = std::max(0.35f, (bellyMaxX - bellyMinX) * 0.5f);
 		const float bellyCenterX = 0.5f * (bellyMinX + bellyMaxX);
 		const float rayMaxY = size.y + 8.0f;

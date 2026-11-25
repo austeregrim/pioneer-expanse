@@ -24,29 +24,27 @@ TerrainColorFractal<TerrainColorVolcanic>::TerrainColorFractal(const SystemBody 
 template <>
 vector3d TerrainColorFractal<TerrainColorVolcanic>::GetColor(const vector3d &p, double height, const vector3d &norm) const
 {
-	double n = m_invMaxHeight * height;
-	const double flatness = pow(p.Dot(norm), 6.0);
-	const vector3d color_cliffs = m_rockColor[2];
-	double equatorial_desert = (-1.0 + 2.0 * octavenoise(m_fracdef[0], 0.5, (n * 2.0) * p)) * 1.0 * (1.0 - p.y * p.y);
+	const double n = Clamp(m_invMaxHeight * height, 0.0, 1.0);
+	const double flatness = pow(Clamp(p.Dot(norm), 0.0, 1.0), 6.0);
+	const double equator = Clamp(1.0 - p.y * p.y, 0.0, 1.0);
+	const double detail = octavenoise(m_fracdef[0], 0.5, (0.35 + n * 1.8) * p);
 
-	vector3d col;
+	// Smooth continuous volcanic strata from dark basalt lowlands to warm ash/ochre highlands
+	vector3d colBasalt = interpolate_color(detail, m_darkrockColor[0], m_rockColor[0]);
+	vector3d colPlains = interpolate_color(detail, m_rockColor[1], vector3d(0.42, 0.26, 0.14));
+	vector3d colHigh = interpolate_color(detail, m_rockColor[2], vector3d(0.50, 0.32, 0.20));
 
-	if (n > 0.4) {
-		col = interpolate_color(equatorial_desert, vector3d(.3, .2, 0), vector3d(.3, .1, .0));
-		col = interpolate_color(n, col, vector3d(.1, .0, .0));
-		col = interpolate_color(flatness, color_cliffs, col);
-	} else if (n > 0.2) {
-		col = interpolate_color(equatorial_desert, vector3d(1.2, 1, 0), vector3d(.9, .3, .0));
-		col = interpolate_color(n, col, vector3d(-1.1, -1, .0));
-		col = interpolate_color(flatness, color_cliffs, col);
-	} else if (n > 0.1) {
-		col = interpolate_color(equatorial_desert, vector3d(.2, .1, 0), vector3d(.1, .05, .0));
-		col = interpolate_color(n, col, vector3d(2.5, 2, .0));
-		col = interpolate_color(flatness, color_cliffs, col);
-	} else {
-		col = interpolate_color(equatorial_desert, vector3d(.75, .6, 0), vector3d(.75, .2, .0));
-		col = interpolate_color(n, col, vector3d(-2, -2.2, .0));
-		col = interpolate_color(flatness, color_cliffs, col);
+	vector3d col = interpolate_color(Clamp(n * 3.0, 0.0, 1.0), colBasalt, colPlains);
+	col = interpolate_color(Clamp((n - 0.30) * 1.8, 0.0, 1.0), col, colHigh);
+	col = interpolate_color(equator * 0.28, col, vector3d(0.48, 0.28, 0.14));
+	col = interpolate_color(flatness, m_rockColor[2], col);
+
+	if (m_surfaceEffects & Terrain::EFFECT_LAVA) {
+		const double lavaNoise = octavenoise(m_fracdef[0], 0.55, p * 2.4);
+		const double elevFactor = Clamp((0.28 - n) / 0.18, 0.0, 1.0);
+		const double basinFactor = Clamp((lavaNoise - 0.42) / 0.22, 0.0, 1.0);
+		const double lavaAmount = Clamp(elevFactor * basinFactor * (0.65 + 0.55 * m_volcanic), 0.0, 1.0);
+		col = interpolate_color(lavaAmount, col, vector3d(0.98, 0.03, 0.0));
 	}
 	return col;
 }

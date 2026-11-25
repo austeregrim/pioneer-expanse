@@ -26,6 +26,9 @@ void main(void)
 	vec3 a = viewDist.x * eyenorm - geosphereCenter;
 	vec3 b = viewDist.y * eyenorm - geosphereCenter;
 	ldprod = AtmosLengthDensityProduct(a, b, atmosColor.a * geosphereAtmosFogDensity, atmosDist, geosphereAtmosInvScaleHeight);
+	if (atmosWeatherParams.z >= 0.5) {
+		ldprod *= mix(1.0, max(atmosWeatherParams.x, 1.0), 0.35);
+	}
 
 	float fogFactor = 1.0 / exp(ldprod);
 	vec4 atmosDiffuse = vec4(0.0);
@@ -52,6 +55,11 @@ void main(void)
 	//calculate sunset tone red when passing through more atmosphere, clamp everything.
 	float atmpower = (atmosDiffuse.r+atmosDiffuse.g+atmosDiffuse.b)/3.0;
 	vec4 sunset = vec4(0.8,clamp(pow(atmpower,0.8),0.0,1.0),clamp(pow(atmpower,1.2),0.0,1.0),1.0);
+	if (atmosWeatherParams.z >= 0.5) {
+		float mieAvg = max((atmosMieParams.x + atmosMieParams.y + atmosMieParams.z) / 3.0, 1e-9);
+		vec3 mieHue = clamp(atmosMieParams.xyz / mieAvg, 0.5, 1.5);
+		sunset.rgb *= mix(vec3(1.0), mieHue, 0.45);
+	}
 
 	atmosDiffuse.a = 1.0;
 	frag_color = (1.0-fogFactor) * (atmosDiffuse*

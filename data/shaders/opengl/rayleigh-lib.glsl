@@ -1,6 +1,34 @@
 int _iSamples = 16;
 int _oSamples = 8;
 
+vec3 getAtmosBetaR()
+{
+	return (atmosWeatherParams.z >= 0.5)
+		? atmosRayleighBeta.xyz
+		: (1e-6 * vec3(3.8, 13.5, 33.1));
+}
+
+vec3 getAtmosBetaM()
+{
+	return (atmosWeatherParams.z >= 0.5)
+		? (atmosMieParams.xyz * max(atmosWeatherParams.x, 1.0))
+		: (1e-6 * vec3(21.0));
+}
+
+vec3 getAtmosBetaOzone()
+{
+	return (atmosWeatherParams.z >= 0.5 && atmosRayleighBeta.w > 0.0)
+		? (1e-6 * vec3(0.65, 1.88, 0.085) * atmosRayleighBeta.w)
+		: vec3(0.0);
+}
+
+float getAtmosMieG()
+{
+	return (atmosWeatherParams.z >= 0.5)
+		? clamp(atmosMieParams.w, 0.45, 0.90)
+		: 0.76f;
+}
+
 // get density at given point
 vec2 getDensityAtPoint(const in vec3 rayStart, const in sampler2D densityLUT)
 {
@@ -94,10 +122,11 @@ vec3 directLight2dLUT(const in vec3 a, const in vec3 b, const in sampler2D scatt
 	float cos_phi = dot(normalize(b - a), normalize(a));
 	vec2 density = exp(texture(scatterLUT, vec2(acos(cos_phi) / PI, height_scaled)).xy);
 
-	vec3 betaR = 1e-6 * vec3(3.8, 13.5, 33.1);
-	vec3 betaM = 1e-6 * vec3(21.0);
+	vec3 betaR = getAtmosBetaR();
+	vec3 betaM = getAtmosBetaM();
+	vec3 betaOzone = getAtmosBetaOzone();
 
-	return exp(-(betaR * density.x + betaM * density.y));
+	return exp(-((betaR + betaOzone * 0.45) * density.x + betaM * density.y));
 }
 
 
@@ -112,10 +141,11 @@ vec3 directLight1dLUT(const in vec3 a, const in vec3 b, const in sampler2D densi
 		density += segmentLength * getDensityAtPoint(c, densityLUT);
 	}
 
-	vec3 betaR = 1e-6 * vec3(3.8, 13.5, 33.1);
-	vec3 betaM = 1e-6 * vec3(21.0);
+	vec3 betaR = getAtmosBetaR();
+	vec3 betaM = getAtmosBetaM();
+	vec3 betaOzone = getAtmosBetaOzone();
 
-	return exp(-(betaR * density.x + betaM * density.y));
+	return exp(-((betaR + betaOzone * 0.45) * density.x + betaM * density.y));
 }
 
 
@@ -131,9 +161,10 @@ void processLight(const in vec3 a, const in vec3 b, inout vec2 iDensity, inout v
 
 	float mu = dot(rayDirection, sunDirection);
 	float phaseR = rayleighPhaseFunction(mu);
-	float phaseM = miePhaseFunction(0.76f, mu);
-	vec3 betaR = 1e-6 * vec3(3.8, 13.5, 33.1);
-	vec3 betaM = 1e-6 * vec3(21.0);
+	float phaseM = miePhaseFunction(getAtmosMieG(), mu);
+	vec3 betaR = getAtmosBetaR();
+	vec3 betaM = getAtmosBetaM();
+	vec3 betaOzone = getAtmosBetaOzone();
 
 	int iSamples = _iSamples;
 	int oSamples = _oSamples;
@@ -161,7 +192,7 @@ void processLight(const in vec3 a, const in vec3 b, inout vec2 iDensity, inout v
 		vec3 color1 = color1R + color1M;
 
 		// after scattering
-		vec3 color2 = color1 * exp(-(betaR * iDensity.x + betaM * iDensity.y));
+		vec3 color2 = color1 * exp(-((betaR + betaOzone * 0.45) * iDensity.x + betaM * iDensity.y));
 
 		iDensity += deltaDensity;
 		color += (intersect.y > 0.f) ? vec3(0.f) : color2;
@@ -275,10 +306,11 @@ vec3 calculateAtmosphereColorAB(const in vec4 planet, const in vec4 atmosphere, 
 // medium over the given optical depth. This is a convenience function.
 vec3 calcTransmittance(const in vec2 opticalDepth)
 {
-	const vec3 betaR = 1e-6 * vec3(3.8, 13.5, 33.1);
-	const vec3 betaM = 1e-6 * vec3(21.0);
+	vec3 betaR = getAtmosBetaR();
+	vec3 betaM = getAtmosBetaM();
+	vec3 betaOzone = getAtmosBetaOzone();
 
-	return exp(-(betaR * opticalDepth.x + betaM * opticalDepth.y));
+	return exp(-((betaR + betaOzone * 0.45) * opticalDepth.x + betaM * opticalDepth.y));
 }
 
 // Compute the atmospheric transmittance along a ray from a point within the atmosphere to a point on the edge of the atmosphere.
@@ -321,9 +353,9 @@ vec3 calculateRayInscattering(inout vec2 opticalDepth, const in vec3 rayStart, c
 	// camera to the surface so we need to invert the ray dir here.
 	float mu = dot(-rayDir, lightDir);
 	float phaseR = rayleighPhaseFunction(mu);
-	float phaseM = miePhaseFunction(0.76f, mu);
-	vec3 betaR = 1e-6 * vec3(3.8, 13.5, 33.1);
-	vec3 betaM = 1e-6 * vec3(21.0);
+	float phaseM = miePhaseFunction(getAtmosMieG(), mu);
+	vec3 betaR = getAtmosBetaR();
+	vec3 betaM = getAtmosBetaM();
 
 	float iSegmentLength = geosphereRadius * atmosDist / _iSamples;
 	if (iSegmentLength == 0.0) {
@@ -381,9 +413,9 @@ vec3 calculateReflectedSkyColor(const in vec3 surfaceP, const in vec3 reflDir, c
 
 	float mu = dot(reflDir, lightDir);
 	float phaseR = rayleighPhaseFunction(mu);
-	float phaseM = miePhaseFunction(0.76f, mu);
-	const vec3 betaR = 1e-6 * vec3(3.8, 13.5, 33.1);
-	const vec3 betaM = 1e-6 * vec3(21.0);
+	float phaseM = miePhaseFunction(getAtmosMieG(), mu);
+	vec3 betaR = getAtmosBetaR();
+	vec3 betaM = getAtmosBetaM();
 
 	vec2 iDensity = vec2(0.0);
 	vec3 accum = vec3(0.0);
