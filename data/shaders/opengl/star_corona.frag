@@ -8,6 +8,8 @@ in vec2 coronaUV;
 
 // starColor: rgb = spectral star color, a = quad half-extent in stellar radii (e.g. 2.6)
 uniform vec4 starColor;
+uniform vec3 starAxisX;
+uniform vec3 starAxisY;
 uniform float uTime;
 
 out vec4 frag_color;
@@ -68,9 +70,11 @@ void main(void)
 	if (edgeMask <= 0.001)
 		discard;
 
-	// Use periodic direction vector on a fixed-radius cylinder in 3D noise space:
-	// never scale dir by time or radial height, so angular plume frequency stays strictly constant
+	// Map 2D billboard limb direction into the star's 3D rotating coordinate frame
+	// so chromosphere, streamers, and solar flares stay pinned to 3D surface positions regardless of camera orbit/roll
 	vec2 dir = p / max(r, 0.0001);
+	vec3 limbDir3D = normalize(starAxisX * dir.x + starAxisY * dir.y);
+	vec3 starViewDir = normalize(cross(starAxisX, starAxisY));
 	float t = mod(uTime * 0.14, 512.0);
 
 	vec3 baseCol = clamp(starColor.rgb, vec3(0.12), vec3(1.0));
@@ -80,32 +84,55 @@ void main(void)
 	// Distance outside stellar photosphere limb (r = 1.0)
 	float h = max(0.0, r - 0.97);
 
-	// 1. Tight boiling chromosphere atmosphere hugging the star's limb
-	float chromoNoise = fbm3D(vec3(dir * 5.2, t * 0.55));
+	// 1. Tight boiling chromosphere atmosphere hugging the star's limb (3D star-locked)
+	float chromoNoise = fbm3D(limbDir3D * 4.8 + vec3(0.0, 0.0, t * 0.45));
 	float chromosphere = exp(-h * (13.5 - 3.5 * chromoNoise)) * smoothstep(0.88, 1.0, r);
 
-	// 2. Animated radial coronal streamers / plasma plumes (outward advection along orthogonal Z axis)
-	float streamerNoise = fbm3D(vec3(dir * 2.3, h * 1.25 - t * 0.38));
-	float finePlumes = fbm3D(vec3(dir * 4.6 + vec2(3.1, -1.7), h * 2.10 - t * 0.65));
+	// 2. Animated radial coronal streamers / plasma plumes (outward advection along 3D limb normal)
+	float streamerNoise = fbm3D(limbDir3D * (2.6 + h * 0.35) - limbDir3D * (t * 0.28));
+	float finePlumes = fbm3D(limbDir3D * (5.2 + h * 0.55) + vec3(3.1, -1.7, 2.3) - limbDir3D * (t * 0.48));
 	float plumeMask = smoothstep(0.34, 0.78, streamerNoise * 0.72 + finePlumes * 0.28);
 	float streamers = exp(-h * 3.1) * plumeMask * smoothstep(0.92, 1.03, r);
 
-	// 3. Eruptive solar prominence arches & flares licking off active longitudes
-	float angle = atan(dir.y, dir.x);
+	// 3. Eruptive solar prominence arches & flares anchored to 3D active belts on the star
+	const vec3 kFlareDirs[8] = vec3[](
+		normalize(vec3( 0.94,  0.22,  0.25)),
+		normalize(vec3(-0.91, -0.26,  0.32)),
+		normalize(vec3( 0.28,  0.34, -0.90)),
+		normalize(vec3(-0.32, -0.28, -0.90)),
+		normalize(vec3( 0.72, -0.35, -0.60)),
+		normalize(vec3(-0.74,  0.38, -0.55)),
+		normalize(vec3( 0.45, -0.32,  0.83)),
+		normalize(vec3(-0.48,  0.30,  0.82))
+	);
 	float archField = 0.0;
-	for (int i = 0; i < 4; ++i) {
+	for (int i = 0; i < 8; ++i) {
 		float fi = float(i);
-		float centerAng = fi * 1.570796 + sin(t * (0.18 + fi * 0.05) + fi * 2.1) * 0.45;
-		float dAng = atan(sin(angle - centerAng), cos(angle - centerAng));
-		float halfWidth = 0.16 + 0.05 * sin(t * 0.31 + fi * 1.7);
+		// Gentle slow magnetic drift around the fixed 3D active site
+		vec3 jitter = vec3(
+			sin(t * (0.14 + fi * 0.02) + fi * 2.1),
+			cos(t * (0.11 + fi * 0.03) + fi * 1.4) * 0.6,
+			cos(t * (0.13 + fi * 0.025) + fi * 3.1)
+		) * 0.08;
+		vec3 archDir = normalize(kFlareDirs[i] + jitter);
+
+		// Prominences are visible when near the 3D stellar limb relative to the camera
+		float viewDot = dot(archDir, starViewDir);
+		float limbVis = smoothstep(0.68, 0.18, abs(viewDot));
+		if (limbVis <= 0.001)
+			continue;
+
+		vec3 archLimb = normalize(archDir - starViewDir * viewDot);
+		float dAng = acos(clamp(dot(limbDir3D, archLimb), -1.0, 1.0));
+		float halfWidth = 0.15 + 0.045 * sin(t * 0.31 + fi * 1.7);
 		float u = dAng / halfWidth;
-		if (abs(u) < 1.15) {
-			float archHeight = (0.14 + 0.11 * sin(t * (0.27 + fi * 0.09) + fi * 3.3)) * max(0.0, 1.0 - u * u);
+		if (u < 1.15) {
+			float archHeight = (0.14 + 0.10 * sin(t * (0.27 + fi * 0.07) + fi * 3.3)) * max(0.0, 1.0 - u * u);
 			float archDist = abs(h - archHeight);
 			float loopThickness = 0.018 + 0.014 * finePlumes;
 			float loopGlow = exp(-(archDist * archDist) / (loopThickness * loopThickness));
-			float wisp = 0.55 + 0.45 * fbm3D(vec3(dir * 6.0, t * 0.8 + fi * 5.0));
-			archField += loopGlow * wisp * smoothstep(1.15, 0.65, abs(u)) * smoothstep(0.96, 1.01, r);
+			float wisp = 0.55 + 0.45 * fbm3D(limbDir3D * 6.0 + vec3(0.0, t * 0.65, fi * 5.0));
+			archField += loopGlow * wisp * limbVis * smoothstep(1.15, 0.65, u) * smoothstep(0.96, 1.01, r);
 		}
 	}
 

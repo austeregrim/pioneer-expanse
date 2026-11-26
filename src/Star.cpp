@@ -140,6 +140,8 @@ void Star::Render(Graphics::Renderer *renderer, const Camera *camera, const vect
 
 		const Color4f col = sbody ? sbody->GetStarColor().ToColor4f() : Color4f(1.0f, 0.85f, 0.65f, 1.0f);
 		static const size_t s_starColorName = "starColor"_hash;
+		static const size_t s_starAxisXName = "starAxisX"_hash;
+		static const size_t s_starAxisYName = "starAxisY"_hash;
 		m_coronaMat->SetPushConstant(s_starColorName, vector3f(col.r, col.g, col.b), kCoronaExtentRadii);
 
 		// Anchor the corona billboard's up-axis to the star's own 3D rotational pole in camera space
@@ -151,6 +153,13 @@ void Star::Render(Graphics::Renderer *renderer, const Camera *camera, const vect
 		vector3d cxaxis = starUp.Cross(zaxis).NormalizedSafe();
 		vector3d cyaxis = zaxis.Cross(cxaxis).NormalizedSafe();
 		matrix4x4d coronaRot = matrix4x4d::MakeRotMatrix(cxaxis, cyaxis, zaxis).Inverse();
+
+		// Project billboard basis vectors back into the star's 3D rotating frame so shaders evaluate flares on the 3D star surface
+		const matrix3x3d camToStar = viewTransform.GetOrient().Transpose();
+		const vector3d starAxisX = (camToStar * cxaxis).NormalizedSafe();
+		const vector3d starAxisY = (camToStar * cyaxis).NormalizedSafe();
+		m_coronaMat->SetPushConstant(s_starAxisXName, vector3f(starAxisX));
+		m_coronaMat->SetPushConstant(s_starAxisYName, vector3f(starAxisY));
 
 		renderer->SetTransform(matrix4x4f(ctrans * matrix4x4d::ScaleMatrix(coronaRad) * coronaRot));
 		renderer->DrawMesh(m_coronaMesh.get(), m_coronaMat.get());

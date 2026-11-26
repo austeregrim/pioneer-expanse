@@ -6,6 +6,8 @@
 Shader star_corona
 
 PushConstant vec4 starColor
+PushConstant vec3 starAxisX
+PushConstant vec3 starAxisY
 PushConstant float uTime
 
 Buffer DrawData binding=1

@@ -1,7 +1,8 @@
 # Performance & Visual Fixes — Batch C: Hardware Instancing (`RingField` & `SurfaceScatter`), Scatter Shadows (#3), & Proactive Planet LODs (#9)
 
+> **Status**: **Completed** (released in `v2026.11.26.2-expanse`, including time-dilation, LRU sizing, instanced scratch-buffer, and visual/audio/supercruise fixes).
 > **Independent Agent Assignment**: This plan is self-contained and has zero file overlap with Batch A or Batch B.
-> *(Note: In `src/GeoSphere.cpp`, Batch C **only** modifies `Update()` / `ProcessQuadSplitRequests()` / LOD preloading; Batch A only modifies `Render()` cloud setup.)*
+> *(Note: In `src/GeoSphere.cpp`, Batch C **only** modifies `Update()` / `UpdatePreloadState()` / `ProcessQuadSplitRequests()` / LOD preloading; Batch A only modifies `Render()` cloud setup.)*
 
 ---
 
@@ -68,8 +69,8 @@
 1. **Preserve Mining & Collisions 100%**:
    * Do **not** alter `RingField::TraceRay` (`m_depletedYield` depletion, fragment spawning, hit distance) or `RingField::TimeStepUpdate` collision resolution.
    * Only accelerate `GatherCellRocks` + `Render`.
-2. **Add Bounded LRU Cell Cache**:
-   * Add a cache (e.g., `MAX_CACHED_CELLS = 1024`) keyed by `{ gx, gz, RockTier }` storing the un-culled `std::vector<RockInstance>` for that cell, with an LRU list or age counter so moving through a ring only generates newly entered cells instead of regenerating up to ~4,820 cells every frame.
+2. **Add Bounded O(1) LRU Cell Cache**:
+   * Implemented an O(1) `std::list` + `std::unordered_map` LRU cache with `MAX_CACHED_CELLS = 6144` (covering the ~4,820-cell working set across all 4 tiers without thrashing) keyed by `{ gx, gz, RockTier }` storing only static, un-spun `RockInstance` data (`phase`, `spinRate`, `pos`, etc.) so `m_elapsedTime`-driven spin and mining remain 100% time-dilation accurate.
    * In `Render`, continue checking `m_depletedYield.find(inst.id)` when gathering `visibleRocks` so mined-out boulders disappear immediately as before.
 3. **Math & Culling Tightening (`RingField.cpp:705-801`)**:
    * Replace `std::hypot` / `Length()` distance checks in `gatherTier` (`L711`, `L720`, `L730`, `L755`) with squared-distance comparisons (`dx*dx + dz*dz > maxDistSq`), computing `std::sqrt` only for rocks that survive culling and need `Smoothstep` fade.
@@ -86,10 +87,9 @@
 
 1. **Fix #3 (Part 1) — Planet & Terrain-Ridge Occlusion on Boulders**:
    * Currently `SurfaceScatter::Render` (`L501-507`, `L680-692`) renders boulders via `"multi"` with unoccluded `uLight[0]`, so stars below the planet's horizon or behind mountain ridges continue illuminating rocks at night.
-   * Fix:
-     * For each active directional light (`0..std::min(numLights, 4)`), evaluate `sunElev = camUpView.Dot(starDirView)` AND run `WeatherSystem::ComputeTerrainRayVisibility(...)` from the camera/boulder region toward the star in planet-rotating space (using `m_planet->GetTerrainHeight(...)`).
-     * Wait: For boulders spanning up to ~680 m around the camera, check if `sunElev < 0.08`: compute per-cell or per-cluster (or camera + local terrain height) `sunVis`, OR even better, compute `sunVis` per rock when the sun is near/below the horizon (`sunElev < 0.12`) using a fast 4-step terrain raymarch (or cached per-cell solar visibility) and pass `sunVis` in the per-instance attribute (`i_emissive.a`) or `rockLightScale` uniform! When `sunElev < -0.02` (below geometric horizon), `sunVis = 0.0` cleanly shuts off direct starlight on every boulder—zero light bleeding through the planet at night.
-     * Modulate `skyBounce` (ambient/emissive) by `dayFactor * cloudAtten` as already done, ensuring boulders match the shadowed terrain brightness at dusk, night, and behind ridges.
+   * **Implemented Fix**:
+     * Evaluated per-light geometric horizon attenuation (`rockLightScale`) and per-cell primary-star `WeatherSystem::ComputeTerrainRayVisibility(...)` when `sunElev` is in the horizon/ridge zone (`-0.025 <= sunElev <= 0.35`), refreshing cached cell `cachedSunVis` whenever `std::abs(gameTime - cell.sunVisGameTime) > 1.0` or `starDirRot` changes (safe under docked time acceleration). `sunVis` is passed via `i_emissive.a` in `rock_instanced.*`.
+     * Modulated `skyBounce` (ambient/emissive) by `dayFactor * (0.35 + 0.65 * cellSunVis) * cloudAtten`, ensuring boulders match shadowed terrain brightness at dusk, night, and behind ridges.
 2. **Fix #3 (Part 2) — Cast Ground Shadows From Boulders onto Planet Surface**:
    * Add a lightweight batched shadow-decal pass in `SurfaceScatter::Render` whenever `sunVis > 0.05` and the boulder is within shadow-draw distance (e.g. `dist < 320.0 * distMult` for `tier == 0`, `dist < 55.0` for `tier == 1`):
      * Project the primary star's direction onto the boulder's local tangent plane (`surfNormal`) to get the shadow stretch direction and elongation (`clamp(1.0 / max(sunElev, 0.22), 1.0, 3.8)`).
@@ -110,12 +110,10 @@
 2. **Fix Issue #9 — Proactive LOD Pre-Generation for Targeted Planets**:
    * **Root cause**: `GeoSphere::Update()` (`src/GeoSphere.cpp:379-386`) only runs `LODUpdate(m_tempCampos, m_tempFrustum)` if `m_hasTempCampos` is true (meaning the planet has already rendered) and uses the current `m_tempCampos` (so while approaching in Supercruise or orbital glide, high-detail patches aren't requested until you are already close, causing visible popping/blurry terrain).
    * **Fix**:
-     1. In `GeoSphere::Update()` (and `GeoSphere::UpdateAllGeoSpheres()`): determine if the player's ship exists and either:
-        * has this `Planet` / `TerrainBody` as its `GetNavTarget()` (or is inside its frame / within `15.0 * radius`), AND
-        * is approaching (`dist < 25.0 * radius` in Supercruise or normal flight).
-     2. Compute a **lookahead camera position** `preloadCampos` in planet-unit space: project the player's position + velocity lookahead (`pos + vel * lookaheadSec`, clamped toward the sub-ship surface point at e.g. `std::max(1.005, distUnit * 0.45)`) along the approach vector.
-     3. Run a **budgeted** `PreloadLODUpdate(preloadCampos, maxJobsToQueue)` pass on the sub-ship hemisphere (skipping frustum culling for `depth <= 4` or using a wide approach cone around `preloadCampos.Normalized()`), capping newly queued jobs per frame (e.g. `<= 8` background `QuadPatchJob`s/frame when preloading, keeping `mQuadSplitRequests` sorted closest-first and respecting `MAX_SPLIT_OPERATIONS` so foreground rendering and the async thread pool never saturate).
-     4. Also guard `LODUpdate` merge logic (`GeoPatch.cpp:435-444`) so preloaded patches on the player's current nav target within approach distance aren't immediately merged back down on the next tick.
+     1. In `GeoSphere::Update()` (`UpdatePreloadState()`): gate preloading strictly to `Pi::game && !Pi::game->IsPaused() && Pi::game->GetTimeAccel() == Game::TIMEACCEL_1X` and `Pi::player->GetFlightState() == Ship::FLYING`, matching `GetNavTarget()` or the player's current body frame within `1.001 < distUnit < 25.0` (and approaching when `distUnit >= 15.0`).
+     2. Compute a bounded 1x wall-clock lookahead camera position `m_preloadCampos` (`6.0s` lookahead clamped to `[1.005, distUnit]` radii).
+     3. Run a budgeted `PreloadLODUpdate(m_preloadCampos, m_preloadDir, preloadBudget)` pass (`<= 8` jobs/frame, `maxPreloadDepth <= 10`) on the approach hemisphere (`Dot >= -0.15`).
+     4. Guard `GeoPatch::LODUpdate` merge logic only while `m_geosphere->IsPreloadActive()`, automatically releasing preloaded patches if the player untargets, departs, docks, pauses, or engages time acceleration.
 
 ---
 

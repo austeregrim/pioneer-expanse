@@ -89,6 +89,7 @@ public:
 	}
 
 	void LODUpdate(const vector3d &campos, const Graphics::Frustum &frustum);
+	void PreloadLODUpdate(const vector3d &preloadCampos, const vector3d &approachDir, int &budgetRemaining);
 
 	void RequestSinglePatch();
 	void ReceiveHeightmaps(SQuadSplitResult *psr);
@@ -154,6 +155,8 @@ private:
 	GeoSphere *m_geosphere;
 	double m_splitLength; // rough length, is how near to the camera the m_clipCentroid should be before it must split
 	double m_clipRadius;
+	float m_detailFreq = 1.0f;
+	vector3f m_tileOffset = vector3f(0.0f);
 	const GeoPatchID m_PatchID;
 	Job::Handle m_job;
 	Sint32 m_depth;

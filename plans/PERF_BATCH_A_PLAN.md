@@ -1,5 +1,6 @@
 # Performance & Visual Fixes — Batch A: Planet/Sky Shaders, Cloud & Sunset Fixes (#5, #6), & Planet Inspector
 
+> **Status**: **Completed** (released in `v2026.11.26-expanse`, commit `3e5a2e2`).
 > **Independent Agent Assignment**: This plan is self-contained and has zero file overlap with Batch B or Batch C.
 > *(Note: In `src/GeoSphere.cpp`, Batch A **only** modifies `GeoSphere::Render()` lines ~600–690 for clouds; Batch C only modifies `GeoSphere::Update()` / `ProcessQuadSplitRequests()`.)*
 

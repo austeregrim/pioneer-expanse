@@ -64,37 +64,75 @@ def loop_crossfade(buf: np.ndarray, fade_sec: float = 0.25) -> np.ndarray:
 
 
 def synth_rain_canopy(rng: np.random.Generator) -> np.ndarray:
+    """Synthesize heavy non-tonal rain thrashing on a metal hull / tin roof."""
     dur = 4.25
     n = int(round(dur * SAMPLE_RATE))
+    fade_sec = 0.25
+    loop_dur = dur - fade_sec
     buf = np.zeros((n, 2), dtype=np.float64)
 
-    # Soft diffused canopy hiss bed
+    # 1. Heavy broadband rain-on-metal wash bed (no narrow resonant peaks)
     noise = rng.normal(0.0, 1.0, size=(n, 2))
     freqs = np.fft.rfftfreq(n, 1.0 / SAMPLE_RATE)
-    bp = np.exp(-0.5 * ((freqs - 1400.0) / 1100.0) ** 2) * (freqs > 180.0)
+    # Warm tin-roof spectrum: low-mid sheet thrum (180-450 Hz) + dense broadband patter (600-5200 Hz)
+    low_body = 0.42 * np.exp(-0.5 * ((freqs - 310.0) / 170.0) ** 2)
+    mid_sheet = 0.95 * np.exp(-0.5 * ((freqs - 1550.0) / 1250.0) ** 2)
+    hi_spray = 0.48 * np.exp(-0.5 * ((freqs - 4200.0) / 1800.0) ** 2)
+    bp = (low_body + mid_sheet + hi_spray) * (freqs > 110.0)
     bed = np.fft.irfft(np.fft.rfft(noise, axis=0) * bp[:, None], n=n, axis=0)
     bed /= max(1e-6, np.max(np.abs(bed)))
-    buf += 0.14 * bed
 
-    # Individual metallic/glass canopy droplet pings
-    num_drops = 240
+    # Subtle periodic wind-driven rain-sheet swell
+    t_bed = np.arange(n) / SAMPLE_RATE
+    swell = 0.84 + 0.16 * np.sin(2.0 * np.pi * (t_bed / loop_dur) * 2.0 + 0.4) * np.cos(
+        2.0 * np.pi * (t_bed / loop_dur) * 1.0
+    )
+    buf += 0.34 * bed * swell[:, None]
+
+    # 2. Dense non-tonal percussive raindrop impacts (filtered noise bursts — zero sine waves)
+    def shape_burst(raw: np.ndarray, lp_alpha: float, hp_alpha: float) -> np.ndarray:
+        # 1-pole high-pass followed by 1-pole low-pass for dry broadband impact transients
+        y_hp = np.empty_like(raw)
+        prev_x = 0.0
+        prev_y = 0.0
+        for i in range(len(raw)):
+            x = raw[i]
+            prev_y = hp_alpha * (prev_y + x - prev_x)
+            prev_x = x
+            y_hp[i] = prev_y
+        y_lp = np.empty_like(y_hp)
+        acc = 0.0
+        for i in range(len(y_hp)):
+            acc += lp_alpha * (y_hp[i] - acc)
+            y_lp[i] = acc
+        return y_lp
+
+    num_drops = 1400
     for _ in range(num_drops):
-        start = int(rng.integers(0, n - 2200))
-        dlen = int(rng.integers(450, 1400))
+        start = int(rng.integers(0, n - 320))
+        dlen = int(rng.integers(56, 240))
         t = np.arange(dlen) / SAMPLE_RATE
-        f0 = rng.uniform(950.0, 3400.0)
-        tau = rng.uniform(0.004, 0.014)
-        env = (1.0 - np.exp(-t / 0.0008)) * np.exp(-t / tau)
-        ping = env * (np.sin(2.0 * np.pi * f0 * t) + 0.35 * np.sin(2.0 * np.pi * f0 * 1.62 * t))
-        pan = rng.uniform(-0.85, 0.85)
-        amp = rng.uniform(0.06, 0.22)
+        tau = rng.uniform(0.0007, 0.0028)
+        env = (1.0 - np.exp(-t / 0.00018)) * np.exp(-t / tau)
+        raw = rng.normal(0.0, 1.0, size=dlen)
+        if rng.random() < 0.28:
+            # Heavier alloy-panel thud
+            burst = shape_burst(raw, lp_alpha=rng.uniform(0.08, 0.18), hp_alpha=0.95)
+            amp = rng.uniform(0.08, 0.24)
+        else:
+            # Crisp high-mid canopy patter
+            burst = shape_burst(raw, lp_alpha=rng.uniform(0.28, 0.62), hp_alpha=rng.uniform(0.76, 0.88))
+            amp = rng.uniform(0.05, 0.18)
+        burst /= max(1e-6, np.max(np.abs(burst)))
+        hit = env * burst
+        pan = rng.uniform(-0.88, 0.88)
         g_l = amp * np.cos((pan + 1.0) * np.pi * 0.25)
         g_r = amp * np.sin((pan + 1.0) * np.pi * 0.25)
-        buf[start : start + dlen, 0] += g_l * ping
-        buf[start : start + dlen, 1] += g_r * ping
+        buf[start : start + dlen, 0] += g_l * hit
+        buf[start : start + dlen, 1] += g_r * hit
 
-    buf = loop_crossfade(buf, 0.25)
-    buf /= max(1.0, np.max(np.abs(buf)) / 0.72)
+    buf = loop_crossfade(buf, fade_sec)
+    buf /= max(1.0, np.max(np.abs(buf)) / 0.78)
     return buf
 
 

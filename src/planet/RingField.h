@@ -11,7 +11,9 @@
 #include "matrix4x4.h"
 #include "vector3.h"
 
+#include <array>
 #include <cstdint>
+#include <list>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -59,8 +61,35 @@ private:
 		RockTier tier;
 	};
 
+	struct RockInstanceGPU {
+		matrix4x4f modelView;
+		Color4f diffuse;
+		Color4f emissive;
+	};
+
+	struct CellKey {
+		int64_t gx;
+		int64_t gz;
+		uint8_t tier;
+
+		bool operator==(const CellKey &o) const
+		{
+			return gx == o.gx && gz == o.gz && tier == o.tier;
+		}
+	};
+
+	struct CellKeyHash {
+		size_t operator()(const CellKey &k) const noexcept;
+	};
+
+	struct CachedCell {
+		std::vector<RockInstance> rocks;
+		std::list<CellKey>::iterator lruIt;
+	};
+
 	static constexpr int NUM_VARIANTS = 8;
 	static constexpr int MAX_VISIBLE_ROCKS = 4500;
+	static constexpr size_t MAX_CACHED_CELLS = 6144;
 	static constexpr double CELL_MICRO = 105.0;
 	static constexpr double CELL_FINE = 210.0;
 	static constexpr double CELL_COARSE = 850.0;
@@ -71,6 +100,7 @@ private:
 
 	FrameId GetOrbitalFrameId() const;
 	void GatherCellRocks(int64_t gx, int64_t gz, double cellSize, RockTier tier, std::vector<RockInstance> &out) const;
+	const std::vector<RockInstance> &GetOrBuildCell(int64_t gx, int64_t gz, double cellSize, RockTier tier) const;
 	Color ComputeRockColor(const RingBand &band, uint64_t seed) const;
 	void SpawnMiningFragment(const vector3d &hitPosOrb, const vector3d &normalOrb, const RingBand &band);
 
@@ -87,6 +117,11 @@ private:
 	std::unique_ptr<Graphics::Material> m_dustMaterial;
 	std::unique_ptr<Graphics::MeshObject> m_rockMeshes[NUM_VARIANTS];
 	Graphics::VertexArray m_dustVerts;
+
+	// O(1) render-frame LRU cache storing un-spun base RockInstances (spin & posView computed per-frame).
+	mutable std::list<CellKey> m_lruList;
+	mutable std::unordered_map<CellKey, CachedCell, CellKeyHash> m_cellCache;
+	std::array<std::vector<RockInstanceGPU>, NUM_VARIANTS> m_variantBuckets;
 
 	// Remaining fractional mining yield [0.0..1.0] for rocks damaged by mining lasers.
 	std::unordered_map<uint64_t, float> m_depletedYield;

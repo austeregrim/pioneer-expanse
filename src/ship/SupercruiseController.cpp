@@ -997,8 +997,25 @@ void SupercruiseController::SafeDisengage()
 	m_idleAITimer = 0.0f;
 
 	bool exitAtCurrentPosition = false;
+	bool targetInSafeRange = false;
+	if (target) {
+		vector3d relToTarget;
+		if (GetActiveTargetPosRelToShip(relToTarget)) {
+			const double dist = relToTarget.Length();
+			double targetExclR = 0.0;
+			if (target->IsType(ObjectType::TERRAINBODY)) {
+				const double maxTargetExclR = GetExclusionZoneRadius(target);
+				targetExclR = (dist <= maxTargetExclR * 3.0 + 250000.0)
+					? GetExclusionZoneRadiusAtDir(target, m_ship->GetPositionRelTo(target).NormalizedSafe())
+					: maxTargetExclR;
+			}
+			const double effectiveDist = std::max(0.0, dist - targetExclR);
+			const bool isOccluded = (GetTargetObscuredBy(relToTarget, target) != nullptr);
+			targetInSafeRange = !isOccluded && (effectiveDist <= SAFE_DISENGAGE_DIST);
+		}
+	}
 
-	if (target && target->IsType(ObjectType::SPACESTATION)) {
+	if (targetInSafeRange && target && target->IsType(ObjectType::SPACESTATION)) {
 		SpaceStation *station = static_cast<SpaceStation *>(target);
 		if (!station->IsGroundStation()) {
 			// Orbital Station Drop-In: switch to station frame, 12 km out (or keep if closer)
@@ -1048,7 +1065,7 @@ void SupercruiseController::SafeDisengage()
 			m_ship->SetVelocity(vector3d(0.0));
 			m_ship->SetAngVelocity(vector3d(0.0));
 		}
-	} else if (target && (target->IsType(ObjectType::SHIP) || target->IsType(ObjectType::HYPERSPACECLOUD)) && m_targetDistance <= SAFE_DISENGAGE_DIST) {
+	} else if (targetInSafeRange && target && (target->IsType(ObjectType::SHIP) || target->IsType(ObjectType::HYPERSPACECLOUD))) {
 		m_ship->SwitchToFrame(target->GetFrame());
 		const vector3d relToShip = m_ship->GetPosition() - target->GetPosition();
 		const double currentDist = relToShip.Length();
@@ -1065,7 +1082,7 @@ void SupercruiseController::SafeDisengage()
 		}
 		m_ship->SetVelocity(target->GetVelocity());
 		m_ship->SetAngVelocity(vector3d(0.0));
-	} else if (target && target->IsType(ObjectType::TERRAINBODY)) {
+	} else if (targetInSafeRange && target && target->IsType(ObjectType::TERRAINBODY)) {
 		// Planetary Orbital Drop-In: if farther than the safe orbital insertion altitude (250 km above local exclusion zone),
 		// drop into stable orbit at 250 km above exclusion zone; if already closer, exit at current position.
 		Frame *pf = Frame::GetFrame(target->GetFrame());
@@ -1128,7 +1145,7 @@ void SupercruiseController::SafeDisengage()
 	ClearStaleSupercruiseTarget();
 	Sound::BodyMakeNoise(m_ship, "Hyperdrive_Abort", 1.0f);
 
-	if (dockAfterDrop && target && target->IsType(ObjectType::SPACESTATION)) {
+	if (dockAfterDrop && targetInSafeRange && target && target->IsType(ObjectType::SPACESTATION)) {
 		if (m_ship->IsType(ObjectType::PLAYER)) {
 			if (PlayerShipController *psc = static_cast<Player *>(m_ship)->GetPlayerController()) {
 				psc->SetFlightControlState(CONTROL_AUTOPILOT);

@@ -1,5 +1,6 @@
 # Performance & Visual Fixes — Batch B: CPU Caching, Typed Space Lists, WorldView Deduplication, SectorMap Static VBOs & Lua Hygiene
 
+> **Status**: **Completed** (released in `v2026.11.26.1-expanse`, commit `2b79565`).
 > **Independent Agent Assignment**: This plan is self-contained and has zero file overlap with Batch A or Batch C.
 
 ---

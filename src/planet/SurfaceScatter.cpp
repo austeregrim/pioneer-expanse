@@ -22,7 +22,9 @@
 #include "graphics/TextureBuilder.h"
 #include "graphics/Types.h"
 #include "graphics/VertexArray.h"
+#include "graphics/VertexBuffer.h"
 #include "perlin.h"
+#include "planet/WeatherSystem.h"
 #include "profiler/Profiler.h"
 
 #include <algorithm>
@@ -113,7 +115,8 @@ SurfaceScatter::SurfaceScatter(Planet *planet) :
 	m_hasLava(false),
 	m_icyness(0.0),
 	m_volcanicity(0.0),
-	m_dustColor(168, 152, 136, 255)
+	m_dustColor(168, 152, 136, 255),
+	m_shadowVerts(Graphics::ATTRIB_POSITION | Graphics::ATTRIB_DIFFUSE)
 {
 	const SystemBody *sbody = m_planet ? m_planet->GetSystemBody() : nullptr;
 	if (sbody) {
@@ -147,15 +150,34 @@ void SurfaceScatter::InitGraphics(Graphics::Renderer *r, int quality, bool enhan
 	for (int i = 0; i < NUM_VARIANTS; ++i) {
 		m_rockMeshes[i] = BuildRockMesh(r, m_baseSeed + uint32_t(i) * 4999U + 271U, i, subdivs, useNormalMap);
 	}
-	m_rockMaterial.reset(r->CreateMaterial("multi", rockDesc, rockRsd, m_rockMeshes[0]->GetFormat()));
+	Graphics::VertexFormatDesc vtxFormat = m_rockMeshes[0]->GetFormat();
+	size_t ai = vtxFormat.GetNumAttribs();
+	vtxFormat.attribs[ai++] = { Graphics::ATTRIB_FORMAT_MAT4x4, 6, 1, uint16_t(offsetof(RockInstanceGPU, modelView)) };
+	vtxFormat.attribs[ai++] = { Graphics::ATTRIB_FORMAT_FLOAT4, 10, 1, uint16_t(offsetof(RockInstanceGPU, diffuse)) };
+	vtxFormat.attribs[ai++] = { Graphics::ATTRIB_FORMAT_FLOAT4, 11, 1, uint16_t(offsetof(RockInstanceGPU, emissive)) };
+	vtxFormat.bindings[1] = { sizeof(RockInstanceGPU), true, Graphics::ATTRIB_RATE_INSTANCE };
+
+	m_rockMaterial.reset(r->CreateMaterial("rock_instanced", rockDesc, rockRsd, vtxFormat));
 	m_rockMaterial->diffuse = Color::WHITE;
 	m_rockMaterial->specular = Color(18, 17, 16, 255);
 	m_rockMaterial->shininess = 5.0f;
+	m_rockMaterial->SetPushConstant("rockLightScale"_hash, Color4f(1.0f, 1.0f, 1.0f, 1.0f));
 	if (useNormalMap) {
 		m_rockMaterial->SetTexture("diffuse"_hash,
 			Graphics::TextureBuilder::Model("textures/rock_diffuse.png").GetOrCreateTexture(r, "model"));
 		m_rockMaterial->SetTexture("normal"_hash,
 			Graphics::TextureBuilder::Normal("textures/rock_normal.png").GetOrCreateTexture(r, "model"));
+	}
+	if (!m_shadowMaterial) {
+		Graphics::MaterialDescriptor shadowDesc;
+		Graphics::RenderStateDesc shadowRsd;
+		shadowRsd.blendMode = Graphics::BLEND_ALPHA;
+		shadowRsd.depthWrite = false;
+		shadowRsd.cullMode = Graphics::CULL_NONE;
+		shadowRsd.primitiveType = Graphics::TRIANGLES;
+
+		auto shadowVfmt = Graphics::VertexFormatDesc::FromAttribSet(Graphics::ATTRIB_POSITION | Graphics::ATTRIB_DIFFUSE);
+		m_shadowMaterial.reset(r->CreateMaterial("vtxColor", shadowDesc, shadowRsd, shadowVfmt));
 	}
 	m_builtQuality = quality;
 	m_builtEnhanced = enhanced;
@@ -260,17 +282,17 @@ std::unique_ptr<Graphics::MeshObject> SurfaceScatter::BuildRockMesh(Graphics::Re
 		return vector2f(v.x, v.y) * UV_SCALE;
 	};
 
-	for (const IcoTri &t : tris) {
-		const vector3f &v0 = verts[t.a];
-		const vector3f &v1 = verts[t.b];
-		const vector3f &v2 = verts[t.c];
-		const vector3f faceNormal = (v1 - v0).Cross(v2 - v0).NormalizedSafe();
+	std::vector<uint16_t> indices;
+	indices.reserve(tris.size() * 3);
 
-		const Color c0(vertShade[t.a], vertShade[t.a], vertShade[t.a], 255);
-		const Color c1(vertShade[t.b], vertShade[t.b], vertShade[t.b], 255);
-		const Color c2(vertShade[t.c], vertShade[t.c], vertShade[t.c], 255);
+	if (withTangents) {
+		std::vector<int> vertMap(verts.size() * 3, -1);
+		for (const IcoTri &t : tris) {
+			const vector3f &v0 = verts[t.a];
+			const vector3f &v1 = verts[t.b];
+			const vector3f &v2 = verts[t.c];
+			const vector3f faceNormal = (v1 - v0).Cross(v2 - v0).NormalizedSafe();
 
-		if (withTangents) {
 			const float ax = std::abs(faceNormal.x), ay = std::abs(faceNormal.y), az = std::abs(faceNormal.z);
 			int domAxis = 2;
 			vector3f tAxis(1.0f, 0.0f, 0.0f);
@@ -281,22 +303,40 @@ std::unique_ptr<Graphics::MeshObject> SurfaceScatter::BuildRockMesh(Graphics::Re
 				domAxis = 1;
 				tAxis = vector3f(1.0f, 0.0f, 0.0f);
 			}
-			auto orthoTang = [&](const vector3f &vn) -> vector3f {
-				vector3f tang = (tAxis - vn * vn.Dot(tAxis)).NormalizedSafe();
-				return (tang.LengthSqr() < 0.01f) ? vector3f(0.0f, 1.0f, 0.0f) : tang;
-			};
 
-			va.Add(v0, c0, smoothNorms[t.a], projectTriUV(v0, domAxis), orthoTang(smoothNorms[t.a]));
-			va.Add(v1, c1, smoothNorms[t.b], projectTriUV(v1, domAxis), orthoTang(smoothNorms[t.b]));
-			va.Add(v2, c2, smoothNorms[t.c], projectTriUV(v2, domAxis), orthoTang(smoothNorms[t.c]));
-		} else {
-			va.Add(v0, c0, smoothNorms[t.a]);
-			va.Add(v1, c1, smoothNorms[t.b]);
-			va.Add(v2, c2, smoothNorms[t.c]);
+			const int triVerts[3] = { t.a, t.b, t.c };
+			for (int k = 0; k < 3; ++k) {
+				const int vIdx = triVerts[k];
+				int &mapped = vertMap[size_t(vIdx) * 3 + size_t(domAxis)];
+				if (mapped < 0) {
+					vector3f tang = (tAxis - smoothNorms[vIdx] * smoothNorms[vIdx].Dot(tAxis)).NormalizedSafe();
+					if (tang.LengthSqr() < 0.01f)
+						tang = vector3f(0.0f, 1.0f, 0.0f);
+					mapped = int(va.GetNumVerts());
+					const Color c(vertShade[vIdx], vertShade[vIdx], vertShade[vIdx], 255);
+					va.Add(verts[vIdx], c, smoothNorms[vIdx], projectTriUV(verts[vIdx], domAxis), tang);
+				}
+				indices.push_back(uint16_t(mapped));
+			}
+		}
+	} else {
+		for (size_t i = 0; i < verts.size(); ++i) {
+			const Color c(vertShade[i], vertShade[i], vertShade[i], 255);
+			va.Add(verts[i], c, smoothNorms[i]);
+		}
+		for (const IcoTri &t : tris) {
+			indices.push_back(uint16_t(t.a));
+			indices.push_back(uint16_t(t.b));
+			indices.push_back(uint16_t(t.c));
 		}
 	}
 
-	return std::unique_ptr<Graphics::MeshObject>(r->CreateMeshObjectFromArray(&va));
+	Graphics::IndexBuffer *idxBuf = r->CreateIndexBuffer(Uint32(indices.size()), Graphics::BUFFER_USAGE_STATIC, Graphics::INDEX_BUFFER_16BIT);
+	Uint16 *idxPtr = idxBuf->Map16(Graphics::BUFFER_MAP_WRITE);
+	std::copy(indices.begin(), indices.end(), idxPtr);
+	idxBuf->Unmap();
+
+	return std::unique_ptr<Graphics::MeshObject>(r->CreateMeshObjectFromArray(&va, idxBuf));
 }
 
 vector3d SurfaceScatter::CubeMetersToUnit(int face, double uM, double vM) const
@@ -315,15 +355,20 @@ vector3d SurfaceScatter::CubeMetersToUnit(int face, double uM, double vM) const
 	return v.Normalized();
 }
 
-const std::vector<SurfaceScatter::RockInstance> &SurfaceScatter::GetOrBuildCell(int face, uint8_t tier, int64_t gx, int64_t gz)
+SurfaceScatter::CachedCell &SurfaceScatter::GetOrBuildCell(int face, uint8_t tier, int64_t gx, int64_t gz)
 {
 	const CellKey key{ gx, gz, uint8_t(face), tier };
 	auto it = m_cellCache.find(key);
-	if (it != m_cellCache.end())
+	if (it != m_cellCache.end()) {
+		m_lruList.splice(m_lruList.begin(), m_lruList, it->second.lruIt);
 		return it->second;
+	}
 
-	if (m_cellCache.size() >= MAX_CACHED_CELLS)
-		m_cellCache.clear();
+	if (m_cellCache.size() >= MAX_CACHED_CELLS) {
+		const CellKey &evictKey = m_lruList.back();
+		m_cellCache.erase(evictKey);
+		m_lruList.pop_back();
+	}
 
 	std::vector<RockInstance> rocks;
 	const double cellSize = (tier == 0) ? CELL_LARGE : CELL_SMALL;
@@ -396,6 +441,7 @@ const std::vector<SurfaceScatter::RockInstance> &SurfaceScatter::GetOrBuildCell(
 
 		// Embed boulder bottom ~28% into the regolith so nothing appears to hover
 		inst.posRotM = unitDir * (h0 - inst.scale * 0.28);
+		inst.surfNormal = surfNormal;
 
 		// Align +Y to local terrain normal with slight slope bias & random yaw/tilt
 		const vector3d upDir = (surfNormal * 0.65 + unitDir * 0.35).Normalized();
@@ -445,7 +491,15 @@ const std::vector<SurfaceScatter::RockInstance> &SurfaceScatter::GetOrBuildCell(
 		rocks.push_back(inst);
 	}
 
-	return m_cellCache.emplace(key, std::move(rocks)).first->second;
+	const vector3d cellCenterUnit = CubeMetersToUnit(face, (double(gx) + 0.5) * cellSize, (double(gz) + 0.5) * cellSize);
+	const double cellCenterH = m_planet->GetTerrainHeight(cellCenterUnit);
+
+	m_lruList.push_front(key);
+	CachedCell entry;
+	entry.rocks = std::move(rocks);
+	entry.lruIt = m_lruList.begin();
+	entry.centerPosRotM = cellCenterUnit * (cellCenterH + 2.0);
+	return m_cellCache.emplace(key, std::move(entry)).first->second;
 }
 
 void SurfaceScatter::Render(Graphics::Renderer *r, const matrix4x4d &viewTran, const vector3d &camPos)
@@ -497,14 +551,24 @@ void SurfaceScatter::Render(Graphics::Renderer *r, const matrix4x4d &viewTran, c
 		}
 	}
 
-	// Day/night solar elevation, overcast cloud darkening, and active ship spotlight parameters
-	double dayFactor = 1.0;
-	if (r->GetNumLights() > 0) {
-		const vector3d camUpView = (viewTran.ApplyRotationOnly(camUnit) * m_invPlanetRadius).NormalizedSafe();
-		const vector3d starDirView = vector3d(r->GetLight(0).GetPosition()).NormalizedSafe();
-		const double sunElev = camUpView.Dot(starDirView);
-		dayFactor = Smoothstep(-0.08, 0.18, sunElev);
+	const matrix3x3d viewRotInvR = viewTran.GetOrient() * matrix3x3d::Scale(m_invPlanetRadius);
+
+	// Day/night solar elevation, planet horizon occlusion, overcast darkening, and active ship spotlights
+	float lightScale[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+	vector3d starDirRot(0.0, 1.0, 0.0);
+	double sunElev = 1.0;
+	const uint32_t numLights = std::min<uint32_t>(r->GetNumLights(), 4);
+	for (uint32_t li = 0; li < numLights; ++li) {
+		const vector3d lDirView = vector3d(r->GetLight(li).GetPosition()).NormalizedSafe();
+		const vector3d lDirRot = (viewRotInvR.Transpose() * lDirView).NormalizedSafe();
+		const double lElev = camUnit.Dot(lDirRot);
+		lightScale[li] = float(Smoothstep(-0.025, 0.02, lElev));
+		if (li == 0) {
+			starDirRot = lDirRot;
+			sunElev = lElev;
+		}
 	}
+	const double dayFactor = (numLights > 0) ? Smoothstep(-0.08, 0.18, sunElev) : 1.0;
 	const double gameTime = Pi::game ? Pi::game->GetTime() : 0.0;
 	const WeatherState weather = m_planet->GetWeatherState(camRotM, gameTime);
 	const double cloudAtten = weather.hasAtmosphere
@@ -587,6 +651,24 @@ void SurfaceScatter::Render(Graphics::Renderer *r, const matrix4x4d &viewTran, c
 	int rendered = 0;
 	const double aglFade = Clamp(1.0 - (agl - 650.0 * distMult) / (500.0 * distMult), 0.0, 1.0);
 	const double smallAglFade = Clamp(1.0 - (agl - 140.0 * distMult) / (140.0 * distMult), 0.0, 1.0);
+	const double maxFeatureRadiusM = std::max(m_planetRadius + 1.0, m_planet->GetMaxFeatureRadius());
+
+	m_shadowVerts.Clear();
+	for (auto &b : m_variantBuckets)
+		b.clear();
+
+	static constexpr int SHADOW_SEGMENTS = 8;
+	static std::array<float, SHADOW_SEGMENTS + 1> s_cosTable;
+	static std::array<float, SHADOW_SEGMENTS + 1> s_sinTable;
+	static bool s_trigInit = false;
+	if (!s_trigInit) {
+		for (int k = 0; k <= SHADOW_SEGMENTS; ++k) {
+			const double a = (double(k) / double(SHADOW_SEGMENTS)) * 2.0 * M_PI;
+			s_cosTable[k] = float(std::cos(a));
+			s_sinTable[k] = float(std::sin(a));
+		}
+		s_trigInit = true;
+	}
 
 	auto renderTier = [&](uint8_t tier, double cellSize, int range, double tierFade, int budget, double keepProb) {
 		if (tierFade <= 0.01 || rendered >= maxTotalRocks || budget <= 0 || keepProb <= 0.0)
@@ -594,12 +676,36 @@ void SurfaceScatter::Render(Graphics::Renderer *r, const matrix4x4d &viewTran, c
 
 		const int64_t cx = FloorCell(camUM, cellSize);
 		const int64_t cz = FloorCell(camVM, cellSize);
+		const double shadowMaxDist = (tier == 0) ? (320.0 * distMult) : 55.0;
+		const double shadowMaxDistSq = shadowMaxDist * shadowMaxDist;
 		int tierCount = 0;
 
 		for (const CellOffset &off : GetSortedCellOffsets(range)) {
 			const int64_t gx = cx + off.dx;
 			const int64_t gz = cz + off.dz;
-			const std::vector<RockInstance> &cellRocks = GetOrBuildCell(face, tier, gx, gz);
+			CachedCell &cell = GetOrBuildCell(face, tier, gx, gz);
+			const std::vector<RockInstance> &cellRocks = cell.rocks;
+			if (cellRocks.empty())
+				continue;
+
+			// Per-cell terrain-ridge visibility (refreshed on gameTime/sunDir change for time-dilation safety)
+			float cellSunVis = 1.0f;
+			if (numLights == 0 || sunElev < -0.025) {
+				cellSunVis = 0.0f;
+			} else if (sunElev <= 0.35) {
+				const bool stale = (std::abs(gameTime - cell.sunVisGameTime) > 1.0) ||
+					(cell.sunVisStarDir.Dot(starDirRot) < 0.99998);
+				if (stale) {
+					cell.cachedSunVis = WeatherSystem::ComputeTerrainRayVisibility(
+						cell.centerPosRotM, starDirRot, 1.0e11,
+						m_planetRadius, maxFeatureRadiusM, 0.0045,
+						[p = m_planet](const vector3d &u) { return p->GetTerrainHeight(u); });
+					cell.sunVisGameTime = gameTime;
+					cell.sunVisStarDir = starDirRot;
+				}
+				cellSunVis = cell.cachedSunVis;
+			}
+			const double effDay = dayFactor * (0.35 + 0.65 * double(cellSunVis));
 
 			for (size_t idx = 0; idx < cellRocks.size(); ++idx) {
 				if (keepProb < 0.999) {
@@ -626,12 +732,13 @@ void SurfaceScatter::Render(Graphics::Renderer *r, const matrix4x4d &viewTran, c
 				if (distSq > effMaxDist * effMaxDist)
 					continue;
 
-				const vector3d posView = viewTran.ApplyRotationOnly(relM) * m_invPlanetRadius;
+				const vector3d posView = viewRotInvR * relM;
 				if (posView.z > inst.scale * 2.0)
 					continue;
 
 				const double forwardDist = std::max(1.0, -posView.z);
-				if (std::hypot(posView.x, posView.y) > forwardDist * 1.65 + inst.scale * 3.0)
+				const double frustumThresh = forwardDist * 1.65 + inst.scale * 3.0;
+				if (posView.x * posView.x + posView.y * posView.y > frustumThresh * frustumThresh)
 					continue;
 
 				const double dist = std::sqrt(distSq);
@@ -640,29 +747,14 @@ void SurfaceScatter::Render(Graphics::Renderer *r, const matrix4x4d &viewTran, c
 				if (s <= 0.04)
 					continue;
 
-				const vector3d bx = viewTran.ApplyRotationOnly(inst.orient * vector3d(s, 0.0, 0.0)) * m_invPlanetRadius;
-				const vector3d by = viewTran.ApplyRotationOnly(inst.orient * vector3d(0.0, s, 0.0)) * m_invPlanetRadius;
-				const vector3d bz = viewTran.ApplyRotationOnly(inst.orient * vector3d(0.0, 0.0, s)) * m_invPlanetRadius;
-
-				matrix4x4f m = matrix4x4f::Identity;
-				m[0] = float(bx.x);
-				m[1] = float(bx.y);
-				m[2] = float(bx.z);
-				m[4] = float(by.x);
-				m[5] = float(by.y);
-				m[6] = float(by.z);
-				m[8] = float(bz.x);
-				m[9] = float(bz.y);
-				m[10] = float(bz.z);
-				m[12] = float(posView.x);
-				m[13] = float(posView.y);
-				m[14] = float(posView.z);
+				const matrix3x3d m3 = viewRotInvR * inst.orient * matrix3x3d::Scale(s);
 
 				double spotBoost = 0.0;
 				if (hasShipSpot) {
 					const vector3d fromShip = inst.posRotM - shipPosRot;
-					const double dShip = fromShip.Length();
-					if (dShip > 0.5 && dShip < 240.0) {
+					const double dShipSq = fromShip.LengthSqr();
+					if (dShipSq > 0.25 && dShipSq < (240.0 * 240.0)) {
+						const double dShip = std::sqrt(dShipSq);
 						const vector3d dirFromShip = fromShip / dShip;
 						const double dFade = Clamp(1.0 - dShip / 240.0, 0.0, 1.0);
 						const double att = dFade * dFade;
@@ -677,19 +769,80 @@ void SurfaceScatter::Render(Graphics::Renderer *r, const matrix4x4d &viewTran, c
 					}
 				}
 				const double diffScale = Clamp(cloudDiffuse + spotBoost * 0.55, 0.72, 1.0);
-				m_rockMaterial->diffuse = Color(
-					uint8_t(Clamp(double(inst.color.r) * diffScale, 0.0, 255.0)),
-					uint8_t(Clamp(double(inst.color.g) * diffScale, 0.0, 255.0)),
-					uint8_t(Clamp(double(inst.color.b) * diffScale, 0.0, 255.0)),
-					255);
-				const double skyBounce = 0.12 * dayFactor * cloudAtten + spotBoost * 0.45;
-				m_rockMaterial->emissive = Color(
-					uint8_t(Clamp(double(inst.color.r) * skyBounce, 0.0, 255.0)),
-					uint8_t(Clamp(double(inst.color.g) * skyBounce, 0.0, 255.0)),
-					uint8_t(Clamp(double(inst.color.b) * skyBounce, 0.0, 255.0)),
-					255);
-				r->SetTransform(m);
-				r->DrawMesh(m_rockMeshes[inst.variant].get(), m_rockMaterial.get());
+				const double skyBounce = 0.12 * effDay * cloudAtten + spotBoost * 0.45;
+				const Color4f baseCol = inst.color.ToColor4f();
+
+				RockInstanceGPU gpu;
+				gpu.modelView = matrix4x4f::Identity;
+				gpu.modelView[0] = float(m3[0]);
+				gpu.modelView[1] = float(m3[3]);
+				gpu.modelView[2] = float(m3[6]);
+				gpu.modelView[4] = float(m3[1]);
+				gpu.modelView[5] = float(m3[4]);
+				gpu.modelView[6] = float(m3[7]);
+				gpu.modelView[8] = float(m3[2]);
+				gpu.modelView[9] = float(m3[5]);
+				gpu.modelView[10] = float(m3[8]);
+				gpu.modelView[12] = float(posView.x);
+				gpu.modelView[13] = float(posView.y);
+				gpu.modelView[14] = float(posView.z);
+				gpu.diffuse = Color4f(
+					Clamp(baseCol.r * float(diffScale), 0.0f, 1.0f),
+					Clamp(baseCol.g * float(diffScale), 0.0f, 1.0f),
+					Clamp(baseCol.b * float(diffScale), 0.0f, 1.0f),
+					1.0f);
+				gpu.emissive = Color4f(
+					Clamp(baseCol.r * float(skyBounce), 0.0f, 1.0f),
+					Clamp(baseCol.g * float(skyBounce), 0.0f, 1.0f),
+					Clamp(baseCol.b * float(skyBounce), 0.0f, 1.0f),
+					cellSunVis);
+
+				m_variantBuckets[inst.variant].push_back(gpu);
+
+				// Batched directional ground shadow decal away from the primary star
+				if (numLights > 0 && cellSunVis > 0.05f && sunElev > 0.02 && distSq < shadowMaxDistSq) {
+					const double shFade = (1.0 - Smoothstep(shadowMaxDist * 0.65, shadowMaxDist, dist)) * fadeOut * tierFade;
+					const uint8_t centerAlpha = uint8_t(Clamp(165.0 * double(cellSunVis) * cloudAtten * shFade, 0.0, 185.0));
+					if (centerAlpha > 3) {
+						vector3d shDir = (inst.surfNormal * inst.surfNormal.Dot(starDirRot) - starDirRot).NormalizedSafe();
+						if (shDir.LengthSqr() < 0.01)
+							shDir = inst.orient.VectorX();
+						const vector3d shSide = inst.surfNormal.Cross(shDir).NormalizedSafe();
+						const double stretch = Clamp(1.0 / std::max(sunElev, 0.22), 1.0, 3.8);
+						const double halfLen = s * (1.20 + 0.65 * stretch);
+						const double halfWid = s * 1.48;
+						// inst.posRotM is embedded at h0 - 0.28*scale; offset +0.32*scale clears the ground cleanly
+						const vector3d shCenterRotM = inst.posRotM + inst.surfNormal * (inst.scale * 0.32) + shDir * (s * 0.48 * stretch);
+						const vector3f cView(viewRotInvR * (shCenterRotM - camRotM));
+						const vector3f dView(viewRotInvR * (shDir * halfLen));
+						const vector3f wView(viewRotInvR * (shSide * halfWid));
+
+						// Two-ring umbra + soft penumbra so shadow matches the boulder's full sculpted footprint
+						constexpr float kUmbraFrac = 0.62f;
+						const Color cCenter(0, 0, 0, centerAlpha);
+						const Color cEdge(0, 0, 0, 0);
+						for (int k = 0; k < SHADOW_SEGMENTS; ++k) {
+							const vector3f dir0 = dView * s_cosTable[k] + wView * s_sinTable[k];
+							const vector3f dir1 = dView * s_cosTable[k + 1] + wView * s_sinTable[k + 1];
+							const vector3f u0 = cView + dir0 * kUmbraFrac;
+							const vector3f u1 = cView + dir1 * kUmbraFrac;
+							const vector3f p0 = cView + dir0;
+							const vector3f p1 = cView + dir1;
+
+							m_shadowVerts.Add(cView, cCenter);
+							m_shadowVerts.Add(u0, cCenter);
+							m_shadowVerts.Add(u1, cCenter);
+
+							m_shadowVerts.Add(u0, cCenter);
+							m_shadowVerts.Add(p0, cEdge);
+							m_shadowVerts.Add(p1, cEdge);
+
+							m_shadowVerts.Add(u0, cCenter);
+							m_shadowVerts.Add(p1, cEdge);
+							m_shadowVerts.Add(u1, cCenter);
+						}
+					}
+				}
 
 				++rendered;
 				++tierCount;
@@ -701,4 +854,46 @@ void SurfaceScatter::Render(Graphics::Renderer *r, const matrix4x4d &viewTran, c
 
 	renderTier(0, CELL_LARGE, range0, aglFade, budget0, keep0);
 	renderTier(1, CELL_SMALL, range1, smallAglFade, budget1, keep1);
+
+	if (!m_shadowVerts.IsEmpty() && m_shadowMaterial) {
+		r->SetTransform(matrix4x4f::Identity);
+		r->DrawBuffer(&m_shadowVerts, m_shadowMaterial.get());
+	}
+
+	if (rendered > 0) {
+		Graphics::BufferBinding<Graphics::VertexBuffer> ib = r->CreateTempVertexBuffer(uint32_t(rendered), sizeof(RockInstanceGPU));
+		RockInstanceGPU *dst = ib.buffer->MapRange<RockInstanceGPU>(ib, Graphics::BUFFER_MAP_WRITE);
+		uint32_t offsets[NUM_VARIANTS] = {};
+		uint32_t counts[NUM_VARIANTS] = {};
+		uint32_t cursor = 0;
+
+		if (dst) {
+			for (int v = 0; v < NUM_VARIANTS; ++v) {
+				const auto &bucket = m_variantBuckets[v];
+				if (bucket.empty())
+					continue;
+				offsets[v] = cursor;
+				counts[v] = uint32_t(bucket.size());
+				std::copy(bucket.begin(), bucket.end(), dst + cursor);
+				cursor += counts[v];
+			}
+			ib.buffer->UnmapRange(false);
+		}
+
+		if (cursor > 0) {
+			r->SetTransform(matrix4x4f::Identity);
+			m_rockMaterial->SetPushConstant("rockLightScale"_hash, Color4f(lightScale[0], lightScale[1], lightScale[2], lightScale[3]));
+			for (int v = 0; v < NUM_VARIANTS; ++v) {
+				if (counts[v] == 0)
+					continue;
+				Graphics::BufferBinding<Graphics::VertexBuffer> slice{ ib.buffer, ib.offset + offsets[v], counts[v] };
+				const Graphics::BufferBinding<Graphics::VertexBuffer> vtxBindings[2] = {
+					{ m_rockMeshes[v]->GetVertexBuffer() },
+					slice
+				};
+				Graphics::IndexBuffer *idxBuf = m_rockMeshes[v]->GetIndexBuffer();
+				r->Draw({ vtxBindings, 2 }, idxBuf, m_rockMaterial.get(), idxBuf->GetIndexCount(), counts[v]);
+			}
+		}
+	}
 }

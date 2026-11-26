@@ -381,7 +381,9 @@ namespace TerrainFeature {
 						const double floorLvl = -0.80 + 0.24 * age;
 						const double k = 0.14 + 0.12 * age;
 						const double diff = bowlRaw - floorLvl;
-						const double bowl = 0.5 * (bowlRaw + floorLvl + sqrt(diff * diff + k * k)) - 0.5 * k;
+						// Normalize so bowl(u=1.0) == 0.0 exactly, eliminating vertical step cliffs along crater rims
+						const double bowlAtRim = 0.5 * (floorLvl + sqrt(floorLvl * floorLvl + k * k)) - 0.5 * k;
+						const double bowl = (0.5 * (bowlRaw + floorLvl + sqrt(diff * diff + k * k)) - 0.5 * k) - bowlAtRim;
 
 						const double u2 = u * u;
 						const double rim = cRim * u2 * u2;

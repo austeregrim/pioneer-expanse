@@ -1,0 +1,18 @@
+## Copyright © 2008-2026 Pioneer Developers. See AUTHORS.txt for details
+## Licensed under the terms of the GPL v3. See licenses/GPL-3.txt
+
+Shader rock_instanced
+
+Texture sampler2D texture0 name=diffuse
+Texture sampler2D texture6 name=normal
+
+PushConstant vec4 lightIntensity binding=1
+PushConstant vec4 rockLightScale
+PushConstant float enhancedGraphics
+
+Buffer LightData binding=0
+Buffer DrawData binding=1
+Buffer SpotLightData binding=3
+
+Vertex "rock_instanced.vert"
+Fragment "rock_instanced.frag"

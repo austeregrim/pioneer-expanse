@@ -130,6 +130,14 @@ struct IcoTri {
 
 } // namespace
 
+size_t RingField::CellKeyHash::operator()(const CellKey &k) const noexcept
+{
+	uint64_t h = SplitMix64(uint64_t(k.gx));
+	h ^= SplitMix64(uint64_t(k.gz) + 0x9E3779B97F4A7C15ULL);
+	h ^= SplitMix64(uint64_t(k.tier));
+	return size_t(SplitMix64(h));
+}
+
 RingField::RingField(Planet *planet) :
 	m_planet(planet),
 	m_planetRadius(1.0),
@@ -174,10 +182,18 @@ void RingField::InitGraphics(Graphics::Renderer *r, int quality, bool enhanced)
 	for (int i = 0; i < NUM_VARIANTS; ++i) {
 		m_rockMeshes[i] = BuildRockMesh(r, m_baseSeed + uint32_t(i) * 7919U + 131U, subdivs, useNormalMap);
 	}
-	m_rockMaterial.reset(r->CreateMaterial("multi", rockDesc, rockRsd, m_rockMeshes[0]->GetFormat()));
+	Graphics::VertexFormatDesc vtxFormat = m_rockMeshes[0]->GetFormat();
+	size_t ai = vtxFormat.GetNumAttribs();
+	vtxFormat.attribs[ai++] = { Graphics::ATTRIB_FORMAT_MAT4x4, 6, 1, uint16_t(offsetof(RockInstanceGPU, modelView)) };
+	vtxFormat.attribs[ai++] = { Graphics::ATTRIB_FORMAT_FLOAT4, 10, 1, uint16_t(offsetof(RockInstanceGPU, diffuse)) };
+	vtxFormat.attribs[ai++] = { Graphics::ATTRIB_FORMAT_FLOAT4, 11, 1, uint16_t(offsetof(RockInstanceGPU, emissive)) };
+	vtxFormat.bindings[1] = { sizeof(RockInstanceGPU), true, Graphics::ATTRIB_RATE_INSTANCE };
+
+	m_rockMaterial.reset(r->CreateMaterial("rock_instanced", rockDesc, rockRsd, vtxFormat));
 	m_rockMaterial->diffuse = Color::WHITE;
 	m_rockMaterial->specular = Color(36, 36, 40, 255);
 	m_rockMaterial->shininess = 10.0f;
+	m_rockMaterial->SetPushConstant("rockLightScale"_hash, Color4f(1.0f, 1.0f, 1.0f, 1.0f));
 	if (useNormalMap) {
 		m_rockMaterial->SetTexture("diffuse"_hash,
 			Graphics::TextureBuilder::Model("textures/rock_diffuse.png").GetOrCreateTexture(r, "model"));
@@ -297,17 +313,17 @@ std::unique_ptr<Graphics::MeshObject> RingField::BuildRockMesh(Graphics::Rendere
 		return vector2f(v.x, v.y) * UV_SCALE;
 	};
 
-	for (const IcoTri &t : tris) {
-		const vector3f &v0 = verts[t.a];
-		const vector3f &v1 = verts[t.b];
-		const vector3f &v2 = verts[t.c];
-		const vector3f faceNormal = (v1 - v0).Cross(v2 - v0).NormalizedSafe();
+	std::vector<uint16_t> indices;
+	indices.reserve(tris.size() * 3);
 
-		const Color c0(vertShade[t.a], vertShade[t.a], vertShade[t.a], 255);
-		const Color c1(vertShade[t.b], vertShade[t.b], vertShade[t.b], 255);
-		const Color c2(vertShade[t.c], vertShade[t.c], vertShade[t.c], 255);
+	if (withTangents) {
+		std::vector<int> vertMap(verts.size() * 3, -1);
+		for (const IcoTri &t : tris) {
+			const vector3f &v0 = verts[t.a];
+			const vector3f &v1 = verts[t.b];
+			const vector3f &v2 = verts[t.c];
+			const vector3f faceNormal = (v1 - v0).Cross(v2 - v0).NormalizedSafe();
 
-		if (withTangents) {
 			const float ax = std::abs(faceNormal.x), ay = std::abs(faceNormal.y), az = std::abs(faceNormal.z);
 			int domAxis = 2;
 			vector3f tAxis(1.0f, 0.0f, 0.0f);
@@ -318,24 +334,40 @@ std::unique_ptr<Graphics::MeshObject> RingField::BuildRockMesh(Graphics::Rendere
 				domAxis = 1;
 				tAxis = vector3f(1.0f, 0.0f, 0.0f);
 			}
-			vector3f tang0 = (tAxis - smoothNorms[t.a] * smoothNorms[t.a].Dot(tAxis)).NormalizedSafe();
-			vector3f tang1 = (tAxis - smoothNorms[t.b] * smoothNorms[t.b].Dot(tAxis)).NormalizedSafe();
-			vector3f tang2 = (tAxis - smoothNorms[t.c] * smoothNorms[t.c].Dot(tAxis)).NormalizedSafe();
-			if (tang0.LengthSqr() < 0.01f) tang0 = vector3f(0.0f, 1.0f, 0.0f);
-			if (tang1.LengthSqr() < 0.01f) tang1 = vector3f(0.0f, 1.0f, 0.0f);
-			if (tang2.LengthSqr() < 0.01f) tang2 = vector3f(0.0f, 1.0f, 0.0f);
 
-			va.Add(v0, c0, smoothNorms[t.a], projectTriUV(v0, domAxis), tang0);
-			va.Add(v1, c1, smoothNorms[t.b], projectTriUV(v1, domAxis), tang1);
-			va.Add(v2, c2, smoothNorms[t.c], projectTriUV(v2, domAxis), tang2);
-		} else {
-			va.Add(v0, c0, smoothNorms[t.a]);
-			va.Add(v1, c1, smoothNorms[t.b]);
-			va.Add(v2, c2, smoothNorms[t.c]);
+			const int triVerts[3] = { t.a, t.b, t.c };
+			for (int k = 0; k < 3; ++k) {
+				const int vIdx = triVerts[k];
+				int &mapped = vertMap[size_t(vIdx) * 3 + size_t(domAxis)];
+				if (mapped < 0) {
+					vector3f tang = (tAxis - smoothNorms[vIdx] * smoothNorms[vIdx].Dot(tAxis)).NormalizedSafe();
+					if (tang.LengthSqr() < 0.01f)
+						tang = vector3f(0.0f, 1.0f, 0.0f);
+					mapped = int(va.GetNumVerts());
+					const Color c(vertShade[vIdx], vertShade[vIdx], vertShade[vIdx], 255);
+					va.Add(verts[vIdx], c, smoothNorms[vIdx], projectTriUV(verts[vIdx], domAxis), tang);
+				}
+				indices.push_back(uint16_t(mapped));
+			}
+		}
+	} else {
+		for (size_t i = 0; i < verts.size(); ++i) {
+			const Color c(vertShade[i], vertShade[i], vertShade[i], 255);
+			va.Add(verts[i], c, smoothNorms[i]);
+		}
+		for (const IcoTri &t : tris) {
+			indices.push_back(uint16_t(t.a));
+			indices.push_back(uint16_t(t.b));
+			indices.push_back(uint16_t(t.c));
 		}
 	}
 
-	return std::unique_ptr<Graphics::MeshObject>(r->CreateMeshObjectFromArray(&va));
+	Graphics::IndexBuffer *idxBuf = r->CreateIndexBuffer(Uint32(indices.size()), Graphics::BUFFER_USAGE_STATIC, Graphics::INDEX_BUFFER_16BIT);
+	Uint16 *idxPtr = idxBuf->Map16(Graphics::BUFFER_MAP_WRITE);
+	std::copy(indices.begin(), indices.end(), idxPtr);
+	idxBuf->Unmap();
+
+	return std::unique_ptr<Graphics::MeshObject>(r->CreateMeshObjectFromArray(&va, idxBuf));
 }
 
 Color RingField::ComputeRockColor(const RingBand &band, uint64_t seed) const
@@ -480,6 +512,29 @@ void RingField::GatherCellRocks(int64_t gx, int64_t gz, double cellSize, RockTie
 		inst.tier = tier;
 		out.push_back(inst);
 	}
+}
+
+const std::vector<RingField::RockInstance> &RingField::GetOrBuildCell(int64_t gx, int64_t gz, double cellSize, RockTier tier) const
+{
+	const CellKey key{ gx, gz, static_cast<uint8_t>(tier) };
+	auto it = m_cellCache.find(key);
+	if (it != m_cellCache.end()) {
+		m_lruList.splice(m_lruList.begin(), m_lruList, it->second.lruIt);
+		return it->second.rocks;
+	}
+
+	if (m_cellCache.size() >= MAX_CACHED_CELLS) {
+		const CellKey &evictKey = m_lruList.back();
+		m_cellCache.erase(evictKey);
+		m_lruList.pop_back();
+	}
+
+	std::vector<RockInstance> rocks;
+	GatherCellRocks(gx, gz, cellSize, tier, rocks);
+
+	m_lruList.push_front(key);
+	CachedCell entry{ std::move(rocks), m_lruList.begin() };
+	return m_cellCache.emplace(key, std::move(entry)).first->second.rocks;
 }
 
 void RingField::TimeStepUpdate(float timeStep)
@@ -686,8 +741,7 @@ void RingField::Render(Graphics::Renderer *r, const matrix4x4d &viewTran, const 
 	std::vector<RockInstance> visibleRocks;
 	visibleRocks.reserve(maxVisible);
 
-	std::vector<RockInstance> cellRocks;
-	cellRocks.reserve(16);
+	const double invPlanetRadius = 1.0 / m_planetRadius;
 
 	auto gatherTier = [&](RockTier tier, double cellSize, int range,
 						  double innerInStart, double innerInEnd,
@@ -700,6 +754,11 @@ void RingField::Render(Graphics::Renderer *r, const matrix4x4d &viewTran, const 
 		const int64_t cz = FloorCell(camInRing.z, cellSize);
 		const double cellBoundR = 0.65 * cellSize + maxHalfThick + maxRockScale * 3.0;
 		const double maxCellHorizDist = outerMax + 0.65 * cellSize;
+		const double maxCellHorizDistSq = maxCellHorizDist * maxCellHorizDist;
+		const double outerMaxSq = outerMax * outerMax;
+		const double innerInStartSq = innerInStart * innerInStart;
+		const double innerInEndSq = innerInEnd * innerInEnd;
+		const double outerFullEndSq = outerFullEnd * outerFullEnd;
 		int added = 0;
 
 		for (const CellOffset &off : GetSortedCellOffsets(range)) {
@@ -708,53 +767,63 @@ void RingField::Render(Graphics::Renderer *r, const matrix4x4d &viewTran, const 
 			const double cellCenterX = (double(gx) + 0.5) * cellSize;
 			const double cellCenterZ = (double(gz) + 0.5) * cellSize;
 
-			if (std::hypot(cellCenterX - camInRing.x, cellCenterZ - camInRing.z) > maxCellHorizDist)
+			const double cdx = cellCenterX - camInRing.x;
+			const double cdz = cellCenterZ - camInRing.z;
+			if (cdx * cdx + cdz * cdz > maxCellHorizDistSq)
 				continue;
 
 			// Conservative cell-level frustum cull before generating rock instances
 			const vector3d cellCenterRing(cellCenterX, 0.0, cellCenterZ);
-			const vector3d cellView = viewTran * ((spinMatrix * cellCenterRing) / m_planetRadius);
+			const vector3d cellView = viewTran * ((spinMatrix * cellCenterRing) * invPlanetRadius);
 			if (cellView.z - cellBoundR > 0.0)
 				continue;
 			const double cellFwd = std::max(1.0, -cellView.z + cellBoundR);
-			if (std::hypot(cellView.x, cellView.y) - cellBoundR > cellFwd * 1.65)
+			const double cellThresh = cellFwd * 1.65 + cellBoundR;
+			if (cellView.x * cellView.x + cellView.y * cellView.y > cellThresh * cellThresh)
 				continue;
 
-			cellRocks.clear();
-			GatherCellRocks(gx, gz, cellSize, tier, cellRocks);
-			for (RockInstance &inst : cellRocks) {
-				auto depIt = m_depletedYield.find(inst.id);
+			const std::vector<RockInstance> &cellRocks = GetOrBuildCell(gx, gz, cellSize, tier);
+			for (const RockInstance &baseInst : cellRocks) {
+				auto depIt = m_depletedYield.find(baseInst.id);
 				if (depIt != m_depletedYield.end() && depIt->second <= 0.0f)
 					continue;
 
-				const double d = (inst.pos - camInRing).Length();
-				if (d > outerMax)
+				const double dSq = (baseInst.pos - camInRing).LengthSqr();
+				if (dSq > outerMaxSq)
 					continue;
-				if (innerInEnd > 0.0 && d < innerInStart)
+				if (innerInEnd > 0.0 && dSq < innerInStartSq)
 					continue;
 
 				double fade = 1.0;
-				if (innerInEnd > innerInStart && d < innerInEnd)
-					fade *= Smoothstep(innerInStart, innerInEnd, d);
-				if (d > outerFullEnd)
-					fade *= (1.0 - Smoothstep(outerFullEnd, outerMax, d));
+				const bool needInnerFade = (innerInEnd > innerInStart && dSq < innerInEndSq);
+				const bool needOuterFade = (dSq > outerFullEndSq);
+				if (needInnerFade || needOuterFade) {
+					const double d = std::sqrt(dSq);
+					if (needInnerFade)
+						fade *= Smoothstep(innerInStart, innerInEnd, d);
+					if (needOuterFade)
+						fade *= (1.0 - Smoothstep(outerFullEnd, outerMax, d));
+				}
 
 				const double keepProb = fade * fade * densityBoost;
-				const double uKeep = double((inst.id >> 16) & 0xFFFFU) * (1.0 / 65536.0);
+				const double uKeep = double((baseInst.id >> 16) & 0xFFFFU) * (1.0 / 65536.0);
 				if (uKeep >= keepProb)
 					continue;
 
-				inst.scale *= fade;
-				if (inst.scale <= 0.05)
+				const double scaledSize = baseInst.scale * fade;
+				if (scaledSize <= 0.05)
 					continue;
 
-				const vector3d posView = viewTran * ((spinMatrix * inst.pos) / m_planetRadius);
-				if (posView.z > inst.scale * 2.5)
+				const vector3d posView = viewTran * ((spinMatrix * baseInst.pos) * invPlanetRadius);
+				if (posView.z > scaledSize * 2.5)
 					continue;
 				const double forwardDist = std::max(1.0, -posView.z);
-				if (std::hypot(posView.x, posView.y) > forwardDist * 1.65 + inst.scale * 3.0)
+				const double frustumThresh = forwardDist * 1.65 + scaledSize * 3.0;
+				if (posView.x * posView.x + posView.y * posView.y > frustumThresh * frustumThresh)
 					continue;
 
+				RockInstance inst = baseInst;
+				inst.scale = scaledSize;
 				inst.posView = posView;
 				visibleRocks.push_back(inst);
 				++added;
@@ -770,34 +839,74 @@ void RingField::Render(Graphics::Renderer *r, const matrix4x4d &viewTran, const 
 	gatherTier(RockTier::COARSE, CELL_COARSE, 19, 0.0, 0.0, 5500.0, 16000.0, 68.0, 1.0, budgetCoarse);
 	gatherTier(RockTier::FAR, CELL_FAR, 16, 9000.0, 13500.0, 14000.0, 33000.0, 90.0, 1.0, budgetFar);
 
-	// Draw boulders in camera view space using double-precision offsets first to avoid jitter.
+	// Bucket boulders by mesh variant and issue at most NUM_VARIANTS instanced draw calls.
+	for (auto &b : m_variantBuckets)
+		b.clear();
+
+	const matrix3x3d viewSpinInvR = viewTran.GetOrient() * spinMatrix * matrix3x3d::Scale(invPlanetRadius);
 	for (const RockInstance &inst : visibleRocks) {
 		const vector3d &posView = inst.posView;
 
 		const double angle = inst.phase + inst.spinRate * m_elapsedTime;
 		const matrix3x3d rockRot = matrix3x3d::Rotate(angle, inst.spinAxis);
+		const matrix3x3d m3 = viewSpinInvR * rockRot * matrix3x3d::Scale(inst.scale);
 
-		const vector3d bx = viewTran.ApplyRotationOnly(spinMatrix * (rockRot * vector3d(inst.scale, 0.0, 0.0))) / m_planetRadius;
-		const vector3d by = viewTran.ApplyRotationOnly(spinMatrix * (rockRot * vector3d(0.0, inst.scale, 0.0))) / m_planetRadius;
-		const vector3d bz = viewTran.ApplyRotationOnly(spinMatrix * (rockRot * vector3d(0.0, 0.0, inst.scale))) / m_planetRadius;
+		RockInstanceGPU gpu;
+		gpu.modelView = matrix4x4f::Identity;
+		gpu.modelView[0] = float(m3[0]);
+		gpu.modelView[1] = float(m3[3]);
+		gpu.modelView[2] = float(m3[6]);
+		gpu.modelView[4] = float(m3[1]);
+		gpu.modelView[5] = float(m3[4]);
+		gpu.modelView[6] = float(m3[7]);
+		gpu.modelView[8] = float(m3[2]);
+		gpu.modelView[9] = float(m3[5]);
+		gpu.modelView[10] = float(m3[8]);
+		gpu.modelView[12] = float(posView.x);
+		gpu.modelView[13] = float(posView.y);
+		gpu.modelView[14] = float(posView.z);
+		gpu.diffuse = inst.color.ToColor4f();
+		gpu.emissive = Color4f(0.0f, 0.0f, 0.0f, 1.0f);
 
-		matrix4x4f m = matrix4x4f::Identity;
-		m[0] = float(bx.x);
-		m[1] = float(bx.y);
-		m[2] = float(bx.z);
-		m[4] = float(by.x);
-		m[5] = float(by.y);
-		m[6] = float(by.z);
-		m[8] = float(bz.x);
-		m[9] = float(bz.y);
-		m[10] = float(bz.z);
-		m[12] = float(posView.x);
-		m[13] = float(posView.y);
-		m[14] = float(posView.z);
+		m_variantBuckets[inst.variant].push_back(gpu);
+	}
 
-		m_rockMaterial->diffuse = inst.color;
-		r->SetTransform(m);
-		r->DrawMesh(m_rockMeshes[inst.variant].get(), m_rockMaterial.get());
+	const uint32_t totalInstances = uint32_t(visibleRocks.size());
+	if (totalInstances > 0) {
+		Graphics::BufferBinding<Graphics::VertexBuffer> ib = r->CreateTempVertexBuffer(totalInstances, sizeof(RockInstanceGPU));
+		RockInstanceGPU *dst = ib.buffer->MapRange<RockInstanceGPU>(ib, Graphics::BUFFER_MAP_WRITE);
+		uint32_t offsets[NUM_VARIANTS] = {};
+		uint32_t counts[NUM_VARIANTS] = {};
+		uint32_t cursor = 0;
+
+		if (dst) {
+			for (int v = 0; v < NUM_VARIANTS; ++v) {
+				const auto &bucket = m_variantBuckets[v];
+				if (bucket.empty())
+					continue;
+				offsets[v] = cursor;
+				counts[v] = uint32_t(bucket.size());
+				std::copy(bucket.begin(), bucket.end(), dst + cursor);
+				cursor += counts[v];
+			}
+			ib.buffer->UnmapRange(false);
+		}
+
+		if (cursor > 0) {
+			r->SetTransform(matrix4x4f::Identity);
+			m_rockMaterial->SetPushConstant("rockLightScale"_hash, Color4f(1.0f, 1.0f, 1.0f, 1.0f));
+			for (int v = 0; v < NUM_VARIANTS; ++v) {
+				if (counts[v] == 0)
+					continue;
+				Graphics::BufferBinding<Graphics::VertexBuffer> slice{ ib.buffer, ib.offset + offsets[v], counts[v] };
+				const Graphics::BufferBinding<Graphics::VertexBuffer> vtxBindings[2] = {
+					{ m_rockMeshes[v]->GetVertexBuffer() },
+					slice
+				};
+				Graphics::IndexBuffer *idxBuf = m_rockMeshes[v]->GetIndexBuffer();
+				r->Draw({ vtxBindings, 2 }, idxBuf, m_rockMaterial.get(), idxBuf->GetIndexCount(), counts[v]);
+			}
+		}
 	}
 
 	// Pass 3: Soft translucent dust puffs around ship when flying inside the ring plane

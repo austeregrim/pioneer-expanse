@@ -78,10 +78,13 @@ public:
 	void Reset() override;
 
 	inline Sint32 GetMaxDepth() const { return m_maxDepth; }
+	bool IsPreloadActive() const { return m_preloadActive; }
+	const vector3d &GetPreloadCampos() const { return m_preloadCampos; }
 
 	void AddQuadSplitRequest(double, SQuadSplitRequest *, GeoPatch *);
 
 private:
+	void UpdatePreloadState();
 	void BuildFirstPatches();
 	void CalculateMaxPatchDepth();
 	inline vector3d GetColor(const vector3d &p, double height, const vector3d &norm) const
@@ -111,6 +114,9 @@ private:
 	bool m_hasTempCampos;
 	vector3d m_tempCampos;
 	Graphics::Frustum m_tempFrustum;
+	bool m_preloadActive;
+	vector3d m_preloadCampos;
+	vector3d m_preloadDir;
 
 	static RefCountedPtr<GeoPatchContext> s_patchContext;
 

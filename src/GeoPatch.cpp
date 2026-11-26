@@ -94,6 +94,18 @@ GeoPatch::GeoPatch(const RefCountedPtr<GeoPatchContext> &ctx_, GeoSphere *gs,
 		distMult = 5.0 / Clamp(m_depth, 1, 5);
 	}
 	m_splitLength = GEOPATCH_SUBDIVIDE_AT_CAMDIST / pow(2.0, m_depth) * distMult;
+	m_detailFreq = pow(2.0f, float(m_geosphere->GetMaxDepth()) - float(m_depth));
+
+	const double planetRad = m_geosphere->GetSystemBody()->GetRadius();
+	constexpr double kTriTilePeriod = 4096.0;
+	auto wrapMod = [](double v, double period) {
+		const double r = fmod(v, period);
+		return r < 0.0 ? r + period : r;
+	};
+	m_tileOffset = vector3f(
+		float(wrapMod(m_clipCentroid.x * planetRad, kTriTilePeriod)),
+		float(wrapMod(m_clipCentroid.y * planetRad, kTriTilePeriod)),
+		float(wrapMod(m_clipCentroid.z * planetRad, kTriTilePeriod)));
 
 #if USE_SUB_CENTROID_CLIPPING
 	for (size_t i = 0; i < NUM_HORIZON_POINTS; i++) {
@@ -338,23 +350,8 @@ void GeoPatch::RenderImmediate(Graphics::Renderer *renderer, const vector3d &cam
 		Pi::statSceneTris += (m_ctx->GetNumTris());
 		++Pi::statNumPatches;
 
-		// per-patch detail texture scaling value
-		const float fDetailFrequency = pow(2.0f, float(m_geosphere->GetMaxDepth()) - float(m_depth));
-
-		// Seamless world-locked tri-planar tile offset (exact modulo 4096m in double precision; 16x multiple of 256m ocean period)
-		const double planetRad = m_geosphere->GetSystemBody()->GetRadius();
-		constexpr double kTriTilePeriod = 4096.0;
-		auto wrapMod = [](double v, double period) {
-			double r = fmod(v, period);
-			return r < 0.0 ? r + period : r;
-		};
-		const vector3f tileOffset(
-			float(wrapMod(m_clipCentroid.x * planetRad, kTriTilePeriod)),
-			float(wrapMod(m_clipCentroid.y * planetRad, kTriTilePeriod)),
-			float(wrapMod(m_clipCentroid.z * planetRad, kTriTilePeriod)));
-
-		m_geosphere->GetSurfaceMaterial()->SetPushConstant("PatchDetailFrequency"_hash, fDetailFrequency);
-		m_geosphere->GetSurfaceMaterial()->SetPushConstant("PatchTileOffset"_hash, tileOffset);
+		m_geosphere->GetSurfaceMaterial()->SetPushConstant("PatchDetailFrequency"_hash, m_detailFreq);
+		m_geosphere->GetSurfaceMaterial()->SetPushConstant("PatchTileOffset"_hash, m_tileOffset);
 		renderer->DrawMesh(m_patchVBOData->m_patchMesh.get(), m_geosphere->GetSurfaceMaterial().Get());
 
 #if DEBUG_CENTROIDS
@@ -433,13 +430,50 @@ void GeoPatch::LODUpdate(const vector3d &campos, const Graphics::Frustum &frustu
 			}
 		}
 	} else if (canMerge) {
-		for (int i = 0; i < NUM_KIDS; i++) {
-			canMerge &= m_kids[i]->canBeMerged();
+		if (m_geosphere->IsPreloadActive() && m_depth > 0) {
+			const double preloadDist = (m_geosphere->GetPreloadCampos() - m_clipCentroid).Length();
+			if (preloadDist < m_splitLength)
+				canMerge = false;
 		}
 		if (canMerge) {
 			for (int i = 0; i < NUM_KIDS; i++) {
-				m_kids[i].reset();
+				canMerge &= m_kids[i]->canBeMerged();
 			}
+			if (canMerge) {
+				for (int i = 0; i < NUM_KIDS; i++) {
+					m_kids[i].reset();
+				}
+			}
+		}
+	}
+}
+
+void GeoPatch::PreloadLODUpdate(const vector3d &preloadCampos, const vector3d &approachDir, int &budgetRemaining)
+{
+	PROFILE_SCOPED()
+	if (m_hasJobRequest || budgetRemaining <= 0)
+		return;
+
+	double centroidDist = DBL_MAX;
+	if (m_depth > 0) {
+		if (m_clipCentroid.Normalized().Dot(approachDir) < -0.15)
+			return;
+		centroidDist = (preloadCampos - m_clipCentroid).Length();
+		const int maxPreloadDepth = std::min(std::min(GEOPATCH_MAX_DEPTH, m_geosphere->GetMaxDepth()), 10);
+		if (m_depth >= maxPreloadDepth || centroidDist >= m_splitLength)
+			return;
+	}
+
+	if (!m_kids[0]) {
+		m_hasJobRequest = true;
+		SQuadSplitRequest *ssrd = new SQuadSplitRequest(m_corners->m_v0, m_corners->m_v1, m_corners->m_v2, m_corners->m_v3, m_clipCentroid.Normalized(), m_depth,
+			m_geosphere->GetSystemBody()->GetPath(), m_PatchID, m_ctx->GetEdgeLen() - 2,
+			m_ctx->GetFrac(), m_geosphere->GetTerrain());
+		m_geosphere->AddQuadSplitRequest(centroidDist, ssrd, this);
+		--budgetRemaining;
+	} else {
+		for (int i = 0; i < NUM_KIDS && budgetRemaining > 0; i++) {
+			m_kids[i]->PreloadLODUpdate(preloadCampos, approachDir, budgetRemaining);
 		}
 	}
 }

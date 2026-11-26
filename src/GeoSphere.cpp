@@ -3,6 +3,8 @@
 
 #include "GeoSphere.h"
 
+#include "Body.h"
+#include "Frame.h"
 #include "Game.h"
 #include "GameConfig.h"
 #include "GeoPatch.h"
@@ -10,9 +12,12 @@
 #include "GeoPatchJobs.h"
 #include "ObjectViewerView.h"
 #include "Pi.h"
+#include "Player.h"
 #include "RefCounted.h"
+#include "Ship.h"
 #include "galaxy/AtmosphereParameters.h"
 #include "galaxy/StarSystem.h"
+#include "galaxy/SystemBody.h"
 #include "planet/WeatherSystem.h"
 #include "graphics/Drawables.h"
 #include "graphics/Frustum.h"
@@ -194,6 +199,7 @@ void GeoSphere::Reset()
 
 	m_visiblePatches.reserve(1024);
 
+	m_preloadActive = false;
 	m_initStage = eBuildFirstPatches;
 }
 
@@ -202,6 +208,9 @@ GeoSphere::GeoSphere(const SystemBody *body) :
 	m_hasTempCampos(false),
 	m_tempCampos(0.0),
 	m_tempFrustum(800, 600, 0.5, 1.0, 1000.0),
+	m_preloadActive(false),
+	m_preloadCampos(0.0),
+	m_preloadDir(0.0),
 	m_initStage(eBuildFirstPatches),
 	m_maxDepth(0)
 {
@@ -377,15 +386,78 @@ void GeoSphere::Update()
 		m_initStage = eDefaultUpdateState;
 	} break;
 	case eDefaultUpdateState:
-		if (m_hasTempCampos) {
+		UpdatePreloadState();
+		if (m_hasTempCampos || m_preloadActive) {
 			ProcessSplitResults();
-			for (int i = 0; i < NUM_PATCHES; i++) {
-				m_patches[i]->LODUpdate(m_tempCampos, m_tempFrustum);
+			if (m_hasTempCampos) {
+				for (int i = 0; i < NUM_PATCHES; i++) {
+					m_patches[i]->LODUpdate(m_tempCampos, m_tempFrustum);
+				}
+			}
+			if (m_preloadActive) {
+				int preloadBudget = 8;
+				for (int i = 0; i < NUM_PATCHES && preloadBudget > 0; i++) {
+					m_patches[i]->PreloadLODUpdate(m_preloadCampos, m_preloadDir, preloadBudget);
+				}
 			}
 			ProcessQuadSplitRequests();
 		}
 		break;
 	}
+}
+
+void GeoSphere::UpdatePreloadState()
+{
+	m_preloadActive = false;
+
+	// Only preload during active 1x real-time flight (never while paused, docked, or time-accelerated)
+	if (!Pi::game || Pi::game->IsPaused() || Pi::game->GetTimeAccel() != Game::TIMEACCEL_1X)
+		return;
+	if (!Pi::player || Pi::player->IsDead() || Pi::player->GetFlightState() != Ship::FLYING)
+		return;
+	if (!m_sbody || m_sbody->GetRadius() <= 1.0)
+		return;
+
+	Body *targetBody = nullptr;
+	if (Body *nav = Pi::player->GetNavTarget()) {
+		if (nav->GetSystemBody() == m_sbody)
+			targetBody = nav;
+	}
+	if (!targetBody) {
+		Frame *pf = Frame::GetFrame(Pi::player->GetFrame());
+		if (pf && pf->GetBody() && pf->GetBody()->GetSystemBody() == m_sbody)
+			targetBody = pf->GetBody();
+	}
+	if (!targetBody)
+		return;
+
+	const Frame *tf = Frame::GetFrame(targetBody->GetFrame());
+	const FrameId rotFrame = tf ? tf->GetRotFrame() : targetBody->GetFrame();
+	const double planetRad = m_sbody->GetRadius();
+
+	const vector3d shipPosRot = Pi::player->GetPositionRelTo(rotFrame);
+	const vector3d shipVelRot = Pi::player->GetVelocityRelTo(rotFrame);
+	const double shipDistM = shipPosRot.Length();
+	const double distUnit = shipDistM / planetRad;
+	if (distUnit <= 1.001 || distUnit >= 25.0)
+		return;
+
+	const vector3d subShipDir = shipPosRot / shipDistM;
+	const double radialSpeed = shipVelRot.Dot(subShipDir);
+	if (distUnit >= 15.0 && radialSpeed > -50.0)
+		return;
+
+	constexpr double kLookaheadSec = 6.0;
+	const vector3d lookaheadPosRot = shipPosRot + shipVelRot * kLookaheadSec;
+	const double lookaheadDistUnit = lookaheadPosRot.Length() / planetRad;
+	const vector3d preloadDir = (lookaheadPosRot.Dot(subShipDir) > 0.0 && lookaheadDistUnit > 0.1)
+		? lookaheadPosRot.Normalized()
+		: subShipDir;
+	const double targetDistUnit = Clamp(std::min(lookaheadDistUnit, distUnit * 0.55), 1.005, distUnit);
+
+	m_preloadCampos = preloadDir * targetDistUnit;
+	m_preloadDir = preloadDir;
+	m_preloadActive = true;
 }
 
 void GeoSphere::AddQuadSplitRequest(double dist, SQuadSplitRequest *pReq, GeoPatch *pPatch)
