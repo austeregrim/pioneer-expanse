@@ -6,6 +6,7 @@
 #include "Body.h"
 #include "Frame.h"
 #include "Game.h"
+#include "GameConfig.h"
 #include "MathUtil.h"
 #include "Pi.h"
 #include "Planet.h"
@@ -18,6 +19,7 @@
 #include "graphics/Material.h"
 #include "graphics/RenderState.h"
 #include "graphics/Renderer.h"
+#include "graphics/TextureBuilder.h"
 #include "graphics/Types.h"
 #include "graphics/VertexArray.h"
 #include "perlin.h"
@@ -128,23 +130,38 @@ SurfaceScatter::SurfaceScatter(Planet *planet) :
 
 SurfaceScatter::~SurfaceScatter() = default;
 
-void SurfaceScatter::InitGraphics(Graphics::Renderer *r)
+void SurfaceScatter::InitGraphics(Graphics::Renderer *r, int quality, bool enhanced)
 {
+	const int subdivs = (quality <= 1) ? 0 : (quality >= 4 ? 2 : 1);
+	const bool useNormalMap = (quality >= 2) && enhanced;
+
 	Graphics::MaterialDescriptor rockDesc;
 	rockDesc.lighting = true;
 	rockDesc.vertexColors = true;
+	if (useNormalMap) {
+		rockDesc.textures = 1;
+		rockDesc.normalMap = true;
+	}
 
 	Graphics::RenderStateDesc rockRsd;
 	for (int i = 0; i < NUM_VARIANTS; ++i) {
-		m_rockMeshes[i] = BuildRockMesh(r, m_baseSeed + uint32_t(i) * 4999U + 271U, i);
+		m_rockMeshes[i] = BuildRockMesh(r, m_baseSeed + uint32_t(i) * 4999U + 271U, i, subdivs, useNormalMap);
 	}
 	m_rockMaterial.reset(r->CreateMaterial("multi", rockDesc, rockRsd, m_rockMeshes[0]->GetFormat()));
 	m_rockMaterial->diffuse = Color::WHITE;
-	m_rockMaterial->specular = Color(42, 40, 38, 255);
-	m_rockMaterial->shininess = 10.0f;
+	m_rockMaterial->specular = Color(18, 17, 16, 255);
+	m_rockMaterial->shininess = 5.0f;
+	if (useNormalMap) {
+		m_rockMaterial->SetTexture("diffuse"_hash,
+			Graphics::TextureBuilder::Model("textures/rock_diffuse.png").GetOrCreateTexture(r, "model"));
+		m_rockMaterial->SetTexture("normal"_hash,
+			Graphics::TextureBuilder::Normal("textures/rock_normal.png").GetOrCreateTexture(r, "model"));
+	}
+	m_builtQuality = quality;
+	m_builtEnhanced = enhanced;
 }
 
-std::unique_ptr<Graphics::MeshObject> SurfaceScatter::BuildRockMesh(Graphics::Renderer *r, uint32_t seed, int variant) const
+std::unique_ptr<Graphics::MeshObject> SurfaceScatter::BuildRockMesh(Graphics::Renderer *r, uint32_t seed, int variant, int subdivs, bool withTangents) const
 {
 	Random rng(seed);
 	const float phi = (1.0f + std::sqrt(5.0f)) * 0.5f;
@@ -179,8 +196,8 @@ std::unique_ptr<Graphics::MeshObject> SurfaceScatter::BuildRockMesh(Graphics::Re
 		return idx;
 	};
 
-	// One subdivision yields 80 crisp faceted mineral faces
-	{
+	// Subdivide according to quality tier (0=20 faces, 1=80 faces, 2=320 faces)
+	for (int s = 0; s < subdivs; ++s) {
 		std::unordered_map<uint64_t, int> cache;
 		std::vector<IcoTri> nextTris;
 		nextTris.reserve(tris.size() * 4);
@@ -219,20 +236,64 @@ std::unique_ptr<Graphics::MeshObject> SurfaceScatter::BuildRockMesh(Graphics::Re
 		vertShade[i] = uint8_t(ao);
 	}
 
-	Graphics::VertexArray va(Graphics::ATTRIB_POSITION | Graphics::ATTRIB_NORMAL | Graphics::ATTRIB_DIFFUSE);
+	std::vector<vector3f> smoothNorms(verts.size(), vector3f(0.0f));
+	for (const IcoTri &t : tris) {
+		const vector3f faceN = (verts[t.b] - verts[t.a]).Cross(verts[t.c] - verts[t.a]);
+		smoothNorms[t.a] += faceN;
+		smoothNorms[t.b] += faceN;
+		smoothNorms[t.c] += faceN;
+	}
+	for (vector3f &n : smoothNorms)
+		n = n.NormalizedSafe();
+
+	const Graphics::AttributeSet attribs = withTangents
+		? (Graphics::ATTRIB_POSITION | Graphics::ATTRIB_NORMAL | Graphics::ATTRIB_DIFFUSE | Graphics::ATTRIB_UV0 | Graphics::ATTRIB_TANGENT)
+		: (Graphics::ATTRIB_POSITION | Graphics::ATTRIB_NORMAL | Graphics::ATTRIB_DIFFUSE);
+	Graphics::VertexArray va(attribs);
+
+	auto projectTriUV = [](const vector3f &v, int domAxis) -> vector2f {
+		constexpr float UV_SCALE = 0.55f;
+		if (domAxis == 0)
+			return vector2f(v.z, v.y) * UV_SCALE;
+		if (domAxis == 1)
+			return vector2f(v.x, v.z) * UV_SCALE;
+		return vector2f(v.x, v.y) * UV_SCALE;
+	};
+
 	for (const IcoTri &t : tris) {
 		const vector3f &v0 = verts[t.a];
 		const vector3f &v1 = verts[t.b];
 		const vector3f &v2 = verts[t.c];
-		const vector3f normal = (v1 - v0).Cross(v2 - v0).NormalizedSafe();
+		const vector3f faceNormal = (v1 - v0).Cross(v2 - v0).NormalizedSafe();
 
 		const Color c0(vertShade[t.a], vertShade[t.a], vertShade[t.a], 255);
 		const Color c1(vertShade[t.b], vertShade[t.b], vertShade[t.b], 255);
 		const Color c2(vertShade[t.c], vertShade[t.c], vertShade[t.c], 255);
 
-		va.Add(v0, c0, normal);
-		va.Add(v1, c1, normal);
-		va.Add(v2, c2, normal);
+		if (withTangents) {
+			const float ax = std::abs(faceNormal.x), ay = std::abs(faceNormal.y), az = std::abs(faceNormal.z);
+			int domAxis = 2;
+			vector3f tAxis(1.0f, 0.0f, 0.0f);
+			if (ax >= ay && ax >= az) {
+				domAxis = 0;
+				tAxis = vector3f(0.0f, 0.0f, 1.0f);
+			} else if (ay >= ax && ay >= az) {
+				domAxis = 1;
+				tAxis = vector3f(1.0f, 0.0f, 0.0f);
+			}
+			auto orthoTang = [&](const vector3f &vn) -> vector3f {
+				vector3f tang = (tAxis - vn * vn.Dot(tAxis)).NormalizedSafe();
+				return (tang.LengthSqr() < 0.01f) ? vector3f(0.0f, 1.0f, 0.0f) : tang;
+			};
+
+			va.Add(v0, c0, smoothNorms[t.a], projectTriUV(v0, domAxis), orthoTang(smoothNorms[t.a]));
+			va.Add(v1, c1, smoothNorms[t.b], projectTriUV(v1, domAxis), orthoTang(smoothNorms[t.b]));
+			va.Add(v2, c2, smoothNorms[t.c], projectTriUV(v2, domAxis), orthoTang(smoothNorms[t.c]));
+		} else {
+			va.Add(v0, c0, smoothNorms[t.a]);
+			va.Add(v1, c1, smoothNorms[t.b]);
+			va.Add(v2, c2, smoothNorms[t.c]);
+		}
 	}
 
 	return std::unique_ptr<Graphics::MeshObject>(r->CreateMeshObjectFromArray(&va));
@@ -268,7 +329,7 @@ const std::vector<SurfaceScatter::RockInstance> &SurfaceScatter::GetOrBuildCell(
 	const double cellSize = (tier == 0) ? CELL_LARGE : CELL_SMALL;
 	uint64_t state = HashCell(face, tier, gx, gz, m_baseSeed);
 
-	const int maxAttempts = (tier == 0) ? 5 : 6;
+	const int maxAttempts = (tier == 0) ? 7 : 8;
 	rocks.reserve(size_t(maxAttempts));
 
 	for (int i = 0; i < maxAttempts; ++i) {
@@ -347,28 +408,38 @@ const std::vector<SurfaceScatter::RockInstance> &SurfaceScatter::GetOrBuildCell(
 		const matrix3x3d basis = matrix3x3d::FromVectors(bX0, upDir, bZ0);
 		inst.orient = basis * localRot;
 
-		// Biome mineral tinting
-		const double toneShift = 0.80 + 0.38 * NextRand01(state);
-		double rC = double(m_dustColor.r) * 0.82 * toneShift;
-		double gC = double(m_dustColor.g) * 0.82 * toneShift;
-		double bC = double(m_dustColor.b) * 0.82 * toneShift;
+		// Biome mineral tinting (sample local terrain biome color + neutral stone grey-tan)
+		const double toneShift = 0.84 + 0.32 * NextRand01(state);
+		const double heightNorm = std::max(0.0, (h0 - m_planetRadius) * m_invPlanetRadius);
+		const vector3d groundCol = m_planet->GetTerrainColor(unitDir, heightNorm, surfNormal);
+		const double gR = Clamp(groundCol.x, 0.05, 1.0) * 255.0;
+		const double gG = Clamp(groundCol.y, 0.05, 1.0) * 255.0;
+		const double gB = Clamp(groundCol.z, 0.05, 1.0) * 255.0;
+
+		const double stoneR = 158.0;
+		const double stoneG = 153.0;
+		const double stoneB = 145.0;
+
+		double rC = MathUtil::mix(stoneR, gR, 0.45) * toneShift;
+		double gC = MathUtil::mix(stoneG, gG, 0.45) * toneShift;
+		double bC = MathUtil::mix(stoneB, gB, 0.45) * toneShift;
 
 		if (m_icyness > 0.35) {
 			const double iceMix = (m_icyness - 0.35) / 0.65;
-			rC = MathUtil::mix(rC, 175.0 * toneShift, iceMix * 0.45);
-			gC = MathUtil::mix(gC, 192.0 * toneShift, iceMix * 0.45);
-			bC = MathUtil::mix(bC, 212.0 * toneShift, iceMix * 0.45);
+			rC = MathUtil::mix(rC, 185.0 * toneShift, iceMix * 0.45);
+			gC = MathUtil::mix(gC, 200.0 * toneShift, iceMix * 0.45);
+			bC = MathUtil::mix(bC, 218.0 * toneShift, iceMix * 0.45);
 		} else if (m_volcanicity > 0.65) {
 			const double basaltMix = (m_volcanicity - 0.65) / 0.35;
-			rC = MathUtil::mix(rC, 68.0 * toneShift, basaltMix * 0.55);
-			gC = MathUtil::mix(gC, 62.0 * toneShift, basaltMix * 0.55);
-			bC = MathUtil::mix(bC, 60.0 * toneShift, basaltMix * 0.55);
+			rC = MathUtil::mix(rC, 82.0 * toneShift, basaltMix * 0.55);
+			gC = MathUtil::mix(gC, 76.0 * toneShift, basaltMix * 0.55);
+			bC = MathUtil::mix(bC, 74.0 * toneShift, basaltMix * 0.55);
 		}
 
 		inst.color = Color(
-			uint8_t(Clamp(rC, 25.0, 235.0)),
-			uint8_t(Clamp(gC, 25.0, 235.0)),
-			uint8_t(Clamp(bC, 25.0, 235.0)),
+			uint8_t(Clamp(rC, 55.0, 235.0)),
+			uint8_t(Clamp(gC, 55.0, 235.0)),
+			uint8_t(Clamp(bC, 55.0, 235.0)),
 			255);
 
 		rocks.push_back(inst);
@@ -383,6 +454,21 @@ void SurfaceScatter::Render(Graphics::Renderer *r, const matrix4x4d &viewTran, c
 	if (!m_planet || !r)
 		return;
 
+	const int quality = Pi::config ? Clamp(Pi::config->Int("SurfaceScatterQuality", 3), 0, 4) : 3;
+	if (quality <= 0)
+		return;
+	const int amount = Pi::config ? Clamp(Pi::config->Int("SurfaceScatterAmount", 2), 0, 4) : 2;
+	const bool enhanced = r->IsEnhancedGraphicsEnabled();
+
+	double distMult = 1.0;
+	switch (quality) {
+	case 1: distMult = 0.60; break;
+	case 2: distMult = 0.85; break;
+	case 4: distMult = 1.35; break;
+	case 3:
+	default: distMult = 1.00; break;
+	}
+
 	// -camPos * m_planetRadius is camera position in planet rotating frame (meters)
 	const vector3d camRotM = (-camPos) * m_planetRadius;
 	const double camLen = camRotM.Length();
@@ -392,11 +478,11 @@ void SurfaceScatter::Render(Graphics::Renderer *r, const matrix4x4d &viewTran, c
 	const vector3d camUnit = camRotM / camLen;
 	const double camTerrainRad = m_planet->GetTerrainHeight(camUnit);
 	const double agl = camLen - camTerrainRad;
-	if (agl > 1150.0)
+	if (agl > 1150.0 * distMult)
 		return;
 
-	if (!m_rockMaterial)
-		InitGraphics(r);
+	if (!m_rockMaterial || m_builtQuality != quality || m_builtEnhanced != enhanced)
+		InitGraphics(r, quality, enhanced);
 
 	// Collect ground starport positions once per frame to exclude landing pads from rocks
 	std::vector<vector3d> portPositions;
@@ -424,7 +510,9 @@ void SurfaceScatter::Render(Graphics::Renderer *r, const matrix4x4d &viewTran, c
 	const double cloudAtten = weather.hasAtmosphere
 		? Clamp(1.0 - weather.lowerCloudCover * 0.62 - weather.stormIntensity * 0.22, 0.22, 1.0)
 		: 1.0;
-	const double ambientLit = Clamp(0.04 + 0.96 * dayFactor * cloudAtten, 0.04, 1.0);
+	const double cloudDiffuse = weather.hasAtmosphere
+		? Clamp(1.0 - weather.lowerCloudCover * 0.18 - weather.stormIntensity * 0.10, 0.72, 1.0)
+		: 1.0;
 
 	bool hasShipSpot = false;
 	bool fwdLightOn = false;
@@ -466,12 +554,42 @@ void SurfaceScatter::Render(Graphics::Renderer *r, const matrix4x4d &viewTran, c
 	const double camUM = su * m_planetRadius;
 	const double camVM = sv * m_planetRadius;
 
-	int rendered = 0;
-	const double aglFade = Clamp(1.0 - (agl - 650.0) / 500.0, 0.0, 1.0);
-	const double smallAglFade = Clamp(1.0 - (agl - 140.0) / 140.0, 0.0, 1.0);
+	int maxTotalRocks = 750;
+	int range0 = 6, budget0 = 420;
+	int range1 = 5, budget1 = 330;
+	double keep0 = 0.72, keep1 = 0.75;
+	switch (amount) {
+	case 0: // Low
+		maxTotalRocks = 160;
+		range0 = 4; budget0 = 160; keep0 = 0.35;
+		range1 = 0; budget1 = 0;   keep1 = 0.00;
+		break;
+	case 1: // Medium
+		maxTotalRocks = 420;
+		range0 = 5; budget0 = 260; keep0 = 0.55;
+		range1 = 4; budget1 = 160; keep1 = 0.45;
+		break;
+	case 3: // Very High
+		maxTotalRocks = 1050;
+		range0 = 7; budget0 = 580; keep0 = 0.88;
+		range1 = 6; budget1 = 470; keep1 = 0.88;
+		break;
+	case 4: // Extreme
+		maxTotalRocks = MAX_VISIBLE_ROCKS;
+		range0 = 8; budget0 = 780; keep0 = 1.00;
+		range1 = 7; budget1 = 620; keep1 = 1.00;
+		break;
+	case 2: // High (default)
+	default:
+		break;
+	}
 
-	auto renderTier = [&](uint8_t tier, double cellSize, int range, double tierFade, int budget) {
-		if (tierFade <= 0.01 || rendered >= MAX_VISIBLE_ROCKS || budget <= 0)
+	int rendered = 0;
+	const double aglFade = Clamp(1.0 - (agl - 650.0 * distMult) / (500.0 * distMult), 0.0, 1.0);
+	const double smallAglFade = Clamp(1.0 - (agl - 140.0 * distMult) / (140.0 * distMult), 0.0, 1.0);
+
+	auto renderTier = [&](uint8_t tier, double cellSize, int range, double tierFade, int budget, double keepProb) {
+		if (tierFade <= 0.01 || rendered >= maxTotalRocks || budget <= 0 || keepProb <= 0.0)
 			return;
 
 		const int64_t cx = FloorCell(camUM, cellSize);
@@ -483,7 +601,14 @@ void SurfaceScatter::Render(Graphics::Renderer *r, const matrix4x4d &viewTran, c
 			const int64_t gz = cz + off.dz;
 			const std::vector<RockInstance> &cellRocks = GetOrBuildCell(face, tier, gx, gz);
 
-			for (const RockInstance &inst : cellRocks) {
+			for (size_t idx = 0; idx < cellRocks.size(); ++idx) {
+				if (keepProb < 0.999) {
+					const uint64_t gateHash = SplitMix64(
+						uint64_t(gx) * 73856093ULL ^ uint64_t(gz) * 19349663ULL ^ (uint64_t(idx) << 8) ^ uint64_t(tier));
+					if (double(gateHash & 0xFFFFu) * (1.0 / 65535.0) > keepProb)
+						continue;
+				}
+				const RockInstance &inst = cellRocks[idx];
 				// Exclude rocks within 650m of ground starport centers
 				bool nearPort = false;
 				for (const vector3d &pPos : portPositions) {
@@ -497,7 +622,8 @@ void SurfaceScatter::Render(Graphics::Renderer *r, const matrix4x4d &viewTran, c
 
 				const vector3d relM = inst.posRotM - camRotM;
 				const double distSq = relM.LengthSqr();
-				if (distSq > inst.maxDist * inst.maxDist)
+				const double effMaxDist = inst.maxDist * distMult;
+				if (distSq > effMaxDist * effMaxDist)
 					continue;
 
 				const vector3d posView = viewTran.ApplyRotationOnly(relM) * m_invPlanetRadius;
@@ -509,7 +635,7 @@ void SurfaceScatter::Render(Graphics::Renderer *r, const matrix4x4d &viewTran, c
 					continue;
 
 				const double dist = std::sqrt(distSq);
-				const double fadeOut = 1.0 - Smoothstep(inst.maxDist * 0.68, inst.maxDist, dist);
+				const double fadeOut = 1.0 - Smoothstep(effMaxDist * 0.68, effMaxDist, dist);
 				const double s = inst.scale * fadeOut * tierFade;
 				if (s <= 0.04)
 					continue;
@@ -550,23 +676,29 @@ void SurfaceScatter::Render(Graphics::Renderer *r, const matrix4x4d &viewTran, c
 						}
 					}
 				}
-				const double litScale = Clamp(ambientLit + spotBoost, 0.04, 1.0);
+				const double diffScale = Clamp(cloudDiffuse + spotBoost * 0.55, 0.72, 1.0);
 				m_rockMaterial->diffuse = Color(
-					uint8_t(Clamp(double(inst.color.r) * litScale, 0.0, 255.0)),
-					uint8_t(Clamp(double(inst.color.g) * litScale, 0.0, 255.0)),
-					uint8_t(Clamp(double(inst.color.b) * litScale, 0.0, 255.0)),
+					uint8_t(Clamp(double(inst.color.r) * diffScale, 0.0, 255.0)),
+					uint8_t(Clamp(double(inst.color.g) * diffScale, 0.0, 255.0)),
+					uint8_t(Clamp(double(inst.color.b) * diffScale, 0.0, 255.0)),
+					255);
+				const double skyBounce = 0.12 * dayFactor * cloudAtten + spotBoost * 0.45;
+				m_rockMaterial->emissive = Color(
+					uint8_t(Clamp(double(inst.color.r) * skyBounce, 0.0, 255.0)),
+					uint8_t(Clamp(double(inst.color.g) * skyBounce, 0.0, 255.0)),
+					uint8_t(Clamp(double(inst.color.b) * skyBounce, 0.0, 255.0)),
 					255);
 				r->SetTransform(m);
 				r->DrawMesh(m_rockMeshes[inst.variant].get(), m_rockMaterial.get());
 
 				++rendered;
 				++tierCount;
-				if (rendered >= MAX_VISIBLE_ROCKS || tierCount >= budget)
+				if (rendered >= maxTotalRocks || tierCount >= budget)
 					return;
 			}
 		}
 	};
 
-	renderTier(0, CELL_LARGE, 6, aglFade, 420);
-	renderTier(1, CELL_SMALL, 5, smallAglFade, 330);
+	renderTier(0, CELL_LARGE, range0, aglFade, budget0, keep0);
+	renderTier(1, CELL_SMALL, range1, smallAglFade, budget1, keep1);
 }

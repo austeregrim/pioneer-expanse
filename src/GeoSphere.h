@@ -121,6 +121,8 @@ private:
 	RefCountedPtr<Graphics::Texture> m_texLo;
 	RefCountedPtr<Graphics::Texture> m_texOceanSwell;
 	RefCountedPtr<Graphics::Texture> m_texOceanChop;
+	RefCountedPtr<Graphics::Texture> m_texTerrainRegolith;
+	RefCountedPtr<Graphics::Texture> m_texTerrainCliff;
 	RefCountedPtr<Graphics::Material> m_cloudMaterial;
 	RefCountedPtr<Graphics::Material> m_cloudInsideMaterial;
 

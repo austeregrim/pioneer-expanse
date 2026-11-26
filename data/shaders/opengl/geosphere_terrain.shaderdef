@@ -7,6 +7,8 @@ Texture sampler2D texture0
 Texture sampler2D texture1
 Texture sampler2D oceanTexA
 Texture sampler2D oceanTexB
+Texture sampler2D terrainRegolithTex
+Texture sampler2D terrainCliffTex
 
 Buffer LightData binding=0
 Buffer DrawData binding=1

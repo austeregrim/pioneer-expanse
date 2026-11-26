@@ -23,6 +23,7 @@
 #include "graphics/Material.h"
 #include "graphics/RenderState.h"
 #include "graphics/Renderer.h"
+#include "graphics/TextureBuilder.h"
 #include "graphics/Types.h"
 #include "graphics/VertexArray.h"
 #include "graphics/VertexBuffer.h"
@@ -156,33 +157,50 @@ FrameId RingField::GetOrbitalFrameId() const
 	return pf ? pf->GetNonRotFrame() : planetFrameId;
 }
 
-void RingField::InitGraphics(Graphics::Renderer *r)
+void RingField::InitGraphics(Graphics::Renderer *r, int quality, bool enhanced)
 {
+	const int subdivs = (quality >= 4) ? 2 : 1;
+	const bool useNormalMap = (quality >= 2) && enhanced;
+
 	Graphics::MaterialDescriptor rockDesc;
 	rockDesc.lighting = true;
 	rockDesc.vertexColors = true;
+	if (useNormalMap) {
+		rockDesc.textures = 1;
+		rockDesc.normalMap = true;
+	}
 
 	Graphics::RenderStateDesc rockRsd;
 	for (int i = 0; i < NUM_VARIANTS; ++i) {
-		m_rockMeshes[i] = BuildRockMesh(r, m_baseSeed + uint32_t(i) * 7919U + 131U);
+		m_rockMeshes[i] = BuildRockMesh(r, m_baseSeed + uint32_t(i) * 7919U + 131U, subdivs, useNormalMap);
 	}
 	m_rockMaterial.reset(r->CreateMaterial("multi", rockDesc, rockRsd, m_rockMeshes[0]->GetFormat()));
 	m_rockMaterial->diffuse = Color::WHITE;
-	m_rockMaterial->specular = Color(72, 72, 78, 255);
-	m_rockMaterial->shininess = 18.0f;
+	m_rockMaterial->specular = Color(36, 36, 40, 255);
+	m_rockMaterial->shininess = 10.0f;
+	if (useNormalMap) {
+		m_rockMaterial->SetTexture("diffuse"_hash,
+			Graphics::TextureBuilder::Model("textures/rock_diffuse.png").GetOrCreateTexture(r, "model"));
+		m_rockMaterial->SetTexture("normal"_hash,
+			Graphics::TextureBuilder::Normal("textures/rock_normal.png").GetOrCreateTexture(r, "model"));
+	}
+	m_builtQuality = quality;
+	m_builtEnhanced = enhanced;
 
-	Graphics::MaterialDescriptor dustDesc;
-	Graphics::RenderStateDesc dustRsd;
-	dustRsd.blendMode = Graphics::BLEND_ALPHA;
-	dustRsd.depthWrite = false;
-	dustRsd.cullMode = Graphics::CULL_NONE;
-	dustRsd.primitiveType = Graphics::TRIANGLES;
+	if (!m_dustMaterial) {
+		Graphics::MaterialDescriptor dustDesc;
+		Graphics::RenderStateDesc dustRsd;
+		dustRsd.blendMode = Graphics::BLEND_ALPHA;
+		dustRsd.depthWrite = false;
+		dustRsd.cullMode = Graphics::CULL_NONE;
+		dustRsd.primitiveType = Graphics::TRIANGLES;
 
-	auto dustVfmt = Graphics::VertexFormatDesc::FromAttribSet(Graphics::ATTRIB_POSITION | Graphics::ATTRIB_DIFFUSE);
-	m_dustMaterial.reset(r->CreateMaterial("vtxColor", dustDesc, dustRsd, dustVfmt));
+		auto dustVfmt = Graphics::VertexFormatDesc::FromAttribSet(Graphics::ATTRIB_POSITION | Graphics::ATTRIB_DIFFUSE);
+		m_dustMaterial.reset(r->CreateMaterial("vtxColor", dustDesc, dustRsd, dustVfmt));
+	}
 }
 
-std::unique_ptr<Graphics::MeshObject> RingField::BuildRockMesh(Graphics::Renderer *r, uint32_t seed) const
+std::unique_ptr<Graphics::MeshObject> RingField::BuildRockMesh(Graphics::Renderer *r, uint32_t seed, int subdivs, bool withTangents) const
 {
 	Random rng(seed);
 	const float phi = (1.0f + std::sqrt(5.0f)) * 0.5f;
@@ -203,7 +221,6 @@ std::unique_ptr<Graphics::MeshObject> RingField::BuildRockMesh(Graphics::Rendere
 		{ 4, 9, 5 }, { 2, 4, 11 }, { 6, 2, 10 }, { 8, 6, 7 }, { 9, 8, 1 }
 	};
 
-	// One subdivision yields 80 sharp faceted faces per boulder
 	auto midpoint = [&](int i1, int i2, std::unordered_map<uint64_t, int> &cache) -> int {
 		const uint32_t lo = std::min(i1, i2);
 		const uint32_t hi = std::max(i1, i2);
@@ -218,7 +235,7 @@ std::unique_ptr<Graphics::MeshObject> RingField::BuildRockMesh(Graphics::Rendere
 		return idx;
 	};
 
-	{
+	for (int s = 0; s < subdivs; ++s) {
 		std::unordered_map<uint64_t, int> cache;
 		std::vector<IcoTri> nextTris;
 		nextTris.reserve(tris.size() * 4);
@@ -256,20 +273,66 @@ std::unique_ptr<Graphics::MeshObject> RingField::BuildRockMesh(Graphics::Rendere
 		vertShade[i] = uint8_t(shade);
 	}
 
-	Graphics::VertexArray va(Graphics::ATTRIB_POSITION | Graphics::ATTRIB_NORMAL | Graphics::ATTRIB_DIFFUSE);
+	std::vector<vector3f> smoothNorms(verts.size(), vector3f(0.0f));
+	for (const IcoTri &t : tris) {
+		const vector3f faceN = (verts[t.b] - verts[t.a]).Cross(verts[t.c] - verts[t.a]);
+		smoothNorms[t.a] += faceN;
+		smoothNorms[t.b] += faceN;
+		smoothNorms[t.c] += faceN;
+	}
+	for (vector3f &n : smoothNorms)
+		n = n.NormalizedSafe();
+
+	const Graphics::AttributeSet attribs = withTangents
+		? (Graphics::ATTRIB_POSITION | Graphics::ATTRIB_NORMAL | Graphics::ATTRIB_DIFFUSE | Graphics::ATTRIB_UV0 | Graphics::ATTRIB_TANGENT)
+		: (Graphics::ATTRIB_POSITION | Graphics::ATTRIB_NORMAL | Graphics::ATTRIB_DIFFUSE);
+	Graphics::VertexArray va(attribs);
+
+	auto projectTriUV = [](const vector3f &v, int domAxis) -> vector2f {
+		constexpr float UV_SCALE = 0.55f;
+		if (domAxis == 0)
+			return vector2f(v.z, v.y) * UV_SCALE;
+		if (domAxis == 1)
+			return vector2f(v.x, v.z) * UV_SCALE;
+		return vector2f(v.x, v.y) * UV_SCALE;
+	};
+
 	for (const IcoTri &t : tris) {
 		const vector3f &v0 = verts[t.a];
 		const vector3f &v1 = verts[t.b];
 		const vector3f &v2 = verts[t.c];
-		const vector3f normal = (v1 - v0).Cross(v2 - v0).NormalizedSafe();
+		const vector3f faceNormal = (v1 - v0).Cross(v2 - v0).NormalizedSafe();
 
 		const Color c0(vertShade[t.a], vertShade[t.a], vertShade[t.a], 255);
 		const Color c1(vertShade[t.b], vertShade[t.b], vertShade[t.b], 255);
 		const Color c2(vertShade[t.c], vertShade[t.c], vertShade[t.c], 255);
 
-		va.Add(v0, c0, normal);
-		va.Add(v1, c1, normal);
-		va.Add(v2, c2, normal);
+		if (withTangents) {
+			const float ax = std::abs(faceNormal.x), ay = std::abs(faceNormal.y), az = std::abs(faceNormal.z);
+			int domAxis = 2;
+			vector3f tAxis(1.0f, 0.0f, 0.0f);
+			if (ax >= ay && ax >= az) {
+				domAxis = 0;
+				tAxis = vector3f(0.0f, 0.0f, 1.0f);
+			} else if (ay >= ax && ay >= az) {
+				domAxis = 1;
+				tAxis = vector3f(1.0f, 0.0f, 0.0f);
+			}
+			vector3f tang0 = (tAxis - smoothNorms[t.a] * smoothNorms[t.a].Dot(tAxis)).NormalizedSafe();
+			vector3f tang1 = (tAxis - smoothNorms[t.b] * smoothNorms[t.b].Dot(tAxis)).NormalizedSafe();
+			vector3f tang2 = (tAxis - smoothNorms[t.c] * smoothNorms[t.c].Dot(tAxis)).NormalizedSafe();
+			if (tang0.LengthSqr() < 0.01f) tang0 = vector3f(0.0f, 1.0f, 0.0f);
+			if (tang1.LengthSqr() < 0.01f) tang1 = vector3f(0.0f, 1.0f, 0.0f);
+			if (tang2.LengthSqr() < 0.01f) tang2 = vector3f(0.0f, 1.0f, 0.0f);
+
+			va.Add(v0, c0, smoothNorms[t.a], projectTriUV(v0, domAxis), tang0);
+			va.Add(v1, c1, smoothNorms[t.b], projectTriUV(v1, domAxis), tang1);
+			va.Add(v2, c2, smoothNorms[t.c], projectTriUV(v2, domAxis), tang2);
+		} else {
+			va.Add(v0, c0, smoothNorms[t.a]);
+			va.Add(v1, c1, smoothNorms[t.b]);
+			va.Add(v2, c2, smoothNorms[t.c]);
+		}
 	}
 
 	return std::unique_ptr<Graphics::MeshObject>(r->CreateMeshObjectFromArray(&va));
@@ -565,12 +628,13 @@ void RingField::Render(Graphics::Renderer *r, const matrix4x4d &viewTran, const 
 	if (std::abs(camInRing.y) > 34000.0 || camR < minR - 34000.0 || camR > maxR + 34000.0)
 		return;
 
-	const int ringQuality = Pi::config ? Pi::config->Int("VolumetricRings", 3) : 3;
+	const int ringQuality = Pi::config ? Clamp(Pi::config->Int("VolumetricRings", 3), 0, 4) : 3;
 	if (ringQuality <= 0)
 		return;
 
-	if (!m_rockMaterial)
-		InitGraphics(r);
+	const bool enhanced = r->IsEnhancedGraphicsEnabled();
+	if (!m_rockMaterial || m_builtQuality != ringQuality || m_builtEnhanced != enhanced)
+		InitGraphics(r, ringQuality, enhanced);
 
 	double maxHalfThick = std::max(80.0, rings.thickness.ToDouble());
 	for (const RingBand &b : rings.bands)

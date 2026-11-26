@@ -5,13 +5,18 @@
 #if BUILD_WITH_OPENAL
 
 #include "AlAudioBackend.h"
+#include "Frame.h"
+#include "GameConfig.h"
 #include "Pi.h"
+#include "Planet.h"
 #include "Player.h"
 #include "core/Log.h"
+#include "utils.h"
 
 #include "AL/alext.h"
 
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 #define CHECK_OPENAL_ERROR_IMPL(file, line, fn, ...)                                                                                    \
@@ -59,12 +64,42 @@ Sound::AlAudioBackend::AlAudioBackend()
 
 	m_next_event_id = Pi::rng.Int32();
 
+#ifdef AL_EFX_H
+	if (alcIsExtensionPresent(m_device, ALC_EXT_EFX_NAME) == ALC_TRUE) {
+		m_alGenFilters = reinterpret_cast<LPALGENFILTERS>(alGetProcAddress("alGenFilters"));
+		m_alDeleteFilters = reinterpret_cast<LPALDELETEFILTERS>(alGetProcAddress("alDeleteFilters"));
+		m_alFilteri = reinterpret_cast<LPALFILTERI>(alGetProcAddress("alFilteri"));
+		m_alFilterf = reinterpret_cast<LPALFILTERF>(alGetProcAddress("alFilterf"));
+		if (m_alGenFilters && m_alDeleteFilters && m_alFilteri && m_alFilterf) {
+			alGetError();
+			m_alGenFilters(1, &m_vacuumFilter);
+			if (alGetError() == AL_NO_ERROR && m_vacuumFilter != 0) {
+				m_alFilteri(m_vacuumFilter, AL_FILTER_TYPE, AL_FILTER_LOWPASS);
+				m_alFilterf(m_vacuumFilter, AL_LOWPASS_GAIN, 1.0f);
+				m_alFilterf(m_vacuumFilter, AL_LOWPASS_GAINHF, 1.0f);
+				if (alGetError() == AL_NO_ERROR) {
+					m_efxSupported = true;
+				} else {
+					m_alDeleteFilters(1, &m_vacuumFilter);
+					m_vacuumFilter = 0;
+				}
+			}
+		}
+	}
+#endif
+
 	Output("Initialized OpenAL audio backend");
 }
 
 Sound::AlAudioBackend::~AlAudioBackend()
 {
 	m_events.clear();
+#ifdef AL_EFX_H
+	if (m_vacuumFilter != 0 && m_alDeleteFilters) {
+		m_alDeleteFilters(1, &m_vacuumFilter);
+		m_vacuumFilter = 0;
+	}
+#endif
 	alcDestroyContext(m_context);
 	m_context = nullptr;
 	alcCloseDevice(m_device);
@@ -192,6 +227,7 @@ void Sound::AlAudioBackend::BodyMakeNoise(const Body *b, std::string_view key, f
 	}
 
 	auto it = m_events.emplace(++m_next_event_id, sample_it->second).first;
+	it->second.SetExterior(true);
 	it->second.SetGain(m_sfxVolume);
 
 	CHECK_OPENAL_ERROR(alSource3f, it->second.GetSource(), AL_POSITION, pos.x, pos.y, pos.z);
@@ -202,6 +238,11 @@ void Sound::AlAudioBackend::BodyMakeNoise(const Body *b, std::string_view key, f
 
 	CHECK_OPENAL_ERROR(alSourcei, it->second.GetSource(), AL_REFERENCE_DISTANCE, 10);
 	CHECK_OPENAL_ERROR(alSourcef, it->second.GetSource(), AL_ROLLOFF_FACTOR, 0.1f);
+#ifdef AL_EFX_H
+	if (m_efxSupported && m_vacuumFilter != 0 && (!Pi::config || Pi::config->Int("VacuumAcoustics", 1) != 0)) {
+		alSourcei(it->second.GetSource(), AL_DIRECT_FILTER, ALint(m_vacuumFilter));
+	}
+#endif
 	CHECK_OPENAL_ERROR(alSourcePlay, it->second.GetSource());
 }
 
@@ -236,8 +277,57 @@ void Sound::AlAudioBackend::AddSample(std::string_view key, Sample &&sample)
 	m_samples[std::string(key)] = std::move(sample);
 }
 
+void Sound::AlAudioBackend::UpdateVacuumFilter()
+{
+#ifdef AL_EFX_H
+	if (!m_efxSupported || m_vacuumFilter == 0 || !m_alFilterf)
+		return;
+
+	const bool enabled = (!Pi::config || Pi::config->Int("VacuumAcoustics", 1) != 0);
+	float gain = 1.0f;
+	float gainHF = 1.0f;
+
+	if (enabled) {
+		float atmoDensity = 0.0f;
+		if (Pi::player && !Pi::player->IsDead()) {
+			if (Pi::player->GetFlightState() == Ship::DOCKED) {
+				atmoDensity = 1.225f;
+			} else if (Frame *pf = Frame::GetFrame(Pi::player->GetFrame())) {
+				const Body *astro = pf->GetBody();
+				if (pf->IsRotFrame() && astro && astro->IsType(ObjectType::PLANET)) {
+					double pressure = 0.0, density = 0.0;
+					static_cast<const Planet *>(astro)->GetAtmosphericState(Pi::player->GetPosition().Length(), &pressure, &density);
+					atmoDensity = float(density);
+				}
+			}
+		}
+
+		const float norm = Clamp(std::sqrt(std::max(0.0f, atmoDensity) / 0.25f), 0.0f, 1.0f);
+		gain = Clamp(0.72f + 0.28f * norm, 0.72f, 1.0f);
+		gainHF = Clamp(0.14f + 0.86f * norm, 0.14f, 1.0f);
+	}
+
+	const bool changed = (std::abs(gain - m_lastVacuumGain) > 0.01f) || (std::abs(gainHF - m_lastVacuumGainHF) > 0.01f);
+	if (changed) {
+		m_alFilterf(m_vacuumFilter, AL_LOWPASS_GAIN, gain);
+		m_alFilterf(m_vacuumFilter, AL_LOWPASS_GAINHF, gainHF);
+		m_lastVacuumGain = gain;
+		m_lastVacuumGainHF = gainHF;
+
+		const ALint filterId = enabled ? ALint(m_vacuumFilter) : AL_FILTER_NULL;
+		for (auto &[id, ev] : m_events) {
+			if (ev.IsExterior()) {
+				alSourcei(ev.GetSource(), AL_DIRECT_FILTER, filterId);
+			}
+		}
+	}
+#endif
+}
+
 void Sound::AlAudioBackend::Update(float delta_t)
 {
+	UpdateVacuumFilter();
+
 	std::vector<eventid> events_to_remove;
 	for (auto &[id, ev] : m_events) {
 		ev.Update(delta_t);
@@ -334,6 +424,7 @@ Sound::AlAudioBackend::SoundEvent::SoundEvent(SoundEvent &&other)
 	fade_rate = other.fade_rate;
 	streaming_finished = other.streaming_finished;
 	is_music = other.is_music;
+	is_exterior = other.is_exterior;
 	op = other.op;
 	buffers[0] = std::exchange(other.buffers[0], 0);
 	buffers[1] = std::exchange(other.buffers[1], 0);
@@ -351,6 +442,7 @@ Sound::AlAudioBackend::SoundEvent &Sound::AlAudioBackend::SoundEvent::operator=(
 	fade_rate = other.fade_rate;
 	streaming_finished = other.streaming_finished;
 	is_music = other.is_music;
+	is_exterior = other.is_exterior;
 	op = other.op;
 	buffers[0] = std::exchange(other.buffers[0], 0);
 	buffers[1] = std::exchange(other.buffers[1], 0);

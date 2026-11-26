@@ -1322,6 +1322,11 @@ static void OnPlayerDockOrUndock()
 {
 	Pi::game->RequestTimeAccel(Game::TIMEACCEL_1X);
 	Pi::game->SetTimeAccel(Game::TIMEACCEL_1X);
+	if (!Pi::config->Int("DisableSound")) {
+		const float vol = Clamp(0.55f * Sound::GetSfxVolume(), 0.0f, 0.75f);
+		if (vol > 0.01f)
+			Sound::PlaySfx("hangar_hydraulics", vol, vol, 0);
+	}
 }
 
 void Pi::ToggleObjectViewer()

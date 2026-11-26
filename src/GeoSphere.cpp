@@ -41,7 +41,7 @@ static const int detail_edgeLen[5] = {
 	9, 17, 17, 33, 33
 };
 
-static const double detail_targetTriLength[5] = { 120.0, 80.0, 55.0, 38.0, 25.0 };
+static const double detail_targetTriLength[5] = { 80.0, 50.0, 32.0, 22.0, 14.0 };
 static std::vector<GeoSphere *> s_allGeospheres;
 static Uint32 s_debugFlags = GeoSphere::DebugFlags::DEBUG_NONE;
 
@@ -594,21 +594,21 @@ void GeoSphere::Render(Graphics::Renderer *renderer, const matrix4x4d &modelView
 		renderer->SetWireFrameMode(false);
 
 	// Enhanced Graphics: analytical ray-sphere dual-deck dynamic cloud layers (zero sagitta, visible from ground & orbit)
-	if (renderer->IsEnhancedGraphicsEnabled() && m_cloudMaterial.Valid() && m_cloudInsideMaterial.Valid() && hasWeatherAtmo) {
+	const int atmoQuality = Pi::config ? Clamp(Pi::config->Int("AtmosphereQuality", 3), 0, 4) : 3;
+	if (renderer->IsEnhancedGraphicsEnabled() && atmoQuality > 0 && m_cloudMaterial.Valid() && m_cloudInsideMaterial.Valid() && hasWeatherAtmo) {
 		if (coverage > 0.05f && m_atmos) {
 			const double maxTerrainM = m_terrain ? (m_terrain->GetMaxHeight() * planetRadM) : 0.0;
-			const double effectiveTerrainM = (hydro > 0.01) ? maxTerrainM * (1.0 - 0.52 * std::min(hydro, 1.0)) : maxTerrainM;
 
-			const double terrainClearLow = effectiveTerrainM * 0.45 + 1400.0;
+			const double terrainClearLow = maxTerrainM * 1.05 + 1800.0;
 			const double weatherLowM = (weather.hasAtmosphere && weather.lowerCloudAltM > 100.0)
 				? weather.lowerCloudAltM
 				: std::clamp(planetRadM * 0.00052, 2200.0, 5000.0);
-			const double lowerAltM = std::clamp(std::max(weatherLowM, terrainClearLow), 1600.0, std::max(5500.0, atmTopM * 0.36));
+			const double lowerAltM = std::max(std::clamp(weatherLowM, 1600.0, std::max(5500.0, atmTopM * 0.50)), terrainClearLow);
 
 			const double weatherHighM = (weather.hasAtmosphere && weather.upperCloudAltM > 100.0)
 				? weather.upperCloudAltM
 				: std::clamp(planetRadM * 0.00142, 7400.0, 12800.0);
-			const double upperAltM = std::clamp(std::max(weatherHighM, lowerAltM + 2600.0), lowerAltM + 2400.0, std::max(8500.0, atmTopM * 0.54));
+			const double upperAltM = std::max(std::clamp(weatherHighM, lowerAltM + 2400.0, std::max(8500.0, atmTopM * 0.68)), lowerAltM + 2600.0);
 
 			vector3d east, north, up;
 			WeatherSystem::BuildLocalENU(camDir, east, north, up);
@@ -619,7 +619,8 @@ void GeoSphere::Render(Graphics::Renderer *renderer, const matrix4x4d &modelView
 			const float seed = float(sbody->GetSeed() & 0xFFFFu) * 0.001f;
 			const float camAlt = float(camLenD);
 			const Color4f aCol = m_atmosphereParameters.atmosCol.ToColor4f();
-			const vector3f sphereCenter = vector3f(trans * vector3d(0.0)) / radius;
+			const double viewRadD = std::max(vector3d(trans[0], trans[1], trans[2]).Length(), 1.0);
+			const vector3f sphereCenter = vector3f((trans * vector3d(0.0)) / viewRadD);
 			const matrix4x4f &projMat = renderer->GetProjection();
 			const float projC = projMat[10];
 			const float projD = projMat[14];
@@ -633,6 +634,7 @@ void GeoSphere::Render(Graphics::Renderer *renderer, const matrix4x4d &modelView
 			static const size_t s_layerParamsName = "layerParams"_hash;
 			static const size_t s_flashCellName = "flashCell"_hash;
 			static const size_t s_camDirObjName = "camDirObj"_hash;
+			static const size_t s_cloudQualityName = "cloudQuality"_hash;
 
 			const float stormIntensity = weather.hasAtmosphere ? float(weather.stormIntensity) : 0.0f;
 			const float windDriftScale = float(Clamp(0.75 + 0.35 * std::min(atmo, 2.5), 0.50, 1.80));
@@ -661,18 +663,21 @@ void GeoSphere::Render(Graphics::Renderer *renderer, const matrix4x4d &modelView
 					Clamp(0.88f + 0.12f * aCol.b, 0.0f, 1.0f)), 0.94f);
 				cloudMat->SetPushConstant(s_weatherParamsName, vector3f(stormIntensity, windDriftScale * windMult, flash.intensity * flashScale), dustFactor);
 				cloudMat->SetPushConstant(s_cloudScaleName, vector3f(planetRadKm, cloudAltKm, camAltKm), atmoDense);
-				cloudMat->SetPushConstant(s_cloudGeomName, vector3f(float(rDiffD), float(planetRadM), projC), projD);
+				cloudMat->SetPushConstant(s_cloudGeomName, vector3f(float(rDiffD), float(viewRadD), projC), projD);
 				cloudMat->SetPushConstant(s_cloudCenterName, sphereCenter);
 				cloudMat->SetPushConstant(s_layerParamsName, vector3f(layerType, localCov, camLocalWeight), opacityScale);
 				cloudMat->SetPushConstant(s_flashCellName, strikeDirObj, flash.intensity * flashScale);
 				cloudMat->SetPushConstant(s_camDirObjName, camDirF);
+				cloudMat->SetPushConstant(s_cloudQualityName, float(atmoQuality));
 
 				renderer->SetTransform(matrix4x4f(trans * matrix4x4d::ScaleMatrix(boundRadD)));
 				m_atmos->Draw(renderer, cloudMat);
 			};
 
-			// Render far-to-near relative to camera altitude so upper cirrus and lower cumulus composite cleanly
-			if (camAltM < lowerAltM) {
+			// Render single lower deck on Low/Medium (<= 2) and dual altitude layers on High/Extreme (>= 3)
+			if (atmoQuality <= 2) {
+				drawCloudLayer(lowerAltM, 0.0f, coverage, lowerLocalCover, 1.0f, 0.98f, 0.0f, 1.0f);
+			} else if (camAltM < lowerAltM) {
 				drawCloudLayer(upperAltM, 1.0f, upperGlobalCover, upperLocalCover, 1.55f, 0.62f, 13.7f, 0.35f);
 				drawCloudLayer(lowerAltM, 0.0f, coverage, lowerLocalCover, 1.0f, 0.98f, 0.0f, 1.0f);
 			} else {
@@ -744,10 +749,14 @@ void GeoSphere::SetUpMaterials()
 		m_texLo.Reset(Graphics::TextureBuilder::Model("textures/low.dds").GetOrCreateTexture(Pi::renderer, "model"));
 		m_texOceanSwell.Reset(Graphics::TextureBuilder("textures/ocean_waves_swell.png", Graphics::LINEAR_REPEAT, true, false, true, false, true).GetOrCreateTexture(Pi::renderer, "ocean"));
 		m_texOceanChop.Reset(Graphics::TextureBuilder("textures/ocean_waves_chop.png", Graphics::LINEAR_REPEAT, true, false, true, false, true).GetOrCreateTexture(Pi::renderer, "ocean"));
+		m_texTerrainRegolith.Reset(Graphics::TextureBuilder("textures/terrain_regolith.png", Graphics::LINEAR_REPEAT, true, false, true, false, true).GetOrCreateTexture(Pi::renderer, "terrain"));
+		m_texTerrainCliff.Reset(Graphics::TextureBuilder("textures/terrain_cliff.png", Graphics::LINEAR_REPEAT, true, false, true, false, true).GetOrCreateTexture(Pi::renderer, "terrain"));
 		m_surfaceMaterial->SetTexture("texture0"_hash, m_texHi.Get());
 		m_surfaceMaterial->SetTexture("texture1"_hash, m_texLo.Get());
 		m_surfaceMaterial->SetTexture("oceanTexA"_hash, m_texOceanSwell.Get());
 		m_surfaceMaterial->SetTexture("oceanTexB"_hash, m_texOceanChop.Get());
+		m_surfaceMaterial->SetTexture("terrainRegolithTex"_hash, m_texTerrainRegolith.Get());
+		m_surfaceMaterial->SetTexture("terrainCliffTex"_hash, m_texTerrainCliff.Get());
 	}
 
 	CreateAtmosphereMaterial();

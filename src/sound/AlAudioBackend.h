@@ -13,6 +13,7 @@
 
 #include "AL/al.h"
 #include "AL/alc.h"
+#include "AL/efx.h"
 #include "vorbis/vorbisfile.h"
 
 #include <memory>
@@ -70,6 +71,8 @@ namespace Sound {
 			void SetTargetGain(float gain, float rate);
 			void SetTargetGain(float gainL, float gainR, float rate);
 			bool IsMusic() const { return is_music; }
+			void SetExterior(bool ext) { is_exterior = ext; }
+			bool IsExterior() const { return is_exterior; }
 
 		private:
 			void FillBuffer(int idx);
@@ -88,10 +91,13 @@ namespace Sound {
 			float volume;
 			bool streaming_finished;
 			bool is_music;
+			bool is_exterior = false;
 			Op op;
 			std::unique_ptr<OggVorbis_File> oggv;
 			OggFileDataStream ogg_data_stream;
 		};
+
+		void UpdateVacuumFilter();
 
 		ALCdevice *m_device;
 		ALCcontext *m_context;
@@ -101,6 +107,16 @@ namespace Sound {
 		float m_masterVolume = 1.F;
 		float m_sfxVolume = 1.F;
 		bool m_paused = false;
+		bool m_efxSupported = false;
+		ALuint m_vacuumFilter = 0;
+		float m_lastVacuumGain = -1.F;
+		float m_lastVacuumGainHF = -1.F;
+#ifdef AL_EFX_H
+		LPALGENFILTERS m_alGenFilters = nullptr;
+		LPALDELETEFILTERS m_alDeleteFilters = nullptr;
+		LPALFILTERI m_alFilteri = nullptr;
+		LPALFILTERF m_alFilterf = nullptr;
+#endif
 	};
 
 } // namespace Sound

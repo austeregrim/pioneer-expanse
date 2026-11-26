@@ -9,7 +9,7 @@ Transforming **Pioneer: Expanse** into a deep single-player space simulation com
 1. **Standalone Single-Player Depth**: Deliver interconnected systemic gameplay without MMO network latency, forced server wipes, or RNG progression treadmills.
 2. **Deep Simulation with Meaningful Physicality**: Ground mechanics in astrophysics and rigid-body simulation—from planetary Roche rings, Supercruise gravity wells, and Keplerian local frames down to atmospheric weather and hull acoustics.
 3. **Cohesive In-Universe Lore**: Anchor aerospace manufacturers, covert engineers, megastructures, and deep-space non-human encounters inside a serious **Pioneer: Expanse** setting using crisp SVG corporate iconography (`data/icons/logos/`).
-4. **Asset-Smart Sequenced Pillars**: Complete code/audio/shader systems (`Plan A` polish, `Plan E` M3/M7, `Plan J` Frontline Support, `Plan C`/`F`/`G` code pillars) ahead of 3D-asset-gated milestones (`Plan B` SRVs, `Plan E` M8 Cockpits, `Plan D` Megaships, `Plan G` M4 Aliens).
+4. **Asset-Smart Sequenced Pillars**: Complete code/audio/shader systems (`Plan J` Frontline Support, `Plan C`/`F`/`G` code pillars) ahead of 3D-asset-gated milestones (`Plan B` SRVs, `Plan E` M8 Cockpits, `Plan D` Megaships, `Plan G` M4 Aliens).
 
 ---
 
@@ -17,7 +17,7 @@ Transforming **Pioneer: Expanse** into a deep single-player space simulation com
 
 ```mermaid
 graph TD
-    subgraph Completed["Completed Core & Systems (Plans 02-04, A, I, E M1-6)"]
+    subgraph Completed["Completed Core & Systems (Plans 02-04, A, I, E M1-7)"]
         F1["FSD Supercruise, Autopilot Mk 2-4 & Dual-Tank Routing"]
         F2["Macro 3D Galactic Map (100k ly), Cross-System Targets & Panning"]
         F3["NPC Supercruise Traffic, ShipRegistry & FSD Interdiction"]
@@ -25,12 +25,11 @@ graph TD
         F5["Dynamic Crises, InterCast, ISX Stocks, Lottery, Taxes & Penal"]
         F6["Plan A: Multi-Ship Hangars, Resident Vaults, Captains & Fleet Autonomy"]
         F7["Plan I: Transponder, Dark Running, Licences & Warrant Scanner"]
-        F8["Plan E (M1-6): PBR, Flares, Chemistry Rayleigh/Mie, Weather, Terrain & Chimes"]
+        F8["Plan E (M1-7): PBR, Weather, Terrain, Quality Presets, Vacuum Audio & Aria Voice"]
     end
 
     subgraph NextSequence["Active Priority Sequence"]
-        S2["1. Plan E Finish (Next Up): M7 Soundscapes, Vacuum Audio & Cockpit AI Voice"]
-        S3["2. Plan J: Military Enlistment, Non-Combat Frontline Support & Deputy Charter"]
+        S3["1. Plan J (Next Up): Military Enlistment, Non-Combat Frontline Support & Deputy Charter"]
     end
 
     subgraph Discussion["Design Discussion Queue (Code-First)"]
@@ -47,8 +46,7 @@ graph TD
         PH["Plan H: Capital Ships, Fleet Carriers & Station Building"]
     end
 
-    Completed --> S2 --> S3
-    S3 --> Discussion
+    Completed --> S3 --> Discussion
     Discussion --> AssetGated
 ```
 
@@ -63,8 +61,8 @@ graph TD
 | **Core** | **[`04_NPC_SUPERCRUISE_INTERDICTION_PLAN.md`](./04_NPC_SUPERCRUISE_INTERDICTION_PLAN.md)** | Universal NPC Supercruise traffic, station occlusion, ambient patrol/pirate spawns, Low Wakes, FSD Interdictor tug-of-war, NPC evasion & security pacing | Plan 02 | **Completed** |
 | **Plan A** | **[`A_PLAN_MULTI_SHIP_AND_CREW_AUTONOMY.md`](./A_PLAN_MULTI_SHIP_AND_CREW_AUTONOMY.md)** | Multi-ship ownership, hangars, ship swap, cargo/module transfer, Resident Station Storage Vaults (500t/50 modules), captains/5 skills/payroll, `FOLLOW`/`DOCK`/`AUTO_TRADE` Cr/hr/`AUTO_MINE`/`PATROL`/piracy, mission delegation, IS/OOS sim | Plans 02–04 | **Completed** |
 | **Plan I** | **[`I_PLAN_TRANSPONDER_AND_STEALTH.md`](./I_PLAN_TRANSPONDER_AND_STEALTH.md)** | Transponder on/off, dark running `<1c`, persistent locks, police witness FOV + occlusion, bounty licences, Warrant Scanner, sub-light sensors & smugglers | Plan 04 | **Completed** |
-| **Plan E** | **[`E_PLAN_GRAPHICS_AUDIO_OVERHAUL.md`](./E_PLAN_GRAPHICS_AUDIO_OVERHAUL.md)** | **Completed (M1–6)**: Enhanced Graphics toggle, PBR, terrain-occluded flares, plumes, gas giants, dual clouds, ocean waves, chemistry/weather Rayleigh/Mie, dwarf planets, 20m tri-planar terrain, 3D weather/lightning, ship lights, 4-tier chimes. **Next Up**: **M7** (situational hull/weather audio, OpenAL vacuum low-pass, Cockpit AI voice). **Asset-Gated**: **M8** (3D cockpits & canopy glass). | Plan 02 | **In Progress (M7 Next Up; M8 Asset-Gated)** |
-| **Plan J** | **[`J_PLAN_MILITARY_FRONTLINE_AND_DEPUTY.md`](./J_PLAN_MILITARY_FRONTLINE_AND_DEPUTY.md)** | Military enlistment, non-combat frontline support (blockade running, supply convoys, evacuations, recon, Plan A fleet support), optional combat zones, and high-standing **Faction Deputy Charter** | Plan I & Crises | **Queued (After Plan E M3/M7)** |
+| **Plan E** | **[`E_PLAN_GRAPHICS_AUDIO_OVERHAUL.md`](./E_PLAN_GRAPHICS_AUDIO_OVERHAUL.md)** | **Completed (M1–7)**: Enhanced Graphics toggle, Low–Extreme quality presets, PBR, terrain-occluded flares, plumes, gas giants, dual clouds, ocean waves, chemistry/weather Rayleigh/Mie, galactic skybox/starfield, dwarf planets, 20m tri-planar terrain, bump-mapped 3D `SurfaceScatter` & ring boulders, volcanic magma/plumes, 3D weather/lightning, ship lights, 4-tier chimes, situational hull/weather soundscapes, OpenAL EFX vacuum low-pass & **Aria** Cockpit AI voice. **Asset-Gated**: **M8** (3D cockpits & canopy glass). | Plan 02 | **Completed (M1–7; M8 Asset-Gated)** |
+| **Plan J** | **[`J_PLAN_MILITARY_FRONTLINE_AND_DEPUTY.md`](./J_PLAN_MILITARY_FRONTLINE_AND_DEPUTY.md)** | Military enlistment, non-combat frontline support (blockade running, supply convoys, evacuations, recon, Plan A fleet support), optional combat zones, and high-standing **Faction Deputy Charter** | Plan I & Crises | **Next Up (Design / Implementation)** |
 | **Plan C** | **[`C_PLAN_ENGINEERING_CRAFTING.md`](./C_PLAN_ENGINEERING_CRAFTING.md)** | Zero-mass raw/manufactured/encoded material ledger, Scrap Reclamation, in-field matter synthesis (boosts/O2/ammo) & deterministic G1–G5 Engineers with Experimental overrides | Plan 03 & Plan I | **Queued (Design Discussion)** |
 | **Plan F** | **[`F_PLAN_FLEET_MANUFACTURERS.md`](./F_PLAN_FLEET_MANUFACTURERS.md)** | **Completed**: 6 Manufacturer franchise dealerships (`corp_*.svg`) & 8 station profiles. **Queued**: Modular slot cleanup, Fixed/Gimballed/Turreted weapons, deployable hardpoints & countermeasures *(no `SYS/ENG/WEP` pips)*; **Asset-Gated**: `.gltf` fleet | Plan 02 | **Partially Done (Combat/Slots Queued)** |
 | **Plan G** | **[`G_PLAN_EXPLORATION_ALIENS.md`](./G_PLAN_EXPLORATION_ALIENS.md)** | **Completed**: Universal Cartographics, Discovery Scanner & Scan Manager. **Queued**: FSS waveform tuning, DSS orbital probes (surface POIs & ring hotspots), VIP liners & burning-station evacs; **Asset-Gated**: Alien fleets | Plan 03, C, D | **Partially Done (FSS/DSS/Evacs Queued)** |
@@ -76,14 +74,11 @@ graph TD
 
 ## 4. Confirmed Sequenced Rollout
 
-1. **Step 1 — Finish Plan E Code/Audio/Visuals (`M3` & `M7`) (Next Up)**:
-   * Per-planet atmospheric chemistry & weather-coupled **Rayleigh/Mie scattering** (`M3`).
-   * Design and implement situational hull/weather/debris `.ogg` soundscapes, OpenAL vacuum low-pass filtering, and priority-queued **Cockpit AI Voice** (`M7`).
-2. **Step 2 — Enact Plan J (Military Frontline Support & Deputy Charter)**:
+1. **Step 1 — Enact Plan J (Military Frontline Support & Deputy Charter) (Next Up)**:
    * Build non-combat frontline logistics/recon/extraction, fleet support, optional combat zones, and high-standing Deputy authority on top of Plan I licences and `MacroGalaxyEngine`.
-3. **Step 3 — Design Discussions & Code-First Pillars**:
+2. **Step 2 — Design Discussions & Code-First Pillars**:
    * Discuss and scope **Plan C** (materials & synthesis boosts), **Plan F** (turrets, hardpoints, countermeasures—without `SYS/ENG/WEP` pips), and **Plan G M1–M3** (FSS/DSS probes & crisis evacuations).
-4. **Step 4 — 3D-Asset & Endgame Pillars**:
+3. **Step 3 — 3D-Asset & Endgame Pillars**:
    * Prepare Blender/AI-assisted `.glb` assets for **Plan B** (SRVs), **Plan E M8** (3D Cockpits), **Plan D** (Megaships), **Plan G M4** (Aliens), and **Plan H** (Capital Ships & Empire Building).
 
 ---

@@ -66,8 +66,8 @@ private:
 	static constexpr double CELL_COARSE = 850.0;
 	static constexpr double CELL_FAR = 2100.0;
 
-	void InitGraphics(Graphics::Renderer *r);
-	std::unique_ptr<Graphics::MeshObject> BuildRockMesh(Graphics::Renderer *r, uint32_t seed) const;
+	void InitGraphics(Graphics::Renderer *r, int quality, bool enhanced);
+	std::unique_ptr<Graphics::MeshObject> BuildRockMesh(Graphics::Renderer *r, uint32_t seed, int subdivs, bool withTangents) const;
 
 	FrameId GetOrbitalFrameId() const;
 	void GatherCellRocks(int64_t gx, int64_t gz, double cellSize, RockTier tier, std::vector<RockInstance> &out) const;
@@ -80,6 +80,8 @@ private:
 	matrix3x3d m_axialRot; // maps ringLocal -> orbFrame
 	uint32_t m_baseSeed;
 	double m_elapsedTime;
+	int m_builtQuality = -1;
+	bool m_builtEnhanced = false;
 
 	std::unique_ptr<Graphics::Material> m_rockMaterial;
 	std::unique_ptr<Graphics::Material> m_dustMaterial;

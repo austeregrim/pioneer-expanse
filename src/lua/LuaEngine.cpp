@@ -28,6 +28,7 @@
 #include "pigui/PiGui.h"
 #include "scenegraph/Model.h"
 #include "ship/SupercruiseController.h"
+#include "sound/CockpitVoice.h"
 #include "sound/Sound.h"
 #include "sound/SoundMusic.h"
 #include "utils.h"
@@ -597,6 +598,58 @@ static int l_engine_set_water_quality(lua_State *l)
 	return 0;
 }
 
+static int l_engine_get_atmosphere_quality(lua_State *l)
+{
+	lua_pushinteger(l, Clamp(Pi::config->Int("AtmosphereQuality", 3), 0, 4));
+	return 1;
+}
+
+static int l_engine_set_atmosphere_quality(lua_State *l)
+{
+	const int level = Clamp(int(luaL_checkinteger(l, 1)), 0, 4);
+	Pi::config->SetInt("AtmosphereQuality", level);
+	return 0;
+}
+
+static int l_engine_get_surface_scatter_quality(lua_State *l)
+{
+	lua_pushinteger(l, Clamp(Pi::config->Int("SurfaceScatterQuality", 3), 0, 4));
+	return 1;
+}
+
+static int l_engine_set_surface_scatter_quality(lua_State *l)
+{
+	const int level = Clamp(int(luaL_checkinteger(l, 1)), 0, 4);
+	Pi::config->SetInt("SurfaceScatterQuality", level);
+	return 0;
+}
+
+static int l_engine_get_surface_scatter_amount(lua_State *l)
+{
+	lua_pushinteger(l, Clamp(Pi::config->Int("SurfaceScatterAmount", 2), 0, 4));
+	return 1;
+}
+
+static int l_engine_set_surface_scatter_amount(lua_State *l)
+{
+	const int level = Clamp(int(luaL_checkinteger(l, 1)), 0, 4);
+	Pi::config->SetInt("SurfaceScatterAmount", level);
+	return 0;
+}
+
+static int l_engine_get_weather_effects_quality(lua_State *l)
+{
+	lua_pushinteger(l, Clamp(Pi::config->Int("WeatherEffectsQuality", 3), 0, 4));
+	return 1;
+}
+
+static int l_engine_set_weather_effects_quality(lua_State *l)
+{
+	const int level = Clamp(int(luaL_checkinteger(l, 1)), 0, 4);
+	Pi::config->SetInt("WeatherEffectsQuality", level);
+	return 0;
+}
+
 static int l_engine_get_enhanced_graphics(lua_State *l)
 {
 	lua_pushboolean(l, Pi::config->Int("EnhancedGraphics", 1) != 0);
@@ -874,6 +927,74 @@ static int l_engine_set_binaural_rendering(lua_State *l)
 	const bool enabled = lua_toboolean(l, 1);
 	Sound::EnableBinaural(enabled);
 	Pi::config->SetInt("BinauralRendering", enabled ? 1 : 0);
+	return 0;
+}
+
+static int l_engine_get_vacuum_acoustics(lua_State *l)
+{
+	lua_pushboolean(l, Pi::config->Int("VacuumAcoustics", 1) != 0);
+	return 1;
+}
+
+static int l_engine_set_vacuum_acoustics(lua_State *l)
+{
+	if (lua_isnone(l, 1))
+		return luaL_error(l, "SetVacuumAcoustics takes one boolean argument");
+	const bool enabled = lua_toboolean(l, 1);
+	Pi::config->SetInt("VacuumAcoustics", enabled ? 1 : 0);
+	return 0;
+}
+
+static int l_engine_get_cockpit_voice_enabled(lua_State *l)
+{
+	lua_pushboolean(l, Pi::config->Int("CockpitVoiceEnabled", 1) != 0);
+	return 1;
+}
+
+static int l_engine_set_cockpit_voice_enabled(lua_State *l)
+{
+	if (lua_isnone(l, 1))
+		return luaL_error(l, "SetCockpitVoiceEnabled takes one boolean argument");
+	const bool enabled = lua_toboolean(l, 1);
+	Pi::config->SetInt("CockpitVoiceEnabled", enabled ? 1 : 0);
+	if (!enabled)
+		Sound::CockpitVoice::Clear();
+	return 0;
+}
+
+static int l_engine_get_cockpit_voice_volume(lua_State *l)
+{
+	lua_pushnumber(l, Clamp(Pi::config->Float("CockpitVoiceVolume", 0.85f), 0.0f, 1.0f));
+	return 1;
+}
+
+static int l_engine_set_cockpit_voice_volume(lua_State *l)
+{
+	const float vol = Clamp(float(luaL_checknumber(l, 1)), 0.0f, 1.0f);
+	Pi::config->SetFloat("CockpitVoiceVolume", vol);
+	return 0;
+}
+
+static int l_engine_get_cockpit_voice_pack(lua_State *l)
+{
+	const std::string pack = Pi::config->String("CockpitVoicePack", "aria");
+	lua_pushlstring(l, pack.c_str(), pack.size());
+	return 1;
+}
+
+static int l_engine_set_cockpit_voice_pack(lua_State *l)
+{
+	const char *pack = luaL_checkstring(l, 1);
+	Pi::config->SetString("CockpitVoicePack", pack);
+	return 0;
+}
+
+static int l_engine_play_cockpit_voice(lua_State *l)
+{
+	const char *eventId = luaL_checkstring(l, 1);
+	const int prioInt = Clamp(int(luaL_optinteger(l, 2, 1)), 0, 3);
+	const float cooldown = float(luaL_optnumber(l, 3, 6.0));
+	Sound::CockpitVoice::Enqueue(eventId, static_cast<Sound::CockpitVoice::Priority>(prioInt), cooldown);
 	return 0;
 }
 
@@ -1212,6 +1333,14 @@ void LuaEngine::Register()
 		{ "SetVolumetricRings", l_engine_set_volumetric_rings },
 		{ "GetWaterQuality", l_engine_get_water_quality },
 		{ "SetWaterQuality", l_engine_set_water_quality },
+		{ "GetAtmosphereQuality", l_engine_get_atmosphere_quality },
+		{ "SetAtmosphereQuality", l_engine_set_atmosphere_quality },
+		{ "GetSurfaceScatterQuality", l_engine_get_surface_scatter_quality },
+		{ "SetSurfaceScatterQuality", l_engine_set_surface_scatter_quality },
+		{ "GetSurfaceScatterAmount", l_engine_get_surface_scatter_amount },
+		{ "SetSurfaceScatterAmount", l_engine_set_surface_scatter_amount },
+		{ "GetWeatherEffectsQuality", l_engine_get_weather_effects_quality },
+		{ "SetWeatherEffectsQuality", l_engine_set_weather_effects_quality },
 		{ "GetEnhancedGraphics", l_engine_get_enhanced_graphics },
 		{ "SetEnhancedGraphics", l_engine_set_enhanced_graphics },
 
@@ -1259,6 +1388,15 @@ void LuaEngine::Register()
 		{ "IsBinauralRenderingSupported", l_engine_is_binaural_supported },
 		{ "GetBinauralRendering", l_engine_get_binaural_rendering },
 		{ "SetBinauralRendering", l_engine_set_binaural_rendering },
+		{ "GetVacuumAcoustics", l_engine_get_vacuum_acoustics },
+		{ "SetVacuumAcoustics", l_engine_set_vacuum_acoustics },
+		{ "GetCockpitVoiceEnabled", l_engine_get_cockpit_voice_enabled },
+		{ "SetCockpitVoiceEnabled", l_engine_set_cockpit_voice_enabled },
+		{ "GetCockpitVoiceVolume", l_engine_get_cockpit_voice_volume },
+		{ "SetCockpitVoiceVolume", l_engine_set_cockpit_voice_volume },
+		{ "GetCockpitVoicePack", l_engine_get_cockpit_voice_pack },
+		{ "SetCockpitVoicePack", l_engine_set_cockpit_voice_pack },
+		{ "PlayCockpitVoice", l_engine_play_cockpit_voice },
 
 		{ "CanBrowseUserFolder", l_get_can_browse_user_folders },
 		{ "OpenBrowseUserFolder", l_browse_user_folders },

@@ -39,10 +39,18 @@ GameConfig::GameConfig(const map_string &override_)
 	map["MaxPhysicsCyclesPerRender"] = "4";
 	map["AntiAliasingMode"] = "2";
 	map["MaxFPS"] = "0"; // 0 = unlimited / off
-	map["VolumetricRings"] = "3"; // 0=Disabled, 1=Low, 2=Medium, 3=High, 4=Ultra
+	map["VolumetricRings"] = "3"; // 0=Disabled, 1=Low, 2=Medium, 3=High, 4=Extreme
 	map["WaterQuality"] = "2"; // 0=Low (fast flat), 1=Medium (1-layer waves), 2=High (2-layer FFT waves + foam), 3=Very High (4-cascade FFT waves)
+	map["AtmosphereQuality"] = "3"; // 0=Off, 1=Low, 2=Medium, 3=High, 4=Extreme
+	map["SurfaceScatterQuality"] = "3"; // 0=Off, 1=Low, 2=Medium, 3=High, 4=Extreme
+	map["SurfaceScatterAmount"] = "2"; // 0=Low, 1=Medium, 2=High, 3=Very High, 4=Extreme
+	map["WeatherEffectsQuality"] = "3"; // 0=Off, 1=Low, 2=Medium, 3=High, 4=Extreme
 	map["RealisticScattering"] = "2"; // 0=Classic, 1=Fast Rayleigh/Mie, 2=Full Rayleigh/Mie
 	map["EnhancedGraphics"] = "1"; // 0=Classic Fallback, 1=Enhanced Graphics (PBR, Glare, Lens Flare, etc.)
+	map["VacuumAcoustics"] = "1"; // 0=Off, 1=On (OpenAL EFX low-pass attenuation in vacuum)
+	map["CockpitVoiceEnabled"] = "1"; // 0=Off, 1=On
+	map["CockpitVoiceVolume"] = "0.85"; // 0.0..1.0
+	map["CockpitVoicePack"] = "aria"; // Voice pack directory/prefix
 	map["JoystickDeadzone"] = "0.2"; // 20% deadzone is common
 	map["DefaultLowThrustPower"] = "0.25";
 	map["VSync"] = "1";

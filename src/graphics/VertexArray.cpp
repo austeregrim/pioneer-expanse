@@ -205,6 +205,15 @@ namespace Graphics {
 			CopyPosNormCol(buffer, *this);
 			result = true;
 			break;
+		default: {
+			const VertexFormatDesc fmt = VertexFormatDesc::FromAttribSet(m_attribs);
+			const size_t totalBytes = size_t(GetNumVerts()) * fmt.bindings[0].stride;
+			assert(buffer->GetStride() == fmt.bindings[0].stride);
+			uint8_t *vtxPtr = buffer->Map<uint8_t>(Graphics::BUFFER_MAP_WRITE);
+			result = PopulateRange(fmt, vtxPtr, totalBytes);
+			buffer->Unmap();
+			break;
+		}
 		}
 
 		buffer->SetVertexCount(GetNumVerts());
@@ -303,6 +312,15 @@ namespace Graphics {
 	void VertexArray::Add(const vector3f &v, const vector3f &n, const vector2f &uv, const vector3f &tang)
 	{
 		position.emplace_back(v);
+		normal.emplace_back(n);
+		uv0.emplace_back(uv);
+		tangent.emplace_back(tang);
+	}
+
+	void VertexArray::Add(const vector3f &v, const Color &c, const vector3f &n, const vector2f &uv, const vector3f &tang)
+	{
+		position.emplace_back(v);
+		diffuse.emplace_back(c);
 		normal.emplace_back(n);
 		uv0.emplace_back(uv);
 		tangent.emplace_back(tang);

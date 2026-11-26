@@ -180,7 +180,7 @@ local function showVideoOptions()
 
 	-- Volumetric Planetary Rings
 	local ringLevels = { 0, 1, 2, 3, 4 }
-	local ringLabels = { lui.OFF, lui.LOW, lui.MEDIUM, lui.HIGH, lui.VERY_HIGH }
+	local ringLabels = { lui.OFF, lui.LOW, lui.MEDIUM, lui.HIGH, lui.EXTREME or "Extreme" }
 	local curRing = Engine.GetVolumetricRings()
 	local selectedRing = math.max(0, math.min(4, curRing))
 
@@ -188,6 +188,25 @@ local function showVideoOptions()
 	local waterLevels = { 0, 1, 2, 3 }
 	local waterLabels = { lui.LOW, lui.MEDIUM, lui.HIGH, lui.VERY_HIGH }
 	local selectedWater = math.max(0, math.min(3, Engine.GetWaterQuality()))
+
+	-- Atmosphere & Cloud Quality
+	local atmoLevels = { 0, 1, 2, 3, 4 }
+	local atmoLabels = { lui.OFF, lui.LOW, lui.MEDIUM, lui.HIGH, lui.EXTREME or "Extreme" }
+	local selectedAtmo = math.max(0, math.min(4, Engine.GetAtmosphereQuality()))
+
+	-- Surface Scatter Quality & Amount
+	local scatterQLevels = { 0, 1, 2, 3, 4 }
+	local scatterQLabels = { lui.OFF, lui.LOW, lui.MEDIUM, lui.HIGH, lui.EXTREME or "Extreme" }
+	local selectedScatterQ = math.max(0, math.min(4, Engine.GetSurfaceScatterQuality()))
+
+	local scatterALevels = { 0, 1, 2, 3, 4 }
+	local scatterALabels = { lui.LOW, lui.MEDIUM, lui.HIGH, lui.VERY_HIGH, lui.EXTREME or "Extreme" }
+	local selectedScatterA = math.max(0, math.min(4, Engine.GetSurfaceScatterAmount()))
+
+	-- Weather Effects Quality
+	local weatherLevels = { 0, 1, 2, 3, 4 }
+	local weatherLabels = { lui.OFF, lui.LOW, lui.MEDIUM, lui.HIGH, lui.EXTREME or "Extreme" }
+	local selectedWeather = math.max(0, math.min(4, Engine.GetWeatherEffectsQuality()))
 
 	local textCompress = Engine.GetTextureCompressionEnabled()
 	local gpuJobs = Engine.GetGpuJobsEnabled()
@@ -204,7 +223,43 @@ local function showVideoOptions()
 	local realisticScattering = Engine.GetRealisticScattering()
 	local enhancedGraphics = Engine.GetEnhancedGraphics()
 
-	local cityDetail = keyOf(detailLabels,keyOf(detailLevels, Engine.GetCityDetailLevel()))-1
+	local curPlanetDetailStr = Engine.GetPlanetDetailLevel()
+	local curCityDetailStr = Engine.GetCityDetailLevel()
+	local cityDetail = keyOf(detailLabels,keyOf(detailLevels, curCityDetailStr))-1
+
+	-- Overall Graphics Quality Preset (Low -> Extreme, or Custom)
+	local graphicsPresets = {
+		{ enhanced = true, scatter = 1, atmo = 1, water = 0, rings = 1, scatterQ = 1, scatterA = 0, wx = 1, detail = "LOW",       city = "LOW",       aniso = 2  },
+		{ enhanced = true, scatter = 2, atmo = 2, water = 1, rings = 2, scatterQ = 2, scatterA = 1, wx = 2, detail = "MEDIUM",    city = "MEDIUM",    aniso = 4  },
+		{ enhanced = true, scatter = 2, atmo = 3, water = 2, rings = 3, scatterQ = 3, scatterA = 2, wx = 3, detail = "HIGH",      city = "HIGH",      aniso = 8  },
+		{ enhanced = true, scatter = 2, atmo = 3, water = 3, rings = 3, scatterQ = 3, scatterA = 3, wx = 3, detail = "VERY_HIGH", city = "VERY_HIGH", aniso = 16 },
+		{ enhanced = true, scatter = 2, atmo = 4, water = 3, rings = 4, scatterQ = 4, scatterA = 4, wx = 4, detail = "VERY_HIGH", city = "VERY_HIGH", aniso = 16 },
+	}
+	local presetLabels = {
+		lui.LOW,
+		lui.MEDIUM,
+		lui.HIGH,
+		lui.VERY_HIGH,
+		lui.EXTREME or "Extreme",
+		lui.CUSTOM or "Custom",
+	}
+	local selectedPreset = 5
+	for i, p in ipairs(graphicsPresets) do
+		if enhancedGraphics == p.enhanced
+			and realisticScattering == p.scatter
+			and selectedAtmo == p.atmo
+			and selectedWater == p.water
+			and selectedRing == p.rings
+			and selectedScatterQ == p.scatterQ
+			and selectedScatterA == p.scatterA
+			and selectedWeather == p.wx
+			and curPlanetDetailStr == p.detail
+			and curCityDetailStr == p.city
+			and curAniso == p.aniso then
+			selectedPreset = i - 1
+			break
+		end
+	end
 	local displayNavTunnels = Engine.GetDisplayNavTunnels()
 	local displaySpeedLines = Engine.GetDisplaySpeedLines()
 	local displayHudTrails = Engine.GetDisplayHudTrails()
@@ -243,6 +298,22 @@ local function showVideoOptions()
 
 	ui.separator()
 
+	c,selectedPreset = combo(lui.GRAPHICS_PRESET or "Graphics Quality Preset", selectedPreset, presetLabels, lui.GRAPHICS_PRESET_DESC or "Applies a cohesive preset from Low to Extreme across atmosphere clouds, water, planetary rings, surface scatter, weather effects, and terrain detail.")
+	if c and selectedPreset < #graphicsPresets then
+		local p = graphicsPresets[selectedPreset + 1]
+		Engine.SetEnhancedGraphics(p.enhanced)
+		Engine.SetRealisticScattering(p.scatter)
+		Engine.SetAtmosphereQuality(p.atmo)
+		Engine.SetWaterQuality(p.water)
+		Engine.SetVolumetricRings(p.rings)
+		Engine.SetSurfaceScatterQuality(p.scatterQ)
+		Engine.SetSurfaceScatterAmount(p.scatterA)
+		Engine.SetWeatherEffectsQuality(p.wx)
+		Engine.SetPlanetDetailLevel(p.detail)
+		Engine.SetCityDetailLevel(p.city)
+		Engine.SetAnisoFiltering(p.aniso)
+	end
+
 	c,enhancedGraphics = checkbox(lui.ENHANCED_GRAPHICS or "Enhanced Graphics (PBR, Glare & Lens Flare)", enhancedGraphics, lui.ENHANCED_GRAPHICS_DESC or "Enables enhanced PBR ship/station materials, star glare, and optical lens flare. Disable to restore Classic Pioneer graphics immediately.")
 	if c then
 		Engine.SetEnhancedGraphics(enhancedGraphics)
@@ -264,7 +335,12 @@ local function showVideoOptions()
 		Engine.SetRealisticScattering(realisticScattering)
 	end
 
-	c,selectedRing = combo(lui.VOLUMETRIC_RINGS or "Volumetric Planetary Rings", selectedRing, ringLabels, lui.VOLUMETRIC_RINGS_DESC or "Controls 3D boulder and dust density in planetary rings.")
+	c,selectedAtmo = combo(lui.ATMOSPHERE_QUALITY or "Atmosphere & Cloud Quality", selectedAtmo, atmoLabels, lui.ATMOSPHERE_QUALITY_DESC or "Controls planetary cloud deck octaves, domain warping, and dual altitude layers (Low/Medium use a single deck; High/Extreme render both cumulus and high cirrus layers).")
+	if c then
+		Engine.SetAtmosphereQuality(atmoLevels[selectedAtmo+1])
+	end
+
+	c,selectedRing = combo(lui.VOLUMETRIC_RINGS or "Volumetric Planetary Rings", selectedRing, ringLabels, lui.VOLUMETRIC_RINGS_DESC or "Controls 3D boulder density, mesh detail, and normal-mapped rock bump shading in planetary rings.")
 	if c then
 		Engine.SetVolumetricRings(ringLevels[selectedRing+1])
 	end
@@ -272,6 +348,21 @@ local function showVideoOptions()
 	c,selectedWater = combo(lui.WATER_QUALITY or "Water Surface Quality", selectedWater, waterLabels, lui.WATER_QUALITY_DESC or "Controls ocean wave layers, whitecap foam, and close-up ripple detail. Lower values significantly improve planetary surface FPS (applies immediately).")
 	if c then
 		Engine.SetWaterQuality(waterLevels[selectedWater+1])
+	end
+
+	c,selectedScatterQ = combo(lui.SURFACE_SCATTER_QUALITY or "Surface Scatter Quality", selectedScatterQ, scatterQLabels, lui.SURFACE_SCATTER_QUALITY_DESC or "Controls 3D surface boulder mesh detail, rock bump mapping, and draw distance (applies immediately).")
+	if c then
+		Engine.SetSurfaceScatterQuality(scatterQLevels[selectedScatterQ+1])
+	end
+
+	c,selectedScatterA = combo(lui.SURFACE_SCATTER_AMOUNT or "Surface Scatter Amount", selectedScatterA, scatterALabels, lui.SURFACE_SCATTER_AMOUNT_DESC or "Controls the density and visible count of 3D boulders, outcrops, and cobbles on rocky worlds (applies immediately).")
+	if c then
+		Engine.SetSurfaceScatterAmount(scatterALevels[selectedScatterA+1])
+	end
+
+	c,selectedWeather = combo(lui.WEATHER_EFFECTS_QUALITY or "Weather Effects Quality", selectedWeather, weatherLabels, lui.WEATHER_EFFECTS_QUALITY_DESC or "Controls 3D precipitation, volcanic plumes, and storm lightning particle density (applies immediately).")
+	if c then
+		Engine.SetWeatherEffectsQuality(weatherLevels[selectedWeather+1])
 	end
 
 	c,selectedDetail = combo(lui.PLANET_DETAIL_DISTANCE, selectedDetail, detailLabels, lui.DETAIL_DESC)
@@ -439,6 +530,39 @@ local function showSoundOptions()
 		c,binaural_enabled = checkbox(lui.BINAURAL_RENDERING, binaural_enabled, lui.BINAURAL_RENDERING_DESC)
 		if c then Engine.SetBinauralRendering(binaural_enabled) end
 	end
+
+	ui.separator()
+
+	local vacuumAcoustics = Engine.GetVacuumAcoustics()
+	c, vacuumAcoustics = checkbox(lui.VACUUM_ACOUSTICS or "Vacuum Acoustics (OpenAL Low-Pass)", vacuumAcoustics, lui.VACUUM_ACOUSTICS_DESC or "Muffles exterior space sounds with an OpenAL low-pass filter based on atmospheric density while keeping cockpit alerts crisp.")
+	if c then Engine.SetVacuumAcoustics(vacuumAcoustics) end
+
+	local voiceEnabled = Engine.GetCockpitVoiceEnabled()
+	c, voiceEnabled = checkbox(lui.COCKPIT_VOICE_ENABLED or "Cockpit AI Voice Advisories", voiceEnabled, lui.COCKPIT_VOICE_ENABLED_DESC or "Enables non-overlapping, priority-queued spoken cockpit advisories and critical warnings.")
+	if c then Engine.SetCockpitVoiceEnabled(voiceEnabled) end
+
+	local voiceVol = math.floor(Engine.GetCockpitVoiceVolume() * 100 + 0.5)
+	c, voiceVol = slider(lui.COCKPIT_VOICE_VOLUME or "Cockpit Voice Volume", voiceVol, 0, 100, lui.COCKPIT_VOICE_VOLUME_DESC or "Volume of spoken Cockpit AI advisories.")
+	if c then Engine.SetCockpitVoiceVolume(voiceVol / 100) end
+
+	local voicePackIds = { "aria" }
+	local voicePackLabels = { "Aria (US Female)" }
+	local curPack = Engine.GetCockpitVoicePack()
+	local selectedPack = 0
+	for i, pid in ipairs(voicePackIds) do
+		if pid == curPack then
+			selectedPack = i - 1
+			break
+		end
+	end
+	c, selectedPack = combo(lui.COCKPIT_VOICE_PACK or "Cockpit Voice Pack", selectedPack, voicePackLabels, lui.COCKPIT_VOICE_PACK_DESC or "Selects the Cockpit AI voice personality.")
+	if c then
+		Engine.SetCockpitVoicePack(voicePackIds[selectedPack + 1])
+	end
+	ui.sameLine()
+	optionTextButton(lui.TEST_VOICE or "Test Voice", lui.TEST_VOICE_DESC or "Plays a sample Cockpit AI voice advisory.", voiceEnabled, function()
+		Engine.PlayCockpitVoice("shields_online", 1, 0.5)
+	end)
 end
 
 local function showLanguageOptions()

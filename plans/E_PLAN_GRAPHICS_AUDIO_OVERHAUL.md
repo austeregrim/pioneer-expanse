@@ -1,8 +1,8 @@
 # Technical Implementation Plan: Graphics, Planetary Engine, Weather & Audio Overhaul
 
-**Document Version**: 2.4  
-**Status**: In Progress (M1–6 Completed; M7 Next Up; M8 Asset-Gated)  
-**Priority Tier**: Active Pillar (Audio Finish Next Up)  
+**Document Version**: 2.6  
+**Status**: Code & Audio Completed (M1–7 Completed; M8 Asset-Gated)  
+**Priority Tier**: Completed Code/Audio Pillar (M8 Asset-Gated)  
 **Parent Roadmap**: [`01_EXPANSE_LONG_TERM_ROADMAP.md`](./01_EXPANSE_LONG_TERM_ROADMAP.md)  
 
 ---
@@ -35,7 +35,7 @@ graph TD
 
     subgraph Track3["Track 3: Atmospheric Weather & Soundscape"]
         T3M1["Milestone 6: Atmospheric Weather, Wind Turbulence & Aviation Chimes (Completed)"]
-        T3M2["Milestone 7: Situational Hull/Weather Soundscapes, Vacuum Acoustics & Cockpit AI Voice (Next Up)"]
+        T3M2["Milestone 7: Situational Hull/Weather Soundscapes, Vacuum Acoustics & Cockpit AI Voice (Completed)"]
     end
 
     subgraph Track4["Track 4: Full 3D Cockpit Interior Overhaul (Asset-Gated)"]
@@ -75,6 +75,7 @@ graph TD
   * Enabled `RealisticScattering = 2` (Full Rayleigh/Mie) by default in `GameConfig`.
   * Computed per-planet `rayleighBeta`, `mieBeta`, `mieG`, and `ozoneStrength` across all 9 atmospheric chemistry classes (`O2/N2` + Chappuis ozone twilight, dusty `CO2` Mars vs. greenhouse `CO2` Venus, `CO`, photochemical `CH4` Titan vs. clear `CH4`, `H2`, `He`, `Ar`, `S/SO2`, `N2`), plus volcanicity ash aerosol blending and hand-authored `atmosCol` hue tinting.
   * Coupled live `WeatherSystem` storm intensity, overcast cover, and precipitation aerosols (`DUST`, `ASH`, `RAIN`, `SNOW`) into the `BaseSphereData` UBO each frame while preserving identical Classic fallback when `EnhancedGraphics == 0`.
+  * Added solar-elevation daytime/twilight star suppression alongside the **Galactic Skybox & Starfield Overhaul** (`src/Background.cpp`, `data/shaders/opengl/skybox.frag`, `starfield.*`): aligned Milky Way disc, galactic core bulge, dust rifts, procedural nebulae, fine 1px pinpoints, radial open clusters, optical scroll-zoom scaling, and statically calibrated skybox.
 
 ---
 
@@ -88,6 +89,9 @@ graph TD
   * Tightened `GeoSphere` close-range patch triangle target from `100m` to `20m` and fixed `CalculateMaxPatchDepth()` reset behavior (`src/GeoSphere.cpp`).
   * Overhauled `TerrainHeightBarrenRock*`, `TerrainHeightHillsCraters2`, and `TerrainHeightMountainsCraters2` to eliminate high-frequency noise-aliasing spikes and introduce smooth drivable basin floors (`smooth_basin_floor`), terraced mesas (`smooth_terrace`), navigable canyons, and true cellular craters.
   * Added seamless world-locked **Tri-Planar PBR Multi-Splat** shading (`PatchTileOffset` modulo 256m double-precision offset in `src/GeoPatch.cpp`, plus stratified cliff rock, talus/scree mid-slopes, flat regolith/soil, and per-layer GGX microfacet roughness/Fresnel in `geosphere_terrain.*` and `rayleigh_geosphere_terrain.*`).
+  * **Surface Naturalization & 3D `SurfaceScatter`** (`src/planet/SurfaceScatter.*`, `src/GeoSphere.cpp`, `src/GeoPatch.cpp`, `geosphere_terrain.frag`, `rayleigh_geosphere_terrain.frag`): quintic 3-octave FBM micro-detail (removing BC1 strips), anisotropic filtering, finer mid-range cliff subdivision, and 3D procedural boulders/outcrops/cobbles with day/night/cloud & ship spotlight shading, plus procedural tangent-space rock bump mapping (`scripts/generate_rock_normal.py` -> `data/textures/rock_normal.png`) on `SurfaceScatter` and `RingField` boulders.
+  * **Volcanic Surface & Plume Overhaul** (`src/terrain/TerrainColorVolcanic.cpp`, `src/planet/WeatherEffects.*`, `geosphere_terrain.frag`, `rayleigh_geosphere_terrain.frag`): smooth volcanic strata, organic shorelines, pulsing pahoehoe crust & HDR magma fissures, plus rising atmospheric steam/smoke/ember plumes.
+  * **Low → Extreme Graphics Quality Presets & Controls (`GameConfig.cpp`, `LuaEngine.cpp`, `settings-window.lua`, `planet_clouds.frag`, `GeoSphere.cpp`, `WeatherEffects.cpp`)**: Added cohesive `Low`–`Extreme` overall graphics presets plus granular controls for `AtmosphereQuality` (cloud FBM octaves, domain warping, and single vs. dual altitude cloud decks), `SurfaceScatterQuality` (mesh subdivision, bump mapping, draw distance), `SurfaceScatterAmount` (density/budgets), `WeatherEffectsQuality` (precipitation/plume density), and `VolumetricRings`.
 * **Future Follow-Up Note**: Add in-system procedural **asteroid fields / asteroid belts** as localized volumetric/navigable belts without altering existing `StarSystemGenerator` planetary seeds.
 
 ---
@@ -101,10 +105,10 @@ graph TD
   * Upgraded `AmbientSounds` (`src/sound/AmbientSounds.cpp`): fixed `NUM_SURFACE_DEAD_SOUNDS` array bounds (`12` -> `6`) and added continuous atmospheric wind, rain/storm loops, and distance-delayed thunder claps.
   * Added Lua `Body:GetWeatherState` (`src/lua/LuaBody.cpp`), adaptive `PlanetaryInfo` HUD wind/turbulence/shear telemetry (`data/pigui/modules/planetary-info.lua`), surface Starport ATC ATIS briefings (`data/modules/StationTrafficControl/StationTrafficControl.lua`), and hysteresis-guarded weather advisories (`data/pigui/modules/master-alarm.lua`).
   * Overhauled all 10 existing cockpit alarms/warnings/sirens/beeps plus 3 new weather alerts (`scripts/generate_cockpit_chimes.py`) into a warm, non-clipping 4-tier acoustic hierarchy (`data/sounds/*.ogg`, `data/sounds/Cockpit/*.ogg`): sweeping/whooping sirens for alarms (`Missile_Inbound`, `danger_siren`, `alarm_emer`, `alarm_descent`, `alarm_generic1`), fast repetitive rounded beeps/boops for warnings (`warning`, `Missile_lock`, `impact_chime`, `weather_windshear`), aircraft "bing-bong" two-tone chimes for awareness notifications (`fuel_low`, `weather_advisory`, `weather_turbulence`), and a single warm "ding" for informational notices (`notify_beep`).
-* **Milestone 7 *(Next Up — Needs Design Pass First)* — Situational Hull/Weather Soundscapes, Vacuum Acoustics & Cockpit AI Voice**:
-  * **Situational Soundscape Design**: Map and synthesize procedural `.ogg` soundscapes (expanding `scripts/generate_cockpit_chimes.py`) across all cockpit/hull immersion contexts—rain, hail, sand, and volcanic ash pelting canopy & hull; atmospheric wind & reentry plasma roar; ring ice/micro-debris hull pings; thermal & high-G hull creaks; and hangar elevator hydraulics.
-  * **Vacuum Acoustics (`AlAudioBackend.cpp`)**: OpenAL low-pass filtering for exterior space sounds vs. crisp hull-transducer impacts and internal thrusters.
-  * **Cockpit AI Voice**: Non-overlapping priority-queued Cockpit AI advisory voice ("Frame Shift Drive charging", "Temperature critical", "Interdiction detected", "Entering severe wind shear").
+* **Milestone 7 *(Completed)* — Situational Hull/Weather Soundscapes, Vacuum Acoustics & Cockpit AI Voice**:
+  * **Situational Soundscapes (`scripts/generate_hull_soundscapes.py`, `data/sounds/Hull/*.ogg`, `src/sound/AmbientSounds.cpp`, `src/Pi.cpp`)**: Synthesized 44.1 kHz stereo Vorbis assets and wired `hull_rain_canopy` (`RAIN`), `hull_sand_ash` (`DUST`/`ASH`), `hull_reentry_roar` (atmospheric entry speed/heat), `hull_ring_debris` (flying inside planetary rings), `hull_creak_stress` (high-G/thermal stress), and `hangar_hydraulics` (dock/undock pad cycling).
+  * **Vacuum Acoustics (`src/sound/AlAudioBackend.*`)**: Implemented OpenAL `ALC_EXT_EFX` low-pass filter (`AL_FILTER_LOWPASS`) driven smoothly by local atmospheric density (`Planet::GetAtmosphericState`, full-pass when docked) on exterior 3D `BodyMakeNoise` sources while keeping internal cockpit alerts crisp, toggleable via `VacuumAcoustics` in Sound Settings.
+  * **Cockpit AI Voice (`src/sound/CockpitVoice.*`, `scripts/generate_cockpit_voices.py`, `data/sounds/Voice/aria/voice_aria_*.ogg`)**: Built non-overlapping, priority-queued (`INFO`/`ADVISORY`/`WARNING`/`CRITICAL`) voice manager with per-event cooldowns and generated 18 calm, warm US female advisories ("Aria" pack via `en-US-AvaNeural` + studio proximity EQ/loudnorm), wired across Supercruise/FSD, interdiction, hyperspace, shields, missiles, landing gear, docking clearance, and `master-alarm.lua` thermal/fuel/weather cautions, with enable/volume/pack/test controls in Sound Settings.
 
 ---
 

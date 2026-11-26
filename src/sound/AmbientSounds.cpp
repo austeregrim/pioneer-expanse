@@ -12,6 +12,8 @@
 #include "Space.h"
 #include "SpaceStation.h"
 #include "WorldView.h"
+#include "galaxy/RingStyle.h"
+#include "galaxy/SystemBody.h"
 #include "planet/WeatherSystem.h"
 
 #include <algorithm>
@@ -62,7 +64,12 @@ static Sound::Event s_atmosphereNoises[eMaxNumAtmosphereSounds];
 static Sound::Event s_planetSurfaceNoise;
 static Sound::Event s_weatherWindNoise;
 static Sound::Event s_weatherStormNoise;
+static Sound::Event s_hullPrecipNoise;
+static Sound::Event s_hullReentryNoise;
+static Sound::Event s_hullRingNoise;
 static std::string s_activeWeatherStormSample;
+static std::string s_activeHullPrecipSample;
+static double s_lastHullCreakTime = -100.0;
 struct PendingThunder {
 	float delaySec = 0.0f;
 	float volL = 0.0f;
@@ -82,8 +89,36 @@ static void FadeOutWeatherSounds()
 	if (s_weatherStormNoise.IsPlaying()) {
 		s_weatherStormNoise.FadeOut(1.0f, Sound::OP_REPEAT);
 	}
+	if (s_hullPrecipNoise.IsPlaying()) {
+		s_hullPrecipNoise.FadeOut(1.0f, Sound::OP_REPEAT);
+	}
+	if (s_hullReentryNoise.IsPlaying()) {
+		s_hullReentryNoise.FadeOut(1.0f, Sound::OP_REPEAT);
+	}
 	s_activeWeatherStormSample.clear();
+	s_activeHullPrecipSample.clear();
 	s_pendingThunders.clear();
+}
+
+static void UpdateLoopingSound(Sound::Event &ev, std::string *activeSample, const char *sampleName, float targetVol, float rate)
+{
+	if (targetVol > 0.01f && sampleName) {
+		if (ev.IsPlaying() && activeSample && *activeSample != sampleName) {
+			ev.Stop();
+			*activeSample = sampleName;
+			ev.Play(sampleName, targetVol, targetVol, Sound::OP_REPEAT);
+		} else if (ev.IsPlaying()) {
+			ev.VolumeAnimate(targetVol, targetVol, rate, rate);
+		} else {
+			if (activeSample)
+				*activeSample = sampleName;
+			ev.Play(sampleName, targetVol, targetVol, Sound::OP_REPEAT);
+		}
+	} else if (ev.IsPlaying()) {
+		ev.FadeOut(1.0f, Sound::OP_REPEAT);
+		if (activeSample)
+			activeSample->clear();
+	}
 }
 
 static void UpdateWeatherSounds(float v_env, bool isExterior)
@@ -162,6 +197,40 @@ static void UpdateWeatherSounds(float v_env, bool isExterior)
 		s_activeWeatherStormSample.clear();
 	}
 
+	// Situational hull precipitation soundscape (canopy raindrops vs. sand/ash abrasion, louder inside cockpit)
+	const float cockpitGain = (isExterior ? 0.30f : 0.85f) * Sound::GetSfxVolume();
+	const char *wantedHullPrecip = nullptr;
+	if (weather.precipType == PrecipitationType::RAIN) {
+		wantedHullPrecip = "hull_rain_canopy";
+	} else if (weather.precipType == PrecipitationType::DUST || weather.precipType == PrecipitationType::ASH) {
+		wantedHullPrecip = "hull_sand_ash";
+	}
+	const float targetHullPrecipVol = wantedHullPrecip
+		? Clamp(float(weather.precipIntensity) * densityGain * altFade * 0.42f, 0.0f, 0.50f) * cockpitGain
+		: 0.0f;
+	UpdateLoopingSound(s_hullPrecipNoise, &s_activeHullPrecipSample, wantedHullPrecip, targetHullPrecipVol, 0.6f);
+
+	// Reentry plasma & aerodynamic hull roar when entering atmosphere at speed or thermal load
+	float targetReentryVol = 0.0f;
+	if (fs == Ship::FLYING && weather.densityKgM3 > 0.002) {
+		const float speedNorm = Clamp((float(Pi::player->GetVelocity().Length()) - 450.0f) / 2600.0f, 0.0f, 1.0f);
+		const float heatNorm = Clamp((float(Pi::player->GetHullTemperature()) - 0.12f) / 0.65f, 0.0f, 1.0f);
+		const float entryDrive = std::max(speedNorm * Clamp(float(weather.densityKgM3 / 0.25), 0.1f, 1.0f), heatNorm);
+		targetReentryVol = Clamp(entryDrive * 0.52f, 0.0f, 0.55f) * cockpitGain;
+	}
+	UpdateLoopingSound(s_hullReentryNoise, nullptr, "hull_reentry_roar", targetReentryVol, 0.8f);
+
+	// High-G / thermal hull structural creak one-shots
+	if (fs == Ship::FLYING && !Pi::game->IsPaused() && (gameTime - s_lastHullCreakTime) >= 7.0) {
+		const double accelG = Pi::player->GetLastForce().Length() / (std::max(1.0, Pi::player->GetMass()) * 9.81);
+		const double hullTemp = Pi::player->GetHullTemperature();
+		if (accelG > 5.5 || hullTemp > 0.62 || weather.turbulence > 0.72) {
+			const float creakVol = Clamp(0.28f * cockpitGain, 0.08f, 0.45f);
+			Sound::PlaySfx("hull_creak_stress", creakVol, creakVol, 0);
+			s_lastHullCreakTime = gameTime;
+		}
+	}
+
 	if (sbody && weather.lightningActivity > 0.05 && altFade > 0.05f) {
 		const LightningFlash flash = WeatherSystem::SampleLightningFlash(sbody->GetSeed(), gameTime, weather.lightningActivity);
 		if (flash.triggeredThisWindow && flash.boltSeed != 0 && flash.boltSeed != s_lastLightningSeed) {
@@ -210,7 +279,11 @@ void AmbientSounds::Uninit()
 {
 	onChangeCamTypeConnection.disconnect();
 	FadeOutWeatherSounds();
+	if (s_hullRingNoise.IsPlaying()) {
+		s_hullRingNoise.FadeOut(1.0f, Sound::OP_REPEAT);
+	}
 	s_lastLightningSeed = 0;
+	s_lastHullCreakTime = -100.0;
 }
 
 void AmbientSounds::Update()
@@ -218,6 +291,34 @@ void AmbientSounds::Update()
 	const bool isExterior = Pi::game->GetWorldView()->shipView->IsExteriorView();
 	const float v_env = (isExterior ? 1.0f : 0.5f) * Sound::GetSfxVolume();
 	UpdateWeatherSounds(v_env, isExterior);
+
+	// Ring ice/micro-debris hull ping loop when flying inside a planetary ring plane
+	float targetRingVol = 0.0f;
+	if (Pi::player && Pi::player->GetFlightState() == Ship::FLYING) {
+		if (Frame *pf = Frame::GetFrame(Pi::player->GetFrame())) {
+			Frame *orbFrame = Frame::GetFrame(pf->GetNonRotFrame());
+			const Body *astro = orbFrame ? orbFrame->GetBody() : pf->GetBody();
+			if (astro && astro->IsType(ObjectType::PLANET)) {
+				const SystemBody *sb = astro->GetSystemBody();
+				if (sb && sb->HasRings()) {
+					const RingStyle &rings = sb->GetRings();
+					const double planetRad = std::max(1.0, sb->GetRadius());
+					const matrix3x3d axialInv = matrix3x3d::RotateX(sb->GetAxialTilt()).Transpose();
+					const vector3d relOrb = Pi::player->GetPositionRelTo(astro);
+					const vector3d inRing = axialInv * relOrb;
+					const double r = std::hypot(inRing.x, inRing.z);
+					const double minR = rings.minRadius.ToDouble() * planetRad;
+					const double maxR = rings.maxRadius.ToDouble() * planetRad;
+					const double halfThick = std::max(900.0, rings.thickness.ToDouble() * 1.5);
+					if (r >= minR && r <= maxR && std::abs(inRing.y) <= halfThick) {
+						const float speedNorm = Clamp(float(Pi::player->GetVelocity().Length()) / 400.0f, 0.2f, 1.0f);
+						targetRingVol = speedNorm * (isExterior ? 0.16f : 0.36f) * Sound::GetSfxVolume();
+					}
+				}
+			}
+		}
+	}
+	UpdateLoopingSound(s_hullRingNoise, nullptr, "hull_ring_debris", targetRingVol, 0.6f);
 
 	if (Pi::player->GetFlightState() == Ship::DOCKED) {
 		if (s_starNoise.IsPlaying()) {

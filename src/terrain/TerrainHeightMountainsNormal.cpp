@@ -67,13 +67,13 @@ void TerrainHeightFractal<TerrainHeightMountainsNormal>::GetHeights(const vector
 			if (n < 0.133) {
 				n += n * billow_octavenoise(m_fracdef[6], 0.5 * octavenoise(m_fracdef[5], 0.5, p), p);
 			} else {
-				n += (0.16 / n) * billow_octavenoise(m_fracdef[6], 0.5 * octavenoise(m_fracdef[5], 0.5, p), p);
+				n += ((0.133 * 0.133) / n) * billow_octavenoise(m_fracdef[6], 0.5 * octavenoise(m_fracdef[5], 0.5, p), p);
 			}
 
 			if (n < 0.066667) {
 				n += n * billow_octavenoise(m_fracdef[5], 0.5 * octavenoise(m_fracdef[5], 0.5, p), p);
 			} else {
-				n += (0.04 / n) * billow_octavenoise(m_fracdef[5], 0.5 * octavenoise(m_fracdef[5], 0.5, p), p);
+				n += ((0.066667 * 0.066667) / n) * billow_octavenoise(m_fracdef[5], 0.5 * octavenoise(m_fracdef[5], 0.5, p), p);
 			}
 			//smaller ridged mountains
 			n += n * 0.7 * ridged_octavenoise(m_fracdef[5], 0.5 * octavenoise(m_fracdef[6], 0.5, p), p);
@@ -94,7 +94,7 @@ void TerrainHeightFractal<TerrainHeightMountainsNormal>::GetHeights(const vector
 
 			if (n > 0.2 && n <= 0.25) {
 				n += (0.25 - n) * 0.2 * ridged_octavenoise(m_fracdef[3], Clamp(h * 0.0002 * octavenoise(m_fracdef[5], 0.5, p), 0.5 * octavenoise(m_fracdef[3], 0.5, p), 0.5 * octavenoise(m_fracdef[4], 0.5, p)), p);
-			} else if (n > 0.05) {
+			} else if (n > 0.05 && n <= 0.2) {
 				n += ((n - 0.05) / 15) * ridged_octavenoise(m_fracdef[3], Clamp(h * 0.0002 * octavenoise(m_fracdef[5], 0.5, p), 0.5 * octavenoise(m_fracdef[3], 0.5, p), 0.5 * octavenoise(m_fracdef[4], 0.5, p)), p);
 			}
 			n = n * 0.2;

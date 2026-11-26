@@ -1,6 +1,7 @@
 -- Copyright © 2008-2026 Pioneer Developers. See AUTHORS.txt for details
 -- Licensed under the terms of the GPL v3. See licenses/GPL-3.txt
 
+local Engine = require 'Engine'
 local Event = require 'Event'
 local Game = require 'Game'
 local Gravity = require 'pigui.libs.gravity'
@@ -72,6 +73,7 @@ local function alarm ()
 	local t = Game.player:GetHullTemperature()
 	if t and t > 0.8 and not alreadyAlertedTemp then
 		ui.playSfx("alarm_emer", 1.0, 1.0)
+		Engine.PlayCockpitVoice("temp_critical", 3, 12.0)
 		alreadyAlertedTemp = true;
 	end
 	if t < 0.8 and alreadyAlertedTemp then
@@ -85,6 +87,7 @@ local function alarm ()
 	local warningRatio = remainingFuel - currentSpeed
 	if warningRatio < (maxDv / 10) and not alreadyAlertedFuel then
 		ui.playSfx("fuel_low", 1.0, 1.0)
+		Engine.PlayCockpitVoice("fuel_low", 2, 20.0)
 		alreadyAlertedFuel = true
 	end
 	if warningRatio > (maxDv / 10) and alreadyAlertedFuel then
@@ -216,6 +219,7 @@ local function alarm ()
 		if windShearActive then
 			if not alreadyAlertedWindShear and (now - lastWindShearChimeTime) >= 20.0 then
 				ui.playSfx("weather_windshear", 0.75, 0.75)
+				Engine.PlayCockpitVoice("wind_shear", 2, 20.0)
 				lastWindShearChimeTime = now
 			end
 			alreadyAlertedWindShear = true
@@ -232,6 +236,7 @@ local function alarm ()
 		if weather.turbulence >= 0.65 then
 			if not alreadyAlertedTurb and (now - lastTurbChimeTime) >= 25.0 then
 				ui.playSfx("weather_turbulence", 0.70, 0.70)
+				Engine.PlayCockpitVoice("turbulence", 2, 25.0)
 				lastTurbChimeTime = now
 			end
 			alreadyAlertedTurb = true
@@ -248,6 +253,7 @@ local function alarm ()
 		if weather.stormIntensity >= 0.60 then
 			if not alreadyAlertedStorm and (now - lastStormChimeTime) >= 45.0 then
 				ui.playSfx("weather_advisory", 0.65, 0.65)
+				Engine.PlayCockpitVoice("storm_advisory", 1, 45.0)
 				lastStormChimeTime = now
 			end
 			alreadyAlertedStorm = true

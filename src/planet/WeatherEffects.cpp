@@ -5,6 +5,7 @@
 
 #include "Frame.h"
 #include "Game.h"
+#include "GameConfig.h"
 #include "MathUtil.h"
 #include "Pi.h"
 #include "Planet.h"
@@ -306,11 +307,21 @@ void WeatherEffects::BuildLightningBolt(
 void WeatherEffects::Update(float timeStep)
 {
 	PROFILE_SCOPED();
-	if (!m_ship || m_ship->IsDead()) {
+	const int wxQuality = Pi::config ? Clamp(Pi::config->Int("WeatherEffectsQuality", 3), 0, 4) : 3;
+	if (!m_ship || m_ship->IsDead() || wxQuality <= 0) {
 		m_precipVisible = false;
 		m_volcanicVisible = false;
 		m_lightningVisible = false;
 		return;
+	}
+
+	float densityScale = 1.0f;
+	switch (wxQuality) {
+	case 1: densityScale = 0.25f; break;
+	case 2: densityScale = 0.55f; break;
+	case 4: densityScale = 1.40f; break;
+	case 3:
+	default: densityScale = 1.00f; break;
 	}
 
 	const Ship::FlightState fs = m_ship->GetFlightState();
@@ -433,7 +444,7 @@ void WeatherEffects::Update(float timeStep)
 			const vector3f relDir = (relSpeedD > 1e-4) ? vector3f(relVelD / relSpeedD) : vector3f(-up);
 
 			const float altFade = float(1.0 - Clamp((weather.altitudeM - cloudCeiling * 0.85) / std::max(1.0, cloudCeiling * 0.33), 0.0, 1.0));
-			const int activeCount = Clamp(int(180.0 + 1620.0 * std::pow(weather.precipIntensity, 0.85)), 0, NUM_PARTICLES);
+			const int activeCount = Clamp(int((180.0 + 1620.0 * std::pow(weather.precipIntensity, 0.85)) * double(densityScale)), 0, NUM_PARTICLES);
 			const float streakLen = Clamp(float(relSpeedD) * streakTimeScale, minStreak, maxStreak);
 			const vector3f streakVec = relDir * streakLen;
 			const float intensityAlpha = float(Clamp(0.36 + 0.62 * weather.precipIntensity + 0.12 * weather.stormIntensity, 0.0, 0.98)) * altFade;
@@ -496,7 +507,7 @@ void WeatherEffects::Update(float timeStep)
 			const float streakLen = Clamp(float(relSpeedD) * 0.045f, 0.28f, 2.2f);
 			const vector3f streakVec = plumeDir * streakLen;
 
-			const int activeCount = Clamp(int(120.0f + 240.0f * volcFactor), 0, NUM_VOLCANIC_PARTICLES);
+			const int activeCount = Clamp(int((120.0f + 240.0f * volcFactor) * densityScale), 0, NUM_VOLCANIC_PARTICLES);
 			const float alphaScale = volcFactor * altFade * atmScale;
 			if (activeCount > 0 && alphaScale > 0.02f) {
 				m_volcanicVerts.Clear();

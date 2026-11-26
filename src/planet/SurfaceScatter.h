@@ -58,13 +58,13 @@ private:
 	};
 
 	static constexpr int NUM_VARIANTS = 6;
-	static constexpr int MAX_VISIBLE_ROCKS = 750;
+	static constexpr int MAX_VISIBLE_ROCKS = 1400;
 	static constexpr size_t MAX_CACHED_CELLS = 512;
 	static constexpr double CELL_LARGE = 64.0;
 	static constexpr double CELL_SMALL = 24.0;
 
-	void InitGraphics(Graphics::Renderer *r);
-	std::unique_ptr<Graphics::MeshObject> BuildRockMesh(Graphics::Renderer *r, uint32_t seed, int variant) const;
+	void InitGraphics(Graphics::Renderer *r, int quality, bool enhanced);
+	std::unique_ptr<Graphics::MeshObject> BuildRockMesh(Graphics::Renderer *r, uint32_t seed, int variant, int subdivs, bool withTangents) const;
 	vector3d CubeMetersToUnit(int face, double uM, double vM) const;
 	const std::vector<RockInstance> &GetOrBuildCell(int face, uint8_t tier, int64_t gx, int64_t gz);
 
@@ -77,6 +77,8 @@ private:
 	double m_icyness;
 	double m_volcanicity;
 	Color m_dustColor;
+	int m_builtQuality = -1;
+	bool m_builtEnhanced = false;
 
 	std::unique_ptr<Graphics::Material> m_rockMaterial;
 	std::array<std::unique_ptr<Graphics::MeshObject>, NUM_VARIANTS> m_rockMeshes;

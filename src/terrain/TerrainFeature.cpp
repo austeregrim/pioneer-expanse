@@ -9,289 +9,110 @@ using namespace TerrainNoise;
 
 namespace TerrainFeature {
 
+	namespace {
+		inline double smooth_canyon_profile(double n, double outer, double inner, double inner2, double outer2)
+		{
+			if (n > outer2)
+				return 1.0;
+			if (n > inner2) {
+				const double t = (n - inner2) / (outer2 - inner2);
+				return t * t * (3.0 - 2.0 * t);
+			}
+			if (n > inner)
+				return 0.0;
+			if (n > outer) {
+				const double t = (n - outer) / (inner - outer);
+				return 1.0 - t * t * (3.0 - 2.0 * t);
+			}
+			return 1.0;
+		}
+	} // namespace
+
 	// Creates small canyons (smoothstep walls, octave-capped to prevent jagged vertical aliasing)
 	double canyon_ridged_function(const fracdef_t &def, const vector3d &p)
 	{
-		double h;
-		const int oct = std::min(def.octaves, 8);
+		const int oct = std::min(def.octaves, 7);
 		const double n = ridged_octavenoise(oct, 0.52, 2.0, def.frequency * p);
-		constexpr double outer = 0.685;
-		constexpr double inner = 0.710;
-		constexpr double inner2 = 0.720;
-		constexpr double outer2 = 0.745;
-		if (n > outer2) {
-			h = 1.0;
-		} else if (n > inner2) {
-			const double t = (n - inner2) / (outer2 - inner2);
-			h = t * t * (3.0 - 2.0 * t);
-		} else if (n > inner) {
-			h = 0.0;
-		} else if (n > outer) {
-			const double t = (n - outer) / (inner - outer);
-			h = 1.0 - t * t * (3.0 - 2.0 * t);
-		} else {
-			h = 1.0;
-		}
-		return h * def.amplitude;
+		return smooth_canyon_profile(n, 0.655, 0.708, 0.722, 0.775) * def.amplitude;
 	}
 
 	// Larger canyon (smoothstep sloped walls, octave-capped to avoid jagged drop-offs)
 	double canyon2_ridged_function(const fracdef_t &def, const vector3d &p)
 	{
-		double h;
-		const int oct = std::min(def.octaves, 8);
+		const int oct = std::min(def.octaves, 7);
 		const double n = ridged_octavenoise(oct, 0.54, 2.0, def.frequency * p);
-		constexpr double outer = 0.670;
-		constexpr double inner = 0.705;
-		constexpr double inner2 = 0.725;
-		constexpr double outer2 = 0.760;
-		if (n > outer2) {
-			h = 1.0;
-		} else if (n > inner2) {
-			const double t = (n - inner2) / (outer2 - inner2);
-			h = t * t * (3.0 - 2.0 * t);
-		} else if (n > inner) {
-			h = 0.0;
-		} else if (n > outer) {
-			const double t = (n - outer) / (inner - outer);
-			h = 1.0 - t * t * (3.0 - 2.0 * t);
-		} else {
-			h = 1.0;
-		}
-		return h * def.amplitude;
+		return smooth_canyon_profile(n, 0.635, 0.700, 0.725, 0.790) * def.amplitude;
 	}
 
 	// Largest canyon (smoothstep sloped walls, octave-capped to avoid jagged drop-offs)
 	double canyon3_ridged_function(const fracdef_t &def, const vector3d &p)
 	{
-		double h;
-		const int oct = std::min(def.octaves, 8);
+		const int oct = std::min(def.octaves, 7);
 		const double n = ridged_octavenoise(oct, 0.56, 2.0, def.frequency * p);
-		constexpr double outer = 0.665;
-		constexpr double inner = 0.705;
-		constexpr double inner2 = 0.725;
-		constexpr double outer2 = 0.765;
-		if (n > outer2) {
-			h = 1.0;
-		} else if (n > inner2) {
-			const double t = (n - inner2) / (outer2 - inner2);
-			h = t * t * (3.0 - 2.0 * t);
-		} else if (n > inner) {
-			h = 0.0;
-		} else if (n > outer) {
-			const double t = (n - outer) / (inner - outer);
-			h = 1.0 - t * t * (3.0 - 2.0 * t);
-		} else {
-			h = 1.0;
-		}
-		return h * def.amplitude;
+		return smooth_canyon_profile(n, 0.635, 0.700, 0.725, 0.790) * def.amplitude;
 	}
 
 	double canyon_normal_function(const fracdef_t &def, const vector3d &p)
 	{
-		double h;
-		double n = 0;
-		n = octavenoise(def.octaves, 0.54, 2.0, def.frequency * p);
-		constexpr double outer = 0.71;
-		constexpr double inner = 0.715;
-		constexpr double inner2 = 0.715;
-		constexpr double outer2 = 0.72;
-		if (n > outer2) {
-			h = 1;
-		} else if (n > inner2) {
-			h = 0.0 + 1.0 * (n - inner2) * (1.0 / (outer2 - inner2));
-		} else if (n > inner) {
-			h = 0;
-		} else if (n > outer) {
-			h = 1.0 - 1.0 * (n - outer) * (1.0 / (inner - outer));
-		} else {
-			h = 1.0;
-		}
-		return h * def.amplitude;
+		const int oct = std::min(def.octaves, 7);
+		const double n = octavenoise(oct, 0.54, 2.0, def.frequency * p);
+		return smooth_canyon_profile(n, 0.655, 0.708, 0.722, 0.775) * def.amplitude;
 	}
 
 	double canyon2_normal_function(const fracdef_t &def, const vector3d &p)
 	{
-		double h;
-		double n = 0;
-		n = octavenoise(def.octaves, 0.56, 2.0, def.frequency * p);
-		constexpr double outer = 0.7;
-		constexpr double inner = 0.71;
-		constexpr double inner2 = 0.72;
-		constexpr double outer2 = 0.73;
-		if (n > outer2) {
-			h = 1;
-		} else if (n > inner2) {
-			h = 0.0 + 1.0 * (n - inner2) * (1.0 / (outer2 - inner2));
-		} else if (n > inner) {
-			h = 0;
-		} else if (n > outer) {
-			h = 1.0 - 1.0 * (n - outer) * (1.0 / (inner - outer));
-		} else {
-			h = 1.0;
-		}
-		return h * def.amplitude;
+		const int oct = std::min(def.octaves, 7);
+		const double n = octavenoise(oct, 0.56, 2.0, def.frequency * p);
+		return smooth_canyon_profile(n, 0.635, 0.700, 0.725, 0.790) * def.amplitude;
 	}
 
 	double canyon3_normal_function(const fracdef_t &def, const vector3d &p)
 	{
-		double h;
-		double n = 0;
-		n = octavenoise(def.octaves, 0.585, 2.0, def.frequency * p);
-		constexpr double outer = 0.7;
-		constexpr double inner = 0.71;
-		constexpr double inner2 = 0.72;
-		constexpr double outer2 = 0.73;
-		if (n > outer2) {
-			h = 1.0;
-		} else if (n > inner2) {
-			h = 0.0 + 1.0 * (n - inner2) * (1.0 / (outer2 - inner2));
-		} else if (n > inner) {
-			h = 0.0;
-		} else if (n > outer) {
-			h = 1.0 - 1.0 * (n - outer) * (1.0 / (inner - outer));
-		} else {
-			h = 1.0;
-		}
-		return h * def.amplitude;
+		const int oct = std::min(def.octaves, 7);
+		const double n = octavenoise(oct, 0.585, 2.0, def.frequency * p);
+		return smooth_canyon_profile(n, 0.635, 0.700, 0.725, 0.790) * def.amplitude;
 	}
 
 	double canyon_voronoi_function(const fracdef_t &def, const vector3d &p)
 	{
-		double h;
-		double n = 0;
-		n = octavenoise(def.octaves, 0.54, 2.0, def.frequency * p);
-		constexpr double outer = 0.71;
-		constexpr double inner = 0.715;
-		constexpr double inner2 = 0.715;
-		constexpr double outer2 = 0.72;
-		if (n > outer2) {
-			h = 1;
-		} else if (n > inner2) {
-			h = 0.0 + 1.0 * (n - inner2) * (1.0 / (outer2 - inner2));
-		} else if (n > inner) {
-			h = 0;
-		} else if (n > outer) {
-			h = 1.0 - 1.0 * (n - outer) * (1.0 / (inner - outer));
-		} else {
-			h = 1.0;
-		}
-		return h * def.amplitude;
+		const int oct = std::min(def.octaves, 7);
+		const double n = octavenoise(oct, 0.54, 2.0, def.frequency * p);
+		return smooth_canyon_profile(n, 0.655, 0.708, 0.722, 0.775) * def.amplitude;
 	}
 
 	double canyon2_voronoi_function(const fracdef_t &def, const vector3d &p)
 	{
-		double h;
-		double n = 0;
-		n = octavenoise(def.octaves, 0.56, 2.0, def.frequency * p);
-		constexpr double outer = 0.7;
-		constexpr double inner = 0.71;
-		constexpr double inner2 = 0.72;
-		constexpr double outer2 = 0.73;
-		if (n > outer2) {
-			h = 1;
-		} else if (n > inner2) {
-			h = 0.0 + 1.0 * (n - inner2) * (1.0 / (outer2 - inner2));
-		} else if (n > inner) {
-			h = 0;
-		} else if (n > outer) {
-			h = 1.0 - 1.0 * (n - outer) * (1.0 / (inner - outer));
-		} else {
-			h = 1.0;
-		}
-		return h * def.amplitude;
+		const int oct = std::min(def.octaves, 7);
+		const double n = octavenoise(oct, 0.56, 2.0, def.frequency * p);
+		return smooth_canyon_profile(n, 0.635, 0.700, 0.725, 0.790) * def.amplitude;
 	}
 
 	double canyon3_voronoi_function(const fracdef_t &def, const vector3d &p)
 	{
-		double h;
-		double n = 0;
-		n = octavenoise(def.octaves, 0.585, 2.0, def.frequency * p);
-		constexpr double outer = 0.7;
-		constexpr double inner = 0.71;
-		constexpr double inner2 = 0.72;
-		constexpr double outer2 = 0.73;
-		if (n > outer2) {
-			h = 1.0;
-		} else if (n > inner2) {
-			h = 0.0 + 1.0 * (n - inner2) * (1.0 / (outer2 - inner2));
-		} else if (n > inner) {
-			h = 0.0;
-		} else if (n > outer) {
-			h = 1.0 - 1.0 * (n - outer) * (1.0 / (inner - outer));
-		} else {
-			h = 1.0;
-		}
-		return h * def.amplitude;
+		const int oct = std::min(def.octaves, 7);
+		const double n = octavenoise(oct, 0.585, 2.0, def.frequency * p);
+		return smooth_canyon_profile(n, 0.635, 0.700, 0.725, 0.790) * def.amplitude;
 	}
 
 	double canyon_billow_function(const fracdef_t &def, const vector3d &p)
 	{
-		double h;
-		double n = 0;
-		n = octavenoise(def.octaves, 0.54, 2.0, def.frequency * p);
-		constexpr double outer = 0.71;
-		constexpr double inner = 0.715;
-		constexpr double inner2 = 0.715;
-		constexpr double outer2 = 0.72;
-		if (n > outer2) {
-			h = 1;
-		} else if (n > inner2) {
-			h = 0.0 + 1.0 * (n - inner2) * (1.0 / (outer2 - inner2));
-		} else if (n > inner) {
-			h = 0;
-		} else if (n > outer) {
-			h = 1.0 - 1.0 * (n - outer) * (1.0 / (inner - outer));
-		} else {
-			h = 1.0;
-		}
-		return h * def.amplitude;
+		const int oct = std::min(def.octaves, 7);
+		const double n = octavenoise(oct, 0.54, 2.0, def.frequency * p);
+		return smooth_canyon_profile(n, 0.655, 0.708, 0.722, 0.775) * def.amplitude;
 	}
 
 	double canyon2_billow_function(const fracdef_t &def, const vector3d &p)
 	{
-		double h;
-		double n = 0;
-		n = octavenoise(def.octaves, 0.56, 2.0, def.frequency * p);
-		constexpr double outer = 0.7;
-		constexpr double inner = 0.71;
-		constexpr double inner2 = 0.72;
-		constexpr double outer2 = 0.73;
-		if (n > outer2) {
-			h = 1;
-		} else if (n > inner2) {
-			h = 0.0 + 1.0 * (n - inner2) * (1.0 / (outer2 - inner2));
-		} else if (n > inner) {
-			h = 0;
-		} else if (n > outer) {
-			h = 1.0 - 1.0 * (n - outer) * (1.0 / (inner - outer));
-		} else {
-			h = 1.0;
-		}
-		return h * def.amplitude;
+		const int oct = std::min(def.octaves, 7);
+		const double n = octavenoise(oct, 0.56, 2.0, def.frequency * p);
+		return smooth_canyon_profile(n, 0.635, 0.700, 0.725, 0.790) * def.amplitude;
 	}
 
 	double canyon3_billow_function(const fracdef_t &def, const vector3d &p)
 	{
-		double h;
-		double n = 0;
-		n = octavenoise(def.octaves, 0.585, 2.0, def.frequency * p);
-		constexpr double outer = 0.7;
-		constexpr double inner = 0.71;
-		constexpr double inner2 = 0.72;
-		constexpr double outer2 = 0.73;
-		if (n > outer2) {
-			h = 1.0;
-		} else if (n > inner2) {
-			h = 0.0 + 1.0 * (n - inner2) * (1.0 / (outer2 - inner2));
-		} else if (n > inner) {
-			h = 0.0;
-		} else if (n > outer) {
-			h = 1.0 - 1.0 * (n - outer) * (1.0 / (inner - outer));
-		} else {
-			h = 1.0;
-		}
-		return h * def.amplitude;
+		const int oct = std::min(def.octaves, 7);
+		const double n = octavenoise(oct, 0.585, 2.0, def.frequency * p);
+		return smooth_canyon_profile(n, 0.635, 0.700, 0.725, 0.790) * def.amplitude;
 	}
 
 	/*double rock_function(const fracdef_t &def, const vector3d &p)
@@ -466,24 +287,13 @@ namespace TerrainFeature {
 	double river_function(const fracdef_t &def, const vector3d &p, int style)
 	{
 		assert(style >= 0 && style < 2);
-		double h;
-		double n = octavenoise(def.octaves, 0.585, 2.0, def.frequency * p * 0.5);
-		constexpr double outer[] = { 0.67, 0.01 };
-		constexpr double inner[] = { 0.715, 0.49 };
-		constexpr double inner2[] = { 0.715, 0.51 };
-		constexpr double outer2[] = { 0.76, 0.99 };
-		if (n > outer2[style]) {
-			h = 1;
-		} else if (n > inner2[style]) {
-			h = 0.0 + 1.0 * (n - inner2[style]) * (1.0 / (outer2[style] - inner2[style]));
-		} else if (n > inner[style]) {
-			h = 0;
-		} else if (n > outer[style]) {
-			h = 1.0 - 1.0 * (n - outer[style]) * (1.0 / (inner[style] - outer[style]));
-		} else {
-			h = 1.0;
-		}
-		return h * def.amplitude;
+		const int oct = std::min(def.octaves, 7);
+		const double n = octavenoise(oct, 0.585, 2.0, def.frequency * p * 0.5);
+		constexpr double outer[] = { 0.64, 0.01 };
+		constexpr double inner[] = { 0.71, 0.49 };
+		constexpr double inner2[] = { 0.72, 0.51 };
+		constexpr double outer2[] = { 0.79, 0.99 };
+		return smooth_canyon_profile(n, outer[style], inner[style], inner2[style], outer2[style]) * def.amplitude;
 	}
 
 	namespace {

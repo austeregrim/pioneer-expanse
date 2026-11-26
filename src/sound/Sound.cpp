@@ -14,6 +14,7 @@
 #endif
 #include "AudioBackend.h"
 #include "Body.h"
+#include "CockpitVoice.h"
 #include "FileSystem.h"
 #include "JobQueue.h"
 #include "Pi.h"
@@ -95,11 +96,13 @@ namespace Sound {
 
 	void DestroyAllEvents()
 	{
+		CockpitVoice::Clear();
 		m_backend->DestroyAllEvents();
 	}
 
 	void DestroyAllEventsExceptMusic()
 	{
+		CockpitVoice::Clear();
 		m_backend->DestroyAllEventsExceptMusic();
 	}
 
@@ -373,6 +376,7 @@ namespace Sound {
 	void Update(float delta_t)
 	{
 		m_backend->Update(delta_t);
+		CockpitVoice::Update(delta_t);
 	}
 
 	bool IsBinauralSupported()

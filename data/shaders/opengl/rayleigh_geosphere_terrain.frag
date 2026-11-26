@@ -15,6 +15,8 @@ uniform sampler2D densityLUT;
 uniform sampler2D scatterLUT;
 uniform sampler2D oceanTexA;
 uniform sampler2D oceanTexB;
+uniform sampler2D terrainRegolithTex;
+uniform sampler2D terrainCliffTex;
 uniform int NumShadows;
 in vec2 texCoord0;
 
@@ -85,6 +87,13 @@ float rgeoFbm3D(vec3 p)
 	return sum * (1.0 / 0.875);
 }
 
+vec4 sampleTriPlanar(sampler2D tex, vec3 wPos, vec3 tw, float invScale)
+{
+	return texture(tex, wPos.yz * invScale) * tw.x
+		+ texture(tex, wPos.xz * invScale) * tw.y
+		+ texture(tex, wPos.xy * invScale) * tw.z;
+}
+
 void main(void)
 {
 	vec4 hidetail = texture(texture0, texCoord0 * detailScaleHi);
@@ -129,6 +138,7 @@ void main(void)
 		float midFade = exp(-0.00008 * distMeters);
 		float closeFade = exp(-0.00045 * distMeters);
 		float microFade = exp(-0.0022 * distMeters);
+		float fineFade = exp(-0.012 * distMeters);
 
 		float rawWater = 0.0;
 		float waterMask = 0.0;
@@ -136,21 +146,27 @@ void main(void)
 		float whitecap = 0.0;
 		float waterTurb = 0.5;
 #ifdef TERRAIN_WITH_WATER
-		float blueCheck = smoothstep(0.04, 0.095, rawAlbedo.b);
-		float redCheck = 1.0 - smoothstep(0.01, 0.12, rawAlbedo.r);
-		float blueDom = smoothstep(0.03, 0.09, rawAlbedo.b - rawAlbedo.r);
-		rawWater = blueCheck * redCheck * blueDom;
+		float blueCheck = smoothstep(0.03, 0.08, rawAlbedo.b);
+		float notIce = 1.0 - smoothstep(0.32, 0.56, rawAlbedo.r);
+		float blueDom = smoothstep(0.00, 0.22, rawAlbedo.b - rawAlbedo.r);
+		rawWater = blueCheck * notIce * blueDom;
 		waterMask = rawWater;
 #endif
 
 		float macroGrad = 0.5;
 		float microDetail = 0.5;
 		float triMid = 0.0;
+		float triClose = 0.0;
+		float triMicro = 0.0;
+		float triFine = 0.0;
 		float cliffMask = 0.0;
 		float screeMask = 0.0;
 		float bumpMeters = 0.0;
 		float triAlbedoMod = 1.0;
 		vec3 triTint = vec3(1.0);
+		vec2 texLandN = vec2(0.0);
+		float texCavity = 0.65;
+		float texMidB = 0.5;
 		float lavaMask = 0.0;
 		float charredRim = 0.0;
 		float lavaTemp = 0.0;
@@ -162,17 +178,18 @@ void main(void)
 			macroGrad = rgeoFbm3D(sDir * 9.0);
 			microDetail = rgeoFbm3D(sDir * 36.0 + vec3(macroGrad * 1.4));
 
-			// Pure 4-scale 3D quintic FBM geological detail (zero BC1 block compression artifacts at any distance or angle)
+			// Pure 5-scale 3D quintic FBM geological detail (zero BC1 block compression artifacts at any distance or angle)
 			float triMacro = rgeoFbm3D(worldM * (1.0 / 680.0)) * 2.0 - 1.0;
 			triMid = rgeoFbm3D(worldM * (1.0 / 160.0) + vec3(triMacro * 0.65)) * 2.0 - 1.0;
-			float triClose = rgeoFbm3D(worldM * (1.0 / 28.0) + vec3(triMid * 0.65)) * 2.0 - 1.0;
-			float triMicro = rgeoFbm3D(worldM * (1.0 / 5.5) + vec3(triClose * 0.75)) * 2.0 - 1.0;
+			triClose = rgeoFbm3D(worldM * (1.0 / 28.0) + vec3(triMid * 0.65)) * 2.0 - 1.0;
+			triMicro = rgeoFbm3D(worldM * (1.0 / 5.5) + vec3(triClose * 0.75)) * 2.0 - 1.0;
+			triFine = rgeoFbm3D(worldM * (1.0 / 1.15) + vec3(triMicro * 0.85)) * 2.0 - 1.0;
 
 #ifdef TERRAIN_WITH_WATER
 			// Multi-scale organic shoreline breakup (breaks straight triangle edges into natural coves)
-			float coastNoise = triMid * 0.45 + triClose * 0.25 + (microDetail - 0.5) * 0.45;
-			float coastZone = smoothstep(0.03, 0.32, rawWater) * (1.0 - smoothstep(0.68, 0.97, rawWater));
-			waterMask = smoothstep(0.22, 0.78, clamp(rawWater + coastNoise * coastZone * (0.45 + 0.55 * macroFade), 0.0, 1.0));
+			float coastNoise = triMacro * 0.25 + triMid * 0.45 + triClose * 0.25 + (microDetail - 0.5) * 0.35;
+			float coastBell = 4.0 * rawWater * (1.0 - rawWater);
+			waterMask = smoothstep(0.34, 0.66, clamp(rawWater + coastNoise * coastBell * (0.58 + 0.32 * macroFade), 0.0, 1.0));
 #endif
 
 			// Physical surface slope & tri-planar multi-splat weights (cliffs, scree/talus, flat regolith)
@@ -180,23 +197,50 @@ void main(void)
 			cliffMask = smoothstep(0.10, 0.34, slope) * (1.0 - waterMask);
 			screeMask = smoothstep(0.03, 0.14, slope) * (1.0 - cliffMask) * (1.0 - waterMask);
 
-			float radialElevM = (length(eyeposScaled - geosphereCenter) - 1.0) * geosphereRadius;
-			float strata = 0.5 + 0.5 * sin(radialElevM * 0.18 + triMid * 2.6 + macroGrad * 3.5);
-			float rippleWave = sin(dot(worldM, vec3(0.38, 0.09, 0.31)) + triClose * 2.4);
-			float flatMask = (1.0 - cliffMask) * (1.0 - screeMask * 0.5) * (1.0 - waterMask);
+			float strata = clamp(0.5 + triMacro * 0.25 + triMid * 0.25 + (macroGrad - 0.5) * 0.35, 0.0, 1.0);
+			float rockRidge = 1.0 - abs(triClose) * 1.4;
+			float microRidge = 1.0 - abs(triMicro) * 1.3;
+			float rockBias = clamp(cliffMask + screeMask * 0.65, 0.0, 1.0);
 
-			bumpMeters = (triMacro * 12.0 * macroFade + triMid * 3.6 * midFade + triClose * 0.85 * closeFade + triMicro * 0.20 * microFade) *
-				(0.80 + 0.55 * screeMask + 0.85 * cliffMask) +
-				(strata - 0.5) * 2.4 * cliffMask * midFade +
-				rippleWave * 0.06 * closeFade * flatMask;
+			vec4 regMacro = sampleTriPlanar(terrainRegolithTex, worldM, triW, 1.0 / 80.0);
+			vec4 regMid = sampleTriPlanar(terrainRegolithTex, worldM, triW, 1.0 / 16.0);
+			vec4 regNear = sampleTriPlanar(terrainRegolithTex, worldM, triW, 1.0 / 3.5);
+			vec4 texMacro = regMacro;
+			vec4 texMid = regMid;
+			vec4 texNear = regNear;
+			if (rockBias > 0.02) {
+				vec4 clfMacro = sampleTriPlanar(terrainCliffTex, worldM, triW, 1.0 / 90.0);
+				vec4 clfMid = sampleTriPlanar(terrainCliffTex, worldM, triW, 1.0 / 18.0);
+				vec4 clfNear = sampleTriPlanar(terrainCliffTex, worldM, triW, 1.0 / 4.0);
+				texMacro = mix(regMacro, clfMacro, rockBias);
+				texMid = mix(regMid, clfMid, rockBias);
+				texNear = mix(regNear, clfNear, rockBias);
+			}
+			texMidB = texMid.b;
+			texLandN = (texMacro.rg * 2.0 - 1.0) * 0.22 * midFade
+				+ (texMid.rg * 2.0 - 1.0) * 0.72 * closeFade
+				+ (texNear.rg * 2.0 - 1.0) * 0.85 * microFade;
+			float texDetail = (texMacro.b - 0.5) * 0.30 * midFade
+				+ (texMid.b - 0.5) * 0.78 * closeFade
+				+ (texNear.b - 0.5) * 0.65 * microFade;
+			texCavity = mix(0.65, mix(mix(texMacro.a, texMid.a, closeFade * 0.65), texNear.a, microFade * 0.55), midFade);
 
-			float detailSigned = triMacro * 0.12 * macroFade + triMid * 0.16 * midFade + triClose * 0.17 * closeFade + triMicro * 0.11 * microFade + rippleWave * 0.03 * closeFade * flatMask;
-			float cliffStrataDelta = (strata - 0.5) * 0.28 * cliffMask * midFade;
-			float creviceAO = mix(1.0, 0.88, smoothstep(0.15, 0.85, -triMid) * midFade);
-			triAlbedoMod = clamp((1.0 + detailSigned + cliffStrataDelta) * creviceAO, 0.62, 1.38);
+			bumpMeters = (triMacro * 12.0 * macroFade + triMid * 3.6 * midFade + triClose * 1.10 * closeFade + triMicro * 0.32 * microFade + triFine * 0.09 * fineFade) *
+				(0.82 + 0.55 * screeMask + 0.85 * cliffMask) +
+				(rockRidge * 0.55 * closeFade + microRidge * 0.18 * microFade) * rockBias +
+				(strata - 0.5) * 0.9 * cliffMask * midFade;
 
-			vec3 cliffBedrockTint = mix(vec3(0.86, 0.88, 0.92), vec3(1.04, 0.99, 0.94), strata);
-			triTint = mix(vec3(1.0), cliffBedrockTint, cliffMask * midFade * 0.75);
+			float detailSigned = triMacro * 0.12 * macroFade + triMid * 0.15 * midFade + triClose * 0.16 * closeFade +
+				triMicro * 0.11 * microFade + triFine * 0.08 * fineFade * (1.0 - rockBias * 0.35) +
+				texDetail +
+				(rockRidge * 0.09 * closeFade + microRidge * 0.07 * microFade) * rockBias;
+			float cliffStrataDelta = (strata - 0.5) * 0.18 * cliffMask * midFade;
+			float creviceAO = mix(1.0, 0.84, smoothstep(0.10, 0.85, -triMid) * midFade) * mix(0.70, 1.12, texCavity);
+			triAlbedoMod = clamp((1.0 + detailSigned + cliffStrataDelta) * creviceAO, 0.38, 1.62);
+
+			vec3 cliffBedrockTint = mix(vec3(0.68, 0.69, 0.74), vec3(1.02, 0.92, 0.82), strata);
+			vec3 hollowSoilTint = mix(vec3(0.88, 0.86, 0.78), vec3(1.08, 1.02, 0.92), clamp(triClose * 0.5 + 0.5, 0.0, 1.0));
+			triTint = mix(hollowSoilTint, cliffBedrockTint, clamp(cliffMask * 0.88 + screeMask * 0.48, 0.0, 1.0) * midFade);
 
 #ifdef TERRAIN_WITH_LAVA
 			if (waterMask < 0.5) {
@@ -325,8 +369,18 @@ void main(void)
 		if (gradLen > 0.62) {
 			surfGrad *= (0.62 / gradLen);
 		}
-		float grazingFade = smoothstep(0.03, 0.16, abs(dot(tnorm, -eyenorm)));
-		vec3 landNorm = normalize(tnorm - surfGrad * grazingFade);
+		float surfGradFade = smoothstep(0.006, 0.05, abs(dot(tnorm, -eyenorm)));
+		vec3 landNorm = normalize(tnorm - surfGrad * surfGradFade);
+		if (rawWater < 0.985 && (abs(texLandN.x) + abs(texLandN.y)) > 0.002) {
+			vec3 lTanRaw = varyingObjY * triW.x + varyingObjX * triW.y + varyingObjX * triW.z;
+			vec3 lTanOrtho = lTanRaw - tnorm * dot(lTanRaw, tnorm);
+			vec3 lTan = (dot(lTanOrtho, lTanOrtho) > 1e-4) ? normalize(lTanOrtho) : normalize(cross(vec3(0.0, 1.0, 0.0), tnorm + vec3(0.0, 0.0, 1e-4)));
+			vec3 lBitanRaw = varyingObjZ * (triW.x + triW.y) + varyingObjY * triW.z;
+			vec3 lBitanOrtho = lBitanRaw - tnorm * dot(lBitanRaw, tnorm) - lTan * dot(lBitanRaw, lTan);
+			vec3 lBitan = (dot(lBitanOrtho, lBitanOrtho) > 1e-4) ? normalize(lBitanOrtho) : normalize(cross(tnorm, lTan));
+			float texNormFade = smoothstep(0.002, 0.025, abs(dot(tnorm, -eyenorm)));
+			landNorm = normalize(landNorm + (lTan * texLandN.x + lBitan * texLandN.y) * (1.10 * texNormFade));
+		}
 		vec3 surfNorm = normalize(mix(landNorm, waterSurfNorm, waterMask));
 
 		// Auto-detect icy/frosted terrain from raw vertex albedo (excluding liquid oceans)
@@ -343,15 +397,36 @@ void main(void)
 		vec3 mineralTint = mix(vec3(0.94, 0.97, 1.03), vec3(1.04, 0.98, 0.93), macroGrad) * triTint;
 		vec3 icyLift = mix(vec3(1.0), vec3(0.90, 0.98, 1.12), iceMask * 0.55);
 		vec3 landColor = final.rgb * contrastMod * mineralTint * icyLift;
+		// Multi-tone natural soil, gravel pebbles, and weathered stone breakup (eliminates flat monochrome plains)
+		float earthLum = dot(landColor, vec3(0.32, 0.48, 0.20));
+		float dryCrevice = clamp((1.0 - texCavity) * 0.75 + smoothstep(0.20, 0.80, -triClose * 0.5 + 0.5) * 0.30, 0.0, 0.72);
+		float gravelFleck = smoothstep(0.54, 0.86, texMidB) * closeFade * 0.52;
+		vec3 dustyEarth = vec3(earthLum * 1.12, earthLum * 0.90, earthLum * 0.64);
+		vec3 weatheredStone = vec3(earthLum * 0.96, earthLum * 0.94, earthLum * 0.88);
+		float coverFade = (1.0 - iceMask) * (1.0 - waterMask) * midFade;
+		landColor = mix(landColor, dustyEarth, dryCrevice * coverFade * 0.72);
+		landColor = mix(landColor, weatheredStone, gravelFleck * coverFade * 0.65);
+#ifdef TERRAIN_WITH_WATER
+		float shoreBleed = smoothstep(0.02, 0.55, rawWater) * (1.0 - waterMask);
+		if (shoreBleed > 0.005) {
+			float lAvg = dot(landColor, vec3(0.35, 0.45, 0.20));
+			vec3 wetShore = vec3(max(landColor.r, lAvg * 1.05), max(landColor.g * 0.92, lAvg * 0.92), min(landColor.b, lAvg * 0.65)) * 0.80;
+			landColor = mix(landColor, wetShore, shoreBleed * 0.90);
+		}
+#endif
 
 #if (NUM_LIGHTS > 0)
 		// Per-pixel directional micro-relief shading on sunlit land
 		vec3 L0 = normalize(uLight[0].position.xyz);
 		float nBase = max(dot(tnorm, L0), 0.0);
 		float nSurf = max(dot(landNorm, L0), 0.0);
-		float microShade = mix(1.0, clamp((nSurf + 0.10) / (nBase + 0.10), 0.58, 1.42), smoothstep(0.02, 0.14, nBase) * (1.0 - waterMask));
+		float microShade = mix(1.0, clamp((nSurf + 0.04) / (nBase + 0.04), 0.35, 1.68), smoothstep(0.005, 0.06, nBase) * (1.0 - waterMask));
 		landColor *= microShade;
 #endif
+		float cavityShade = mix(1.0,
+			clamp(0.78 + 0.22 * dot(landNorm, radialUp) + (triClose * 0.10 + triMicro * 0.11 + triFine * 0.10) * closeFade, 0.62, 1.24),
+			(1.0 - waterMask) * midFade);
+		landColor *= cavityShade;
 
 #ifdef TERRAIN_WITH_LAVA
 		// Suppress bright vertex-yellow diffuse inside molten basins & charred shorelines in favor of dark cooled basalt
@@ -369,6 +444,9 @@ void main(void)
 		float stormShade = 0.0;
 		float lightningPulse = 0.0;
 #endif
+		float landCloudAtten = 1.0 - cloudShade * (0.52 + 0.24 * stormShade);
+		landColor *= landCloudAtten;
+		landColor += vec3(0.18, 0.24, 0.34) * lightningPulse * (0.04 + 0.08 * clamp(dot(landNorm, radialUp), 0.0, 1.0));
 
 		// Deep ocean color + true reflected sky-dome colors via Rayleigh+Mie LUT along reflect(eyenorm, surfNorm)
 		vec3 oceanColor = vec3(0.0);
@@ -495,7 +573,7 @@ void main(void)
 			float directCloudTrans = clamp(1.0 - cloudShade * 0.92 - stormShade * 0.08, 0.04, 1.0);
 			float waterSpec = (pow(NdotH, 240.0) * 2.4 + pow(NdotH, 42.0) * 0.16) * waterMask * (1.0 - surfFoam * 0.85) * directCloudTrans * directCloudTrans * sunAboveHoriz;
 			vec3 landSpec = (iceSpecCol * iceGlint * iceMask + rockSpecCol * rockSpec * (1.0 - iceMask * 0.65)) *
-				(1.0 - waterMask) * exp(-0.000045 * distMeters);
+				(1.0 - waterMask) * directCloudTrans * exp(-0.000045 * distMeters);
 			vec3 foamLight = lightCol * vec3(0.92, 0.95, 0.98) * surfFoam * 0.68 * mix(1.0, 0.40, cloudShade) * sunAboveHoriz;
 			specAccum += (landSpec + lightCol * specAtmosTrans * waterSpec + foamLight) * NdotL;
 		}
@@ -529,8 +607,11 @@ void main(void)
 #endif
 
 #ifdef ATMOSPHERE
-		// Add atmospheric Rayleigh aerial perspective after surface detail and micro-shading (dampened over overcast ocean)
-		final.rgb += varyingInscatter * (1.0 - waterMask * cloudShade * 0.65);
+		// Add atmospheric Rayleigh aerial perspective after surface detail and micro-shading (attenuated & muted under cloud cover)
+		float hazeAtten = 1.0 - cloudShade * (0.58 + 0.22 * stormShade);
+		float hazeLum = dot(varyingInscatter, vec3(0.2126, 0.7152, 0.0722));
+		vec3 mutedHaze = mix(varyingInscatter, vec3(hazeLum * 0.96, hazeLum * 0.98, hazeLum * 1.04), cloudShade * (0.45 + 0.25 * stormShade));
+		final.rgb += mutedHaze * hazeAtten;
 
 		// Atmospheric Fresnel limb halo strictly gated to orbital/space views (eliminates milky wash at low altitude)
 		float camAltRad = max(length(geosphereCenter) - 1.0, 0.0);

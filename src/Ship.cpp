@@ -33,6 +33,7 @@
 #include "collider/CollisionContact.h"
 #include "collider/CollisionSpace.h"
 #include "graphics/RenderState.h"
+#include "sound/CockpitVoice.h"
 #include "graphics/Renderer.h"
 #include "graphics/TextureBuilder.h"
 #include "graphics/Types.h"
@@ -827,6 +828,8 @@ bool Ship::OnDamage(Body *attacker, float kgDamage, const CollisionContact &cont
 			} else {
 				dam -= m_stats.shield_mass_left;
 				m_stats.shield_mass_left = 0;
+				if (IsType(ObjectType::PLAYER))
+					Sound::CockpitVoice::Enqueue("shields_offline", Sound::CockpitVoice::Priority::CRITICAL, 8.0f);
 			}
 			Properties().Set("shieldMassLeft", m_stats.shield_mass_left);
 		}
@@ -1192,6 +1195,8 @@ bool Ship::DoDamage(float kgDamage)
 			} else {
 				dam -= m_stats.shield_mass_left;
 				m_stats.shield_mass_left = 0;
+				if (IsType(ObjectType::PLAYER))
+					Sound::CockpitVoice::Enqueue("shields_offline", Sound::CockpitVoice::Priority::CRITICAL, 8.0f);
 			}
 			Properties().Set("shieldMassLeft", m_stats.shield_mass_left);
 		}
@@ -1330,6 +1335,9 @@ Ship::HyperjumpStatus Ship::InitiateHyperjumpTo(const SystemPath &dest, int warm
 	m_hyperspace.duration = duration;
 	m_hyperspace.checks = checks;
 	m_hyperspace.sounds = sounds;
+
+	if (IsType(ObjectType::PLAYER))
+		Sound::CockpitVoice::Enqueue("hyperspace_charging", Sound::CockpitVoice::Priority::ADVISORY, 5.0f);
 
 	return Ship::HYPERJUMP_OK;
 }
@@ -1802,6 +1810,8 @@ void Ship::DepleteShieldsForEmergencyDrop(float cooldownTime)
 		m_shieldCooldown = cooldownTime;
 		Properties().Set("shieldMassLeft", m_stats.shield_mass_left);
 		Sound::BodyMakeNoise(this, "Shieldhit", 1.0f);
+		if (IsType(ObjectType::PLAYER))
+			Sound::CockpitVoice::Enqueue("shields_offline", Sound::CockpitVoice::Priority::CRITICAL, 8.0f);
 	} else {
 		// No shields or shields already down: emergency drop shock damages hull by 10%
 		const float newHullPct = std::max(1.0f, GetPercentHull() - 10.0f);
@@ -2097,13 +2107,17 @@ void Ship::StaticUpdate(const float timeStep)
 		m_shieldCooldown = std::max(0.0f, m_shieldCooldown - timeStep);
 	}
 
-	if (m_stats.shield_mass_left < m_stats.shield_mass) {
+	if (m_stats.shield_mass > 0.0f && m_stats.shield_mass_left < m_stats.shield_mass) {
+		const float prevFrac = m_stats.shield_mass_left / m_stats.shield_mass;
 		// 250 second recharge, scaled by shield generator integrity
 		float recharge_rate = 0.004f * Subsystems::CalcPerformanceMultiplier(m_shieldHealth);
 		float booster = Properties().Get("shield_energy_booster_cap");
 		recharge_rate *= booster ? booster : 1.0f;
 		m_stats.shield_mass_left = Clamp(m_stats.shield_mass_left + m_stats.shield_mass * recharge_rate * timeStep, 0.0f, m_stats.shield_mass);
 		Properties().Set("shieldMassLeft", m_stats.shield_mass_left);
+		const float newFrac = m_stats.shield_mass_left / m_stats.shield_mass;
+		if (IsType(ObjectType::PLAYER) && GetFlightState() == FLYING && prevFrac < 0.15f && newFrac >= 0.15f)
+			Sound::CockpitVoice::Enqueue("shields_online", Sound::CockpitVoice::Priority::ADVISORY, 20.0f);
 	}
 
 	if (m_wheelTransition) {

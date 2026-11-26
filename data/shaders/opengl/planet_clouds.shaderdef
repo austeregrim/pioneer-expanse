@@ -15,6 +15,7 @@ PushConstant vec4 layerParams
 PushConstant vec4 flashCell
 PushConstant vec3 camDirObj
 PushConstant float uTime
+PushConstant float cloudQuality
 
 Buffer LightData binding=0
 Buffer DrawData binding=1

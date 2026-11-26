@@ -23,6 +23,7 @@
 #include "ship/OrbitalDockingGeometry.h"
 #include "ship/Propulsion.h"
 #include "ship/Visibility.h"
+#include "sound/CockpitVoice.h"
 #include "sound/Sound.h"
 
 #include <algorithm>
@@ -688,6 +689,8 @@ bool SupercruiseController::StartCharge()
 		m_ship->AIClearInstructions();
 	Sound::BodyMakeNoise(m_ship, "Hyperdrive_Charge", 1.0f);
 	ShowStatusMessage("FRAMESHIFT DRIVE CHARGING", CHARGE_DURATION);
+	if (isPlayer)
+		Sound::CockpitVoice::Enqueue("fsd_charging", Sound::CockpitVoice::Priority::ADVISORY, 4.0f);
 	return true;
 }
 
@@ -740,6 +743,8 @@ void SupercruiseController::EnterSupercruise()
 
 	Sound::BodyMakeNoise(m_ship, "Hyperdrive_Jump", 1.0f);
 	ShowStatusMessage("SUPERCRUISE ENGAGED", 3.5f);
+	if (m_ship && m_ship->IsType(ObjectType::PLAYER))
+		Sound::CockpitVoice::Enqueue("fsd_engaged", Sound::CockpitVoice::Priority::ADVISORY, 4.0f);
 }
 
 void SupercruiseController::EnterSupercruiseImmediate(double initialSpeed)
@@ -925,6 +930,8 @@ void SupercruiseController::DropIntoRing(Planet *planet, const std::string &reas
 
 	Sound::BodyMakeNoise(m_ship, "Hyperdrive_Abort", 1.0f);
 	ShowStatusMessage(reason.empty() ? "DROPPED INTO PLANETARY RING" : reason, 5.0f);
+	if (m_ship && m_ship->IsType(ObjectType::PLAYER))
+		Sound::CockpitVoice::Enqueue("fsd_disengaged", Sound::CockpitVoice::Priority::ADVISORY, 4.0f);
 }
 
 void SupercruiseController::EnsureShipAboveTerrainAndSyncFrame()
@@ -1129,6 +1136,8 @@ void SupercruiseController::SafeDisengage()
 	} else {
 		ShowStatusMessage("SAFE DISENGAGE COMPLETE", 4.0f);
 	}
+	if (m_ship && m_ship->IsType(ObjectType::PLAYER))
+		Sound::CockpitVoice::Enqueue("fsd_disengaged", Sound::CockpitVoice::Priority::ADVISORY, 4.0f);
 }
 
 void SupercruiseController::ClearStaleSupercruiseTarget()
@@ -1183,6 +1192,8 @@ void SupercruiseController::NormalDrop(const std::string &reason)
 
 	Sound::BodyMakeNoise(m_ship, "Hyperdrive_Abort", 1.0f);
 	ShowStatusMessage(reason.empty() ? "DROPPED FROM SUPERCRUISE" : reason, 4.0f);
+	if (m_ship && m_ship->IsType(ObjectType::PLAYER))
+		Sound::CockpitVoice::Enqueue("fsd_disengaged", Sound::CockpitVoice::Priority::ADVISORY, 4.0f);
 }
 
 void SupercruiseController::EmergencyDrop(const std::string &reason)
@@ -1223,6 +1234,8 @@ void SupercruiseController::EmergencyDrop(const std::string &reason)
 
 	Sound::BodyMakeNoise(m_ship, "Hyperdrive_Abort", 1.0f);
 	ShowStatusMessage(reason.empty() ? "EMERGENCY DROP — SHIELD OVERLOAD & FSD COOLDOWN" : reason, 6.0f);
+	if (m_ship && m_ship->IsType(ObjectType::PLAYER))
+		Sound::CockpitVoice::Enqueue("fsd_emergency_drop", Sound::CockpitVoice::Priority::CRITICAL, 5.0f);
 }
 
 void SupercruiseController::Reset()
@@ -2666,6 +2679,7 @@ bool SupercruiseController::StartInterdiction(Ship *target)
 		targetSc->ShowStatusMessage("INTERDICTION NULLIFIED — DEFENSIVE PULSE DISCHARGED", 6.0f);
 		if (targetIsPlayer) {
 			Sound::BodyMakeNoise(target, "ok", 1.0f);
+			Sound::CockpitVoice::Enqueue("interdiction_evaded", Sound::CockpitVoice::Priority::ADVISORY, 5.0f);
 		}
 
 		// Attacking ship suffers emergency drop, heat spike, and extended 45-second FSD reboot cooldown
@@ -2737,6 +2751,7 @@ bool SupercruiseController::StartInterdiction(Ship *target)
 	if (targetIsPlayer) {
 		Sound::BodyMakeNoise(target, "warning", 1.0f);
 		targetSc->ShowStatusMessage("INTERDICTION DETECTED — ALIGN WITH ESCAPE VECTOR OR THROTTLE TO 0% TO SUBMIT", 6.0f);
+		Sound::CockpitVoice::Enqueue("interdiction_detected", Sound::CockpitVoice::Priority::CRITICAL, 6.0f);
 	}
 	return true;
 }
@@ -2825,6 +2840,8 @@ void SupercruiseController::UpdateInterdiction(float timeStep)
 	} else if (m_escapeProgress >= 1.0) {
 		ClearInterdiction();
 		targetSc->ShowStatusMessage("INTERDICTION EVADED", 4.5f);
+		if (target->IsType(ObjectType::PLAYER))
+			Sound::CockpitVoice::Enqueue("interdiction_evaded", Sound::CockpitVoice::Priority::ADVISORY, 5.0f);
 		EmergencyDrop("INTERDICTION FAILED — FSD OVERLOAD");
 		LuaEvent::Queue("onInterdictionEvaded", m_ship, target);
 		LuaEvent::Emit();
@@ -2929,6 +2946,8 @@ void SupercruiseController::DropPairFromInterdiction(Ship *attacker, Ship *targe
 	} else {
 		attSc->ShowStatusMessage("INTERDICTION SUCCESSFUL — TARGET DROPPED", 4.5f);
 		tgtSc->ShowStatusMessage("INTERDICTED — EMERGENCY DROP & FSD COOLDOWN (25s)", 5.5f);
+		if (target->IsType(ObjectType::PLAYER))
+			Sound::CockpitVoice::Enqueue("fsd_emergency_drop", Sound::CockpitVoice::Priority::CRITICAL, 5.0f);
 	}
 
 	LuaEvent::Queue("onInterdictionDrop", attacker, target, submitted);

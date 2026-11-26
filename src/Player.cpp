@@ -25,6 +25,7 @@
 #include "ship/PlayerShipController.h"
 #include "ship/ShipController.h"
 #include "ship/SupercruiseController.h"
+#include "sound/CockpitVoice.h"
 #include "sound/Sound.h"
 
 //Some player specific sounds
@@ -174,6 +175,8 @@ bool Player::SetWheelState(bool down)
 	if (did) {
 		s_soundUndercarriage.Play(down ? "UC_out" : "UC_in", 1.0f, 1.0f, 0);
 		GetPlayerController()->SetCruiseDirection(down ? PlayerShipController::CRUISE_UP : PlayerShipController::CRUISE_FWD);
+		Sound::CockpitVoice::Enqueue(down ? "landing_gear_down" : "landing_gear_up",
+			Sound::CockpitVoice::Priority::INFO, 2.5f);
 	}
 	return did;
 }
@@ -214,6 +217,8 @@ void Player::SetAlertState(Ship::AlertState as)
 	case ALERT_MISSILE_DETECTED:
 		Pi::game->log->Add(Lang::MISSILE_DETECTED);
 		Sound::PlaySfx("warning", 0.2f, 0.2f, 0);
+		if (prev != ALERT_MISSILE_DETECTED)
+			Sound::CockpitVoice::Enqueue("missile_inbound", Sound::CockpitVoice::Priority::CRITICAL, 6.0f);
 		break;
 	}
 

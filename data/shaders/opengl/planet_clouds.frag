@@ -28,6 +28,7 @@ uniform vec4 flashCell;
 // camDirObj: camera unit radial direction in planet object space
 uniform vec3 camDirObj;
 uniform float uTime;
+uniform float cloudQuality;
 
 out vec4 frag_color;
 
@@ -85,6 +86,14 @@ float clFbm3D_3(vec3 p)
 	return sum * (1.0 / 0.875);
 }
 
+float clFbm3D_2(vec3 p)
+{
+	float sum = 0.5 * clNoise3D(p);
+	p = p * 2.08 + vec3(11.7, 5.3, 9.1);
+	sum += 0.25 * clNoise3D(p);
+	return sum * (1.0 / 0.75);
+}
+
 vec3 clRotateY(vec3 v, float ang)
 {
 	float c = cos(ang);
@@ -116,8 +125,9 @@ void main(void)
 	// Analytical ray-sphere intersection on exact cloud radius (eliminates icosphere chord sagitta)
 	vec3 eyenorm = normalize(eyePos);
 	float camLen = cloudParams.z;
+	float cloudRad = cloudParams.w;
 	float rDiff = cloudGeom.x;
-	float planetRadM = max(cloudGeom.y, 100000.0);
+	float viewRad = max(cloudGeom.y, 1.0);
 	float projC = cloudGeom.z;
 	float projD = cloudGeom.w;
 
@@ -129,7 +139,9 @@ void main(void)
 			discard;
 	}
 
-	float det = b * b + rDiff;
+	// Cancellation-free perpendicular distance discriminant prevents 32-bit float jitter at orbital limbs
+	vec3 perp = cloudCenter - eyenorm * b;
+	float det = cloudRad * cloudRad - dot(perp, perp);
 	if (det <= 0.0)
 		discard;
 	float sdet = sqrt(det);
@@ -137,7 +149,11 @@ void main(void)
 	if (tHit <= 0.0)
 		discard;
 
-	float distZ = -eyenorm.z * tHit * planetRadM;
+	float distZ = -eyenorm.z * tHit * viewRad;
+	if (camAltKm > cloudAltKm + 25.0)
+		distZ *= 0.992;
+	else if (camAltKm > cloudAltKm + 5.0)
+		distZ *= 0.997;
 	if (distZ <= 0.0)
 		discard;
 	gl_FragDepth = clamp(projD / distZ - projC, 0.0, 1.0);
@@ -156,17 +172,45 @@ void main(void)
 	float tMorph = uTime * 0.00035 * windDriftScale;
 
 	// Domain-warped swirling weather fronts & wispy cumulus/cirrus formations
+	float q = clamp(cloudQuality, 1.0, 4.0);
 	vec3 pScale = mix(vec3(4.2, 5.4, 4.2), vec3(2.8, 7.6, 2.8), isUpperLayer);
 	vec3 p = windDir * pScale + vec3(seed * 3.1, seed * 1.7, -seed * 2.3);
-	vec3 warp = vec3(
-		clFbm3D(p * 0.75 + vec3(tMorph * 0.4, 0.0, -tMorph * 0.3)),
-		clFbm3D(p * 0.75 + vec3(4.2, tMorph * 0.25, 1.9)),
-		clFbm3D(p * 0.75 + vec3(-2.7, 3.1, tMorph * 0.35))
-	);
+	vec3 warp = vec3(0.0);
+	float fronts = 0.0;
+	float wisps = 0.0;
+	float detail = 0.0;
 
-	float fronts = clFbm3D(p + warp * 1.85);
-	float wisps = clFbm3D(p * mix(2.8, 3.4, isUpperLayer) - warp * 1.1 + vec3(tMorph * 0.8, 0.0, 0.0));
-	float detail = clNoise3D(windDir * 28.0 + warp * 2.2);
+	if (q < 1.5) {
+		// Low quality: zero domain warp, 2-octave FBM
+		fronts = clFbm3D_2(p);
+		wisps = clFbm3D_2(p * mix(2.4, 3.0, isUpperLayer) + vec3(tMorph * 0.8, 0.0, 0.0));
+	} else if (q < 2.5) {
+		// Medium quality: single-sample lightweight warp + 3-octave FBM
+		float w = clFbm3D_2(p * 0.75 + vec3(tMorph * 0.4, 0.0, -tMorph * 0.3));
+		warp = vec3(w, w * 0.85, w * 0.7);
+		fronts = clFbm3D_3(p + warp * 1.65);
+		wisps = clFbm3D_3(p * mix(2.6, 3.2, isUpperLayer) - warp + vec3(tMorph * 0.8, 0.0, 0.0));
+	} else if (q < 3.5) {
+		// High quality: full 3-axis 3-octave warp + rich fronts/wisps
+		warp = vec3(
+			clFbm3D_3(p * 0.75 + vec3(tMorph * 0.4, 0.0, -tMorph * 0.3)),
+			clFbm3D_3(p * 0.75 + vec3(4.2, tMorph * 0.25, 1.9)),
+			clFbm3D_3(p * 0.75 + vec3(-2.7, 3.1, tMorph * 0.35))
+		);
+		fronts = clFbm3D(p + warp * 1.85);
+		wisps = clFbm3D_3(p * mix(2.8, 3.4, isUpperLayer) - warp * 1.1 + vec3(tMorph * 0.8, 0.0, 0.0));
+		detail = clNoise3D(windDir * 28.0 + warp * 2.2);
+	} else {
+		// Extreme quality: full 5-octave 3-axis warp + full fronts/wisps/detail
+		warp = vec3(
+			clFbm3D(p * 0.75 + vec3(tMorph * 0.4, 0.0, -tMorph * 0.3)),
+			clFbm3D(p * 0.75 + vec3(4.2, tMorph * 0.25, 1.9)),
+			clFbm3D(p * 0.75 + vec3(-2.7, 3.1, tMorph * 0.35))
+		);
+		fronts = clFbm3D(p + warp * 1.85);
+		wisps = clFbm3D(p * mix(2.8, 3.4, isUpperLayer) - warp * 1.1 + vec3(tMorph * 0.8, 0.0, 0.0));
+		detail = clNoise3D(windDir * 28.0 + warp * 2.2);
+	}
 
 	float rawCloud = mix(fronts * 0.64 + wisps * 0.26 + detail * 0.10, fronts * 0.35 + wisps * 0.52 + detail * 0.13, isUpperLayer);
 
@@ -181,12 +225,16 @@ void main(void)
 
 	float combinedRaw = rawCloud;
 	float localRelief = wisps;
-	if (surfaceBlend > 0.005) {
+	if (surfaceBlend > 0.005 && q >= 1.5) {
 		float localScale1 = clamp(planetRadKm / mix(55.0, 42.0, isUpperLayer), 22.0, 260.0);
 		float localScale2 = localScale1 * mix(2.8, 3.3, isUpperLayer);
 		vec3 localDrift = vec3(tMorph * 1.1, tMorph * 0.2, -tMorph * 0.8);
-		float localDecks = clFbm3D_3(windDir * localScale1 + localDrift + vec3(seed * 7.3, -seed * 3.1, seed * 5.1));
-		float localPuffs = clFbm3D_3(windDir * localScale2 + localDrift * 1.4 + vec3(-seed * 4.1, seed * 2.9, 1.7));
+		float localDecks = (q < 2.5)
+			? clFbm3D_2(windDir * localScale1 + localDrift + vec3(seed * 7.3, -seed * 3.1, seed * 5.1))
+			: clFbm3D_3(windDir * localScale1 + localDrift + vec3(seed * 7.3, -seed * 3.1, seed * 5.1));
+		float localPuffs = (q < 3.5)
+			? clFbm3D_2(windDir * localScale2 + localDrift * 1.4 + vec3(-seed * 4.1, seed * 2.9, 1.7))
+			: clFbm3D_3(windDir * localScale2 + localDrift * 1.4 + vec3(-seed * 4.1, seed * 2.9, 1.7));
 		float localClouds = mix(localDecks * 0.62 + localPuffs * 0.38, localDecks * 0.44 + localPuffs * 0.56, isUpperLayer);
 		float rawSurface = localClouds * 0.68 + rawCloud * 0.32;
 		combinedRaw = mix(rawCloud, rawSurface, surfaceBlend);

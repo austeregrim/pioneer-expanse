@@ -28,9 +28,9 @@ public:
 	void SetTransform(const matrix4x4d &t) { m_transform = t; }
 
 private:
-	static constexpr int NUM_PARTICLES = 1800;
-	static constexpr int NEAR_PARTICLES = 1150;
-	static constexpr int NUM_VOLCANIC_PARTICLES = 360;
+	static constexpr int NUM_PARTICLES = 2520;
+	static constexpr int NEAR_PARTICLES = 1600;
+	static constexpr int NUM_VOLCANIC_PARTICLES = 504;
 	static constexpr float NEAR_BOUNDS = 18.0f;
 	static constexpr float BOX_BOUNDS = 40.0f;
 	static constexpr float VOLCANIC_BOUNDS = 34.0f;

@@ -62,6 +62,7 @@ namespace Graphics {
 		void Add(const vector3f &v, const vector3f &n);
 		void Add(const vector3f &v, const vector3f &n, const vector2f &uv);
 		void Add(const vector3f &v, const vector3f &n, const vector2f &uv, const vector3f &tang);
+		void Add(const vector3f &v, const Color &c, const vector3f &n, const vector2f &uv, const vector3f &tang);
 		//virtual void Reserve(unsigned int howmuch)
 
 		// don't mix these

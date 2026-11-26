@@ -152,6 +152,16 @@ double TerrainBody::GetTerrainHeight(const vector3d &pos_) const
 	}
 }
 
+vector3d TerrainBody::GetTerrainColor(const vector3d &pos, double heightNorm, const vector3d &norm) const
+{
+	if (m_baseSphere) {
+		if (const Terrain *terrain = m_baseSphere->GetTerrain()) {
+			return terrain->GetColor(pos, heightNorm, norm);
+		}
+	}
+	return vector3d(0.55, 0.52, 0.48);
+}
+
 //static
 void TerrainBody::OnChangeDetailLevel(Graphics::Renderer *r)
 {

@@ -33,6 +33,7 @@
 #include "scenegraph/Animation.h"
 #include "scenegraph/CollisionGeometry.h"
 #include "scenegraph/MatrixTransform.h"
+#include "sound/CockpitVoice.h"
 #include "scenegraph/Model.h"
 #include "scenegraph/ModelSkin.h"
 #include "ship/PlayerShipController.h"
@@ -1169,6 +1170,8 @@ bool SpaceStation::GetDockingClearance(Ship *s)
 			sd.maxOffset = calculate_max_offset_squared(pPort->maxShipSize, bboxRad);
 			LuaEvent::Queue("onDockingClearanceGranted", this, s);
 			SwitchToStage(i, DockStage::CLEARANCE_GRANTED);
+			if (s->IsType(ObjectType::PLAYER))
+				Sound::CockpitVoice::Enqueue("docking_granted", Sound::CockpitVoice::Priority::ADVISORY, 4.0f);
 			return true;
 		}
 	}

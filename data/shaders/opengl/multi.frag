@@ -100,7 +100,7 @@ vec3 SampleSpaceEnvironment(vec3 worldDir, vec3 viewDir, vec3 primaryLightDir, v
 void getSurface(inout Surface surf)
 {
 #ifdef VERTEXCOLOR
-	surf.color = vertexColor;
+	surf.color = vertexColor * material.diffuse;
 #else
 	surf.color = material.diffuse;
 #endif
