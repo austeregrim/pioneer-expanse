@@ -40,6 +40,12 @@ local function drawDebugGalaxySim()
 		Engine.SetDebugShowAllShips(valShips)
 	end
 
+	local inspectorEnabled = Game.IsPlanetInspectorEnabled and Game.IsPlanetInspectorEnabled() or false
+	local changedInspector, valInspector = ui.checkbox("Enable Planet Inspector (System Map)", inspectorEnabled)
+	if changedInspector and Game.SetPlanetInspectorEnabled then
+		Game.SetPlanetInspectorEnabled(valInspector)
+	end
+
 	ui.spacing()
 	local okInterCast, InterCast = pcall(require, 'modules.InterCast.InterCast')
 	local okMacro, MacroEngine = pcall(require, 'modules.MacroGalaxy.MacroGalaxyEngine')

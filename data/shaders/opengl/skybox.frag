@@ -55,21 +55,30 @@ float skyFbm3D(vec3 p)
 void main( void )
 {
 	vec3 dir = normalize(v_texCoord);
-	vec3 planeNormal = normalize(vec3(0.052, 0.999, 0.0));
+	const vec3 planeNormal = vec3(0.051930, 0.998651, 0.0);
 	float lat = abs(dot(dir, planeNormal));
 
 	float bandTight = exp(-lat * 9.0);
 	float bandWide = exp(-lat * 2.8);
 
-	vec3 coreDir = normalize(vec3(0.985, 0.0, 0.161));
+	const vec3 coreDir = vec3(0.986904, 0.0, 0.161306);
 	vec3 eqDir = normalize(vec3(dir.x, 0.0, dir.z) + vec3(1e-5, 0.0, 0.0));
-	float coreAlign = pow(max(dot(eqDir, coreDir) * 0.5 + 0.5, 0.0), 3.0);
+	float coreAlignRaw = max(dot(eqDir, coreDir) * 0.5 + 0.5, 0.0);
+	float coreAlign = coreAlignRaw * coreAlignRaw * coreAlignRaw;
 	float coreBulge = exp(-lat * 4.8) * coreAlign;
 
-	float rift = smoothstep(0.42, 0.72, skyFbm3D(dir * 5.5 + vec3(1.7, 0.0, -2.3))) * exp(-lat * 11.0);
+	float rift = 0.0;
+	if (lat < 0.55) {
+		rift = smoothstep(0.42, 0.72, skyFbm3D(dir * 5.5 + vec3(1.7, 0.0, -2.3))) * exp(-lat * 11.0) * smoothstep(0.55, 0.45, lat);
+	}
 
-	float nebWarm = smoothstep(0.56, 0.84, skyFbm3D(dir * 3.8 + vec3(4.1, 1.3, -2.7))) * exp(-lat * 5.2);
-	float nebCool = smoothstep(0.58, 0.85, skyFbm3D(dir * 4.6 + vec3(-3.2, 2.4, 5.1))) * exp(-lat * 4.2);
+	float nebWarm = 0.0;
+	float nebCool = 0.0;
+	if (lat < 0.95) {
+		float nebEdge = smoothstep(0.95, 0.85, lat);
+		nebWarm = smoothstep(0.56, 0.84, skyFbm3D(dir * 3.8 + vec3(4.1, 1.3, -2.7))) * exp(-lat * 5.2) * nebEdge;
+		nebCool = smoothstep(0.58, 0.85, skyFbm3D(dir * 4.6 + vec3(-3.2, 2.4, 5.1))) * exp(-lat * 4.2) * nebEdge;
+	}
 
 	vec3 baseCol = texture(texture0, v_texCoord).xyz * (0.24 + 0.76 * bandWide);
 	vec3 discGlow = vec3(0.055, 0.048, 0.052) * bandTight + vec3(0.11, 0.082, 0.048) * coreBulge;

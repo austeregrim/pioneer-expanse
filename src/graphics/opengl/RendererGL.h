@@ -116,6 +116,8 @@ namespace Graphics {
 		bool ReloadShaders() final;
 
 		bool Screendump(ScreendumpState &sd) final;
+		bool ScreendumpRenderTarget(RenderTarget *rt, ScreendumpState &sd) final;
+		int GetMaxTextureSize() const final;
 
 		void RecordDrawStats(PrimitiveType pt, uint32_t numElements, uint32_t numInstances);
 

@@ -87,25 +87,39 @@ float rgeoFbm3D(vec3 p)
 	return sum * (1.0 / 0.875);
 }
 
-vec4 sampleTriPlanar(sampler2D tex, vec3 wPos, vec3 tw, float invScale)
+vec4 sampleTriPlanar(sampler2D tex, vec3 wPos, vec3 dWdx, vec3 dWdy, vec3 tw, float invScale)
 {
-	return texture(tex, wPos.yz * invScale) * tw.x
-		+ texture(tex, wPos.xz * invScale) * tw.y
-		+ texture(tex, wPos.xy * invScale) * tw.z;
+	vec4 acc = vec4(0.0);
+	float wSum = 0.0;
+	if (tw.x > 0.01) {
+		acc += textureGrad(tex, wPos.yz * invScale, dWdx.yz * invScale, dWdy.yz * invScale) * tw.x;
+		wSum += tw.x;
+	}
+	if (tw.y > 0.01) {
+		acc += textureGrad(tex, wPos.xz * invScale, dWdx.xz * invScale, dWdy.xz * invScale) * tw.y;
+		wSum += tw.y;
+	}
+	if (tw.z > 0.01) {
+		acc += textureGrad(tex, wPos.xy * invScale, dWdx.xy * invScale, dWdy.xy * invScale) * tw.z;
+		wSum += tw.z;
+	}
+	return (wSum > 0.0) ? (acc / wSum) : vec4(0.5, 0.5, 0.5, 0.65);
 }
 
 void main(void)
 {
-	vec4 hidetail = texture(texture0, texCoord0 * detailScaleHi);
-	vec4 lodetail = texture(texture1, texCoord0 * detailScaleLo);
-
-	// calculate the detail texture contribution from hi and lo textures
-	float hiloMix = exp(-0.004 * dist);
-	float detailMix = exp(-0.001 * dist);
-	vec4 detailVal = mix(lodetail, hidetail, hiloMix);
-	vec4 detailMul = mix(vec4(1.0), detailVal, detailMix);
-
 	bool enhanced = (enhancedGraphics >= 0.5);
+	vec4 detailMul = vec4(1.0);
+	if (!enhanced) {
+		vec4 hidetail = texture(texture0, texCoord0 * detailScaleHi);
+		vec4 lodetail = texture(texture1, texCoord0 * detailScaleLo);
+
+		// calculate the detail texture contribution from hi and lo textures
+		float hiloMix = exp(-0.004 * dist);
+		float detailMix = exp(-0.001 * dist);
+		vec4 detailVal = mix(lodetail, hidetail, hiloMix);
+		detailMul = mix(vec4(1.0), detailVal, detailMix);
+	}
 
 	// In Classic mode preserve legacy detailMul + pre-baked atmospheric inscattering.
 	// In Enhanced mode apply crisp world-locked surface detail & micro-shading before adding varyingInscatter.
@@ -131,7 +145,10 @@ void main(void)
 		float distMeters = dist * metersPerViewUnit;
 
 		vec3 worldM = patchLocalPos * geosphereRadius + PatchTileOffset;
-		vec3 triW = pow(abs(sDir), vec3(4.0));
+		vec3 dWdx = dFdx(worldM);
+		vec3 dWdy = dFdy(worldM);
+		vec3 aDir = sDir * sDir;
+		vec3 triW = aDir * aDir;
 		triW /= max(triW.x + triW.y + triW.z, 1e-5);
 
 		float macroFade = exp(-0.000018 * distMeters);
@@ -178,12 +195,17 @@ void main(void)
 			macroGrad = rgeoFbm3D(sDir * 9.0);
 			microDetail = rgeoFbm3D(sDir * 36.0 + vec3(macroGrad * 1.4));
 
-			// Pure 5-scale 3D quintic FBM geological detail (zero BC1 block compression artifacts at any distance or angle)
-			float triMacro = rgeoFbm3D(worldM * (1.0 / 680.0)) * 2.0 - 1.0;
-			triMid = rgeoFbm3D(worldM * (1.0 / 160.0) + vec3(triMacro * 0.65)) * 2.0 - 1.0;
-			triClose = rgeoFbm3D(worldM * (1.0 / 28.0) + vec3(triMid * 0.65)) * 2.0 - 1.0;
-			triMicro = rgeoFbm3D(worldM * (1.0 / 5.5) + vec3(triClose * 0.75)) * 2.0 - 1.0;
-			triFine = rgeoFbm3D(worldM * (1.0 / 1.15) + vec3(triMicro * 0.85)) * 2.0 - 1.0;
+			// Distance-gated 5-scale 3D quintic FBM geological detail
+			bool needCoast = (rawWater > 0.01 && rawWater < 0.985);
+			float triMacro = (macroFade > 0.001 || needCoast) ? (rgeoFbm3D(worldM * (1.0 / 680.0)) * 2.0 - 1.0) : 0.0;
+			if (midFade > 0.001 || needCoast)
+				triMid = rgeoFbm3D(worldM * (1.0 / 160.0) + vec3(triMacro * 0.65)) * 2.0 - 1.0;
+			if (closeFade > 0.001 || needCoast)
+				triClose = rgeoFbm3D(worldM * (1.0 / 28.0) + vec3(triMid * 0.65)) * 2.0 - 1.0;
+			if (microFade > 0.001)
+				triMicro = rgeoFbm3D(worldM * (1.0 / 5.5) + vec3(triClose * 0.75)) * 2.0 - 1.0;
+			if (fineFade > 0.001)
+				triFine = rgeoFbm3D(worldM * (1.0 / 1.15) + vec3(triMicro * 0.85)) * 2.0 - 1.0;
 
 #ifdef TERRAIN_WITH_WATER
 			// Multi-scale organic shoreline breakup (breaks straight triangle edges into natural coves)
@@ -202,19 +224,22 @@ void main(void)
 			float microRidge = 1.0 - abs(triMicro) * 1.3;
 			float rockBias = clamp(cliffMask + screeMask * 0.65, 0.0, 1.0);
 
-			vec4 regMacro = sampleTriPlanar(terrainRegolithTex, worldM, triW, 1.0 / 80.0);
-			vec4 regMid = sampleTriPlanar(terrainRegolithTex, worldM, triW, 1.0 / 16.0);
-			vec4 regNear = sampleTriPlanar(terrainRegolithTex, worldM, triW, 1.0 / 3.5);
-			vec4 texMacro = regMacro;
-			vec4 texMid = regMid;
-			vec4 texNear = regNear;
-			if (rockBias > 0.02) {
-				vec4 clfMacro = sampleTriPlanar(terrainCliffTex, worldM, triW, 1.0 / 90.0);
-				vec4 clfMid = sampleTriPlanar(terrainCliffTex, worldM, triW, 1.0 / 18.0);
-				vec4 clfNear = sampleTriPlanar(terrainCliffTex, worldM, triW, 1.0 / 4.0);
-				texMacro = mix(regMacro, clfMacro, rockBias);
-				texMid = mix(regMid, clfMid, rockBias);
-				texNear = mix(regNear, clfNear, rockBias);
+			const vec4 kDefaultTriTex = vec4(0.5, 0.5, 0.5, 0.65);
+			vec4 texMacro = kDefaultTriTex;
+			vec4 texMid = kDefaultTriTex;
+			vec4 texNear = kDefaultTriTex;
+			bool doRock = (rockBias > 0.02);
+			if (midFade > 0.001) {
+				vec4 regMacro = sampleTriPlanar(terrainRegolithTex, worldM, dWdx, dWdy, triW, 1.0 / 80.0);
+				texMacro = doRock ? mix(regMacro, sampleTriPlanar(terrainCliffTex, worldM, dWdx, dWdy, triW, 1.0 / 90.0), rockBias) : regMacro;
+			}
+			if (closeFade > 0.001) {
+				vec4 regMid = sampleTriPlanar(terrainRegolithTex, worldM, dWdx, dWdy, triW, 1.0 / 16.0);
+				texMid = doRock ? mix(regMid, sampleTriPlanar(terrainCliffTex, worldM, dWdx, dWdy, triW, 1.0 / 18.0), rockBias) : regMid;
+			}
+			if (microFade > 0.001) {
+				vec4 regNear = sampleTriPlanar(terrainRegolithTex, worldM, dWdx, dWdy, triW, 1.0 / 3.5);
+				texNear = doRock ? mix(regNear, sampleTriPlanar(terrainCliffTex, worldM, dWdx, dWdy, triW, 1.0 / 4.0), rockBias) : regNear;
 			}
 			texMidB = texMid.b;
 			texLandN = (texMacro.rg * 2.0 - 1.0) * 0.22 * midFade
@@ -452,7 +477,9 @@ void main(void)
 		vec3 oceanColor = vec3(0.0);
 		if (waterMask > 0.005) {
 			float NdotVWater = clamp(dot(surfNorm, -eyenorm), 0.0, 1.0);
-			float waterFresnel = 0.03 + 0.97 * pow(1.0 - NdotVWater, 4.0);
+			float omw = 1.0 - NdotVWater;
+			float omw2 = omw * omw;
+			float waterFresnel = 0.03 + 0.97 * (omw2 * omw2);
 			vec3 waterReflDir = reflect(eyenorm, surfNorm);
 			// Lift grazing wave-trough reflections slightly above local tangent plane so rays never plunge underground
 			vec3 skyReflDir = normalize(waterReflDir + radialUp * max(0.018 - dot(waterReflDir, radialUp), 0.0));
@@ -553,7 +580,9 @@ void main(void)
 			float denom = NdotH * NdotH * (a2 - 1.0) + 1.0;
 			float D = a2 / (3.14159 * denom * denom + 1e-4);
 			float F0 = mix(mix(0.02, 0.055, cliffMask), 0.045, iceMask);
-			float fresnel = F0 + (max(1.0 - matRoughness, F0) - F0) * pow(1.0 - VdotH, 5.0);
+			float omv = 1.0 - VdotH;
+			float omv2 = omv * omv;
+			float fresnel = F0 + (max(1.0 - matRoughness, F0) - F0) * (omv2 * omv2 * omv);
 			float ggxSpec = clamp(D * fresnel * 0.35, 0.0, 1.6);
 
 			// Crisp crystalline specular highlights on ice + subtle mineral sheen strictly on exposed rock/cliffs

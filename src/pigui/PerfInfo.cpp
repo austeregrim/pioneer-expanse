@@ -8,6 +8,7 @@
 #include "GeoSphere.h"
 #include "Input.h"
 #include "LuaPiGui.h"
+#include "ObjectViewerView.h"
 #include "Pi.h"
 #include "Player.h"
 #include "SectorView.h"
@@ -577,6 +578,13 @@ void PerfInfo::DrawWorldViewStats()
 	}
 
 	DrawTerrainDebug();
+
+#if WITH_OBJECTVIEWER
+	bool inspectorEnabled = ObjectViewerView::IsInspectorEnabled();
+	if (ImGui::Checkbox("Enable Planet Inspector (System Map)", &inspectorEnabled)) {
+		ObjectViewerView::SetInspectorEnabled(inspectorEnabled);
+	}
+#endif
 
 	if (ImGui::Button("ObjectViewer"))
 	{

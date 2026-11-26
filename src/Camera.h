@@ -96,6 +96,14 @@ public:
 	float GetBackgroundIntensity() const { return m_bgIntensity; }
 	bool IsInAtmosphere() const { return m_inAtmosphere; }
 
+	void SetScenicMode(bool enable) { m_scenicMode = enable; }
+	void SetOverrideLight(bool enable, const vector3f &dirCam = vector3f(0.f, 1.f, 0.f), const Color &col = Color::WHITE)
+	{
+		m_overrideLightEnabled = enable;
+		m_overrideLightDir = dirCam;
+		m_overrideLightColor = col;
+	}
+
 	// camera-specific light with attached source body
 	class LightSource {
 	public:
@@ -121,9 +129,12 @@ public:
 
 	void CalcLighting(const Body *b, double &ambient, double &direct) const;
 	void CalcInteriorLighting(const Body* b, Color4ub &sLight, double &sFac) const;
-	void CalcShadows(const int lightNum, const Body *b, std::vector<Shadow> &shadowsOut) const;
-	float ShadowedIntensity(const int lightNum, const Body *b) const;
+	void CalcShadows(const int lightNum, const Body *b, std::vector<Shadow> &shadowsOut, const Body *ignoreBody = nullptr) const;
+	float ShadowedIntensity(const int lightNum, const Body *b, const Body *ignoreBody = nullptr) const;
 	void PrincipalShadows(const Body *b, const int n, std::vector<Shadow> &shadowsOut) const;
+
+	static float ComputeTwilightDayFactor(float sunSinElev, double pressure);
+	static float ComputeAtmosphereBgIntensity(double pressure, double density, float skyWashout);
 
 	// lights with properties in camera space
 	const std::vector<LightSource> &GetLightSources() const { return m_lightSources; }
@@ -186,6 +197,10 @@ private:
 	std::vector<LightSource> m_lightSources;
 	float m_bgIntensity = 1.0f;
 	bool m_inAtmosphere = false;
+	bool m_scenicMode = false;
+	bool m_overrideLightEnabled = false;
+	vector3f m_overrideLightDir = vector3f(0.f, 1.f, 0.f);
+	Color m_overrideLightColor = Color::WHITE;
 };
 
 #endif

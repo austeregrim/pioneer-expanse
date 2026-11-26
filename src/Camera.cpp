@@ -35,7 +35,7 @@ CameraContext::CameraContext(float width, float height, float fovAng, float zNea
 	m_fovAng(fovAng),
 	m_zNear(zNear),
 	m_zFar(zFar),
-	m_frustum(m_width, m_height, m_fovAng, m_zNear, m_zFar),
+	m_frustum(m_width, m_height, DEG2RAD(m_fovAng), m_zNear, m_zFar),
 	m_projMatrix(matrix4x4f::InfinitePerspectiveMatrix(DEG2RAD(m_fovAng), m_width / m_height, m_zNear)),
 	m_frame(FrameId::Invalid),
 	m_pos(0.0),
@@ -172,6 +172,10 @@ void Camera::Update()
 		if (b->GetFlags() & Body::FLAG_DRAW_EXCLUDE)
 			continue;
 
+		// In Scenic/Inspector mode, render only celestial bodies (stars, planets, moons, gas giants)
+		if (m_scenicMode && !b->IsType(ObjectType::TERRAINBODY) && !b->IsType(ObjectType::STAR))
+			continue;
+
 		// Non-player ships in Supercruise (and all sublight ships while the player is in Supercruise) do not render 3D meshes
 		const bool playerInSC = Pi::player && (Pi::player->GetFlightState() == Ship::SUPERCRUISE);
 		if (b != Pi::player && b->IsType(ObjectType::SHIP) &&
@@ -185,9 +189,14 @@ void Camera::Update()
 		attrs.viewTransform.SetTranslate(f->GetInterpPositionRelTo(camFrame));
 		attrs.viewCoords = attrs.viewTransform * b->GetInterpPosition();
 
-		// cull off-screen objects
+		// cull off-screen objects (never frustum-cull stars against side planes —
+		// their corona billboard spans 2.6x clip radius and stars are drawn on the
+		// backdrop pass, so only skip if strictly behind the camera).
 		double rad = b->GetClipRadius();
-		if (!m_context->GetFrustum().TestSphereInfinite(attrs.viewCoords, rad))
+		if (b->IsType(ObjectType::STAR)) {
+			if (attrs.viewCoords.z > rad)
+				continue;
+		} else if (!m_context->GetFrustum().TestSphereInfinite(attrs.viewCoords, rad))
 			continue;
 
 		attrs.camDist = attrs.viewCoords.Length();
@@ -195,7 +204,7 @@ void Camera::Update()
 
 		// approximate pixel width (disc diameter) of body on screen
 		// FIXME: this should reference a property set on the camera instead of querying the window size
-		const float pixSize = m_renderer->GetWindowHeight() * 2.0 * rad / (attrs.camDist * Graphics::GetFovFactor());
+		const float pixSize = m_context->GetHeight() * 2.0 * rad / (attrs.camDist * Graphics::GetFovFactor());
 
 		// terrain objects are visible from distance but might not have any discernable features
 		if (b->IsType(ObjectType::TERRAINBODY)) {
@@ -273,10 +282,16 @@ void Camera::Draw(const Body *excludeBody)
 	Frame::GetFrameTransform(rootFrameId, camFrameId, trans2bg);
 	trans2bg.ClearToRotOnly();
 
-	// Pick up to four suitable system light sources (stars)
+	// Pick up to four suitable system light sources (stars), or use inspector override light
 	m_lightSources.clear();
 	m_lightSources.reserve(4);
-	position_system_lights(camFrame, rootFrame, m_lightSources);
+	if (m_overrideLightEnabled) {
+		const vector3f dir = (m_overrideLightDir.LengthSqr() > 1e-6f) ? m_overrideLightDir.Normalized() : vector3f(0.f, 1.f, 0.f);
+		Graphics::Light light(Graphics::Light::LIGHT_DIRECTIONAL, dir * 1.49598e11f, m_overrideLightColor, m_overrideLightColor);
+		m_lightSources.push_back(LightSource(nullptr, light));
+	} else {
+		position_system_lights(camFrame, rootFrame, m_lightSources);
+	}
 
 	if (m_lightSources.empty()) {
 		// no lights means we're somewhere weird (eg hyperspace). fake one
@@ -287,6 +302,8 @@ void Camera::Draw(const Body *excludeBody)
 	// Fade space background based on planetary atmosphere thickness AND stellar proximity/glare (auto-exposure)
 	float bgIntensity = 1.f;
 	m_inAtmosphere = false;
+	const Body *atmoPlanetBody = nullptr;
+	vector3f atmoLocalUp(0.f, 1.f, 0.f);
 	Frame *camParent = Frame::GetFrame(camFrame->GetParent());
 	if (camParent && camParent->IsRotFrame()) {
 		//check if camera is near a planet
@@ -299,26 +316,23 @@ void Camera::Draw(const Body *excludeBody)
 			planet->GetAtmosphericState(altitude, &pressure, &density);
 			if (pressure >= 0.001) {
 				m_inAtmosphere = true;
+				atmoPlanetBody = camParentBody;
 				const vector3f localUp = (-relpos).Normalized();
+				atmoLocalUp = localUp;
 				float skyWashout = 0.f;
-				const Body *pBody = Pi::game->GetPlayer();
+				const Body *pBody = m_scenicMode ? nullptr : Pi::game->GetPlayer();
 				for (Uint32 i = 0; i < m_lightSources.size(); i++) {
 					// Set up data for eclipses. All bodies are assumed to be spheres.
 					const LightSource &it = m_lightSources[i];
 					const vector3f lightDir(it.GetLight().GetPosition().Normalized());
-					const float shadow = ShadowedIntensity(i, pBody);
+					const float shadow = pBody ? ShadowedIntensity(i, pBody, camParentBody) : 1.0f;
 					const float starLum = Clamp((it.GetLight().GetDiffuse().GetLuminance() / 255.0f) * 1.6f, 0.35f, 1.0f);
 					const float sunSinElev = lightDir.Dot(localUp);
-					const float t = Clamp((sunSinElev - (-0.24f)) / ((-0.015f) - (-0.24f)), 0.0f, 1.0f);
-					const float twilightDay = t * t * (3.0f - 2.0f * t);
+					const float twilightDay = ComputeTwilightDayFactor(sunSinElev, pressure);
 					skyWashout = Clamp(skyWashout + shadow * starLum * twilightDay, 0.0f, 1.0f);
 				}
 
-				const float pT = Clamp((float(pressure) - 0.001f) / (0.05f - 0.001f), 0.0f, 1.0f);
-				const float atmoOpacity = pT * pT * (3.0f - 2.0f * pT);
-				const float daylightSuppression = Clamp(atmoOpacity * skyWashout * 1.15f, 0.0f, 1.0f);
-				const float nightExtinction = Clamp(float(density) * 0.08f, 0.0f, 0.18f);
-				bgIntensity = Clamp((1.0f - nightExtinction) * (1.0f - daylightSuppression), 0.0f, 1.0f);
+				bgIntensity = ComputeAtmosphereBgIntensity(pressure, density, skyWashout);
 			}
 		}
 	}
@@ -328,7 +342,7 @@ void Camera::Draw(const Body *excludeBody)
 	// down toward near-black; turning away or moving further out restores the full starry sky.
 	if (Pi::game->IsNormalSpace()) {
 		float maxStarGlare = 0.0f;
-		const Body *pBody = Pi::game->GetPlayer();
+		const Body *pBody = m_scenicMode ? nullptr : Pi::game->GetPlayer();
 		for (Uint32 i = 0; i < m_lightSources.size(); ++i) {
 			const Body *starBody = m_lightSources[i].GetBody();
 			if (!starBody || !starBody->IsType(ObjectType::STAR))
@@ -358,7 +372,16 @@ void Camera::Draw(const Body *excludeBody)
 			const float fovWeight = float(std::pow(Clamp(1.0 - angToLimb / 1.05, 0.0, 1.0), 1.1));
 			// Proximity falloff scaled by luminosity: completely blacks out skybox near the star
 			const float distFade = float(Clamp(1.0 / (1.0 + std::pow(effDistRadii / 55.0, 2.2)), 0.0, 1.0));
-			const float shadow = pBody ? float(ShadowedIntensity(i, pBody)) : 1.0f;
+			float shadow = 1.0f;
+			if (m_inAtmosphere && atmoPlanetBody != nullptr) {
+				const float otherShadow = pBody ? float(ShadowedIntensity(i, pBody, atmoPlanetBody)) : 1.0f;
+				const float sunSinElev = m_lightSources[i].GetLight().GetPosition().Normalized().Dot(atmoLocalUp);
+				const float ht = Clamp((sunSinElev + 0.04f) / 0.08f, 0.0f, 1.0f);
+				const float horizonVis = ht * ht * (3.0f - 2.0f * ht);
+				shadow = otherShadow * horizonVis;
+			} else {
+				shadow = pBody ? float(ShadowedIntensity(i, pBody)) : 1.0f;
+			}
 
 			const float glare = Clamp(distFade * (0.08f + 0.95f * fovWeight) * shadow, 0.0f, 1.0f);
 			maxStarGlare = std::max(maxStarGlare, glare);
@@ -386,7 +409,7 @@ void Camera::Draw(const Body *excludeBody)
 		m_renderer->SetLights(rendererLights.size(), &rendererLights[0]);
 	}
 
-	{
+	if (!m_scenicMode) {
 		std::vector<Graphics::SpotLight> spotLights;
 		spotLights.reserve(Graphics::MAX_SPOT_LIGHTS);
 		auto collectShipSpots = [&](const Ship *s) {
@@ -416,6 +439,8 @@ void Camera::Draw(const Body *excludeBody)
 			collectShipSpots(static_cast<const Ship *>(attrs.body));
 		}
 		m_renderer->SetSpotLights(uint32_t(spotLights.size()), spotLights.empty() ? nullptr : spotLights.data());
+	} else {
+		m_renderer->SetSpotLights(0, nullptr);
 	}
 
 	// Save lights for later restoring
@@ -452,14 +477,16 @@ void Camera::Draw(const Body *excludeBody)
 		m_renderer->DrawBuffer(&billboards, m_billboardMaterial.get());
 	}
 
-	float illuminationFactor = 1.f;
-	if (Pi::game && Pi::player && !Pi::player->IsDead()) {
-		double amb = 0.0, direct = 1.0;
-		CalcLighting(Pi::player, amb, direct);
-		illuminationFactor = Clamp(float(amb + direct), 0.08f, 1.0f);
-		illuminationFactor = std::pow(illuminationFactor, 1.5);
+	if (!m_scenicMode) {
+		float illuminationFactor = 1.f;
+		if (Pi::game && Pi::player && !Pi::player->IsDead()) {
+			double amb = 0.0, direct = 1.0;
+			CalcLighting(Pi::player, amb, direct);
+			illuminationFactor = Clamp(float(amb + direct), 0.08f, 1.0f);
+			illuminationFactor = std::pow(illuminationFactor, 1.5);
+		}
+		SfxManager::RenderAll(m_renderer, rootFrameId, camFrameId, illuminationFactor);
 	}
-	SfxManager::RenderAll(m_renderer, rootFrameId, camFrameId, illuminationFactor);
 }
 
 // Calculates the ambiently and directly lit portions of the lighting model taking into account the atmosphere and sun positions at a given location
@@ -566,7 +593,25 @@ void Camera::CalcLighting(const Body *b, double &ambient, double &direct) const
 	ambient = std::max(minAmbient, ambient);
 }
 
-void Camera::CalcShadows(const int lightNum, const Body *b, std::vector<Shadow> &shadowsOut) const
+float Camera::ComputeTwilightDayFactor(float sunSinElev, double pressure)
+{
+	const float pScale = Clamp((float(pressure) - 0.001f) / 0.5f, 0.0f, 1.0f);
+	const float minElev = -0.14f - 0.12f * pScale; // -8 deg (thin) to -15 deg (thick)
+	const float maxElev = 0.01f + 0.02f * pScale;  // +0.6 deg (thin) to +1.7 deg (thick)
+	const float t = Clamp((sunSinElev - minElev) / (maxElev - minElev), 0.0f, 1.0f);
+	return t * t * (3.0f - 2.0f * t);
+}
+
+float Camera::ComputeAtmosphereBgIntensity(double pressure, double density, float skyWashout)
+{
+	const float pT = Clamp((float(pressure) - 0.001f) / (0.05f - 0.001f), 0.0f, 1.0f);
+	const float atmoOpacity = pT * pT * (3.0f - 2.0f * pT);
+	const float daylightSuppression = Clamp(atmoOpacity * skyWashout * 1.15f, 0.0f, 1.0f);
+	const float nightExtinction = Clamp(float(density) * 0.08f, 0.0f, 0.18f);
+	return Clamp((1.0f - nightExtinction) * (1.0f - daylightSuppression), 0.0f, 1.0f);
+}
+
+void Camera::CalcShadows(const int lightNum, const Body *b, std::vector<Shadow> &shadowsOut, const Body *ignoreBody) const
 {
 	// Set up data for eclipses. All bodies are assumed to be spheres.
 	const Body *lightBody = m_lightSources[lightNum].GetBody();
@@ -585,7 +630,7 @@ void Camera::CalcShadows(const int lightNum, const Body *b, std::vector<Shadow> 
 
 	// Look for eclipsing third bodies:
 	for (const Body *b2 : Pi::game->GetSpace()->GetBodies()) {
-		if (b2 == b || b2 == lightBody || !(b2->IsType(ObjectType::PLANET) || b2->IsType(ObjectType::STAR)))
+		if (b2 == b || b2 == lightBody || b2 == ignoreBody || !(b2->IsType(ObjectType::PLANET) || b2->IsType(ObjectType::STAR)))
 			continue;
 
 		double b2Radius = b2->GetSystemBody()->GetRadius();
@@ -647,11 +692,11 @@ float discCovered(const double dist, const double rad)
 
 static std::vector<Camera::Shadow> shadows;
 
-float Camera::ShadowedIntensity(const int lightNum, const Body *b) const
+float Camera::ShadowedIntensity(const int lightNum, const Body *b, const Body *ignoreBody) const
 {
 	shadows.clear();
 	shadows.reserve(16);
-	CalcShadows(lightNum, b, shadows);
+	CalcShadows(lightNum, b, shadows, ignoreBody);
 	double product = 1.0;
 	for (std::vector<Camera::Shadow>::const_iterator it = shadows.begin(), itEnd = shadows.end(); it != itEnd; ++it)
 		product *= 1.0 - discCovered(it->centre.Length() / it->lrad, it->srad / it->lrad);

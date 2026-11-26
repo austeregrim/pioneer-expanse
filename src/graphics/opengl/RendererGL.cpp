@@ -1263,4 +1263,40 @@ namespace Graphics {
 		return true;
 	}
 
+	int RendererOGL::GetMaxTextureSize() const
+	{
+		GLint maxSize = 4096;
+		glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxSize);
+		return std::max<int>(maxSize, 2048);
+	}
+
+	bool RendererOGL::ScreendumpRenderTarget(RenderTarget *rt, ScreendumpState &sd)
+	{
+		if (!rt)
+			return false;
+
+		FlushCommandBuffers();
+
+		const RenderTargetDesc &desc = rt->GetDesc();
+		sd.width = desc.width;
+		sd.height = desc.height;
+		sd.bpp = 3;
+		sd.stride = sd.bpp * sd.width;
+		sd.pixels.reset(new Uint8[sd.stride * sd.height]);
+
+		OGL::RenderTarget *oglRT = static_cast<OGL::RenderTarget *>(rt);
+		oglRT->Bind(OGL::RenderTarget::READ);
+		glPixelStorei(GL_PACK_ALIGNMENT, 1);
+		glReadBuffer(GL_COLOR_ATTACHMENT0);
+		glReadPixels(0, 0, sd.width, sd.height, GL_RGB, GL_UNSIGNED_BYTE, sd.pixels.get());
+		glFinish();
+		oglRT->Unbind(OGL::RenderTarget::READ);
+		glReadBuffer(GL_BACK);
+
+		if (m_activeRenderTarget) {
+			m_activeRenderTarget->Bind(OGL::RenderTarget::READ);
+		}
+		return true;
+	}
+
 } // namespace Graphics

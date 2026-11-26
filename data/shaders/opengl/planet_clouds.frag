@@ -104,7 +104,7 @@ vec3 clRotateY(vec3 v, float ang)
 void main(void)
 {
 	float stormIntensity = clamp(weatherParams.x, 0.0, 1.0);
-	float windDriftScale = max(weatherParams.y, 0.25);
+	float windDriftScale = max(weatherParams.y, 0.01);
 	float dustFactor = clamp(weatherParams.w, 0.0, 1.0);
 	float layerType = layerParams.x;
 	float isUpperLayer = step(0.5, layerType);
@@ -118,7 +118,7 @@ void main(void)
 	float cloudAltKm = max(cloudScale.y, 0.5);
 	float camAltKm = cloudScale.z;
 	float atmoDense = clamp(cloudScale.w, 0.0, 1.0);
-	float shellPassFade = smoothstep(0.18, 1.15, abs(camAltKm - cloudAltKm));
+	float shellPassFade = smoothstep(0.22, 1.35, abs(camAltKm - cloudAltKm));
 	if (shellPassFade <= 0.01)
 		discard;
 
@@ -150,10 +150,8 @@ void main(void)
 		discard;
 
 	float distZ = -eyenorm.z * tHit * viewRad;
-	if (camAltKm > cloudAltKm + 25.0)
-		distZ *= 0.992;
-	else if (camAltKm > cloudAltKm + 5.0)
-		distZ *= 0.997;
+	float biasScale = mix(1.0, 0.992, smoothstep(cloudAltKm + 3.0, cloudAltKm + 30.0, camAltKm));
+	distZ *= biasScale;
 	if (distZ <= 0.0)
 		discard;
 	gl_FragDepth = clamp(projD / distZ - projC, 0.0, 1.0);
@@ -163,13 +161,22 @@ void main(void)
 	vec3 dir = normalize(vec3(dot(N, objAxisX), dot(N, objAxisY), dot(N, objAxisZ)));
 	vec3 V = -eyenorm;
 
+	// Blend physical km-scale cumulus/cirrus structure + local WeatherSystem coverage overhead before FBM
+	float surfaceBlend = 1.0 - smoothstep(cloudAltKm * 1.6, cloudAltKm * 6.5, max(camAltKm, 0.0));
+	float underCloud = 1.0 - smoothstep(cloudAltKm - 1.2, cloudAltKm + 0.6, camAltKm);
+	float camDistKm = length(dir - camDirObj) * planetRadKm;
+	float localZone = (1.0 - smoothstep(140.0, 480.0, camDistKm)) * surfaceBlend * clamp(layerParams.z, 0.0, 1.0);
+	float effCoverage = clamp(mix(baseCoverage, layerParams.y, localZone), 0.0, 0.98);
+	if (effCoverage <= 0.01)
+		discard;
+
 	float seed = cloudParams.y;
 	// Zero-shear rigid-body drift + bounded time-independent Coriolis bend (never multiply lat * uTime!)
-	float driftAngle = uTime * 0.00018 * windDriftScale;
+	float driftAngle = uTime * 0.0000075 * windDriftScale;
 	float lat = clamp(dir.y, -1.0, 1.0);
 	float coriolisBend = mix(0.16, 0.26, isUpperLayer) * sin(lat * 3.14159);
 	vec3 windDir = clRotateY(dir, driftAngle + coriolisBend + seed);
-	float tMorph = uTime * 0.00035 * windDriftScale;
+	float tMorph = uTime * 0.000045 * max(windDriftScale, 0.15);
 
 	// Domain-warped swirling weather fronts & wispy cumulus/cirrus formations
 	float q = clamp(cloudQuality, 1.0, 4.0);
@@ -214,15 +221,6 @@ void main(void)
 
 	float rawCloud = mix(fronts * 0.64 + wisps * 0.26 + detail * 0.10, fronts * 0.35 + wisps * 0.52 + detail * 0.13, isUpperLayer);
 
-	// Blend physical km-scale cumulus/cirrus structure + local WeatherSystem coverage overhead for surface sky views
-	float surfaceBlend = 1.0 - smoothstep(cloudAltKm * 1.6, cloudAltKm * 6.5, max(camAltKm, 0.0));
-	float underCloud = 1.0 - smoothstep(cloudAltKm - 1.2, cloudAltKm + 0.6, camAltKm);
-	float camDistKm = length(dir - normalize(camDirObj)) * planetRadKm;
-	float localZone = (1.0 - smoothstep(140.0, 480.0, camDistKm)) * surfaceBlend * clamp(layerParams.z, 0.0, 1.0);
-	float effCoverage = clamp(mix(baseCoverage, layerParams.y, localZone), 0.0, 0.98);
-	if (effCoverage <= 0.01)
-		discard;
-
 	float combinedRaw = rawCloud;
 	float localRelief = wisps;
 	if (surfaceBlend > 0.005 && q >= 1.5) {
@@ -265,10 +263,13 @@ void main(void)
 		// Soft atmospheric wrap across the terminator, dropping strictly to 0 on the night side
 		float dayLit = smoothstep(-0.08, 0.22, ndotl) * (0.28 + 0.72 * max(ndotl, 0.0));
 		maxDayLit = max(maxDayLit, dayLit);
-		float twilight = exp(-pow((ndotl - 0.02) * 8.5, 2.0)) * smoothstep(-0.12, 0.0, ndotl);
+		float twArg = (ndotl - 0.02) * 8.5;
+		float twilight = exp(-(twArg * twArg)) * smoothstep(-0.12, 0.0, ndotl);
 
 		// Subtle forward-scatter silver lining when looking toward the sun through clouds from the ground
-		float forwardScatter = pow(max(dot(-V, L), 0.0), 6.0) * (1.0 - density * 0.6) * smoothstep(-0.10, 0.15, ndotl);
+		float fs = max(dot(-V, L), 0.0);
+		float fs2 = fs * fs;
+		float forwardScatter = (fs2 * fs2 * fs2) * (1.0 - density * 0.6) * smoothstep(-0.10, 0.15, ndotl);
 
 		vec3 sunCol = uLight[i].diffuse.rgb;
 		float lMax = max(max(sunCol.r, sunCol.g), sunCol.b);
@@ -308,7 +309,7 @@ void main(void)
 	// Localized storm-cell lightning glow inside thick clouds (instead of flashing the entire sky)
 	float strikeIntensity = clamp(flashCell.w, 0.0, 1.0);
 	if (strikeIntensity > 0.005) {
-		float strikeDistKm = length(dir - normalize(flashCell.xyz)) * planetRadKm;
+		float strikeDistKm = length(dir - flashCell.xyz) * planetRadKm;
 		float cellFalloff = exp(-strikeDistKm / mix(16.0, 26.0, stormIntensity));
 		float thickMask = smoothstep(0.40, 0.85, density) * (1.0 - 0.55 * isUpperLayer);
 		litColor += vec3(0.68, 0.82, 1.0) * strikeIntensity * cellFalloff * thickMask * 1.15;

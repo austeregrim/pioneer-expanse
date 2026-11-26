@@ -116,7 +116,8 @@ vec3 applyVortexStorm(vec3 dir, vec3 stormCenter, float stormRadius, float swirl
 	spiralArms = arms * smoothstep(1.30, 0.18, r) * smoothstep(0.06, 0.38, r);
 
 	// Raised eyewall collar & recessed inner storm core
-	stormRim = exp(-pow((r - 0.62) / 0.28, 2.0));
+	float rimArg = (r - 0.62) / 0.28;
+	stormRim = exp(-(rimArg * rimArg));
 	stormCore = exp(-r * r * 3.8);
 
 	vec3 warped = sc + east * (rotUV.x * rx) + north * (rotUV.y * ry);
@@ -189,21 +190,29 @@ void main(void)
 	vec3 seedShift = vec3(seed * 0.31, seed * 0.17, -seed * 0.23);
 	float warpAmp = 0.22 + 0.48 * turbulence;
 
-	vec3 warpEast = vec3(
-		ggFbmBL(dirEast * vec3(2.0, 4.2, 2.0) + seedShift + vec3(0.0, 1.3, 2.7), pixelFootprint * 4.2) - 0.5,
-		ggFbmBL(dirEast * vec3(2.0, 4.2, 2.0) + seedShift + vec3(5.2, -2.1, 1.4), pixelFootprint * 4.2) - 0.5,
-		ggFbmBL(dirEast * vec3(2.0, 4.2, 2.0) + seedShift + vec3(-3.4, 4.8, -1.9), pixelFootprint * 4.2) - 0.5
-	);
-	vec3 warpWest = vec3(
-		ggFbmBL(dirWest * vec3(2.0, 4.2, 2.0) + seedShift + vec3(2.1, -0.7, 3.3), pixelFootprint * 4.2) - 0.5,
-		ggFbmBL(dirWest * vec3(2.0, 4.2, 2.0) + seedShift + vec3(-4.1, 1.8, -2.5), pixelFootprint * 4.2) - 0.5,
-		ggFbmBL(dirWest * vec3(2.0, 4.2, 2.0) + seedShift + vec3(1.7, 3.6, -0.9), pixelFootprint * 4.2) - 0.5
-	);
+	float cloudEast = 0.5;
+	float wispEast = 0.5;
+	if (jetBlend > 0.001) {
+		vec3 warpEast = vec3(
+			ggFbmBL(dirEast * vec3(2.0, 4.2, 2.0) + seedShift + vec3(0.0, 1.3, 2.7), pixelFootprint * 4.2) - 0.5,
+			ggFbmBL(dirEast * vec3(2.0, 4.2, 2.0) + seedShift + vec3(5.2, -2.1, 1.4), pixelFootprint * 4.2) - 0.5,
+			ggFbmBL(dirEast * vec3(2.0, 4.2, 2.0) + seedShift + vec3(-3.4, 4.8, -1.9), pixelFootprint * 4.2) - 0.5
+		);
+		cloudEast = ggFbmBL(dirEast * vec3(3.2, 6.8, 3.2) + seedShift + warpEast * warpAmp, pixelFootprint * 6.8);
+		wispEast  = ggFbmBL(dirEast * vec3(5.4, 10.8, 5.4) + seedShift * 1.3 + warpEast * (warpAmp * 1.25), pixelFootprint * 10.8);
+	}
 
-	float cloudEast = ggFbmBL(dirEast * vec3(3.2, 6.8, 3.2) + seedShift + warpEast * warpAmp, pixelFootprint * 6.8);
-	float cloudWest = ggFbmBL(dirWest * vec3(3.2, 6.8, 3.2) + seedShift + warpWest * warpAmp, pixelFootprint * 6.8);
-	float wispEast  = ggFbmBL(dirEast * vec3(5.4, 10.8, 5.4) + seedShift * 1.3 + warpEast * (warpAmp * 1.25), pixelFootprint * 10.8);
-	float wispWest  = ggFbmBL(dirWest * vec3(5.4, 10.8, 5.4) + seedShift * 1.3 + warpWest * (warpAmp * 1.25), pixelFootprint * 10.8);
+	float cloudWest = 0.5;
+	float wispWest = 0.5;
+	if (jetBlend < 0.999) {
+		vec3 warpWest = vec3(
+			ggFbmBL(dirWest * vec3(2.0, 4.2, 2.0) + seedShift + vec3(2.1, -0.7, 3.3), pixelFootprint * 4.2) - 0.5,
+			ggFbmBL(dirWest * vec3(2.0, 4.2, 2.0) + seedShift + vec3(-4.1, 1.8, -2.5), pixelFootprint * 4.2) - 0.5,
+			ggFbmBL(dirWest * vec3(2.0, 4.2, 2.0) + seedShift + vec3(1.7, 3.6, -0.9), pixelFootprint * 4.2) - 0.5
+		);
+		cloudWest = ggFbmBL(dirWest * vec3(3.2, 6.8, 3.2) + seedShift + warpWest * warpAmp, pixelFootprint * 6.8);
+		wispWest  = ggFbmBL(dirWest * vec3(5.4, 10.8, 5.4) + seedShift * 1.3 + warpWest * (warpAmp * 1.25), pixelFootprint * 10.8);
+	}
 
 	float cloudDeck = mix(cloudWest, cloudEast, jetBlend);
 	float cloudWisps = mix(wispWest, wispEast, jetBlend);
@@ -280,7 +289,8 @@ void main(void)
 
 	// Subtle Saturnian polar hexagonal wave
 	float isSaturn = (archetype >= 0.5 && archetype < 1.5) ? 1.0 : 0.0;
-	float hexRing = exp(-pow((absLat - 0.80) / 0.065, 2.0));
+	float hexArg = (absLat - 0.80) / 0.065;
+	float hexRing = exp(-(hexArg * hexArg));
 	waveLatDisp += isSaturn * hexRing * sin(lon * 6.0 - dayPhase * 6.0 + seed) * 0.015;
 
 	float eddyLatOffset = ((cloudDeck - 0.5) * 0.032 + (cloudWisps - 0.5) * 0.012) * (0.25 + 0.95 * shearEdge) * turbulence * eqMask;
@@ -321,7 +331,9 @@ void main(void)
 
 	// High-altitude pale methane cirrus streaks on Neptune-class worlds
 	if (archetype >= 2.5) {
-		float cirrusBand = exp(-pow((absLat - 0.36) / 0.11, 2.0)) + 0.6 * exp(-pow((absLat - 0.56) / 0.08, 2.0));
+		float cb1 = (absLat - 0.36) / 0.11;
+		float cb2 = (absLat - 0.56) / 0.08;
+		float cirrusBand = exp(-(cb1 * cb1)) + 0.6 * exp(-(cb2 * cb2));
 		float cirrusStreak = smoothstep(0.56, 0.80, cloudWisps * 0.65 + cloudDeck * 0.35);
 		vec3 cirrusCol = mix(brightZone * 1.18, vec3(0.84, 0.93, 0.99), 0.45);
 		cloudCol = mix(cloudCol, cirrusCol, clamp(cirrusBand * cirrusStreak * 0.42, 0.0, 0.5));

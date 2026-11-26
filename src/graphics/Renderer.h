@@ -266,6 +266,8 @@ namespace Graphics {
 		};
 
 		virtual bool Screendump(ScreendumpState &sd) { return false; }
+		virtual bool ScreendumpRenderTarget(RenderTarget *rt, ScreendumpState &sd) { return false; }
+		virtual int GetMaxTextureSize() const { return 4096; }
 
 		void SetEnhancedGraphics(bool enabled) { m_enhancedGraphics = enabled; }
 		bool IsEnhancedGraphicsEnabled() const { return m_enhancedGraphics; }

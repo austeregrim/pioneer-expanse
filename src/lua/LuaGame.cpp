@@ -14,6 +14,7 @@
 #include "LuaObject.h"
 #include "LuaTable.h"
 #include "LuaUtils.h"
+#include "ObjectViewerView.h"
 #include "Pi.h"
 #include "Player.h"
 #include "SaveGameManager.h"
@@ -22,8 +23,10 @@
 #include "StringF.h"
 #include "SystemView.h"
 #include "WorldView.h"
+#include "buildopts.h"
 #include "core/GZipFormat.h"
 #include "galaxy/Galaxy.h"
+#include "galaxy/SystemBody.h"
 #include "pigui/LuaPiGui.h"
 
 /*
@@ -752,6 +755,57 @@ static int l_game_set_hardcore(lua_State *l)
 	return 0;
 }
 
+static int l_game_inspect_body(lua_State *l)
+{
+	if (!Pi::game || !Pi::game->GetSpace())
+		return 0;
+
+#if WITH_OBJECTVIEWER
+	Body *target = LuaObject<Body>::GetFromLua(1);
+	if (!target) {
+		SystemBody *sbody = LuaObject<SystemBody>::GetFromLua(1);
+		if (sbody)
+			target = Pi::game->GetSpace()->FindBodyForPath(&sbody->GetPath());
+	}
+	if (!target)
+		return 0;
+
+	ObjectViewerView *ov = Pi::game->GetObjectViewerView();
+	if (ov) {
+		ov->SetReturnView(Pi::GetView());
+		ov->SetTargetBody(target);
+		Pi::SetView(ov);
+	}
+#endif
+	return 0;
+}
+
+static int l_game_toggle_object_viewer(lua_State *l)
+{
+#if WITH_OBJECTVIEWER
+	Pi::ToggleObjectViewer();
+#endif
+	return 0;
+}
+
+static int l_game_is_planet_inspector_enabled(lua_State *l)
+{
+#if WITH_OBJECTVIEWER
+	lua_pushboolean(l, ObjectViewerView::IsInspectorEnabled());
+#else
+	lua_pushboolean(l, false);
+#endif
+	return 1;
+}
+
+static int l_game_set_planet_inspector_enabled(lua_State *l)
+{
+#if WITH_OBJECTVIEWER
+	ObjectViewerView::SetInspectorEnabled(lua_toboolean(l, 1) != 0);
+#endif
+	return 0;
+}
+
 void LuaGame::Register()
 {
 	lua_State *l = Lua::manager->GetLuaState();
@@ -775,6 +829,10 @@ void LuaGame::Register()
 		{ "SwitchView", l_game_switch_view },
 		{ "CurrentView", l_game_current_view },
 		{ "SetView", l_game_set_view },
+		{ "InspectBody", l_game_inspect_body },
+		{ "ToggleObjectViewer", l_game_toggle_object_viewer },
+		{ "IsPlanetInspectorEnabled", l_game_is_planet_inspector_enabled },
+		{ "SetPlanetInspectorEnabled", l_game_set_planet_inspector_enabled },
 		{ "GetDateTime", l_game_get_date_time },
 		{ "GetPartsFromDateTime", l_game_get_parts_from_date_time },
 		{ "SetTimeAcceleration", l_game_set_time_acceleration },

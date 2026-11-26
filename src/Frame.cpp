@@ -513,6 +513,78 @@ void Frame::UpdateInterpTransform(double alpha)
 	}
 }
 
+void Frame::SaveCelestialFrameState(std::vector<CelestialSnapshot> &out)
+{
+	out.resize(s_frames.size());
+	for (size_t i = 0; i < s_frames.size(); ++i) {
+		const Frame &f = s_frames[i];
+		CelestialSnapshot &s = out[i];
+		s.pos = f.m_pos;
+		s.oldPos = f.m_oldPos;
+		s.interpPos = f.m_interpPos;
+		s.vel = f.m_vel;
+		s.orient = f.m_orient;
+		s.interpOrient = f.m_interpOrient;
+		s.oldAngDisplacement = f.m_oldAngDisplacement;
+		s.rootPos = f.m_rootPos;
+		s.rootOrient = f.m_rootOrient;
+		s.rootInterpPos = f.m_rootInterpPos;
+		s.rootInterpOrient = f.m_rootInterpOrient;
+	}
+}
+
+void Frame::ApplyCelestialTimeForPreview(double time)
+{
+	if (s_frames.empty())
+		return;
+
+	for (Frame &frame : s_frames) {
+		if (!frame.m_sbody)
+			continue;
+
+		if (frame.m_parent.valid() && !frame.IsRotFrame()) {
+			frame.m_pos = frame.m_sbody->GetOrbit().OrbitalPosAtTime(time);
+		}
+		frame.m_oldPos = frame.m_pos;
+		frame.m_interpPos = frame.m_pos;
+		frame.m_oldAngDisplacement = 0.0;
+
+		const double ang = fmod(frame.m_angSpeed * time, 2.0 * M_PI);
+		if (!is_zero_exact(ang)) {
+			matrix3x3d rot = matrix3x3d::RotateY(-ang);
+			frame.m_orient = frame.m_initialOrient * rot;
+		} else {
+			frame.m_orient = frame.m_initialOrient;
+		}
+		frame.m_interpOrient = frame.m_orient;
+	}
+
+	for (Frame &frame : s_frames) {
+		frame.UpdateRootRelativeVars();
+	}
+	s_frames[0].UpdateInterpTransform(1.0);
+}
+
+void Frame::RestoreCelestialFrameState(const std::vector<CelestialSnapshot> &in)
+{
+	const size_t count = std::min(in.size(), s_frames.size());
+	for (size_t i = 0; i < count; ++i) {
+		Frame &f = s_frames[i];
+		const CelestialSnapshot &s = in[i];
+		f.m_pos = s.pos;
+		f.m_oldPos = s.oldPos;
+		f.m_interpPos = s.interpPos;
+		f.m_vel = s.vel;
+		f.m_orient = s.orient;
+		f.m_interpOrient = s.interpOrient;
+		f.m_oldAngDisplacement = s.oldAngDisplacement;
+		f.m_rootPos = s.rootPos;
+		f.m_rootOrient = s.rootOrient;
+		f.m_rootInterpPos = s.rootInterpPos;
+		f.m_rootInterpOrient = s.rootInterpOrient;
+	}
+}
+
 void Frame::GetFrameTransform(const FrameId fFromId, const FrameId fToId, matrix4x4d &m)
 {
 	matrix3x3d forient = Frame::GetFrame(fFromId)->GetOrientRelTo(fToId);

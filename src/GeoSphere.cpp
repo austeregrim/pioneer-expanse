@@ -8,6 +8,7 @@
 #include "GeoPatch.h"
 #include "GeoPatchContext.h"
 #include "GeoPatchJobs.h"
+#include "ObjectViewerView.h"
 #include "Pi.h"
 #include "RefCounted.h"
 #include "galaxy/AtmosphereParameters.h"
@@ -440,7 +441,9 @@ void GeoSphere::Render(Graphics::Renderer *renderer, const matrix4x4d &modelView
 	const double camLenD = campos.Length();
 	const vector3d camDir = (camLenD > 1e-9) ? (campos / camLenD) : vector3d(0.0, 1.0, 0.0);
 	const double camAltM = (camLenD - 1.0) * planetRadM;
-	const double gameTime = Pi::game ? Pi::game->GetTime() : 0.0;
+	const double gameTime = ObjectViewerView::HasPreviewTime()
+		? ObjectViewerView::GetPreviewTime()
+		: (Pi::game ? Pi::game->GetTime() : 0.0);
 	WeatherState weather{};
 	LightningFlash flash{};
 	if (hasWeatherAtmo) {
@@ -637,7 +640,9 @@ void GeoSphere::Render(Graphics::Renderer *renderer, const matrix4x4d &modelView
 			static const size_t s_cloudQualityName = "cloudQuality"_hash;
 
 			const float stormIntensity = weather.hasAtmosphere ? float(weather.stormIntensity) : 0.0f;
-			const float windDriftScale = float(Clamp(0.75 + 0.35 * std::min(atmo, 2.5), 0.50, 1.80));
+			const double atmoDrive = Clamp(std::pow(std::max(atmo, 0.005), 0.65), 0.04, 1.65);
+			const double radiusRatio = Clamp(planetRadM / 6371000.0, 0.25, 10.0);
+			const float windDriftScale = float(Clamp((atmoDrive / radiusRatio) * (1.0 + 0.35 * stormIntensity), 0.015, 2.5));
 			const float dustFactor = (weather.hasAtmosphere && weather.precipType == PrecipitationType::DUST) ? float(weather.precipIntensity) : 0.0f;
 			const float planetRadKm = float(planetRadM * 0.001);
 			const float camAltKm = float(camAltM * 0.001);
@@ -646,7 +651,10 @@ void GeoSphere::Render(Graphics::Renderer *renderer, const matrix4x4d &modelView
 			const float lowerLocalCover = weather.hasAtmosphere ? float(weather.lowerCloudCover) : coverage;
 			const float upperLocalCover = weather.hasAtmosphere ? float(weather.upperCloudCover) : (coverage * 0.55f);
 			const float upperGlobalCover = Clamp(coverage * 0.58f + 0.14f, 0.18f, 0.68f);
-			const vector3f camDirF = vector3f(camDir);
+			const vector3f camDirF = vector3f(camDir.NormalizedSafe());
+			float znear = 0.0f, zfar = 0.0f;
+			renderer->GetNearFarRange(znear, zfar);
+			const double safeNearMargin = std::max(0.015, (double(znear) / planetRadM) * 4.0);
 
 			auto drawCloudLayer = [&](double layerAltM, float layerType, float globalCov, float localCov, float windMult, float opacityScale, float seedOff, float flashScale) {
 				const double cloudRadD = 1.0 + (layerAltM / planetRadM);
@@ -655,7 +663,7 @@ void GeoSphere::Render(Graphics::Renderer *renderer, const matrix4x4d &modelView
 				const float cloudRad = float(cloudRadD);
 				const float cloudAltKm = float(layerAltM * 0.001);
 
-				Graphics::Material *cloudMat = (camLenD < boundRadD * 0.996) ? m_cloudInsideMaterial.Get() : m_cloudMaterial.Get();
+				Graphics::Material *cloudMat = (camLenD < boundRadD + safeNearMargin) ? m_cloudInsideMaterial.Get() : m_cloudMaterial.Get();
 				cloudMat->SetPushConstant(s_cloudParamsName, vector3f(globalCov, seed + seedOff, camAlt), cloudRad);
 				cloudMat->SetPushConstant(s_cloudTintName, vector3f(
 					Clamp(0.78f + 0.22f * aCol.r, 0.0f, 1.0f),

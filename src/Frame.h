@@ -114,6 +114,23 @@ public:
 	void UpdateInterpTransform(double alpha);
 	void ClearMovement();
 
+	struct CelestialSnapshot {
+		vector3d pos;
+		vector3d oldPos;
+		vector3d interpPos;
+		vector3d vel;
+		matrix3x3d orient;
+		matrix3x3d interpOrient;
+		double oldAngDisplacement;
+		vector3d rootPos;
+		matrix3x3d rootOrient;
+		vector3d rootInterpPos;
+		matrix3x3d rootInterpOrient;
+	};
+	static void SaveCelestialFrameState(std::vector<CelestialSnapshot> &out);
+	static void ApplyCelestialTimeForPreview(double time);
+	static void RestoreCelestialFrameState(const std::vector<CelestialSnapshot> &in);
+
 	// For an object in a rotating frame, relative to non-rotating frames it
 	// must attain this velocity within rotating frame to be stationary.
 	vector3d GetStasisVelocity(const vector3d &pos) const { return -vector3d(0, m_angSpeed, 0).Cross(pos); }

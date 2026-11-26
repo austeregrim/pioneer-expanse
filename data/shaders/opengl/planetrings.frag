@@ -43,21 +43,25 @@ void main(void)
 		discard;
 
 	vec2 noiseCoord = texCoord1.xz; // using the texCoord1 (a_vertex aka position) probably isn't perfect
-	float coarseNoise = 0.3 + 0.7 * clamp(octaveNoise(noiseCoord * 15.0, 0.3, 1.1, 4.0), 0.0, 1.0); // first-level octave noise
-	float fineNoise = texture(texture1, noiseCoord * 2000.0).r; //finer detail
-
 	float coarseDistance = remap01(15000000.0, 2500000.0, detailDist);
 	float fineDistance = remap01(2000000.0, 200000.0, detailDist);
 
+	float coarseNoise = 1.0;
+	if (coarseDistance > 0.001) {
+		coarseNoise = 0.3 + 0.7 * clamp(octaveNoise(noiseCoord * 15.0, 0.3, 1.1, 4.0), 0.0, 1.0); // first-level octave noise
+	}
+
 	//mix between fine detail, coarse detail and white
-	float detail1 = mix(1.0, coarseNoise, pow(coarseDistance, 2.0));
-	float detail2 = mix(detail1, fineNoise, pow(fineDistance, 2.0));
+	float detail1 = mix(1.0, coarseNoise, coarseDistance * coarseDistance);
+	float fineNoise = (fineDistance > 0.001) ? texture(texture1, noiseCoord * 2000.0).r : detail1; //finer detail
+	float detail2 = mix(detail1, fineNoise, fineDistance * fineDistance);
 
 	float density = (0.2 * detail1 + 0.8 * detail2);
 
 	for (int i=0; i<NUM_LIGHTS; ++i) {
+		vec3 lightDir = normalize(uLight[i].position.xyz);
 		// Compute intersection between the light ray and the planet sphere (rings are scaled so 1.0 = planet radius)
-		vec2 eye_dist = raySphereIntersect(-vec3(texCoord1), normalize(vec3(uViewMatrixInverse * normalize(uLight[i].position))), 1.0);
+		vec2 eye_dist = raySphereIntersect(-vec3(texCoord1), normalize(vec3(uViewMatrixInverse * vec4(lightDir, 0.0))), 1.0);
 		// Find the length of intersection in planet radii (0.0 outside shadow -> up to 2.0 across planet core)
 		float l = (eye_dist.y - eye_dist.x);
 		// Sharp planetary self-shadow with crisp penumbra edge
@@ -67,7 +71,7 @@ void main(void)
 		// Compute ring lighting
 		{
 			// first term: diffuse light phase (like in full/new moon)
-			float mu = dot(normalize(vec3(uLight[i].position)), eyenorm);
+			float mu = dot(lightDir, eyenorm);
 			float diffuse = sqrt(clamp((1.0 - mu) * 0.5, 0.0, 1.0));
 
 			// second term: forward Mie scattering through ice/dust ring particles
@@ -75,7 +79,7 @@ void main(void)
 			float phaseThrough = miePhaseFunction(g, mu) * 1.15;
 
 			// third term: retro-reflective opposition surge (rocky & metallic grains)
-			float muRev = dot(-normalize(vec3(uLight[i].position)), eyenorm);
+			float muRev = -mu;
 			float phaseReflect = (0.35 + 0.65 * density) * miePhaseFunction(0.72, muRev);
 
 			// Ambient scatter prevents shadowed umbra from vanishing completely while keeping sharp contrast

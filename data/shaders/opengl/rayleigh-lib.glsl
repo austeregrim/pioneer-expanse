@@ -113,7 +113,21 @@ vec4 getRaySegment(const in vec3 sunDirection, const in vec3 rayDirection, const
 	return atmosphere_minus_shadow;
 }
 
-vec3 directLight2dLUT(const in vec3 a, const in vec3 b, const in sampler2D scatterLUT) {
+vec3 calcTransmittancePrecomputed(const in vec2 opticalDepth, const in vec3 betaR, const in vec3 betaM, const in vec3 betaOzone)
+{
+	return exp(-((betaR + betaOzone * 0.45) * opticalDepth.x + betaM * opticalDepth.y));
+}
+
+vec3 calculateRayTransmittancePrecomputed(const in vec3 rayStart, const in vec3 rayDir, const in sampler2D scatterLUT, const in vec3 betaR, const in vec3 betaM, const in vec3 betaOzone)
+{
+	float height_scaled = clamp((length(rayStart) - 1) / (geosphereAtmosTopRad - 1), 0, 1);
+	float cos_phi = dot(rayDir, normalize(rayStart));
+	float alpha = acos(cos_phi) / PI;
+	vec2 density = exp(texture(scatterLUT, vec2(alpha, height_scaled)).xy);
+	return calcTransmittancePrecomputed(density, betaR, betaM, betaOzone);
+}
+
+vec3 directLight2dLUTPrecomputed(const in vec3 a, const in vec3 b, const in sampler2D scatterLUT, const in vec3 betaR, const in vec3 betaM, const in vec3 betaOzone) {
 	float height = length(a) - geosphereRadius;
 	float maxHeight = geosphereAtmosTopRad * geosphereRadius - geosphereRadius;
 
@@ -122,11 +136,11 @@ vec3 directLight2dLUT(const in vec3 a, const in vec3 b, const in sampler2D scatt
 	float cos_phi = dot(normalize(b - a), normalize(a));
 	vec2 density = exp(texture(scatterLUT, vec2(acos(cos_phi) / PI, height_scaled)).xy);
 
-	vec3 betaR = getAtmosBetaR();
-	vec3 betaM = getAtmosBetaM();
-	vec3 betaOzone = getAtmosBetaOzone();
+	return calcTransmittancePrecomputed(density, betaR, betaM, betaOzone);
+}
 
-	return exp(-((betaR + betaOzone * 0.45) * density.x + betaM * density.y));
+vec3 directLight2dLUT(const in vec3 a, const in vec3 b, const in sampler2D scatterLUT) {
+	return directLight2dLUTPrecomputed(a, b, scatterLUT, getAtmosBetaR(), getAtmosBetaM(), getAtmosBetaOzone());
 }
 
 
@@ -184,7 +198,7 @@ void processLight(const in vec3 a, const in vec3 b, inout vec2 iDensity, inout v
 		vec3 d = c + sunDirection * d_scal;
 
 		// before scattering
-		vec3 color0 = diffuse.xyz * calculateDirectLight(c, d, densityLUT, oSamples, scatterLUT);
+		vec3 color0 = diffuse.xyz * directLight2dLUTPrecomputed(c, d, scatterLUT, betaR, betaM, betaOzone);
 
 		// during scattering
 		vec3 color1R = color0 * betaR * phaseR * deltaDensity.x;
@@ -192,7 +206,7 @@ void processLight(const in vec3 a, const in vec3 b, inout vec2 iDensity, inout v
 		vec3 color1 = color1R + color1M;
 
 		// after scattering
-		vec3 color2 = color1 * exp(-((betaR + betaOzone * 0.45) * iDensity.x + betaM * iDensity.y));
+		vec3 color2 = color1 * calcTransmittancePrecomputed(iDensity, betaR, betaM, betaOzone);
 
 		iDensity += deltaDensity;
 		color += (intersect.y > 0.f) ? vec3(0.f) : color2;
@@ -356,6 +370,7 @@ vec3 calculateRayInscattering(inout vec2 opticalDepth, const in vec3 rayStart, c
 	float phaseM = miePhaseFunction(getAtmosMieG(), mu);
 	vec3 betaR = getAtmosBetaR();
 	vec3 betaM = getAtmosBetaM();
+	vec3 betaOzone = getAtmosBetaOzone();
 
 	float iSegmentLength = geosphereRadius * atmosDist / _iSamples;
 	if (iSegmentLength == 0.0) {
@@ -378,7 +393,7 @@ vec3 calculateRayInscattering(inout vec2 opticalDepth, const in vec3 rayStart, c
 		float sunLit = smoothstep(horizonCos - 0.018, horizonCos + 0.018, dot(normalize(c), lightDir));
 
 		// outscattering of light reaching this point
-		vec3 color0 = lightColor * calculateRayTransmittance(c, lightDir, scatterLUT);
+		vec3 color0 = lightColor * calculateRayTransmittancePrecomputed(c, lightDir, scatterLUT, betaR, betaM, betaOzone);
 
 		// evaluate the phase function to find the wavelength-dependent
 		// proportion of light being scattered in the camera direction
@@ -387,7 +402,7 @@ vec3 calculateRayInscattering(inout vec2 opticalDepth, const in vec3 rayStart, c
 		vec3 color1 = color1R + color1M;
 
 		// outscattering of this new light on the way to the camera
-		vec3 color2 = color1 * calcTransmittance(opticalDepth);
+		vec3 color2 = color1 * calcTransmittancePrecomputed(opticalDepth, betaR, betaM, betaOzone);
 
 		opticalDepth += deltaDensity;
 		color += sunLit * color2;
@@ -416,6 +431,7 @@ vec3 calculateReflectedSkyColor(const in vec3 surfaceP, const in vec3 reflDir, c
 	float phaseM = miePhaseFunction(getAtmosMieG(), mu);
 	vec3 betaR = getAtmosBetaR();
 	vec3 betaM = getAtmosBetaM();
+	vec3 betaOzone = getAtmosBetaOzone();
 
 	vec2 iDensity = vec2(0.0);
 	vec3 accum = vec3(0.0);
@@ -431,9 +447,9 @@ vec3 calculateReflectedSkyColor(const in vec3 surfaceP, const in vec3 reflDir, c
 		float sunLit = smoothstep(horizonCos - 0.015, horizonCos + 0.015, dot(normalize(c), lightDir));
 
 		if (sunLit > 0.001) {
-			vec3 color0 = lightColor * calculateRayTransmittance(c, lightDir, scatterLUT);
+			vec3 color0 = lightColor * calculateRayTransmittancePrecomputed(c, lightDir, scatterLUT, betaR, betaM, betaOzone);
 			vec3 color1 = color0 * (betaR * phaseR * deltaDensity.x + betaM * phaseM * deltaDensity.y);
-			vec3 color2 = color1 * calcTransmittance(iDensity);
+			vec3 color2 = color1 * calcTransmittancePrecomputed(iDensity, betaR, betaM, betaOzone);
 			accum += sunLit * color2;
 		}
 		iDensity += deltaDensity;
