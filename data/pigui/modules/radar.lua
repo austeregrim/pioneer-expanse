@@ -27,6 +27,15 @@ local DEFAULT_RADAR_SIZE = 10000
 local shouldDisplay2DRadar = false
 local blobSize = 6.0
 
+local VEC_ZERO = Vector2(0)
+local VEC_ONE = Vector2(1)
+local VEC_ICON_12 = Vector2(12, 12)
+local VEC_BLOB_HALF = Vector2(blobSize / 2)
+local VEC_UP = Vector2(0, 1)
+local VEC_RIGHT = Vector2(1, 0)
+local VEC_DOWN = Vector2(0, -1)
+local VEC_LEFT = Vector2(-1, 0)
+
 -- These variable needs to be outside the draw function in order to capture the
 -- current state between frames. We are trying to ensure that a mouse
 -- click started and finished inside the radar area in order to trigger
@@ -250,10 +259,10 @@ radar2d.draw = function(self, center)
 			local position = center + v.aep * size * 2
 			if v.body == navTarget then
 				local color = Color(colors.navTarget.r, colors.navTarget.g, colors.navTarget.b, alpha)
-				ui.addIcon(position, icons.square, color, Vector2(12, 12), ui.anchor.center, ui.anchor.center)
+				ui.addIcon(position, icons.square, color, VEC_ICON_12, ui.anchor.center, ui.anchor.center)
 			elseif v.body == combatTarget then
 				local color = Color(colors.combatTarget.r, colors.combatTarget.g, colors.combatTarget.b, alpha)
-				ui.addIcon(position, icons.square, color, Vector2(12, 12), ui.anchor.center, ui.anchor.center)
+				ui.addIcon(position, icons.square, color, VEC_ICON_12, ui.anchor.center, ui.anchor.center)
 			else
 				local color = getColorFor(v)
 				ui.addCircleFilled(position, 2, color, 4, 1)
@@ -275,7 +284,7 @@ local function drawTarget(target, scale, center, color)
 	local pos = target.rel_position
 	local basePos = Vector2(pos.x * scale.x + center.x, pos.z * scale.y + center.y)
 	local blobPos = Vector2(basePos.x, basePos.y - pos.y * scale.y);
-	local blobHalfSize = Vector2(blobSize / 2)
+	local blobHalfSize = VEC_BLOB_HALF
 	local tooltip = {}
 
 	ui.addLine(basePos, blobPos, color:shade(0.1), 2)
@@ -296,7 +305,7 @@ local function line_circle_clip(origin, dir, radius)
 end
 
 local function locating_line(center, pos, dir, offset)
-	local inv_radius = Vector2(1) / radar.radius
+	local inv_radius = VEC_ONE / radar.radius
 
 	local pos_start = pos + dir * offset * inv_radius
 	local line_a_len = line_circle_clip(pos_start, dir, 1)
@@ -383,10 +392,10 @@ radar3d.draw = function(self, center)
 			local pos = rel_pos * radar.radius + center
 
 			local offset = Vector2(ui.getTextLineHeight() * 0.6)
-			locating_line(center, rel_pos, Vector2(0, 1), offset)
-			locating_line(center, rel_pos, Vector2(1, 0), offset)
-			locating_line(center, rel_pos, Vector2(0, -1), offset)
-			locating_line(center, rel_pos, Vector2(-1, 0), offset)
+			locating_line(center, rel_pos, VEC_UP, offset)
+			locating_line(center, rel_pos, VEC_RIGHT, offset)
+			locating_line(center, rel_pos, VEC_DOWN, offset)
+			locating_line(center, rel_pos, VEC_LEFT, offset)
 
 			local font = ui.fonts.pionicons.medium
 			ui.withFont(font, function()
@@ -565,7 +574,7 @@ local function displayRadar()
 	--
 	-- This is in a window so the buttons work and the mouse-wheel is captured
 	ui.setNextWindowPos(window_pos, "Always")
-	ui.setNextWindowPadding(Vector2(0))
+	ui.setNextWindowPadding(VEC_ZERO)
 	ui.setNextWindowSize(Vector2(window_width, window_height), "Always")
 	ui.window("radar", windowFlags, function()
 

@@ -307,42 +307,45 @@ bool SupercruiseController::IsMassLocked(std::string *outReason) const
 	if (!m_ship || !Pi::game || !Pi::game->GetSpace())
 		return false;
 
-	for (Body *b : Pi::game->GetSpace()->GetBodies()) {
-		if (b == m_ship)
+	for (Body *b : Pi::game->GetSpace()->GetStations()) {
+		if (!b || b == m_ship)
 			continue;
 
-		if (b->IsType(ObjectType::SPACESTATION)) {
-			const double dist = m_ship->GetPositionRelTo(b).Length();
-			if (dist < STATION_MASS_LOCK_DIST) {
-				if (outReason)
-					*outReason = "MASS LOCKED BY " + b->GetLabel();
-				return true;
-			}
-		} else if (b->IsType(ObjectType::TERRAINBODY)) {
-			const SystemBody *sb = b->GetSystemBody();
-			if (!sb)
-				continue;
+		const double dist = m_ship->GetPositionRelTo(b).Length();
+		if (dist < STATION_MASS_LOCK_DIST) {
+			if (outReason)
+				*outReason = "MASS LOCKED BY " + b->GetLabel();
+			return true;
+		}
+	}
 
-			const vector3d posRel = m_ship->GetPositionRelTo(b);
-			const double dist = posRel.Length();
-			const double exclR = GetExclusionZoneRadius(b);
+	for (Body *b : Pi::game->GetSpace()->GetTerrainBodies()) {
+		if (!b || b == m_ship)
+			continue;
 
-			if (sb->GetSuperType() == SystemBody::SUPERTYPE_ROCKY_PLANET) {
-				if (dist < b->GetClipRadius() + PLANET_MASS_LOCK_ALT * 2.0) {
-					const Planet *planet = static_cast<const Planet *>(b);
-					const double terrainR = planet->GetTerrainHeight(posRel.NormalizedSafe());
-					const double alt = dist - terrainR;
-					if (alt < PLANET_MASS_LOCK_ALT) {
-						if (outReason)
-							*outReason = "MASS LOCKED: SURFACE PROXIMITY (" + b->GetLabel() + ")";
-						return true;
-					}
+		const SystemBody *sb = b->GetSystemBody();
+		if (!sb)
+			continue;
+
+		const vector3d posRel = m_ship->GetPositionRelTo(b);
+		const double dist = posRel.Length();
+		const double exclR = GetExclusionZoneRadius(b);
+
+		if (sb->GetSuperType() == SystemBody::SUPERTYPE_ROCKY_PLANET) {
+			if (dist < b->GetClipRadius() + PLANET_MASS_LOCK_ALT * 2.0) {
+				const Planet *planet = static_cast<const Planet *>(b);
+				const double terrainR = planet->GetTerrainHeight(posRel.NormalizedSafe());
+				const double alt = dist - terrainR;
+				if (alt < PLANET_MASS_LOCK_ALT) {
+					if (outReason)
+						*outReason = "MASS LOCKED: SURFACE PROXIMITY (" + b->GetLabel() + ")";
+					return true;
 				}
-			} else if (exclR > 0.0 && dist < exclR * 1.02) {
-				if (outReason)
-					*outReason = "MASS LOCKED: GRAVITY WELL (" + b->GetLabel() + ")";
-				return true;
 			}
+		} else if (exclR > 0.0 && dist < exclR * 1.02) {
+			if (outReason)
+				*outReason = "MASS LOCKED: GRAVITY WELL (" + b->GetLabel() + ")";
+			return true;
 		}
 	}
 
@@ -942,8 +945,8 @@ void SupercruiseController::EnsureShipAboveTerrainAndSyncFrame()
 	m_ship->UpdateFrame();
 
 	if (Pi::game && Pi::game->GetSpace()) {
-		for (Body *b : Pi::game->GetSpace()->GetBodies()) {
-			if (!b || !b->IsType(ObjectType::TERRAINBODY))
+		for (Body *b : Pi::game->GetSpace()->GetTerrainBodies()) {
+			if (!b)
 				continue;
 			const SystemBody *sb = b->GetSystemBody();
 			if (!sb)
@@ -1332,8 +1335,8 @@ void SupercruiseController::UpdateStellarFuelScoop(float timeStep)
 	double bestProx = 0.0;
 	bool sawUnscoopable = false;
 
-	for (Body *b : Pi::game->GetSpace()->GetBodies()) {
-		if (!b || !b->IsType(ObjectType::STAR))
+	for (Body *b : Pi::game->GetSpace()->GetStars()) {
+		if (!b)
 			continue;
 		const SystemBody *sb = b->GetSystemBody();
 		if (!sb)
@@ -1453,8 +1456,8 @@ const Body *SupercruiseController::GetTargetObscuredBy(const vector3d &targetPos
 	const Body *closestBlocker = nullptr;
 	double closestProj = std::numeric_limits<double>::max();
 
-	for (Body *b : Pi::game->GetSpace()->GetBodies()) {
-		if (!b || b == m_ship || b == targetBody || !b->IsType(ObjectType::TERRAINBODY))
+	for (Body *b : Pi::game->GetSpace()->GetTerrainBodies()) {
+		if (!b || b == m_ship || b == targetBody)
 			continue;
 
 		const double exclR = GetExclusionZoneRadius(b);
@@ -1571,8 +1574,8 @@ void SupercruiseController::ComputeAISteering(const vector3d &targetPosRelToShip
 		if (useSmartPathing) {
 			const Body *localGravBody = nullptr;
 			double bestRatio = 4.5;
-			for (Body *b : Pi::game->GetSpace()->GetBodies()) {
-				if (!b || b == targetBody || !b->IsType(ObjectType::TERRAINBODY))
+			for (Body *b : Pi::game->GetSpace()->GetTerrainBodies()) {
+				if (!b || b == targetBody)
 					continue;
 				const double exclR = GetExclusionZoneRadius(b);
 				if (exclR <= 0.0)
@@ -1612,8 +1615,8 @@ void SupercruiseController::ComputeAISteering(const vector3d &targetPosRelToShip
 
 		// 2. Obstacle avoidance: steer tangentially around intervening planetary/stellar exclusion zones
 		double bestAvoidDist = dist;
-		for (Body *b : Pi::game->GetSpace()->GetBodies()) {
-			if (!b || !b->IsType(ObjectType::TERRAINBODY))
+		for (Body *b : Pi::game->GetSpace()->GetTerrainBodies()) {
+			if (!b)
 				continue;
 			const double exclR = GetExclusionZoneRadius(b);
 			if (exclR <= 0.0)
@@ -1803,8 +1806,8 @@ void SupercruiseController::UpdateEnvironmentAndTarget(float timeStep, Body **ou
 	const FrameId shipFrameId = m_ship->GetFrame();
 	const Frame *shipFrame = Frame::GetFrame(shipFrameId);
 
-	for (Body *b : Pi::game->GetSpace()->GetBodies()) {
-		if (!b->IsType(ObjectType::TERRAINBODY))
+	for (Body *b : Pi::game->GetSpace()->GetTerrainBodies()) {
+		if (!b)
 			continue;
 		const SystemBody *sb = b->GetSystemBody();
 		if (!sb)
@@ -2377,8 +2380,8 @@ void SupercruiseController::TimeStepUpdate(float timeStep, const vector3d &desir
 		Body *hitBody = nullptr;
 		double earliestHitDist = stepDist + 1.0;
 
-		for (Body *b : Pi::game->GetSpace()->GetBodies()) {
-			if (!b || !b->IsType(ObjectType::TERRAINBODY))
+		for (Body *b : Pi::game->GetSpace()->GetTerrainBodies()) {
+			if (!b)
 				continue;
 			const SystemBody *sb = b->GetSystemBody();
 			if (!sb)

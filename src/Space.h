@@ -74,6 +74,12 @@ public:
 	Uint32 GetNumBodies() const { return static_cast<Uint32>(m_bodies.size()); }
 	IterationProxy<std::vector<Body *>> GetBodies() { return MakeIterationProxy(m_bodies); }
 	const IterationProxy<const std::vector<Body *>> GetBodies() const { return MakeIterationProxy(m_bodies); }
+	IterationProxy<std::vector<Body *>> GetStars() { return MakeIterationProxy(m_stars); }
+	const IterationProxy<const std::vector<Body *>> GetStars() const { return MakeIterationProxy(m_stars); }
+	IterationProxy<std::vector<Body *>> GetTerrainBodies() { return MakeIterationProxy(m_terrainBodies); }
+	const IterationProxy<const std::vector<Body *>> GetTerrainBodies() const { return MakeIterationProxy(m_terrainBodies); }
+	IterationProxy<std::vector<Body *>> GetStations() { return MakeIterationProxy(m_stations); }
+	const IterationProxy<const std::vector<Body *>> GetStations() const { return MakeIterationProxy(m_stations); }
 
 	Background::Container *GetBackground() { return m_background.get(); }
 	void RefreshBackground();
@@ -118,6 +124,8 @@ private:
 	FrameId GetFrameWithSystemBody(const SystemBody *b) const;
 
 	void UpdateBodies();
+	void RegisterTypedBody(Body *b);
+	void UnregisterTypedBody(Body *b);
 
 	void CollideFrame(FrameId fId);
 
@@ -132,6 +140,9 @@ private:
 
 	// all the bodies we know about
 	std::vector<Body *> m_bodies;
+	std::vector<Body *> m_stars;
+	std::vector<Body *> m_terrainBodies;
+	std::vector<Body *> m_stations;
 
 	// bodies that were removed/killed this timestep and need pruning at the end
 	enum class BodyAssignation {

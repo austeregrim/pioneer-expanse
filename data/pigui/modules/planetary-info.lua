@@ -1,6 +1,7 @@
 -- Copyright © 2008-2026 Pioneer Developers. See AUTHORS.txt for details
 -- Licensed under the terms of the GPL v3. See licenses/GPL-3.txt
 
+local Event = require 'Event'
 local Game = require 'Game'
 local Lang = require 'Lang'
 local Vector2 = _G.Vector2
@@ -16,6 +17,20 @@ local colors = ui.theme.colors
 local icons = ui.theme.icons
 
 local flags = ui.WindowFlags { "NoDecoration", "NoFocusOnAppearing", "NoBringToFrontOnFocus" }
+
+local cachedWeather = nil
+local cachedWeatherFrame = nil
+local cachedWeatherTime = nil
+
+local function resetWeatherCache()
+	cachedWeather = nil
+	cachedWeatherFrame = nil
+	cachedWeatherTime = nil
+end
+
+Event.Register("onGameStart", resetWeatherCache)
+Event.Register("onLeaveSystem", resetWeatherCache)
+Event.Register("onGameEnd", resetWeatherCache)
 
 local function getConditionColor(condition)
 	local sc = ui.theme.styleColors
@@ -58,7 +73,18 @@ local function displayPlanetaryInfo()
 	end
 
 	local frame = player.frameBody
-	local weather = (frame and frame:IsPlanet() and frame.GetWeatherState) and frame:GetWeatherState(player) or nil
+	local weather = nil
+	if frame and frame:IsPlanet() and frame.GetWeatherState then
+		local gameTime = Game.time
+		if cachedWeatherFrame ~= frame or cachedWeatherTime == nil or math.abs(gameTime - cachedWeatherTime) >= 0.20 then
+			cachedWeather = frame:GetWeatherState(player)
+			cachedWeatherFrame = frame
+			cachedWeatherTime = gameTime
+		end
+		weather = cachedWeather
+	else
+		resetWeatherCache()
+	end
 	local hasWeather = weather and weather.hasAtmosphere and weather.density > 0.005
 
 	ui.withFont(pionillium.body, function()

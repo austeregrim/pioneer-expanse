@@ -761,19 +761,33 @@ static int l_game_inspect_body(lua_State *l)
 		return 0;
 
 #if WITH_OBJECTVIEWER
-	Body *target = LuaObject<Body>::GetFromLua(1);
-	if (!target) {
-		SystemBody *sbody = LuaObject<SystemBody>::GetFromLua(1);
-		if (sbody)
-			target = Pi::game->GetSpace()->FindBodyForPath(&sbody->GetPath());
-	}
-	if (!target)
+	ObjectViewerView *ov = Pi::game->GetObjectViewerView();
+	if (!ov)
 		return 0;
 
-	ObjectViewerView *ov = Pi::game->GetObjectViewerView();
-	if (ov) {
+	Body *target = LuaObject<Body>::GetFromLua(1);
+	if (target) {
 		ov->SetReturnView(Pi::GetView());
 		ov->SetTargetBody(target);
+		Pi::SetView(ov);
+		return 0;
+	}
+
+	SystemBody *sbody = LuaObject<SystemBody>::GetFromLua(1);
+	if (!sbody)
+		return 0;
+
+	target = Pi::game->GetSpace()->FindBodyForPath(&sbody->GetPath());
+	if (target) {
+		ov->SetReturnView(Pi::GetView());
+		ov->SetTargetBody(target);
+		Pi::SetView(ov);
+		return 0;
+	}
+
+	if (sbody->GetStarSystem()) {
+		ov->SetReturnView(Pi::GetView());
+		ov->SetTargetSystemBody(RefCountedPtr<StarSystem>(sbody->GetStarSystem()), sbody);
 		Pi::SetView(ov);
 	}
 #endif

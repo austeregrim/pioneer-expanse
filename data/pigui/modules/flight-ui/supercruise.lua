@@ -29,6 +29,14 @@ local colBorder     = Color(60, 130, 180, 140)
 local colWhite      = Color(235, 245, 255, 240)
 local colDimText    = Color(150, 175, 195, 210)
 
+local VEC_PAD_8_26  = Vector2(8, 26)
+local VEC_H_34      = Vector2(34, 0)
+local VEC_H_16      = Vector2(16, 0)
+local VEC_V_34      = Vector2(0, 34)
+local VEC_V_16      = Vector2(0, 16)
+local VEC_V_32      = Vector2(0, 32)
+local VEC_V_10      = Vector2(0, 10)
+
 local policeWarning = nil -- { count, deadline, officerLabel }
 local scanAlert = nil -- { expiresAt, scannerLabel, scanType }
 local policeEscort = nil -- { officerLabel }
@@ -173,8 +181,8 @@ local function drawStatusBanner(player, center, reticuleRadius)
 		local br = Vector2(center.x + barW * 0.5, yBase + barH)
 
 		local extraH = (massLock > 1.05) and 16 or 0
-		ui.addRectFilled(tl - Vector2(8, 26), br + Vector2(8, 8 + extraH), colPanelBg, 4, ui.RoundCornersAll)
-		ui.addRect(tl - Vector2(8, 26), br + Vector2(8, 8 + extraH), (massLock > 1.05) and colAmber or colCyan, 4, ui.RoundCornersAll, 1.5)
+		ui.addRectFilled(tl - VEC_PAD_8_26, br + Vector2(8, 8 + extraH), colPanelBg, 4, ui.RoundCornersAll)
+		ui.addRect(tl - VEC_PAD_8_26, br + Vector2(8, 8 + extraH), (massLock > 1.05) and colAmber or colCyan, 4, ui.RoundCornersAll, 1.5)
 
 		local title = string.format("FRAMESHIFT DRIVE CHARGING — %.1fs", rem)
 		ui.addStyledText(Vector2(center.x, yBase - 6), ui.anchor.center, ui.anchor.bottom, title, colCyan, pionillium.medium)
@@ -651,18 +659,18 @@ local function drawInterdictionHUD(player, center, reticuleRadius)
 		if onscreen then
 			ui.addCircle(pos, 26, vecCol, 24, 2.5)
 			ui.addCircle(pos, 14, colWhite, 20, 1.5)
-			ui.addLine(pos - Vector2(34, 0), pos - Vector2(16, 0), vecCol, 2.0)
-			ui.addLine(pos + Vector2(16, 0), pos + Vector2(34, 0), vecCol, 2.0)
-			ui.addLine(pos - Vector2(0, 34), pos - Vector2(0, 16), vecCol, 2.0)
-			ui.addLine(pos + Vector2(0, 16), pos + Vector2(0, 34), vecCol, 2.0)
-			ui.addStyledText(pos + Vector2(0, 32), ui.anchor.center, ui.anchor.top,
+			ui.addLine(pos - VEC_H_34, pos - VEC_H_16, vecCol, 2.0)
+			ui.addLine(pos + VEC_H_16, pos + VEC_H_34, vecCol, 2.0)
+			ui.addLine(pos - VEC_V_34, pos - VEC_V_16, vecCol, 2.0)
+			ui.addLine(pos + VEC_V_16, pos + VEC_V_34, vecCol, 2.0)
+			ui.addStyledText(pos + VEC_V_32, ui.anchor.center, ui.anchor.top,
 				"ESCAPE VECTOR", vecCol, pionillium.small)
 		end
 
 		if not onscreen or (pos - center):length() > reticuleRadius * 0.95 then
 			local arrowPos = center + Vector2(dir.x, dir.y) * (reticuleRadius * 0.88)
 			ui.addCircleFilled(arrowPos, 6, vecCol, 12, 1.0)
-			ui.addStyledText(arrowPos + Vector2(0, 10), ui.anchor.center, ui.anchor.top,
+			ui.addStyledText(arrowPos + VEC_V_10, ui.anchor.center, ui.anchor.top,
 				"ESCAPE", vecCol, pionillium.tiny)
 		end
 	end

@@ -27,6 +27,15 @@ local alreadyAlertedStorm = false
 local lastWindShearChimeTime = -1000
 local lastTurbChimeTime = -1000
 local lastStormChimeTime = -1000
+local cachedWeather = nil
+local cachedWeatherFrame = nil
+local cachedWeatherTime = nil
+
+local function resetWeatherCache()
+	cachedWeather = nil
+	cachedWeatherFrame = nil
+	cachedWeatherTime = nil
+end
 
 Event.Register("onGameStart", function()
 	alreadyAlertedTemp = false
@@ -40,7 +49,11 @@ Event.Register("onGameStart", function()
 	lastWindShearChimeTime = -1000
 	lastTurbChimeTime = -1000
 	lastStormChimeTime = -1000
+	resetWeatherCache()
 end)
+
+Event.Register("onLeaveSystem", resetWeatherCache)
+Event.Register("onGameEnd", resetWeatherCache)
 
 local TWR_BLINK_PERIOD = 2.0
 local TWR_HUD_WARNING_THRESHOLD = 1.1
@@ -208,7 +221,18 @@ local function alarm ()
 	end
 
 	-- Atmospheric weather advisories (soft aviation chimes + HUD callouts with hysteresis & cooldown)
-	local weather = (Game.player.flightState == "FLYING" and frame and frame:IsPlanet() and frame.GetWeatherState) and frame:GetWeatherState(Game.player) or nil
+	local weather = nil
+	if Game.player.flightState == "FLYING" and frame and frame:IsPlanet() and frame.GetWeatherState then
+		local gameTime = Game.time
+		if cachedWeatherFrame ~= frame or cachedWeatherTime == nil or math.abs(gameTime - cachedWeatherTime) >= 0.20 then
+			cachedWeather = frame:GetWeatherState(Game.player)
+			cachedWeatherFrame = frame
+			cachedWeatherTime = gameTime
+		end
+		weather = cachedWeather
+	else
+		resetWeatherCache()
+	end
 	if weather and weather.hasAtmosphere and weather.density > 0.02 then
 		local now = ui.getTime()
 		local uiTextPos = Vector2(ui.screenWidth / 2, ui.screenHeight / 3 - 10)

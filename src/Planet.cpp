@@ -127,10 +127,27 @@ void Planet::GetAtmosphericState(double dist, double *outPressure, double *outDe
 
 WeatherState Planet::GetWeatherState(const vector3d &posRotFrame, double gameTime) const
 {
+	for (const WeatherCacheEntry &entry : m_weatherCache) {
+		if (entry.valid &&
+			(posRotFrame - entry.posRotFrame).LengthSqr() < 4.0 &&
+			std::abs(gameTime - entry.gameTime) < 0.05) {
+			return entry.state;
+		}
+	}
+
 	const vector3d unitDir = (posRotFrame.LengthSqr() > 1e-12) ? posRotFrame.Normalized() : vector3d(0.0, 1.0, 0.0);
 	const double terrainRad = GetTerrainHeight(unitDir);
 	const double aglM = std::max(0.0, posRotFrame.Length() - terrainRad);
-	return WeatherSystem::SampleWithAgl(GetSystemBody(), posRotFrame, gameTime, aglM);
+	const WeatherState state = WeatherSystem::SampleWithAgl(GetSystemBody(), posRotFrame, gameTime, aglM);
+
+	WeatherCacheEntry &slot = m_weatherCache[m_weatherCacheCursor];
+	slot.valid = true;
+	slot.posRotFrame = posRotFrame;
+	slot.gameTime = gameTime;
+	slot.state = state;
+	m_weatherCacheCursor = (m_weatherCacheCursor + 1) % WEATHER_CACHE_SLOTS;
+
+	return state;
 }
 
 void Planet::GenerateRings(Graphics::Renderer *renderer)

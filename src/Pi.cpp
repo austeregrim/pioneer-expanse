@@ -1334,10 +1334,15 @@ void Pi::ToggleObjectViewer()
 	if (!Pi::game)
 		return;
 
-	if (Pi::GetView() == Pi::game->GetObjectViewerView())
+	if (Pi::GetView() == Pi::game->GetObjectViewerView()) {
 		Pi::SetView(Pi::game->GetWorldView());
-	else if (Pi::player->GetNavTarget())
-		Pi::SetView(Pi::game->GetObjectViewerView());
+	} else {
+		ObjectViewerView *ov = Pi::game->GetObjectViewerView();
+		if (ov) {
+			ov->SetReturnView(Pi::GetView());
+			Pi::SetView(ov);
+		}
+	}
 }
 
 // This absolutely ought not to be part of the Pi class

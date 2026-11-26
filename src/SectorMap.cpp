@@ -28,8 +28,25 @@
 #include <array>
 #include <cmath>
 #include <sstream>
+#include <unordered_map>
 
 using namespace Graphics;
+
+static const std::vector<vector2f> &GetUnitCircle(int segments)
+{
+	static std::unordered_map<int, std::vector<vector2f>> s_unitCircles;
+	auto it = s_unitCircles.find(segments);
+	if (it != s_unitCircles.end())
+		return it->second;
+
+	std::vector<vector2f> &pts = s_unitCircles[segments];
+	pts.reserve(size_t(segments) + 1);
+	for (int s = 0; s <= segments; ++s) {
+		const float ang = (2.0f * float(M_PI) * float(s)) / float(segments);
+		pts.emplace_back(std::cos(ang), std::sin(ang));
+	}
+	return pts;
+}
 
 static const int DRAW_RAD = 5;
 #define INNER_RADIUS (Sector::SIZE * 1.5f)
@@ -627,6 +644,19 @@ void SectorMap::InitObject()
 	Graphics::MaterialDescriptor starPointDesc;
 	starPointDesc.vertexColors = true;
 	m_farStarsMat.Reset(m_context.renderer->CreateMaterial("unlit", starPointDesc, rsd, m_farstarsPoints.GetVertexFormat()));
+
+	Graphics::RenderStateDesc macroCloudRsd{};
+	macroCloudRsd.blendMode = Graphics::BLEND_ALPHA;
+	macroCloudRsd.depthWrite = false;
+	macroCloudRsd.depthTest = true;
+	macroCloudRsd.primitiveType = Graphics::POINTS;
+	Graphics::MaterialDescriptor macroCloudDesc;
+	m_macroStarCloudMat.Reset(m_context.renderer->CreateMaterial(
+		"starfield", macroCloudDesc, macroCloudRsd, Graphics::Drawables::PointSprites().GetVertexFormat()));
+	Graphics::Texture *starPointTex = Graphics::TextureBuilder::Billboard("textures/star_point.png").GetOrCreateTexture(m_context.renderer, "billboard");
+	m_macroStarCloudMat->SetTexture("texture0"_hash, starPointTex);
+	m_macroStarCloudMat->emissive = Color::WHITE;
+	m_macroStarCloudMat->SetPushConstant("starBoost"_hash, vector3f(1.0f, 1.0f, 0.0f), 0.0f);
 
 	Graphics::RenderStateDesc discRsd{};
 	discRsd.blendMode = Graphics::BLEND_ALPHA_ONE;
@@ -1300,12 +1330,13 @@ void SectorMap::DrawFarSectors(const matrix4x4f &modelview)
 		const vector3f curSecOrigin(int(floorf(m_pos.x)), int(floorf(m_pos.y)), int(floorf(m_pos.z)));
 		farTrans.Translate((m_secPosFar - curSecOrigin) * Sector::SIZE);
 		if (m_macroAlpha > 0.01f) {
-			std::vector<Color> fadedColors = m_farstarsColor;
+			m_farstarsDrawColor.resize(m_farstarsColor.size());
 			const float fade = 1.0f - m_macroAlpha;
-			for (auto &c : fadedColors) {
-				c.a = Uint8(float(c.a) * fade);
+			for (size_t i = 0; i < m_farstarsColor.size(); ++i) {
+				m_farstarsDrawColor[i] = m_farstarsColor[i];
+				m_farstarsDrawColor[i].a = Uint8(float(m_farstarsColor[i].a) * fade);
 			}
-			m_farstarsPoints.SetData(m_context.renderer, m_farstars.size(), &m_farstars[0], &fadedColors[0], farTrans, sizeFactor);
+			m_farstarsPoints.SetData(m_context.renderer, m_farstars.size(), &m_farstars[0], &m_farstarsDrawColor[0], farTrans, sizeFactor);
 		} else {
 			m_farstarsPoints.SetData(m_context.renderer, m_farstars.size(), &m_farstars[0], &m_farstarsColor[0], farTrans, sizeFactor);
 		}
@@ -1933,7 +1964,13 @@ void SectorMap::InitMacroGalaxy()
 
 		m_galaxyCloudBaseColor.push_back(Color(cr, cg, cb, ca));
 	}
-	m_galaxyCloudDrawColor = m_galaxyCloudBaseColor;
+	if (!m_galaxyCloudPos.empty()) {
+		std::vector<float> sizes(m_galaxyCloudPos.size(), 0.75f);
+		m_galaxyCloudPoints.reset(new Graphics::Drawables::PointSprites());
+		m_galaxyCloudPoints->SetData(int(m_galaxyCloudPos.size()), m_galaxyCloudPos.data(), m_galaxyCloudBaseColor.data(), sizes.data());
+	} else {
+		m_galaxyCloudPoints.reset();
+	}
 
 	// 3. Generate 3D Volumetric Galactic Glow Billboards (Central Bulge, Sagittarius A* & Spiral Arm Nebulae)
 	m_galaxyGlowBillboards.clear();
@@ -2075,7 +2112,13 @@ void SectorMap::UpdateRegionalStarField(const vector3f &centerLy)
 		m_regionalStarBaseColor.push_back(Color(cr, cg, cb, ca));
 	}
 
-	m_regionalStarDrawColor = m_regionalStarBaseColor;
+	if (!m_regionalStarPos.empty()) {
+		std::vector<float> sizes(m_regionalStarPos.size(), 0.95f);
+		m_regionalStarPoints.reset(new Graphics::Drawables::PointSprites());
+		m_regionalStarPoints->SetData(int(m_regionalStarPos.size()), m_regionalStarPos.data(), m_regionalStarBaseColor.data(), sizes.data());
+	} else {
+		m_regionalStarPoints.reset();
+	}
 }
 
 void SectorMap::DrawMacroGalaxy(const matrix4x4f &modelview)
@@ -2159,14 +2202,12 @@ void SectorMap::DrawMacroGalaxy(const matrix4x4f &modelview)
 		}
 
 		// Draw 3D volumetric star particle cloud (Global Milky Way Cloud - 45,000 points)
-		if (!m_galaxyCloudPos.empty()) {
-			for (size_t i = 0; i < m_galaxyCloudBaseColor.size(); ++i) {
-				m_galaxyCloudDrawColor[i] = m_galaxyCloudBaseColor[i];
-				m_galaxyCloudDrawColor[i].a = Uint8(float(m_galaxyCloudBaseColor[i].a) * m_macroAlpha);
-			}
-			const float ptSize = Clamp(0.32f * (renderer->GetWindowHeight() / 720.0f), 0.2f, 1.0f);
-			m_galaxyCloudPoints.SetData(renderer, m_galaxyCloudPos.size(), &m_galaxyCloudPos[0], &m_galaxyCloudDrawColor[0], modelview, ptSize);
-			m_galaxyCloudPoints.Draw(renderer, m_farStarsMat.Get());
+		if (m_galaxyCloudPoints && m_macroStarCloudMat) {
+			const float ptScale = Clamp(1.1f * (renderer->GetWindowHeight() / 720.0f), 0.75f, 3.0f);
+			m_macroStarCloudMat->emissive = Color(255, 255, 255, Uint8(Clamp(m_macroAlpha * 255.0f, 0.0f, 255.0f)));
+			m_macroStarCloudMat->SetPushConstant("starBoost"_hash, vector3f(ptScale, 1.0f, 0.0f), 0.0f);
+			renderer->SetTransform(modelview);
+			m_galaxyCloudPoints->Draw(renderer, m_macroStarCloudMat.Get());
 		}
 	}
 
@@ -2196,14 +2237,12 @@ void SectorMap::DrawMacroGalaxy(const matrix4x4f &modelview)
 		if ((curCenterLy - m_lastRegionalCenterLy).Length() > 75.0f || m_regionalStarPos.empty()) {
 			UpdateRegionalStarField(curCenterLy);
 		}
-		if (!m_regionalStarPos.empty()) {
-			for (size_t i = 0; i < m_regionalStarBaseColor.size(); ++i) {
-				m_regionalStarDrawColor[i] = m_regionalStarBaseColor[i];
-				m_regionalStarDrawColor[i].a = Uint8(float(m_regionalStarBaseColor[i].a) * m_regionalAlpha);
-			}
-			const float ptSize = Clamp(0.38f * (renderer->GetWindowHeight() / 720.0f), 0.25f, 1.2f);
-			m_regionalStarPoints.SetData(renderer, m_regionalStarPos.size(), &m_regionalStarPos[0], &m_regionalStarDrawColor[0], modelview, ptSize);
-			m_regionalStarPoints.Draw(renderer, m_farStarsMat.Get());
+		if (m_regionalStarPoints && m_macroStarCloudMat) {
+			const float ptScale = Clamp(1.35f * (renderer->GetWindowHeight() / 720.0f), 0.85f, 3.5f);
+			m_macroStarCloudMat->emissive = Color(255, 255, 255, Uint8(Clamp(m_regionalAlpha * 255.0f, 0.0f, 255.0f)));
+			m_macroStarCloudMat->SetPushConstant("starBoost"_hash, vector3f(ptScale, 1.0f, 0.0f), 0.0f);
+			renderer->SetTransform(modelview);
+			m_regionalStarPoints->Draw(renderer, m_macroStarCloudMat.Get());
 		}
 	}
 
@@ -2211,11 +2250,10 @@ void SectorMap::DrawMacroGalaxy(const matrix4x4f &modelview)
 	m_macroLineVerts->Clear();
 
 	auto addCircleXY = [&](const vector3f &center, float radius, int segments, const Color &col) {
+		const std::vector<vector2f> &unit = GetUnitCircle(segments);
 		for (int s = 0; s < segments; ++s) {
-			const float a0 = (2.0f * float(M_PI) * float(s)) / float(segments);
-			const float a1 = (2.0f * float(M_PI) * float(s + 1)) / float(segments);
-			m_macroLineVerts->Add(center + vector3f(std::cos(a0) * radius, std::sin(a0) * radius, 0.0f), col);
-			m_macroLineVerts->Add(center + vector3f(std::cos(a1) * radius, std::sin(a1) * radius, 0.0f), col);
+			m_macroLineVerts->Add(center + vector3f(unit[s].x * radius, unit[s].y * radius, 0.0f), col);
+			m_macroLineVerts->Add(center + vector3f(unit[s + 1].x * radius, unit[s + 1].y * radius, 0.0f), col);
 		}
 	};
 

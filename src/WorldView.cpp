@@ -261,6 +261,7 @@ void WorldView::Draw3D()
 	m_renderer->SetTransform(matrix4x4f::Identity);
 
 	// Enhanced Graphics: procedural star glare, diffraction starburst, and optical lens flare
+	BuildFrameOccluders(m_cameraContext->GetTempFrame());
 	DrawStarLensFlare();
 
 	// Supercruise ships appear as radiant points of light across the system
@@ -769,6 +770,52 @@ vector3d WorldView::GetTargetIndicatorScreenPosition(const Body *body) const
 	return WorldSpaceToScreenSpace(pos);
 }
 
+void WorldView::BuildFrameOccluders(FrameId camFrameId)
+{
+	m_frameOccluders.clear();
+	m_insideOrbitalStation = false;
+	m_frameOccludersCamFrame = camFrameId;
+
+	if (!camFrameId.valid() || !m_game || !m_game->GetSpace())
+		return;
+
+	Space *space = m_game->GetSpace();
+
+	for (Body *b : space->GetStations()) {
+		if (!b)
+			continue;
+		const vector3d p = b->GetInterpPositionRelTo(camFrameId);
+		const double dist = p.Length();
+		const SpaceStation *st = static_cast<const SpaceStation *>(b);
+		const bool insideStation = (!st->IsGroundStation() && dist < b->GetClipRadius());
+		if (insideStation && b != Pi::player)
+			m_insideOrbitalStation = true;
+
+		const double r = std::max(b->GetPhysRadius(), 450.0);
+		const double flareR = std::max(b->GetPhysRadius(), 350.0);
+		if (insideStation || dist > std::min(r, flareR)) {
+			m_frameOccluders.push_back({ b, p, dist, r, flareR, std::max(r, flareR), matrix3x3d::Identity, nullptr, false, true, insideStation });
+		}
+	}
+
+	for (Body *b : space->GetTerrainBodies()) {
+		if (!b)
+			continue;
+		const TerrainBody *tb = static_cast<const TerrainBody *>(b);
+		const SystemBody *sb = tb->GetSystemBody();
+		const double r = sb ? sb->GetRadius() : tb->GetPhysRadius();
+		if (r <= 0.0)
+			continue;
+		const double maxR = std::max(r, tb->GetMaxFeatureRadius());
+		const vector3d p = tb->GetInterpPositionRelTo(camFrameId);
+		const double dist = p.Length();
+		if (dist > 1.0) {
+			const bool checkTerrain = (maxR > r + 1.0) && (dist < maxR * 6.0 || (maxR - r) > (dist - r) * 0.0005);
+			m_frameOccluders.push_back({ b, p, dist, r, r, maxR, checkTerrain ? tb->GetInterpOrientRelTo(camFrameId) : matrix3x3d::Identity, checkTerrain ? tb : nullptr, b->IsType(ObjectType::STAR), false, false });
+		}
+	}
+}
+
 void WorldView::DrawStarLensFlare()
 {
 	if (!m_renderer || !m_renderer->IsEnhancedGraphicsEnabled() || !m_lensFlareMat)
@@ -807,66 +854,31 @@ void WorldView::DrawStarLensFlare()
 		}
 	}
 
-	// Collect celestial and orbital station occluders in camera space for smooth eclipse & terrain ray occlusion
-	struct FlareOccluder {
-		vector3d pos;
-		double dist;
-		double radius;
-		double maxRadius;
-		matrix3x3d orientToCam;
-		const TerrainBody *terrainBody;
-	};
-	std::vector<FlareOccluder> occluders;
-	for (Body *b : m_game->GetSpace()->GetBodies()) {
-		if (!b)
-			continue;
-
-		if (b->IsType(ObjectType::SPACESTATION)) {
-			const vector3d p = b->GetInterpPositionRelTo(camFrameId);
-			const double dist = p.Length();
-			const SpaceStation *st = static_cast<const SpaceStation *>(b);
-			if (!st->IsGroundStation() && dist < b->GetClipRadius())
-				return; // Camera is inside an orbital station bay; hide exterior star flare
-			const double r = std::max(b->GetPhysRadius(), 350.0);
-			if (dist > r)
-				occluders.push_back({ p, dist, r, r, matrix3x3d::Identity, nullptr });
-			continue;
-		}
-
-		if (!b->IsType(ObjectType::TERRAINBODY) || b->IsType(ObjectType::STAR))
-			continue;
-		const TerrainBody *tb = static_cast<const TerrainBody *>(b);
-		const SystemBody *sb = tb->GetSystemBody();
-		const double r = sb ? sb->GetRadius() : tb->GetPhysRadius();
-		if (r <= 0.0)
-			continue;
-		const double maxR = std::max(r, tb->GetMaxFeatureRadius());
-		const vector3d p = tb->GetInterpPositionRelTo(camFrameId);
-		const double dist = p.Length();
-		if (dist > 1.0) {
-			const bool checkTerrain = (maxR > r + 1.0) && (dist < maxR * 6.0 || (maxR - r) > (dist - r) * 0.0005);
-			occluders.push_back({ p, dist, r, maxR, checkTerrain ? tb->GetInterpOrientRelTo(camFrameId) : matrix3x3d::Identity, checkTerrain ? tb : nullptr });
-		}
-	}
+	if (m_insideOrbitalStation)
+		return; // Camera is inside an orbital station bay; hide exterior star flare
 
 	const double fovRad = DEG2RAD(std::max(10.0f, m_cameraContext->GetFovAng()));
 	const double tanHalfFov = std::tan(fovRad * 0.5);
 
-	Graphics::VertexArray quad(Graphics::ATTRIB_POSITION | Graphics::ATTRIB_UV0);
-	quad.Add(vector3f(0.0f, 0.0f, 0.0f), vector2f(0.0f, 0.0f));
-	quad.Add(vector3f(winW, 0.0f, 0.0f), vector2f(1.0f, 0.0f));
-	quad.Add(vector3f(winW, winH, 0.0f), vector2f(1.0f, 1.0f));
-	quad.Add(vector3f(0.0f, 0.0f, 0.0f), vector2f(0.0f, 0.0f));
-	quad.Add(vector3f(winW, winH, 0.0f), vector2f(1.0f, 1.0f));
-	quad.Add(vector3f(0.0f, winH, 0.0f), vector2f(0.0f, 1.0f));
+	if (winW != m_flareQuadW || winH != m_flareQuadH || m_flareQuadVerts.IsEmpty()) {
+		m_flareQuadVerts.Clear();
+		m_flareQuadVerts.Add(vector3f(0.0f, 0.0f, 0.0f), vector2f(0.0f, 0.0f));
+		m_flareQuadVerts.Add(vector3f(winW, 0.0f, 0.0f), vector2f(1.0f, 0.0f));
+		m_flareQuadVerts.Add(vector3f(winW, winH, 0.0f), vector2f(1.0f, 1.0f));
+		m_flareQuadVerts.Add(vector3f(0.0f, 0.0f, 0.0f), vector2f(0.0f, 0.0f));
+		m_flareQuadVerts.Add(vector3f(winW, winH, 0.0f), vector2f(1.0f, 1.0f));
+		m_flareQuadVerts.Add(vector3f(0.0f, winH, 0.0f), vector2f(0.0f, 1.0f));
+		m_flareQuadW = winW;
+		m_flareQuadH = winH;
+	}
 
 	static const size_t s_starParamsName = "starParams"_hash;
 	static const size_t s_starColorName = "starColor"_hash;
 	static const size_t s_flareParamsName = "flareParams"_hash;
 	const float bgVis = m_camera ? Clamp(m_camera->GetBackgroundIntensity(), 0.0f, 1.0f) : 1.0f;
 
-	for (Body *b : m_game->GetSpace()->GetBodies()) {
-		if (!b || !b->IsType(ObjectType::STAR))
+	for (Body *b : m_game->GetSpace()->GetStars()) {
+		if (!b)
 			continue;
 
 		const SystemBody *sb = b->GetSystemBody();
@@ -900,13 +912,16 @@ void WorldView::DrawStarLensFlare()
 
 		// Smooth angular eclipse & 3D terrain ridge occlusion against planets, mountains, moons, and stations
 		float visibility = 1.0f;
-		for (const FlareOccluder &occ : occluders) {
-			if (occ.dist >= dist)
+		for (const FrameOccluder &occ : m_frameOccluders) {
+			if (occ.isStar || occ.dist >= dist)
+				continue;
+			const double occR = occ.flareRadius;
+			if (occ.dist <= occR)
 				continue;
 			const vector3d occDir = occ.pos / occ.dist;
 			const double dotDir = Clamp(starDir.Dot(occDir), -1.0, 1.0);
-			if (occ.dist > occ.radius && dotDir > 0.0) {
-				const double angOcc = std::asin(Clamp(occ.radius / occ.dist, 0.0, 1.0));
+			if (dotDir > 0.0) {
+				const double angOcc = std::asin(Clamp(occR / occ.dist, 0.0, 1.0));
 				const double angSep = std::acos(dotDir);
 				if (angSep <= angOcc - angStar) {
 					visibility = 0.0f;
@@ -918,12 +933,12 @@ void WorldView::DrawStarLensFlare()
 				}
 			}
 
-			if (visibility > 0.005f && occ.terrainBody && occ.maxRadius > occ.radius + 1.0) {
+			if (visibility > 0.005f && occ.terrainBody && occ.maxRadius > occR + 1.0) {
 				const matrix3x3d camToBody = occ.orientToCam.Transpose();
 				const vector3d camPosP = camToBody * (-occ.pos);
 				const vector3d starDirP = (camToBody * starDir).NormalizedSafe();
 				const float terrVis = WeatherSystem::ComputeTerrainRayVisibility(
-					camPosP, starDirP, dist, occ.radius, occ.maxRadius, angStar,
+					camPosP, starDirP, dist, occR, occ.maxRadius, angStar,
 					[tb = occ.terrainBody](const vector3d &u) { return tb->GetTerrainHeight(u); });
 				visibility = std::min(visibility, terrVis);
 				if (visibility <= 0.005f) {
@@ -958,7 +973,7 @@ void WorldView::DrawStarLensFlare()
 		m_lensFlareMat->SetPushConstant(s_starColorName, vector3f(starCol.r, starCol.g, starCol.b), discRadiusNdc);
 		m_lensFlareMat->SetPushConstant(s_flareParamsName, vector3f(pinpointFactor, ghostFactor, 0.0f), 0.0f);
 
-		m_renderer->DrawBuffer(&quad, m_lensFlareMat.get());
+		m_renderer->DrawBuffer(&m_flareQuadVerts, m_lensFlareMat.get());
 	}
 }
 
@@ -983,55 +998,18 @@ void WorldView::DrawSupercruiseShips()
 	const float winH = float(m_renderer->GetWindowHeight());
 	const double zClip = -1.0;
 
-	// Collect celestial (with 3D procedural terrain height) and station occluders in camera space
-	struct Occluder {
-		vector3d pos;
-		double dist;
-		double radius;
-		double maxRadius;
-		matrix3x3d orientToCam;
-		const TerrainBody *terrainBody;
-	};
-	std::vector<Occluder> occluders;
-	for (Body *b : m_game->GetSpace()->GetBodies()) {
-		if (!b)
-			continue;
-
-		if (b->IsType(ObjectType::SPACESTATION)) {
-			const vector3d p = b->GetInterpPositionRelTo(camFrameId);
-			const double dist = p.Length();
-			const SpaceStation *st = static_cast<const SpaceStation *>(b);
-			if (!st->IsGroundStation() && dist < b->GetClipRadius())
-				return; // Camera is inside orbital station superstructure; hide external Supercruise wakes
-			const double r = std::max(b->GetPhysRadius(), 450.0);
-			if (dist > r)
-				occluders.push_back({ p, dist, r, r, matrix3x3d::Identity, nullptr });
-			continue;
-		}
-
-		if (!b->IsType(ObjectType::TERRAINBODY))
-			continue;
-		const TerrainBody *tb = static_cast<const TerrainBody *>(b);
-		const SystemBody *sb = tb->GetSystemBody();
-		const double r = sb ? sb->GetRadius() : tb->GetPhysRadius();
-		if (r <= 0.0)
-			continue;
-		const double maxR = std::max(r, tb->GetMaxFeatureRadius());
-		const vector3d p = tb->GetInterpPositionRelTo(camFrameId);
-		const double dist = p.Length();
-		if (dist > 1.0) {
-			const bool checkTerrain = (maxR > r + 1.0) && (dist < maxR * 6.0 || (maxR - r) > (dist - r) * 0.0005);
-			occluders.push_back({ p, dist, r, maxR, checkTerrain ? tb->GetInterpOrientRelTo(camFrameId) : matrix3x3d::Identity, checkTerrain ? tb : nullptr });
-		}
-	}
+	if (m_insideOrbitalStation)
+		return; // Camera is inside orbital station superstructure; hide external Supercruise wakes
 
 	auto isOccluded = [&](const vector3d &targetCamPos, double targetDist, bool checkTerrainRidges = true) -> bool {
 		if (targetDist <= 1.0)
 			return false;
 		const vector3d dir = targetCamPos / targetDist;
-		for (const Occluder &occ : occluders) {
+		for (const FrameOccluder &occ : m_frameOccluders) {
+			if (occ.dist <= occ.radius)
+				continue;
 			const double proj = occ.pos.Dot(dir);
-			if (occ.dist > occ.radius && proj > 0.0 && proj < targetDist) {
+			if (proj > 0.0 && proj < targetDist) {
 				const double perpSq = occ.pos.LengthSqr() - proj * proj;
 				if (perpSq < occ.radius * occ.radius)
 					return true;
@@ -1350,30 +1328,76 @@ bool WorldView::IsBodyOccludedByTerrainOrStation(const Body *targetBody) const
 		return false;
 	const vector3d dir = targetCamPos / targetDist;
 
-	for (Body *b : m_game->GetSpace()->GetBodies()) {
-		if (!b || b == targetBody || b == Pi::player)
-			continue;
+	if (tempCamFrame.valid() && tempCamFrame == m_frameOccludersCamFrame) {
+		for (const FrameOccluder &occ : m_frameOccluders) {
+			if (!occ.body || occ.body == targetBody || occ.body == Pi::player)
+				continue;
 
-		if (b->IsType(ObjectType::SPACESTATION)) {
-			const vector3d occPos = toCamPos(b);
-			const double occDist = occPos.Length();
-			const SpaceStation *st = static_cast<const SpaceStation *>(b);
-			if (!st->IsGroundStation() && occDist < b->GetClipRadius())
-				return true;
-			const double r = std::max(b->GetPhysRadius(), 450.0);
-			if (occDist > r) {
-				const double proj = occPos.Dot(dir);
-				if (proj > 0.0 && proj < targetDist) {
-					const double perpSq = occPos.LengthSqr() - proj * proj;
-					if (perpSq < r * r)
+			if (occ.isStation) {
+				if (occ.insideThisStation)
+					return true;
+				if (occ.dist > occ.radius) {
+					const double proj = occ.pos.Dot(dir);
+					if (proj > 0.0 && proj < targetDist) {
+						const double perpSq = occ.pos.LengthSqr() - proj * proj;
+						if (perpSq < occ.radius * occ.radius)
+							return true;
+					}
+				}
+				continue;
+			}
+
+			const double proj = occ.pos.Dot(dir);
+			if (occ.dist > occ.radius && proj > 0.0 && proj < targetDist) {
+				const double perpSq = occ.pos.LengthSqr() - proj * proj;
+				if (perpSq < occ.radius * occ.radius)
+					return true;
+			}
+
+			if (occ.terrainBody && proj > -occ.maxRadius) {
+				const double tClosest = Clamp(proj, 0.0, targetDist);
+				const double minDistSq = (occ.pos - dir * tClosest).LengthSqr();
+				const double outerR = occ.maxRadius + 50.0;
+				if (minDistSq <= outerR * outerR) {
+					const matrix3x3d camToBody = occ.orientToCam.Transpose();
+					const vector3d camPosP = camToBody * (-occ.pos);
+					const vector3d dirP = (camToBody * dir).NormalizedSafe();
+					const float terrVis = WeatherSystem::ComputeTerrainRayVisibility(
+						camPosP, dirP, targetDist, occ.radius, occ.maxRadius, 0.0005,
+						[tb = occ.terrainBody](const vector3d &u) { return tb->GetTerrainHeight(u); });
+					if (terrVis <= 0.15f)
 						return true;
 				}
 			}
-			continue;
 		}
+		return false;
+	}
 
-		if (!b->IsType(ObjectType::TERRAINBODY))
+	Space *space = m_game->GetSpace();
+	for (Body *b : space->GetStations()) {
+		if (!b || b == targetBody || b == Pi::player)
 			continue;
+
+		const vector3d occPos = toCamPos(b);
+		const double occDist = occPos.Length();
+		const SpaceStation *st = static_cast<const SpaceStation *>(b);
+		if (!st->IsGroundStation() && occDist < b->GetClipRadius())
+			return true;
+		const double r = std::max(b->GetPhysRadius(), 450.0);
+		if (occDist > r) {
+			const double proj = occPos.Dot(dir);
+			if (proj > 0.0 && proj < targetDist) {
+				const double perpSq = occPos.LengthSqr() - proj * proj;
+				if (perpSq < r * r)
+					return true;
+			}
+		}
+	}
+
+	for (Body *b : space->GetTerrainBodies()) {
+		if (!b || b == targetBody || b == Pi::player)
+			continue;
+
 		const TerrainBody *tb = static_cast<const TerrainBody *>(b);
 		const SystemBody *sb = tb->GetSystemBody();
 		const double r = sb ? sb->GetRadius() : tb->GetPhysRadius();

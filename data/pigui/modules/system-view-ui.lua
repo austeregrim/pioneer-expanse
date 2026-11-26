@@ -721,7 +721,7 @@ local infoView = {
 				ui.spacing()
 			end
 
-			if isSystemBody and body.physicsBody ~= nil and Game.InspectBody ~= nil and Game.IsPlanetInspectorEnabled and Game.IsPlanetInspectorEnabled() then
+			if isSystemBody and Game.InspectBody ~= nil and Game.IsPlanetInspectorEnabled and Game.IsPlanetInspectorEnabled() then
 				local st = body.superType
 				if st == "ROCKY_PLANET" or st == "GAS_GIANT" or st == "STAR" then
 					if ui.button("INSPECT PLANET##sv_info_inspect", Vector2(-1, 0), ui.theme.buttonColors.dark) then

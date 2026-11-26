@@ -12,6 +12,7 @@
 class Body;
 class Camera;
 class SpeedLines;
+class TerrainBody;
 class WeatherEffects;
 class Game;
 
@@ -60,8 +61,8 @@ public:
 	vector3d GetTargetIndicatorScreenPosition(const Body *body) const;
 	vector3d CameraSpaceToScreenSpace(const vector3d &pos) const;
 
-	void BeginCameraFrame() { m_cameraContext->BeginFrame(); };
-	void EndCameraFrame() { m_cameraContext->EndFrame(); };
+	void BeginCameraFrame() { m_frameOccludersCamFrame = FrameId::Invalid; m_cameraContext->BeginFrame(); };
+	void EndCameraFrame() { m_frameOccludersCamFrame = FrameId::Invalid; m_cameraContext->EndFrame(); };
 
 	bool ShouldShowLabels() { return m_labelsOn; }
 
@@ -105,11 +106,32 @@ private:
 
 	void DrawCombatTargetIndicator(const Indicator &target, const Indicator &lead, const Color &c);
 	void DrawEdgeMarker(const Indicator &marker, const Color &c);
+	void BuildFrameOccluders(FrameId camFrameId);
 	void DrawSupercruiseShips();
 	void DrawStarLensFlare();
 	void DrawSupercruiseOverlays();
 	void DrawSurfaceScanOverlay();
 	void ApplyHyperspaceWarpPostProcess();
+
+	struct FrameOccluder {
+		const Body *body = nullptr;
+		vector3d pos;
+		double dist = 0.0;
+		double radius = 0.0;
+		double flareRadius = 0.0;
+		double maxRadius = 0.0;
+		matrix3x3d orientToCam = matrix3x3d::Identity;
+		const TerrainBody *terrainBody = nullptr;
+		bool isStar = false;
+		bool isStation = false;
+		bool insideThisStation = false;
+	};
+	std::vector<FrameOccluder> m_frameOccluders;
+	bool m_insideOrbitalStation = false;
+	FrameId m_frameOccludersCamFrame = FrameId::Invalid;
+	Graphics::VertexArray m_flareQuadVerts{ Graphics::ATTRIB_POSITION | Graphics::ATTRIB_UV0 };
+	float m_flareQuadW = 0.0f;
+	float m_flareQuadH = 0.0f;
 
 	struct SurfaceScanOverlay {
 		const Body *body = nullptr;

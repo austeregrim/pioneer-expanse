@@ -87,19 +87,67 @@ namespace {
 		}
 		if (orbBody && orbBody->GetParent() && orbBody->GetParent()->GetSuperType() == SystemBody::SUPERTYPE_STAR) {
 			const Orbit &orb = orbBody->GetOrbit();
-			if (orb.GetSemiMajorAxis() > 1.0 && orb.GetEccentricity() >= 0.0 && orb.GetEccentricity() < 1.0) {
+			const double sma = orb.GetSemiMajorAxis();
+			if (sma > 1.0 && orb.GetEccentricity() >= 0.0 && orb.GetEccentricity() < 1.0) {
 				const double period = orb.Period();
 				if (period > 1.0) {
-					const vector3d orbPos = orb.OrbitalPosAtTime(gameTime);
-					const vector3d orbPosNext = orb.OrbitalPosAtTime(gameTime + std::max(3600.0, period * 0.002));
-					if (orbPos.LengthSqr() > 1e-6) {
-						const vector3d spinAxis = matrix3x3d::RotateX(params.axialTiltRad) * vector3d(0.0, 1.0, 0.0);
-						const vector3d sunDir = (-orbPos).Normalized();
-						const vector3d sunDirNext = (-orbPosNext).NormalizedSafe();
-						const double sinSub = Clamp(spinAxis.Dot(sunDir), -1.0, 1.0);
-						const double sinSubNext = Clamp(spinAxis.Dot(sunDirNext), -1.0, 1.0);
-						params.seasonSubsolarLatRad = std::asin(sinSub);
-						params.seasonSolarTrend = sinSubNext - sinSub;
+					struct SeasonalOrbitCacheEntry {
+						bool valid = false;
+						const SystemBody *orbBody = nullptr;
+						uint32_t seed = 0;
+						double semiMajorAxis = 0.0;
+						double period = 0.0;
+						double axialTiltRad = 0.0;
+						double cachedTime = 0.0;
+						double subsolarLatRad = 0.0;
+						double solarTrend = 0.0;
+					};
+					static constexpr size_t SEASON_CACHE_SLOTS = 8;
+					thread_local SeasonalOrbitCacheEntry s_seasonCache[SEASON_CACHE_SLOTS];
+					thread_local size_t s_seasonCursor = 0;
+
+					const uint32_t orbSeed = orbBody->GetSeed();
+					const double maxDt = std::min(60.0, period * 0.0005);
+					bool cacheHit = false;
+					for (const SeasonalOrbitCacheEntry &entry : s_seasonCache) {
+						if (entry.valid &&
+							entry.orbBody == orbBody &&
+							entry.seed == orbSeed &&
+							entry.semiMajorAxis == sma &&
+							entry.period == period &&
+							entry.axialTiltRad == params.axialTiltRad &&
+							std::abs(gameTime - entry.cachedTime) < maxDt) {
+							params.seasonSubsolarLatRad = entry.subsolarLatRad;
+							params.seasonSolarTrend = entry.solarTrend;
+							cacheHit = true;
+							break;
+						}
+					}
+
+					if (!cacheHit) {
+						const double trendDt = std::min(period * 0.05, std::max(60.0, period * 0.002));
+						const vector3d orbPos = orb.OrbitalPosAtTime(gameTime);
+						const vector3d orbPosNext = orb.OrbitalPosAtTime(gameTime + trendDt);
+						if (orbPos.LengthSqr() > 1e-6) {
+							const vector3d spinAxis = matrix3x3d::RotateX(params.axialTiltRad) * vector3d(0.0, 1.0, 0.0);
+							const vector3d sunDir = (-orbPos).Normalized();
+							const vector3d sunDirNext = (-orbPosNext).NormalizedSafe();
+							const double sinSub = Clamp(spinAxis.Dot(sunDir), -1.0, 1.0);
+							const double sinSubNext = Clamp(spinAxis.Dot(sunDirNext), -1.0, 1.0);
+							params.seasonSubsolarLatRad = std::asin(sinSub);
+							params.seasonSolarTrend = sinSubNext - sinSub;
+						}
+						SeasonalOrbitCacheEntry &slot = s_seasonCache[s_seasonCursor];
+						slot.valid = true;
+						slot.orbBody = orbBody;
+						slot.seed = orbSeed;
+						slot.semiMajorAxis = sma;
+						slot.period = period;
+						slot.axialTiltRad = params.axialTiltRad;
+						slot.cachedTime = gameTime;
+						slot.subsolarLatRad = params.seasonSubsolarLatRad;
+						slot.solarTrend = params.seasonSolarTrend;
+						s_seasonCursor = (s_seasonCursor + 1) % SEASON_CACHE_SLOTS;
 					}
 				}
 			}
@@ -236,10 +284,13 @@ WeatherState WeatherSystem::SampleFromParams(const WeatherPlanetParams &params, 
 		out.climateZone = ClimateZone::TEMPERATE;
 
 	// Seasonal ITCZ & mid-latitude storm-track forcing
-	const double itczBelt = std::exp(-std::pow((latRad - params.seasonSubsolarLatRad * 0.65) / 0.28, 2.0));
-	const double midLatBelt = std::exp(-std::pow((absLat - 0.84) / 0.26, 2.0));
+	const double itczDist = (latRad - params.seasonSubsolarLatRad * 0.65) / 0.28;
+	const double itczBelt = std::exp(-(itczDist * itczDist));
+	const double midLatDist = (absLat - 0.84) / 0.26;
+	const double midLatBelt = std::exp(-(midLatDist * midLatDist));
 	const double winterBoost = (out.season == SeasonPhase::AUTUMN || out.season == SeasonPhase::WINTER) ? 1.0 : 0.45;
-	const double subtropDry = std::exp(-std::pow((effectiveLat - 0.48) / 0.18, 2.0));
+	const double subtropDist = (effectiveLat - 0.48) / 0.18;
+	const double subtropDry = std::exp(-(subtropDist * subtropDist));
 	const double climateCloudBias = isWet ? (0.10 * itczBelt + 0.07 * midLatBelt * winterBoost - 0.06 * subtropDry) : 0.0;
 	const double climateStormBias = 0.07 * itczBelt + 0.06 * midLatBelt * winterBoost;
 
@@ -281,7 +332,8 @@ WeatherState WeatherSystem::SampleFromParams(const WeatherPlanetParams &params, 
 	const double relDensity = Clamp(out.densityKgM3 / std::max(params.surfaceDensity, 0.05), 0.0, 1.0);
 	const double upperFade = std::pow(relDensity, 0.45);
 	const double boundaryFactor = 0.68 + 0.32 * Smoothstep(0.0, 450.0, effectiveAgl);
-	const double jetPeak = std::exp(-std::pow((altitudeM - cloudCeiling * 0.95) / (cloudCeiling * 0.45), 2.0));
+	const double jetDist = (altitudeM - cloudCeiling * 0.95) / (cloudCeiling * 0.45);
+	const double jetPeak = std::exp(-(jetDist * jetDist));
 	const double tropoFactor = 1.0 - Smoothstep(cloudCeiling * 0.85, cloudCeiling * 1.45, altitudeM);
 
 	// 3-cell zonal planetary circulation (equatorial easterlies, mid-latitude westerlies, weak polar)

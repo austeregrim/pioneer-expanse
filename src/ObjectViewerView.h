@@ -6,6 +6,9 @@
 
 #include "Camera.h"
 #include "View.h"
+#include "galaxy/StarSystem.h"
+
+#include <memory>
 
 class Body;
 class SystemBody;
@@ -13,10 +16,12 @@ class SystemBody;
 class ObjectViewerView : public View {
 public:
 	ObjectViewerView();
+	~ObjectViewerView() override;
 	void Update() override;
 	void Draw3D() override;
 
 	void SetTargetBody(Body *body);
+	void SetTargetSystemBody(RefCountedPtr<StarSystem> system, SystemBody *sbody);
 	void SetReturnView(View *view) { m_returnView = view; }
 
 	static bool IsInspectorEnabled();
@@ -30,6 +35,9 @@ protected:
 	void DrawPiGui() override;
 
 private:
+	void ClearRemoteTarget();
+	void SyncWithMapSelection();
+	bool IsRemoteMode() const { return m_remoteBody != nullptr && m_remoteSystem.Valid(); }
 	void ValidateTargetBody();
 	void ReloadState();
 	void ReturnToPreviousView();
@@ -37,10 +45,13 @@ private:
 	void DrawInfoWindow();
 	void DrawControlsWindow();
 
+	RefCountedPtr<StarSystem> m_remoteSystem;
+	std::unique_ptr<Body> m_remoteBody;
 	Body *m_targetBody;
 	const SystemBody *m_systemBody;
 	bool m_isTerrainBody;
 	bool m_userSelectedBody;
+	bool m_explicitTargetOnSwitch;
 	View *m_returnView;
 
 	float viewingDist;

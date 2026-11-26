@@ -45,6 +45,15 @@ private:
 
 	double m_atmosphereRadius;
 	double m_surfaceGravity_g;
+	struct WeatherCacheEntry {
+		bool valid = false;
+		vector3d posRotFrame = vector3d(0.0);
+		double gameTime = 0.0;
+		WeatherState state{};
+	};
+	static constexpr size_t WEATHER_CACHE_SLOTS = 4;
+	mutable WeatherCacheEntry m_weatherCache[WEATHER_CACHE_SLOTS];
+	mutable size_t m_weatherCacheCursor = 0;
 	RefCountedPtr<Graphics::Texture> m_ringTexture;
 	RefCountedPtr<Graphics::Texture> m_ringNoiseTexture;
 	std::unique_ptr<Graphics::Material> m_ringMaterial;

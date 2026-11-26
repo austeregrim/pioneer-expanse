@@ -207,6 +207,7 @@ private:
 
 	std::vector<vector3f> m_farstars;
 	std::vector<Color> m_farstarsColor;
+	std::vector<Color> m_farstarsDrawColor;
 
 	vector3f m_secPosFar;
 	int m_radiusFar;
@@ -311,17 +312,16 @@ private:
 	std::unique_ptr<Graphics::VertexArray> m_macroLineVerts;
 	RefCountedPtr<Graphics::Material> m_galaxyDiscMat;
 	RefCountedPtr<Graphics::Material> m_galaxyGlowMat;
+	RefCountedPtr<Graphics::Material> m_macroStarCloudMat;
 	Graphics::Drawables::Lines m_macroLines;
-	Graphics::Drawables::Points m_galaxyCloudPoints;
+	std::unique_ptr<Graphics::Drawables::PointSprites> m_galaxyCloudPoints;
 	std::vector<vector3f> m_galaxyCloudPos;
 	std::vector<Color> m_galaxyCloudBaseColor;
-	std::vector<Color> m_galaxyCloudDrawColor;
 
 	void UpdateRegionalStarField(const vector3f &centerLy);
-	Graphics::Drawables::Points m_regionalStarPoints;
+	std::unique_ptr<Graphics::Drawables::PointSprites> m_regionalStarPoints;
 	std::vector<vector3f> m_regionalStarPos;
 	std::vector<Color> m_regionalStarBaseColor;
-	std::vector<Color> m_regionalStarDrawColor;
 	vector3f m_lastRegionalCenterLy{ 1e9f, 1e9f, 1e9f };
 	float m_regionalAlpha = 0.0f;
 };

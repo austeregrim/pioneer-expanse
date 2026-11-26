@@ -271,7 +271,9 @@ Space::Space(Game *game, RefCountedPtr<Galaxy> galaxy, const Json &jsonObj, doub
 		for (Uint32 i = 0; i < bodyArray.size(); i++) {
 			if (bodyArray[i].count("is_not_in_space") > 0)
 				continue;
-			m_bodies.push_back(Body::FromJson(bodyArray[i], this));
+			Body *b = Body::FromJson(bodyArray[i], this);
+			m_bodies.push_back(b);
+			RegisterTypedBody(b);
 		}
 	} catch (Json::type_error &) {
 		throw SavedGameCorruptException();
@@ -626,9 +628,43 @@ void Space::RebuildSystemBodyIndex()
 	m_sbodyIndexValid = true;
 }
 
+void Space::RegisterTypedBody(Body *b)
+{
+	if (!b)
+		return;
+	if (b->IsType(ObjectType::STAR))
+		m_stars.push_back(b);
+	if (b->IsType(ObjectType::TERRAINBODY))
+		m_terrainBodies.push_back(b);
+	if (b->IsType(ObjectType::SPACESTATION))
+		m_stations.push_back(b);
+}
+
+void Space::UnregisterTypedBody(Body *b)
+{
+	if (!b)
+		return;
+	auto removeFrom = [b](std::vector<Body *> &vec) {
+		for (size_t i = 0; i < vec.size(); ++i) {
+			if (vec[i] == b) {
+				vec[i] = vec.back();
+				vec.pop_back();
+				break;
+			}
+		}
+	};
+	if (b->IsType(ObjectType::STAR))
+		removeFrom(m_stars);
+	if (b->IsType(ObjectType::TERRAINBODY))
+		removeFrom(m_terrainBodies);
+	if (b->IsType(ObjectType::SPACESTATION))
+		removeFrom(m_stations);
+}
+
 void Space::AddBody(Body *b)
 {
 	m_bodies.push_back(b);
+	RegisterTypedBody(b);
 }
 
 void Space::RemoveBody(Body *b)
@@ -1407,6 +1443,7 @@ void Space::UpdateBodies()
 		if (remove_iterator != m_bodies.end()) {
 			*remove_iterator = m_bodies.back();
 			m_bodies.pop_back();
+			UnregisterTypedBody(b.first);
 			if (b.second == BodyAssignation::KILL)
 				delete b.first;
 			else

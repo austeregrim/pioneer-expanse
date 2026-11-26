@@ -16,10 +16,12 @@
 #include "SectorView.h"
 #include "Space.h"
 #include "SpaceStation.h"
+#include "Star.h"
 #include "SystemView.h"
 #include "WorldView.h"
 
 #include "buildopts.h"
+#include "galaxy/Galaxy.h"
 #include "galaxy/StarSystem.h"
 #include "galaxy/SystemBody.h"
 #include "graphics/Drawables.h"
@@ -52,6 +54,32 @@ namespace {
 	static bool IsInspectableBody(const Body *b)
 	{
 		return b && (b->IsType(ObjectType::TERRAINBODY) || b->IsType(ObjectType::STAR));
+	}
+
+	static bool IsInspectableSystemBody(const SystemBody *sb)
+	{
+		if (!sb)
+			return false;
+		const SystemBody::BodySuperType st = sb->GetSuperType();
+		return st == SystemBody::SUPERTYPE_ROCKY_PLANET ||
+			st == SystemBody::SUPERTYPE_GAS_GIANT ||
+			st == SystemBody::SUPERTYPE_STAR;
+	}
+
+	static SystemBody *PickDefaultSystemBody(const StarSystem *sys)
+	{
+		if (!sys)
+			return nullptr;
+		SystemBody *fallbackStar = nullptr;
+		for (const RefCountedPtr<SystemBody> &sb : sys->GetBodies()) {
+			if (!sb || !IsInspectableSystemBody(sb.Get()))
+				continue;
+			if (sb->GetSuperType() != SystemBody::SUPERTYPE_STAR)
+				return sb.Get();
+			if (!fallbackStar)
+				fallbackStar = sb.Get();
+		}
+		return fallbackStar;
 	}
 
 	struct PreviewTimeScope {
@@ -203,6 +231,7 @@ ObjectViewerView::ObjectViewerView() :
 	m_systemBody(nullptr),
 	m_isTerrainBody(false),
 	m_userSelectedBody(false),
+	m_explicitTargetOnSwitch(false),
 	m_returnView(nullptr),
 	viewingDist(1000.0f),
 	m_camRot(matrix4x4d::Identity),
@@ -241,10 +270,23 @@ ObjectViewerView::ObjectViewerView() :
 	m_cameraContext->SetCameraOrient(matrix3x3d::Identity);
 }
 
+ObjectViewerView::~ObjectViewerView()
+{
+	ClearRemoteTarget();
+}
+
+void ObjectViewerView::ClearRemoteTarget()
+{
+	m_remoteBody.reset();
+	m_remoteSystem.Reset();
+}
+
 void ObjectViewerView::SetTargetBody(Body *body)
 {
+	ClearRemoteTarget();
 	m_targetBody = body;
 	m_userSelectedBody = (body != nullptr);
+	m_explicitTargetOnSwitch = (body != nullptr);
 	m_isTerrainBody = false;
 	m_systemBody = nullptr;
 	if (body) {
@@ -252,6 +294,95 @@ void ObjectViewerView::SetTargetBody(Body *body)
 		const double rad = std::max(body->GetClipRadius(), 100.0);
 		viewingDist = float(rad * 2.2);
 		m_altitudeM = 2000.0;
+	}
+}
+
+void ObjectViewerView::SetTargetSystemBody(RefCountedPtr<StarSystem> system, SystemBody *sbody)
+{
+	if (!system || !sbody || !IsInspectableSystemBody(sbody))
+		return;
+
+	if (Pi::game && Pi::game->GetSpace() && Pi::game->GetSpace()->GetStarSystem()) {
+		if (system->GetPath().IsSameSystem(Pi::game->GetSpace()->GetStarSystem()->GetPath())) {
+			Body *live = Pi::game->GetSpace()->FindBodyForPath(&sbody->GetPath());
+			if (live && IsInspectableBody(live)) {
+				SetTargetBody(live);
+				return;
+			}
+		}
+	}
+
+	Body *b = (sbody->GetSuperType() == SystemBody::SUPERTYPE_STAR)
+		? static_cast<Body *>(new Star(sbody))
+		: static_cast<Body *>(new Planet(sbody));
+	b->SetLabel(sbody->GetName());
+
+	m_remoteBody.reset();
+	m_remoteSystem = system;
+	m_remoteBody.reset(b);
+
+	m_targetBody = b;
+	m_systemBody = sbody;
+	m_isTerrainBody = true;
+	m_userSelectedBody = true;
+	m_explicitTargetOnSwitch = true;
+
+	const double rad = std::max(b->GetClipRadius(), 100.0);
+	viewingDist = float(rad * 2.2);
+	m_altitudeM = 2000.0;
+}
+
+void ObjectViewerView::SyncWithMapSelection()
+{
+	if (!Pi::game || !Pi::game->GetSpace() || !Pi::game->GetGalaxy())
+		return;
+
+	SystemPath curPath;
+	if (const StarSystem *curSys = Pi::game->GetSpace()->GetStarSystem().Get())
+		curPath = curSys->GetPath();
+
+	SystemPath selPath;
+	SystemView *sv = Pi::game->GetSystemView();
+	if (m_returnView == sv && sv && sv->GetMap() && sv->GetMap()->GetCurrentSystem()) {
+		selPath = sv->GetMap()->GetCurrentSystem()->GetPath();
+	} else if (SectorView *secView = Pi::game->GetSectorView()) {
+		selPath = secView->GetSelected();
+	}
+
+	if (selPath.IsSystemPath() && (!curPath.IsSystemPath() || !selPath.IsSameSystem(curPath))) {
+		RefCountedPtr<StarSystem> remoteSys = Pi::game->GetGalaxy()->GetStarSystem(selPath);
+		if (remoteSys) {
+			SystemBody *targetSb = nullptr;
+			if (sv && sv->GetMap() && sv->GetMap()->GetCurrentSystem() &&
+				sv->GetMap()->GetCurrentSystem()->GetPath().IsSameSystem(selPath)) {
+				const Projectable *proj = sv->GetMap()->GetSelectedObject();
+				if (proj && proj->type == Projectable::OBJECT && proj->base == Projectable::SYSTEMBODY &&
+					IsInspectableSystemBody(proj->ref.sbody)) {
+					const SystemPath targetPath = proj->ref.sbody->GetPath();
+					for (const RefCountedPtr<SystemBody> &sb : remoteSys->GetBodies()) {
+						if (sb && sb->GetPath() == targetPath) {
+							targetSb = sb.Get();
+							break;
+						}
+					}
+				}
+			}
+			if (!targetSb)
+				targetSb = PickDefaultSystemBody(remoteSys.Get());
+			if (targetSb) {
+				SetTargetSystemBody(remoteSys, targetSb);
+				m_explicitTargetOnSwitch = false;
+				return;
+			}
+		}
+	}
+
+	if (IsRemoteMode()) {
+		ClearRemoteTarget();
+		m_targetBody = nullptr;
+		m_systemBody = nullptr;
+		m_isTerrainBody = false;
+		m_userSelectedBody = false;
 	}
 }
 
@@ -274,9 +405,15 @@ void ObjectViewerView::ReturnToPreviousView()
 void ObjectViewerView::ValidateTargetBody()
 {
 	if (!Pi::game || !Pi::game->GetSpace()) {
+		ClearRemoteTarget();
 		m_targetBody = nullptr;
 		m_systemBody = nullptr;
 		m_isTerrainBody = false;
+		return;
+	}
+
+	if (IsRemoteMode()) {
+		m_targetBody = m_remoteBody.get();
 		return;
 	}
 
@@ -419,13 +556,16 @@ void ObjectViewerView::Draw3D()
 	}
 
 	FrameId targetFrameId = m_targetBody->GetFrame();
-	if (!targetFrameId.valid() && Pi::player)
-		targetFrameId = Pi::player->GetFrame();
-	if (!targetFrameId.valid())
-		targetFrameId = Pi::game->GetSpace()->GetRootFrame();
+	if (!IsRemoteMode()) {
+		if (!targetFrameId.valid() && Pi::player)
+			targetFrameId = Pi::player->GetFrame();
+		if (!targetFrameId.valid())
+			targetFrameId = Pi::game->GetSpace()->GetRootFrame();
+	}
 
 	// Compute override directional sun light in camera space if enabled
 	vector3d sunDirCam(0.57735, 0.57735, 0.57735);
+	Color sunColor = Color::WHITE;
 	if (m_overrideSun) {
 		const double elevR = DEG2RAD(double(m_sunElevDeg));
 		const double azimR = DEG2RAD(double(m_sunAzimDeg));
@@ -443,39 +583,99 @@ void ObjectViewerView::Draw3D()
 				std::cos(elevR) * std::sin(azimR)).Normalized();
 		}
 		sunDirCam = (bodyToCam * sunDirBody).NormalizedSafe();
+	} else if (IsRemoteMode()) {
+		const double activeTime = m_useCustomTime ? m_customTime : (Pi::game ? Pi::game->GetTime() : 0.0);
+		sunDirCam = vector3d(0.57735, 0.45, 0.68).Normalized();
+		const SystemBody *orbBody = m_systemBody;
+		while (orbBody && orbBody->GetParent() && orbBody->GetParent()->GetSuperType() != SystemBody::SUPERTYPE_STAR) {
+			orbBody = orbBody->GetParent();
+		}
+		if (orbBody && orbBody->GetParent() && orbBody->GetParent()->GetSuperType() == SystemBody::SUPERTYPE_STAR) {
+			const Orbit &orb = orbBody->GetOrbit();
+			if (orb.GetSemiMajorAxis() > 1.0 && orb.GetEccentricity() >= 0.0 && orb.GetEccentricity() < 1.0) {
+				const vector3d orbPos = orb.OrbitalPosAtTime(activeTime);
+				if (orbPos.LengthSqr() > 1e-6) {
+					sunDirCam = (bodyToCam * (-orbPos).Normalized()).NormalizedSafe();
+				}
+			}
+			sunColor = orbBody->GetParent()->GetStarColor();
+		}
 	}
 
-	// Render full celestial system via Camera::Draw() in scenic mode (no ships/stations)
-	m_cameraContext->SetCameraFrame(targetFrameId);
-	m_cameraContext->SetCameraPosition(m_targetBody->GetInterpPosition() + camPosBody);
-	m_cameraContext->SetCameraOrient(camOrient);
-	m_cameraContext->BeginFrame();
-
-	m_camera->SetScenicMode(true);
-	m_camera->SetOverrideLight(m_overrideSun, vector3f(sunDirCam), Color::WHITE);
-	m_cameraContext->ApplyDrawTransforms(m_renderer);
-	m_camera->Update();
-	m_camera->Draw();
-	m_lastBgIntensity = m_camera->GetBackgroundIntensity();
-
-	if (m_showAxes) {
-		matrix4x4d trans = matrix4x4d::Translation(viewCoords) * viewTransform * matrix4x4d::ScaleMatrix(m_targetBody->GetClipRadius() * 2.0);
-		m_renderer->SetTransform(matrix4x4f(trans));
-		Graphics::Drawables::GetAxes3DDrawable(m_renderer)->Draw(m_renderer);
+	float remoteBgIntensity = 1.0f;
+	if (IsRemoteMode() && m_systemBody && m_systemBody->HasAtmosphere() && m_systemBody->GetAtmRadius() > 1.0) {
+		const double alt = std::max(0.0, camDistFromCenter - m_systemBody->GetRadius());
+		if (alt < m_systemBody->GetAtmRadius()) {
+			const double pAtm = m_systemBody->GetAtmPressure(alt);
+			const double dAtm = m_systemBody->GetAtmDensity(alt, pAtm);
+			const double relDen = Clamp(dAtm / std::max(0.05, m_systemBody->GetAtmSurfaceDensity()), 0.0, 1.0);
+			const vector3d sunDirBody = (bodyToCam.Transpose() * sunDirCam).NormalizedSafe();
+			const double daySide = Clamp(localUpBody.Dot(sunDirBody) * 0.5 + 0.5, 0.0, 1.0);
+			remoteBgIntensity = float(Clamp(1.0 - relDen * (0.35 + 0.55 * daySide), 0.08, 1.0));
+		}
 	}
 
-	m_cameraContext->EndFrame();
+	auto renderRemoteScene = [&](int rtW, int rtH) {
+		float znear = 0.0f, zfar = 0.0f;
+		m_renderer->GetNearFarRange(znear, zfar);
+		m_renderer->SetPerspectiveProjection(fovY, float(rtW) / float(std::max(1, rtH)), znear, zfar);
+		m_renderer->SetTransform(matrix4x4f::Identity);
+		m_renderer->ClearScreen();
+
+		if (Pi::game->GetSpace()->GetBackground()) {
+			Pi::game->GetSpace()->GetBackground()->SetIntensity(remoteBgIntensity);
+			Pi::game->GetSpace()->GetBackground()->Draw(matrix4x4d(bodyToCam));
+			m_renderer->ClearDepthBuffer();
+		}
+
+		const Graphics::Light light(Graphics::Light::LIGHT_DIRECTIONAL, vector3f(sunDirCam) * 1.49598e11f, sunColor, sunColor);
+		m_renderer->SetLights(1, &light);
+		m_renderer->SetSpotLights(0, nullptr);
+
+		m_targetBody->Render(m_renderer, nullptr, viewCoords, viewTransform);
+	};
+
+	if (IsRemoteMode()) {
+		renderRemoteScene(winW, winH);
+		m_lastBgIntensity = remoteBgIntensity;
+		if (m_showAxes) {
+			matrix4x4d trans = matrix4x4d::Translation(viewCoords) * viewTransform * matrix4x4d::ScaleMatrix(m_targetBody->GetClipRadius() * 2.0);
+			m_renderer->SetTransform(matrix4x4f(trans));
+			Graphics::Drawables::GetAxes3DDrawable(m_renderer)->Draw(m_renderer);
+		}
+	} else {
+		// Render full celestial system via Camera::Draw() in scenic mode (no ships/stations)
+		m_cameraContext->SetCameraFrame(targetFrameId);
+		m_cameraContext->SetCameraPosition(m_targetBody->GetInterpPosition() + camPosBody);
+		m_cameraContext->SetCameraOrient(camOrient);
+		m_cameraContext->BeginFrame();
+
+		m_camera->SetScenicMode(true);
+		m_camera->SetOverrideLight(m_overrideSun, vector3f(sunDirCam), Color::WHITE);
+		m_cameraContext->ApplyDrawTransforms(m_renderer);
+		m_camera->Update();
+		m_camera->Draw();
+		m_lastBgIntensity = m_camera->GetBackgroundIntensity();
+
+		if (m_showAxes) {
+			matrix4x4d trans = matrix4x4d::Translation(viewCoords) * viewTransform * matrix4x4d::ScaleMatrix(m_targetBody->GetClipRadius() * 2.0);
+			m_renderer->SetTransform(matrix4x4f(trans));
+			Graphics::Drawables::GetAxes3DDrawable(m_renderer)->Draw(m_renderer);
+		}
+
+		m_cameraContext->EndFrame();
+	}
 
 	// High-res offscreen scenic screenshot capture (1x / 2x / 4x) without inspector UI
 	if (m_pendingCaptureScale > 0) {
 		const int reqScale = m_pendingCaptureScale;
 		m_pendingCaptureScale = 0;
 
-		const int winW = std::max(1, m_renderer->GetWindowWidth());
-		const int winH = std::max(1, m_renderer->GetWindowHeight());
+		const int capWinW = std::max(1, m_renderer->GetWindowWidth());
+		const int capWinH = std::max(1, m_renderer->GetWindowHeight());
 		const int maxTex = std::max(2048, m_renderer->GetMaxTextureSize());
-		int capW = winW * reqScale;
-		int capH = winH * reqScale;
+		int capW = capWinW * reqScale;
+		int capH = capWinH * reqScale;
 		if (capW > maxTex || capH > maxTex) {
 			const double fit = std::min(double(maxTex) / double(capW), double(maxTex) / double(capH));
 			capW = std::max(1, int(std::floor(capW * fit)));
@@ -491,35 +691,46 @@ void ObjectViewerView::Draw3D()
 			m_renderer->SetRenderTarget(rt.get());
 			m_renderer->SetViewport({ 0, 0, capW, capH });
 
-			float znear = 0.0f, zfar = 0.0f;
-			m_renderer->GetNearFarRange(znear, zfar);
-			const float fovY = Pi::config->Float("FOVVertical");
-			RefCountedPtr<CameraContext> capCtx(new CameraContext(float(capW), float(capH), fovY, znear, zfar));
-			Camera capCam(capCtx, m_renderer);
-			capCam.SetScenicMode(true);
-			capCam.SetOverrideLight(m_overrideSun, vector3f(sunDirCam), Color::WHITE);
+			if (IsRemoteMode()) {
+				renderRemoteScene(capW, capH);
+			} else {
+				float znear = 0.0f, zfar = 0.0f;
+				m_renderer->GetNearFarRange(znear, zfar);
+				const float capFovY = Pi::config->Float("FOVVertical");
+				RefCountedPtr<CameraContext> capCtx(new CameraContext(float(capW), float(capH), capFovY, znear, zfar));
+				Camera capCam(capCtx, m_renderer);
+				capCam.SetScenicMode(true);
+				capCam.SetOverrideLight(m_overrideSun, vector3f(sunDirCam), Color::WHITE);
 
-			capCtx->SetCameraFrame(targetFrameId);
-			capCtx->SetCameraPosition(m_targetBody->GetInterpPosition() + camPosBody);
-			capCtx->SetCameraOrient(camOrient);
-			capCtx->BeginFrame();
-			capCtx->ApplyDrawTransforms(m_renderer);
-			capCam.Update();
-			capCam.Draw();
-			capCtx->EndFrame();
+				capCtx->SetCameraFrame(targetFrameId);
+				capCtx->SetCameraPosition(m_targetBody->GetInterpPosition() + camPosBody);
+				capCtx->SetCameraOrient(camOrient);
+				capCtx->BeginFrame();
+				capCtx->ApplyDrawTransforms(m_renderer);
+				capCam.Update();
+				capCam.Draw();
+				capCtx->EndFrame();
+			}
 
 			Graphics::ScreendumpState sd;
 			const bool okRead = m_renderer->ScreendumpRenderTarget(rt.get(), sd);
 
 			m_renderer->SetRenderTarget(prevRT);
 			m_renderer->SetViewport(prevVP);
-			m_cameraContext->ApplyDrawTransforms(m_renderer);
+			if (IsRemoteMode()) {
+				float znear = 0.0f, zfar = 0.0f;
+				m_renderer->GetNearFarRange(znear, zfar);
+				m_renderer->SetPerspectiveProjection(fovY, float(capWinW) / float(capWinH), znear, zfar);
+				m_renderer->SetTransform(matrix4x4f::Identity);
+			} else {
+				m_cameraContext->ApplyDrawTransforms(m_renderer);
+			}
 
 			if (okRead) {
-				const double scaleFactor = double(capH) / double(std::max(1, winH));
+				const double scaleFactor = double(capH) / double(std::max(1, capWinH));
 				if (m_ssIncludeLabel) {
 					std::string labelText = m_targetBody->GetLabel();
-					const StarSystem *sys = Pi::game->GetSpace()->GetStarSystem().Get();
+					const StarSystem *sys = IsRemoteMode() ? m_remoteSystem.Get() : Pi::game->GetSpace()->GetStarSystem().Get();
 					if (sys) {
 						const SystemPath &sp = sys->GetPath();
 						labelText += fmt::format(", {} ({}, {}, {})", sys->GetName(), sp.sectorX, sp.sectorY, sp.sectorZ);
@@ -576,6 +787,11 @@ void ObjectViewerView::OnSwitchTo()
 	m_ignoreEscFirstFrame = true;
 	if (!m_useCustomTime && Pi::game) {
 		m_customTime = Pi::game->GetTime();
+	}
+	if (m_explicitTargetOnSwitch) {
+		m_explicitTargetOnSwitch = false;
+	} else {
+		SyncWithMapSelection();
 	}
 	ValidateTargetBody();
 }
@@ -746,19 +962,52 @@ void ObjectViewerView::DrawControlsWindow()
 
 	ImGui::Separator();
 
-	// Body selector dropdown
+	// Active system indicator & body selector dropdown
 	if (Pi::game && Pi::game->GetSpace()) {
+		const StarSystem *activeSys = IsRemoteMode() ? m_remoteSystem.Get() : Pi::game->GetSpace()->GetStarSystem().Get();
+		if (activeSys) {
+			const SystemPath &sp = activeSys->GetPath();
+			ImGui::Text("System: %s (%d, %d, %d) %s",
+				activeSys->GetName().c_str(), sp.sectorX, sp.sectorY, sp.sectorZ,
+				IsRemoteMode() ? "[Map Selected]" : "[Current System]");
+		}
+		if (IsRemoteMode()) {
+			if (ImGui::Button("Switch to Current System", ImVec2(-1, 0))) {
+				ClearRemoteTarget();
+				m_targetBody = nullptr;
+				m_systemBody = nullptr;
+				m_isTerrainBody = false;
+				m_userSelectedBody = false;
+				ValidateTargetBody();
+			}
+		}
+
 		const char *preview = m_targetBody ? m_targetBody->GetLabel().c_str() : "<None>";
 		if (ImGui::BeginCombo("Inspect Body", preview)) {
-			for (Body *b : Pi::game->GetSpace()->GetBodies()) {
-				if (!IsInspectableBody(b))
-					continue;
-				const bool isSelected = (b == m_targetBody);
-				if (ImGui::Selectable(b->GetLabel().c_str(), isSelected)) {
-					SetTargetBody(b);
+			if (IsRemoteMode()) {
+				for (const RefCountedPtr<SystemBody> &sb : m_remoteSystem->GetBodies()) {
+					if (!sb || !IsInspectableSystemBody(sb.Get()))
+						continue;
+					const bool isSelected = (sb.Get() == m_systemBody);
+					if (ImGui::Selectable(sb->GetName().c_str(), isSelected)) {
+						SetTargetSystemBody(m_remoteSystem, sb.Get());
+						m_explicitTargetOnSwitch = false;
+					}
+					if (isSelected)
+						ImGui::SetItemDefaultFocus();
 				}
-				if (isSelected)
-					ImGui::SetItemDefaultFocus();
+			} else {
+				for (Body *b : Pi::game->GetSpace()->GetBodies()) {
+					if (!IsInspectableBody(b))
+						continue;
+					const bool isSelected = (b == m_targetBody);
+					if (ImGui::Selectable(b->GetLabel().c_str(), isSelected)) {
+						SetTargetBody(b);
+						m_explicitTargetOnSwitch = false;
+					}
+					if (isSelected)
+						ImGui::SetItemDefaultFocus();
+				}
 			}
 			ImGui::EndCombo();
 		}
