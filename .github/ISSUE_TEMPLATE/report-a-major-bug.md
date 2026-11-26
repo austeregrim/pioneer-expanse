@@ -1,8 +1,10 @@
 ---
-title:
-name: 🪳 Report a bug
+name: Report a major bug
 about: Report a defect or unexpected behaviour. Do not use this for feature suggestions.
-note: See FAQ on how to report bugs and crashes, and common causes
+title: ''
+labels: ''
+assignees: ''
+
 ---
 
 <!-- This is a suggested template for your issue. (remove as you check)     -->
@@ -15,10 +17,10 @@ note: See FAQ on how to report bugs and crashes, and common causes
 <!--   * Perhaps a screenshot illustrates the bug well?                     -->
 
 
-### Observed behaviour
+### Observed behavior
 
 
-### Expected behaviour
+### Expected behavior
 
 
 ### Steps to reproduce
@@ -28,4 +30,3 @@ __My pioneer version (and OS):__
 
 
 __My output.txt (required) and game save (optional, but recommended)__
-
