@@ -20,7 +20,7 @@ Equipment.Register("misc.autopilot", EquipType.New {
 	l10n_key="AUTOPILOT",
 	price=1400, purchasable=true, tech_level=1,
 	slot = { type="computer.autopilot", size=1 },
-	mass=0.2, volume=0.5, capabilities = { set_speed=1, autopilot=1 },
+	mass=0.2, volume=0, capabilities = { set_speed=1, autopilot=1 },
 	icon_name="equip_autopilot"
 })
 
@@ -28,7 +28,7 @@ Equipment.Register("misc.autopilot_mk2", EquipType.New {
 	l10n_key="AUTOPILOT_MK2",
 	price=4800, purchasable=true, tech_level=4,
 	slot = { type="computer.autopilot", size=1 },
-	mass=0.3, volume=0.5, capabilities = { set_speed=1, autopilot=2, supercruise_assist=1 },
+	mass=0.3, volume=0, capabilities = { set_speed=1, autopilot=2, supercruise_assist=1 },
 	icon_name="equip_autopilot"
 })
 
@@ -36,7 +36,7 @@ Equipment.Register("misc.autopilot_mk3", EquipType.New {
 	l10n_key="AUTOPILOT_MK3",
 	price=14500, purchasable=true, tech_level=6,
 	slot = { type="computer.autopilot", size=1 },
-	mass=0.4, volume=0.6, capabilities = { set_speed=1, autopilot=3, supercruise_assist=2 },
+	mass=0.4, volume=0, capabilities = { set_speed=1, autopilot=3, supercruise_assist=2 },
 	icon_name="equip_autopilot"
 })
 
@@ -44,7 +44,7 @@ Equipment.Register("misc.autopilot_mk4", EquipType.New {
 	l10n_key="AUTOPILOT_MK4",
 	price=38000, purchasable=true, tech_level=8,
 	slot = { type="computer.autopilot", size=1 },
-	mass=0.5, volume=0.8, capabilities = { set_speed=1, autopilot=4, supercruise_assist=3 },
+	mass=0.5, volume=0, capabilities = { set_speed=1, autopilot=4, supercruise_assist=3 },
 	icon_name="equip_autopilot"
 })
 
@@ -52,7 +52,7 @@ Equipment.Register("misc.trade_computer", EquipType.New {
 	l10n_key="TRADE_COMPUTER",
 	price=400, purchasable=true, tech_level=9,
 	slot={ type="computer", size=1 },
-	mass=0.2, volume=0.5, capabilities={ trade_computer=1 },
+	mass=0.2, volume=0, capabilities={ trade_computer=1 },
 	icon_name="equip_trade_computer"
 })
 
@@ -60,7 +60,7 @@ Equipment.Register("misc.fsd_interdictor_1", EquipType.New {
 	l10n_key="FSD_INTERDICTOR_1",
 	price=6500, purchasable=true, tech_level=2,
 	slot={ type="computer.interdictor", size=1 },
-	mass=1.2, volume=2.0, capabilities={ fsd_interdictor=1 },
+	mass=1.2, volume=0, capabilities={ fsd_interdictor=1 },
 	icon_name="equip_radar"
 })
 
@@ -68,7 +68,7 @@ Equipment.Register("misc.fsd_interdictor_2", EquipType.New {
 	l10n_key="FSD_INTERDICTOR_2",
 	price=18500, purchasable=true, tech_level=7,
 	slot={ type="computer.interdictor", size=1 },
-	mass=1.6, volume=2.5, capabilities={ fsd_interdictor=2 },
+	mass=1.6, volume=0, capabilities={ fsd_interdictor=2 },
 	icon_name="equip_radar"
 })
 
@@ -76,7 +76,7 @@ Equipment.Register("misc.fsd_interdictor_3", EquipType.New {
 	l10n_key="FSD_INTERDICTOR_3",
 	price=45000, purchasable=true, tech_level=9,
 	slot={ type="computer.interdictor", size=1 },
-	mass=2.0, volume=3.0, capabilities={ fsd_interdictor=3 },
+	mass=2.0, volume=0, capabilities={ fsd_interdictor=3 },
 	icon_name="equip_radar"
 })
 
@@ -84,7 +84,7 @@ Equipment.Register("misc.interdiction_nullifier", EquipType.New {
 	l10n_key="INTERDICTION_NULLIFIER",
 	price=14500, purchasable=true, tech_level=3,
 	slot={ type="computer.countermeasure", size=1 },
-	mass=0.8, volume=1.0, capabilities={ interdiction_nullifier=1 },
+	mass=0.8, volume=0, capabilities={ interdiction_nullifier=1 },
 	icon_name="equip_shield_generator"
 })
 
@@ -92,7 +92,7 @@ Equipment.Register("misc.subsystem_targeting_computer", EquipType.New {
 	l10n_key="SUBSYSTEM_TARGETING_COMPUTER",
 	price=8500, purchasable=true, tech_level=6,
 	slot={ type="computer", size=1 },
-	mass=0.4, volume=0.8, capabilities={ subsystem_targeting=1 },
+	mass=0.4, volume=0, capabilities={ subsystem_targeting=1 },
 	icon_name="equip_scanner"
 })
 
@@ -104,7 +104,7 @@ Equipment.Register("sensor.radar", SensorType.New {
 	l10n_key="RADAR",
 	price=680, purchasable=true, tech_level=3,
 	slot = { type="sensor.radar", size=1 },
-	mass=1.0, volume=1.0, capabilities = { radar=1 },
+	mass=1.0, volume=0, capabilities = { radar=1 },
 	icon_name="equip_radar"
 })
 
@@ -112,7 +112,7 @@ Equipment.Register("sensor.sublight_array_1", SensorType.New {
 	l10n_key="SUBLIGHT_SENSOR_ARRAY_1",
 	price=4500, purchasable=true, tech_level=4,
 	slot = { type="sensor.radar", size=1 },
-	mass=1.4, volume=1.5, capabilities = { radar=1, sublight_sensor=1 },
+	mass=1.4, volume=0, capabilities = { radar=1, sublight_sensor=1 },
 	icon_name="equip_radar"
 })
 
@@ -120,7 +120,7 @@ Equipment.Register("sensor.sublight_array_2", SensorType.New {
 	l10n_key="SUBLIGHT_SENSOR_ARRAY_2",
 	price=14000, purchasable=true, tech_level=7,
 	slot = { type="sensor.radar", size=1 },
-	mass=2.0, volume=2.0, capabilities = { radar=2, sublight_sensor=2 },
+	mass=2.0, volume=0, capabilities = { radar=2, sublight_sensor=2 },
 	icon_name="equip_radar"
 })
 
@@ -128,7 +128,7 @@ Equipment.Register("sensor.sublight_array_3", SensorType.New {
 	l10n_key="SUBLIGHT_SENSOR_ARRAY_3",
 	price=36000, purchasable=true, tech_level=9,
 	slot = { type="sensor.radar", size=1 },
-	mass=2.8, volume=2.5, capabilities = { radar=3, sublight_sensor=3 },
+	mass=2.8, volume=0, capabilities = { radar=3, sublight_sensor=3 },
 	icon_name="equip_radar"
 })
 
@@ -136,7 +136,7 @@ Equipment.Register("sensor.discovery_scanner", SensorType.New {
 	l10n_key="DISCOVERY_SCANNER",
 	price=2500, purchasable=true, tech_level=2,
 	slot = { type="sensor.discovery_scanner", size=1 },
-	mass=0.5, volume=1.0, capabilities = { discovery_scanner=1 },
+	mass=0.5, volume=0, capabilities = { discovery_scanner=1 },
 	icon_name="equip_radar"
 })
 

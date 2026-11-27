@@ -44,6 +44,32 @@ local function drawPlayerInfo()
 	ui.separator()
 	ui.spacing()
 
+	if okTax and TaxAuthority and TaxAuthority.GetResidencyInfo then
+		local res = TaxAuthority.GetResidencyInfo()
+		local residencyRows
+		if res.isResident then
+			local lockStr = res.canChange
+				and "Unlocked (Eligible to Relocate)"
+				or string.format("%d / %d days remaining", res.remainingDays or 0, res.termDaysTotal or 90)
+			residencyRows = {
+				{ "Home Station:", res.homeStationName or "Unknown" },
+				{ "Home System:", res.homeSystemName or "Unknown" },
+				{ "Jurisdiction:", res.homeFaction or "Independent" },
+				{ "Tax Rate:", string.format("%.1f%%", (res.effectiveRate or 0) * 100) },
+				{ "Residency Lock:", lockStr },
+			}
+		else
+			residencyRows = {
+				{ "Status:", "Stateless / Unregistered (Register in any Station Lobby)" },
+			}
+		end
+		textTable.withHeading("RESIDENCY & HOME PORT", orbiteer.heading, residencyRows)
+
+		ui.spacing()
+		ui.separator()
+		ui.spacing()
+	end
+
 	local financeRows = {
 		{ l.CASH .. ":", ui.Format.Money(PlayerState.GetMoney()) }
 	}

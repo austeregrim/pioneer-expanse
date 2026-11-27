@@ -5,6 +5,7 @@ local ui = require 'pigui'
 local StationView = require 'pigui.views.station-view'
 local AutoSave    = require 'modules.AutoSave.AutoSave'
 local PlayerState = require 'PlayerState'
+local FactionRoles = require 'FactionRoles'
 local Insurance   = require 'modules.Insurance.Insurance'
 local TaxAuthority = require 'modules.Economy.TaxAuthority'
 local Event       = require 'Event'
@@ -63,6 +64,37 @@ local popup = ModalWindow.New('lobbyPopup', function(self)
 		self:close()
 	end
 end)
+
+local renounceCitizenshipModal = ModalWindow.New('renounceCitizenshipModal', function(self)
+	local cit = FactionRoles.GetCitizenship()
+	local fname = (cit and cit.factionName) or "your faction"
+	ui.withFont(orbiteer.heading, function()
+		ui.textColored(colors.alertRed, "RENOUNCE CIVIL CITIZENSHIP")
+	end)
+	ui.separator()
+	ui.spacing()
+	ui.withFont(pionillium.body, function()
+		ui.textWrapped(string.format(
+			"Are you sure you want to renounce your citizenship in %s? Any active Deputy Charter held in %s will also be forfeited.",
+			fname, fname
+		))
+	end)
+	ui.spacing()
+	local btnW = 140 * rescaleVector.x
+	if ui.button("Confirm Renounce", Vector2(btnW, 0)) then
+		local ok, msg = FactionRoles.RenounceCitizenship()
+		residencyStatusBanner = msg
+		residencyBannerColor = ok and (colors.econProfit or colors.uiPrimaryLight) or colors.alertRed
+		if ok then ui.playSfx("OK") end
+		self:close()
+	end
+	ui.sameLine()
+	if ui.button("Cancel", Vector2(btnW, 0)) then
+		self:close()
+	end
+end)
+renounceCitizenshipModal.centered = true
+renounceCitizenshipModal.size = Vector2(520 * rescaleVector.x, 0)
 
 local incarcerationModal = ModalWindow.New('incarcerationModal', function(self)
 	local rec = Insurance.GetIncarcerationRecord()
@@ -214,6 +246,10 @@ local function drawCivilAdministrationSection(station)
 		end)
 		ui.spacing()
 
+		local cit = FactionRoles.GetCitizenship()
+		local activeMil = FactionRoles.GetActiveEnlistment()
+		local sysFactionName = (Game.system and Game.system.faction and Game.system.faction.name) or "Independent Systems"
+
 		local residencyStatusStr
 		if resInfo.isResident then
 			if resInfo.canChange then
@@ -223,6 +259,15 @@ local function drawCivilAdministrationSection(station)
 			end
 		else
 			residencyStatusStr = "Stateless / Transient Pilot"
+		end
+
+		local citizenshipStr
+		if cit then
+			citizenshipStr = cit.factionName .. (cit.lockedByMilitary and " (Military Service Lock)" or "")
+		elseif resInfo.isResident and not FactionRoles.IsStatelessFaction(resInfo.homeFaction) then
+			citizenshipStr = string.format("Stateless (Eligible to Claim in %s)", resInfo.homeFaction)
+		else
+			citizenshipStr = "Stateless"
 		end
 
 		local rateStr = string.format("%.1f%% (Faction %.1f%% + System %+.1f%%)",
@@ -235,13 +280,17 @@ local function drawCivilAdministrationSection(station)
 			{ "Registered Home Station", resInfo.homeStationName },
 			{ "Home System", resInfo.homeSystemName },
 			{ "Governing Faction", resInfo.homeFaction },
+			{ "Citizenship", citizenshipStr },
 			{ "Residency Status", residencyStatusStr },
 			{ "Effective Tax Rate", rateStr },
 		})
 
 		ui.spacing()
 		if resInfo.isResident and not resInfo.canChange then
-			ui.textColored(colors.fontDim, string.format("90-Day Residency Commitment: %d / %d Days", resInfo.termDaysTotal - resInfo.remainingDays, resInfo.termDaysTotal))
+			local termNote = activeMil
+				and string.format("90-Day Residency Commitment: %d / %d Days (Transfers locked to %s)", resInfo.termDaysTotal - resInfo.remainingDays, resInfo.termDaysTotal, activeMil)
+				or string.format("90-Day Residency Commitment: %d / %d Days", resInfo.termDaysTotal - resInfo.remainingDays, resInfo.termDaysTotal)
+			ui.textColored(colors.fontDim, termNote)
 			local gaugeHeight = math.max(math.ceil(18 * uniformScale), pionillium.details.size + 6)
 			local gaugeWidth = ui.getContentRegion().x
 			local gaugePos = ui.getCursorScreenPos()
@@ -279,6 +328,7 @@ local function drawCivilAdministrationSection(station)
 			if station then
 				local isCurrentHome = (resInfo.isResident and resInfo.homeStationName == station.label)
 				local actionBtnSize = Vector2(ui.getContentRegion().x, actionBtnH)
+				local canMoveFaction, lockReason = FactionRoles.CanChangeResidencyToFaction(sysFactionName)
 				if isCurrentHome then
 					ui.withStyleColors({ Button = ui.theme.buttonColors.disabled.normal, Text = colors.fontDim }, function()
 						ui.button("CURRENT REGISTERED HOME STATION##lobbyRes", actionBtnSize)
@@ -287,6 +337,13 @@ local function drawCivilAdministrationSection(station)
 					ui.withStyleColors({ Button = ui.theme.buttonColors.disabled.normal, Text = colors.fontDim }, function()
 						ui.button(string.format("RESIDENCY LOCKED (%d DAYS REMAINING)##lobbyRes", resInfo.remainingDays), actionBtnSize)
 					end)
+				elseif not canMoveFaction then
+					ui.withStyleColors({ Button = ui.theme.buttonColors.disabled.normal, Text = colors.alertRed }, function()
+						ui.button(string.format("RESIDENCY TRANSFER LOCKED TO %s (ACTIVE MILITARY SERVICE)##lobbyRes", string.upper(activeMil or "")), actionBtnSize)
+					end)
+					if ui.isItemHovered() and lockReason then
+						ui.setTooltip(lockReason)
+					end
 				else
 					local regLabel = string.format("REGISTER RESIDENCY AT %s (90-DAY TERM)##lobbyRes", string.upper(station.label))
 					if ui.button(regLabel, actionBtnSize) then
@@ -300,6 +357,26 @@ local function drawCivilAdministrationSection(station)
 							residencyBannerColor = colors.alertRed
 						end
 					end
+				end
+
+				-- Citizenship Claim / Renounce Actions
+				ui.spacing()
+				if resInfo.isResident and not isPrison and not FactionRoles.IsStatelessFaction(resInfo.homeFaction)
+					and (not cit or cit.factionName ~= resInfo.homeFaction) and not activeMil then
+					local claimLabel = string.format("CLAIM CITIZENSHIP IN %s##lobbyCit", string.upper(resInfo.homeFaction))
+					if ui.button(claimLabel, actionBtnSize) then
+						local ok, msg = FactionRoles.ClaimCitizenship(resInfo.homeFaction)
+						residencyStatusBanner = msg
+						residencyBannerColor = ok and (colors.econProfit or colors.uiPrimaryLight) or colors.alertRed
+						if ok then ui.playSfx("OK") end
+					end
+				elseif cit and not cit.lockedByMilitary then
+					local renLabel = string.format("RENOUNCE %s CITIZENSHIP##lobbyCit", string.upper(cit.factionName))
+					if ui.button(renLabel, actionBtnSize) then
+						renounceCitizenshipModal:open()
+					end
+				elseif cit and cit.lockedByMilitary then
+					ui.textColored(colors.fontDim, string.format("Citizenship locked to %s during active military service.", activeMil))
 				end
 			end
 		end

@@ -20,10 +20,26 @@ local Layout = require 'pigui.modules.new-game-window.layout'
 local Recovery = require 'pigui.modules.new-game-window.recovery'
 local StartVariants = require 'pigui.modules.new-game-window.start-variants'
 local FlightLogParam = require 'pigui.modules.new-game-window.flight-log'
+local ShipParam = require 'pigui.modules.new-game-window.ship'
+local LocationParam = require 'pigui.modules.new-game-window.location'
+local Widgets = require 'pigui.modules.new-game-window.widgets'
 local Game = require 'Game'
+
+local CUSTOM_START_BUDGET = 115000
+local CUSTOM_START_SHIPS = {
+	"xylophis",
+	"lunarshuttle",
+	"bowfin",
+	"pumpkinseed",
+	"coronatrix",
+	"molamola",
+	"wave",
+	"sinonatrix",
+}
 
 local allegianceCombo = { items = {}, selected = 0 }
 local roleCombo = { items = {}, actions = {}, selected = 0 }
+local startMode = "PREDEFINED" -- "PREDEFINED" | "CUSTOM_BUDGET" | "DEBUG_UNLOCK"
 
 local ALLEGIANCES = {
 	{
@@ -32,8 +48,15 @@ local ALLEGIANCES = {
 		faction   = "Solar Federation",
 		location  = SystemPath.New(0, 0, 0, 0, 20), -- Mars High Orbit, Sol
 		desc      = "STARTING FACTION: Solar Federation (Sol System — Mars High Orbit Station | 0 ly)\nThe historical cradle of humanity and administrative core of Federal space. Features dense orbital infrastructure, established commodities markets, and strict SolFed Military & Police patrols. Ideal for commanders who prefer high-security core worlds and reliable commercial trade routes.",
+		loadoutSummary = "REGIONAL OUTFITTING (SolFed): Precision 1MW/Dual-1MW Beam Lasers, Target Scanners, and Autopilot Mk 2 avionics for Federal security compliance.",
 		logPrefix = "Commissioned at Mars High Orbit Station (Sol) under Solar Federation registry.",
 		trimColor = Color('3A7BD5'),
+		loadoutOverrides = {
+			trader    = { weapon_s2_1 = "laser.beamlaser_1mw", utility_s1_3 = "misc.target_scanner" },
+			miner     = { computer_1 = "misc.autopilot_mk2", utility_s1_1 = "misc.target_scanner" },
+			explorer  = { weapon_s2_1 = "laser.beamlaser_1mw", utility_s2_1 = "misc.target_scanner" },
+			mercenary = { computer_1 = "misc.autopilot_mk2", laser_front_s2 = "laser.beamlaser_dual_1mw" },
+		},
 	},
 	{
 		id        = "ciw",
@@ -41,17 +64,31 @@ local ALLEGIANCES = {
 		faction   = "Commonwealth of Independent Worlds",
 		location  = SystemPath.New(1, -1, -1, 0, 8), -- Eridani Commercial Center, Epsilon Eridani
 		desc      = "STARTING FACTION: Commonwealth of Independent Worlds (Epsilon Eridani — Eridani Commercial Center | ~10 ly from Sol)\nA prosperous democratic confederation of core and mid-frontier systems. Eridani Commercial Center is a bustling orbital hub above New Hope with open trade laws, advanced shipyard drydocks, and balanced Confederal Police security.",
+		loadoutSummary = "REGIONAL OUTFITTING (CIW): Dual 1MW Pulse Cannons, Supercruise-capable Autopilot Mk 2 avionics, Target Scanners, and Trade Computer integration.",
 		logPrefix = "Commissioned at Eridani Commercial Center (Epsilon Eridani) within the Commonwealth of Independent Worlds.",
 		trimColor = Color('2ECC71'),
+		loadoutOverrides = {
+			trader    = { computer = "misc.autopilot_mk2", utility_s1_3 = "misc.target_scanner" },
+			miner     = { computer_1 = "misc.autopilot_mk2", utility_s1_1 = "misc.ecm_basic" },
+			explorer  = { weapon_s2_1 = "laser.pulsecannon_dual_1mw", computer_3 = "misc.trade_computer" },
+			mercenary = { computer_1 = "misc.autopilot_mk2", laser_front_s2 = "laser.pulsecannon_dual_1mw" },
+		},
 	},
 	{
 		id        = "haber",
 		name      = "Haber Corporation (Zekonbur — Gaillard Orbital Platform | ~20 ly)",
 		faction   = "Haber Corporation",
-		location  = SystemPath.New(4, -9, -17, 0, 29), -- Gaillard Orbital Platform, Zekonbur
+		location  = SystemPath.New(4, -9, -17, 0, 5), -- Gaillard Orbital Platform, Zekonbur
 		desc      = "STARTING FACTION: Haber Corporation (Zekonbur System — Gaillard Orbital Platform | ~20 ly from Sol)\nA heavily industrialized corporate conglomerate governed by a board of directors. Corporate orbital platforms prioritize mineral processing, heavy manufacturing, and private corporate security enforcement.",
+		loadoutSummary = "REGIONAL OUTFITTING (Haber): Upgraded Improved Thrusters for industrial acceleration, 2MW heavy Pulse Cannons, dual Miner Shielding, Target Scanner, and Subsystem Targeting Computer.",
 		logPrefix = "Cleared from Gaillard Orbital Platform (Zekonbur) under Haber Corporation charter.",
 		trimColor = Color('E67E22'),
+		loadoutOverrides = {
+			trader    = { weapon_s2_1 = "laser.pulsecannon_2mw", thruster = "thruster.improved_s2" },
+			miner     = { shield_s1_2 = "shield.basic_s1", thruster = "thruster.improved_s1" },
+			explorer  = { weapon_s2_1 = "laser.pulsecannon_2mw", utility_s2_1 = "misc.target_scanner" },
+			mercenary = { computer_2 = "misc.subsystem_targeting_computer", thruster = "thruster.improved_s2" },
+		},
 	},
 	{
 		id        = "independent",
@@ -59,35 +96,63 @@ local ALLEGIANCES = {
 		faction   = "Independent",
 		location  = SystemPath.New(-1, 0, 0, 0, 16), -- System Administration Resting, Barnard's Star
 		desc      = "STARTING FACTION: Independent Frontier (Barnard's Star — System Admin. Resting | ~6 ly from Sol)\nAn autonomous orbital frontier station surrounded by resource-rich asteroid bodies and close jump corridors to Sol. Suited for freelance couriers, prospectors, and independent operators outside superpower bureaucracy.",
+		loadoutSummary = "REGIONAL OUTFITTING (Independent): Sublight Sensor Arrays, Scan Detectors, Wake Tracer, Hypercloud Analyzer, and Fuel Scoop readiness for self-reliant ops.",
 		logPrefix = "Departing System Administration Resting orbital station (Barnard's Star) as an independent commander.",
 		trimColor = Color('D4AC0D'),
+		loadoutOverrides = {
+			trader    = { fuel_scoop_s1 = "misc.fuel_scoop_s1", utility_s1_3 = "misc.scan_detector" },
+			miner     = { utility_s1_1 = "misc.scan_detector", sensor = "sensor.sublight_array_1" },
+			explorer  = { utility_s2_1 = "misc.hypercloud_analyzer", sensor = "sensor.sublight_array_1" },
+			mercenary = { utility_s1_1 = "misc.wake_tracer", sensor = "sensor.sublight_array_1" },
+		},
 	},
 	{
 		id        = "rim_commonwealth",
 		name      = "Rim Commonwealth (Orthethio — van der Linden Orbital | ~37 ly)",
 		faction   = "Rim Commonwealth",
-		location  = SystemPath.New(-2, -26, -26, 0, 32), -- van der Linden Orbital, Orthethio
+		location  = SystemPath.New(-2, -26, -26, 0, 8), -- van der Linden Orbital, Orthethio
 		desc      = "STARTING FACTION: Rim Commonwealth (Orthethio System — van der Linden Orbital | ~37 ly from Sol)\nA thriving Rim territory confederation with extensive orbital commerce and frontier trade networks. Distant from Core politics, Orthethio features bustling commodity depots, orbital staging platforms, and active Alliance Security.",
+		loadoutSummary = "REGIONAL OUTFITTING (Rim Commonwealth): Defensive ECM suites, Scan Detectors, Interdiction Nullifier protection, and expanded auxiliary cargo/surface survey gear.",
 		logPrefix = "Commissioned at van der Linden Orbital (Orthethio) in Rim Commonwealth space.",
 		trimColor = Color('8E44AD'),
+		loadoutOverrides = {
+			trader    = { utility_s1_3 = "misc.ecm_basic", utility_s1_4 = "misc.scan_detector" },
+			miner     = { utility_s1_1 = "misc.planetscanner", utility_s1_2 = "misc.scan_detector" },
+			explorer  = { utility_s2_1 = "misc.ecm_basic", cabin_s1_2 = "misc.cabin_hold_s1" },
+			mercenary = { computer_2 = "misc.interdiction_nullifier", utility_s1_1 = "misc.scan_detector" },
+		},
 	},
 	{
 		id        = "druello_pirates",
 		name      = "Druello Pirates (Anvisium — Karlsen Orbital Haven | ~61 ly)",
 		faction   = "Druello Pirates",
-		location  = SystemPath.New(-57, 9, -21, 2, 28), -- Karlsen Orbital Haven, Anvisium
+		location  = SystemPath.New(-57, 9, -21, 2, 6), -- Karlsen Orbital Haven, Anvisium
 		desc      = "STARTING FACTION: Druello Pirates (Anvisium System — Karlsen Orbital Haven | ~61 ly from Sol)\nA lawless deep-space pirate enclave established by Captain Oren Druello, a defector SolFed naval commander. Far outside the reach of Core authorities, this orbital haven offers illicit black market trade, untaxed equipment outfitting, and lucrative privateering contracts for outlaws and mercenaries.",
+		loadoutSummary = "REGIONAL OUTFITTING (Druello Pirates): Concealed Smuggler Cargo Racks, Scan Detectors, FSD Interdictor, Wake Tracer, and mixed Beam/Dual-Pulse pirate weaponry.",
 		logPrefix = "Departing Karlsen Orbital Haven (Anvisium) under the Druello Pirate black flag.",
 		trimColor = Color('C0392B'),
+		loadoutOverrides = {
+			trader    = { cabin_s1_1 = "misc.cabin_smuggler_hold_s1", utility_s1_3 = "misc.scan_detector", weapon_s2_1 = "laser.pulsecannon_dual_1mw" },
+			miner     = { cabin_s1_1 = "misc.cabin_smuggler_hold_s1", utility_s1_1 = "misc.scan_detector", computer_2 = "misc.fsd_interdictor_1" },
+			explorer  = { weapon_s2_1 = "laser.beamlaser_1mw", utility_s2_1 = "misc.scan_detector", cabin_s1_2 = "misc.cabin_smuggler_hold_s1" },
+			mercenary = { laser_front_s2 = "laser.pulsecannon_dual_1mw", weapon_left_s1 = "laser.beamlaser_1mw", weapon_right_s1 = "laser.beamlaser_1mw", utility_s1_1 = "misc.wake_tracer" },
+		},
 	},
 	{
 		id        = "free_systems",
 		name      = "Free Systems (Torashay — Orbital Gateway | ~81 ly)",
 		faction   = "Free Systems",
-		location  = SystemPath.New(-18, -56, -56, 0, 32), -- Torashay Orbital Gateway, Torashay
+		location  = SystemPath.New(-18, -56, -56, 0, 5), -- Torashay Orbital Gateway, Torashay
 		desc      = "STARTING FACTION: Free Systems (Torashay System — Torashay Orbital Gateway | ~81 ly from Sol)\nA fiercely sovereign league of frontier systems located over 80 light years from Sol. Known for raw ore extraction, rugged orbital staging platforms, and open borders with the deep unexplored expanse.",
+		loadoutSummary = "REGIONAL OUTFITTING (Free Systems): Hypercloud Analyzers for deep-frontier wake tracking, Subsystem Targeting Computer, heavy 2MW/Dual Pulse Cannons, and dual Miner shields.",
 		logPrefix = "Cleared from Torashay Orbital Gateway (Torashay) on the outer Free Systems frontier.",
 		trimColor = Color('16A085'),
+		loadoutOverrides = {
+			trader    = { weapon_s2_1 = "laser.pulsecannon_2mw", utility_s1_3 = "misc.hypercloud_analyzer" },
+			miner     = { utility_s1_1 = "misc.planetscanner", shield_s1_2 = "shield.basic_s1" },
+			explorer  = { weapon_s2_1 = "laser.pulsecannon_dual_1mw", utility_s2_1 = "misc.hypercloud_analyzer" },
+			mercenary = { utility_s1_1 = "misc.hypercloud_analyzer", computer_2 = "misc.subsystem_targeting_computer" },
+		},
 	},
 	{
 		id        = "obsidian_worlds",
@@ -95,8 +160,63 @@ local ALLEGIANCES = {
 		faction   = "Obsidian Worlds",
 		location  = SystemPath.New(-60, -44, -44, 0, 13), -- Meyer Anchorage, Hagildrorn
 		desc      = "STARTING FACTION: Obsidian Worlds (Hagildrorn System — Meyer Anchorage | ~86 ly from Sol)\nA remote, heavily fortified sector perched on the edge of charted space ~86 light years from Sol. Known for stark extraction facilities, autonomous defense syndicates, and high bounties on perimeter threats.",
+		loadoutSummary = "REGIONAL OUTFITTING (Obsidian Worlds): Standard Sublight Sensor Array across all hulls, Subsystem Targeting Computers, Beam Laser optics, and Miner ECM.",
 		logPrefix = "Departing Meyer Anchorage (Hagildrorn) in the deep Obsidian Worlds rim.",
 		trimColor = Color('5D6D7E'),
+		loadoutOverrides = {
+			trader    = { sensor = "sensor.sublight_array_1", weapon_s2_1 = "laser.beamlaser_1mw" },
+			miner     = { sensor = "sensor.sublight_array_1", utility_s1_1 = "misc.ecm_basic" },
+			explorer  = { sensor = "sensor.sublight_array_1", computer_3 = "misc.subsystem_targeting_computer" },
+			mercenary = { sensor = "sensor.sublight_array_1", computer_2 = "misc.subsystem_targeting_computer", laser_front_s2 = "laser.beamlaser_dual_1mw" },
+		},
+	},
+	{
+		id        = "tolisian",
+		name      = "Tolisian Scientific Community (Torisay — Ruiz Gateway | ~79 ly)",
+		faction   = "Tolisian Scientific Community",
+		location  = SystemPath.New(4, -1, 9, 0, 13), -- Ruiz Gateway, Torisay
+		desc      = "STARTING FACTION: Tolisian Scientific Community (Torisay System — Ruiz Gateway | ~79 ly from Sol)\nAn enclave of prosperous technocratic worlds governed by an elite scientific council in the outer positive-Z sector. Tolisians outlaw aggressive weaponry and enforce strict human rights, favoring defensive deterrence, long-range telemetry, and peaceful orbital research.",
+		loadoutSummary = "REGIONAL OUTFITTING (Tolisian): High-precision Sublight Sensor Arrays, Autopilot Mk 2 flight computers, Interdiction Nullifier defense, Orbital/Surface survey optics, and Dual Beam Lasers.",
+		logPrefix = "Cleared from Ruiz Gateway (Torisay) under Tolisian Scientific Community charter.",
+		trimColor = Color('9B59B6'),
+		loadoutOverrides = {
+			trader    = { utility_s1_3 = "misc.planetscanner", computer = "misc.autopilot_mk2", sensor = "sensor.sublight_array_1" },
+			miner     = { utility_s1_1 = "misc.orbitscanner", computer_1 = "misc.autopilot_mk2", sensor = "sensor.sublight_array_1" },
+			explorer  = { sensor = "sensor.sublight_array_1", computer_3 = "misc.trade_computer", utility_s2_1 = "misc.hypercloud_analyzer" },
+			mercenary = { computer_2 = "misc.interdiction_nullifier", sensor = "sensor.sublight_array_1", laser_front_s2 = "laser.beamlaser_dual_1mw" },
+		},
+	},
+	{
+		id        = "blood_expanse",
+		name      = "Blood Expanse (Nikunito — Medina Industrial Center | ~260 ly)",
+		faction   = "Blood Expanse",
+		location  = SystemPath.New(22, -17, -17, 1, 15), -- Medina Industrial Center, Nikunito
+		desc      = "STARTING FACTION: Blood Expanse (Nikunito System — Medina Industrial Center | ~260 ly from Sol)\nA vast, heavily industrialized outer collective far across the +X frontier. Forged around deep-core ore refineries and relentless freight quotas, Expanse shipyards turn out over-engineered workhorse vessels built to haul heavy loads and survive frontier ambushes.",
+		loadoutSummary = "REGIONAL OUTFITTING (Blood Expanse): Auxiliary Cargo Racks on Traders/Miners, heavy 2MW Pulse Cannons, dual Miner shields, and Improved S2/S3 Thrusters.",
+		logPrefix = "Launched from Medina Industrial Center (Nikunito) deep within the Blood Expanse.",
+		trimColor = Color('922B21'),
+		loadoutOverrides = {
+			trader    = { cabin_s1_2 = "misc.cabin_hold_s1", weapon_s2_1 = "laser.pulsecannon_2mw" },
+			miner     = { shield_s1_2 = "shield.basic_s1", cabin_s1_2 = "misc.cabin_hold_s1" },
+			explorer  = { weapon_s2_1 = "laser.pulsecannon_2mw", thruster = "thruster.improved_s3" },
+			mercenary = { thruster = "thruster.improved_s2", utility_s1_1 = "misc.scan_detector" },
+		},
+	},
+	{
+		id        = "stellar_union",
+		name      = "Stellar Union (Gligril — Davanzati Residence | ~377 ly)",
+		faction   = "Stellar Union",
+		location  = SystemPath.New(44, 12, 12, 1, 3), -- Davanzati Residence, Gligril
+		desc      = "STARTING FACTION: Stellar Union (Gligril System — Davanzati Residence | ~377 ly from Sol)\nA distant, militarized frontier stratocracy on the far +X/+Y/+Z rim nearly 380 light years from Earth. Patrolled by the Union Battle Flight and Stellar Prefecture, local starports outfit civilian and mercenary hulls alike with tactical targeting avionics, ECM, and pursuit sensors.",
+		loadoutSummary = "REGIONAL OUTFITTING (Stellar Union): Subsystem Targeting Computers, ECM suites, Target Scanners, Wake Tracer pursuit telemetry, and mixed Dual-Pulse / Beam batteries.",
+		logPrefix = "Deployed from Davanzati Residence (Gligril) under Stellar Union Prefecture clearance.",
+		trimColor = Color('2980B9'),
+		loadoutOverrides = {
+			trader    = { weapon_s2_1 = "laser.pulsecannon_dual_1mw", utility_s1_3 = "misc.target_scanner", utility_s1_4 = "misc.ecm_basic" },
+			miner     = { utility_s1_1 = "misc.target_scanner", utility_s1_2 = "misc.ecm_basic" },
+			explorer  = { weapon_s2_1 = "laser.beamlaser_1mw", computer_3 = "misc.subsystem_targeting_computer", utility_s2_1 = "misc.target_scanner" },
+			mercenary = { computer_2 = "misc.subsystem_targeting_computer", utility_s1_1 = "misc.wake_tracer", laser_front_s2 = "laser.pulsecannon_dual_1mw", weapon_left_s1 = "laser.beamlaser_1mw", weapon_right_s1 = "laser.beamlaser_1mw" },
+		},
 	},
 }
 
@@ -209,15 +329,27 @@ local function composeStartVariant(allegianceIdx, roleIdx)
 		role.colors[2],
 		allegiance.trimColor or role.colors[3],
 	}
+	local equipment = table.deepcopy(role.equipment)
+	local overrides = allegiance.loadoutOverrides and allegiance.loadoutOverrides[role.id]
+	if overrides then
+		for slot, itemId in pairs(overrides) do
+			equipment[slot] = itemId
+		end
+	end
+	local desc = allegiance.desc
+	if allegiance.loadoutSummary then
+		desc = desc .. "\n" .. allegiance.loadoutSummary
+	end
+	desc = desc .. "\n\n" .. role.desc
 	return {
 		name      = allegiance.name .. " — " .. role.name,
-		desc      = allegiance.desc .. "\n\n" .. role.desc,
+		desc      = desc,
 		location  = allegiance.location,
 		faction   = allegiance.faction,
 		logmsg    = allegiance.logPrefix .. " " .. role.logRole,
 		shipType  = role.shipType,
 		money     = role.money,
-		equipment = table.deepcopy(role.equipment),
+		equipment = equipment,
 		cargo     = table.deepcopy(role.cargo),
 		pattern   = role.pattern,
 		colors    = colors,
@@ -359,6 +491,18 @@ local function startGame(gameParams)
 		drive:SetFuel(player, drive:GetMaxFuel())
 	end
 
+	-- Force initial residency at the starting station with 42 days remaining on the 90-day lock
+	-- (only for predefined allegiance starts; Custom Start begins stateless with no residency)
+	if startMode == "PREDEFINED" then
+		local startStation = player:GetDockedWith()
+		if startStation then
+			local okTax, TaxAuthority = pcall(require, 'modules.Economy.TaxAuthority')
+			if okTax and TaxAuthority and TaxAuthority.SetInitialResidency then
+				TaxAuthority.SetInitialResidency(startStation, 42)
+			end
+		end
+	end
+
 	for _, entry in ipairs(gameParams.flightlog.Custom) do
 		if FlightLog.InsertCustomEntry(entry) then
 			-- ok then
@@ -445,8 +589,38 @@ local function hasNameInArray(param, array)
 end
 
 local function unlockAll()
+	startMode = "DEBUG_UNLOCK"
+	ShipParam.Equip.budgetTotal = false
+	ShipParam.Type:setAllowedShips(nil, false)
 	Layout.setLock(false)
 	FlightLogParam.value.Custom = {{ entry = "Custom start of the game - for the purpose of debugging or cheat." }}
+end
+
+local function applyCustomBudgetStart()
+	startMode = "CUSTOM_BUDGET"
+	ShipParam.Type:setAllowedShips(CUSTOM_START_SHIPS, true)
+	ShipParam.Equip.budgetTotal = CUSTOM_START_BUDGET
+	setStartVariant({
+		name      = "Custom Start — Independent Budget",
+		desc      = "CUSTOM START (INDEPENDENT BUDGET — 115,000 Cr)\nChoose any basic starter hull on the Ship tab, purchase your own equipment loadout within budget (unspent credits become starting cash), and select your starting system or station on the Location tab.\n\nRESIDENCY: Stateless / Unregistered (no home station residency assigned at start).",
+		location  = SystemPath.New(-1, 0, 0, 0, 16), -- Barnard's Star orbital default; freely changeable
+		logmsg    = "Departing on an independent custom charter with no faction residency.",
+		shipType  = "coronatrix",
+		money     = 0,
+		equipment = {
+			computer_1 = "misc.autopilot",
+			sensor     = "sensor.radar",
+			hyperdrive = "hyperspace.hyperdrive_1",
+			thruster   = "thruster.default_s1",
+		},
+		cargo     = {},
+		pattern   = 1,
+		colors    = { Color('2C3E50'), Color('ABB2B9'), Color('D4AC0D') },
+	})
+	ShipParam.Type.lock = false
+	ShipParam.Equip.lock = false
+	ShipParam.Model.lock = false
+	LocationParam.lock = false
 end
 
 -- wait a few frames, and then calculate the static layout (updateLayout)
@@ -456,7 +630,12 @@ local function applySelectedStartProfile()
 	local action = roleCombo.actions[roleCombo.selected + 1]
 	if action == 'DO_UNLOCK' then
 		unlockAll()
+	elseif action == 'CUSTOM_BUDGET' then
+		applyCustomBudgetStart()
 	else
+		startMode = "PREDEFINED"
+		ShipParam.Equip.budgetTotal = false
+		ShipParam.Type:setAllowedShips(nil, false)
 		setStartVariant(composeStartVariant(allegianceCombo.selected + 1, roleCombo.selected + 1))
 	end
 	updateParams()
@@ -474,10 +653,14 @@ NewGameWindow = ModalWindow.New("New Game", function()
 			ui.text((lui.ALLEGIANCE or "Allegiance") .. ":")
 			ui.sameLine()
 			ui.nextItemWidth(comboWidth)
-			local changedAllegiance, retAllegiance = ui.combo("##allegiance_select", allegianceCombo.selected, allegianceCombo.items)
-			if changedAllegiance then
-				allegianceCombo.selected = retAllegiance
-				applySelectedStartProfile()
+			if startMode == "CUSTOM_BUDGET" then
+				Widgets.combo(true, "##allegiance_select", 0, { "Independent / Select on Location Tab (No Residency)" })
+			else
+				local changedAllegiance, retAllegiance = ui.combo("##allegiance_select", allegianceCombo.selected, allegianceCombo.items)
+				if changedAllegiance then
+					allegianceCombo.selected = retAllegiance
+					applySelectedStartProfile()
+				end
 			end
 
 			ui.sameLine(0, ui.getItemSpacing().x * 2)
@@ -582,6 +765,8 @@ function NewGameWindow:buildProfileCombo()
 	for _, r in ipairs(CAREER_ROLES) do
 		table.insert(roleCombo.items, r.name)
 	end
+	table.insert(roleCombo.items, "Custom Start (Independent Budget)")
+	roleCombo.actions[#roleCombo.items] = 'CUSTOM_BUDGET'
 	if self.debugMode then
 		table.insert(roleCombo.items, "Custom Start (Unlocked)")
 		roleCombo.actions[#roleCombo.items] = 'DO_UNLOCK'
@@ -599,6 +784,9 @@ local firstOpen = true
 function NewGameWindow:open()
 	if (firstOpen or not self.debugMode) and self.mode ~= 'RECOVER' then
 		firstOpen = false
+		startMode = "PREDEFINED"
+		ShipParam.Equip.budgetTotal = false
+		ShipParam.Type:setAllowedShips(nil, false)
 		allegianceCombo.selected = 0
 		roleCombo.selected = 0
 		setStartVariant(composeStartVariant(1, 1))

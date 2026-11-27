@@ -31,6 +31,7 @@ local Crew = require 'pigui.modules.new-game-window.crew'
 local layout = {}
 local ShipModel = {}
 local ShipSummary = {}
+local ShipEquip
 
 --
 -- ship type
@@ -47,6 +48,32 @@ ShipType.idMap = {}
 ShipType.selected = 0
 
 table.sort(ShipType.shipIDs)
+ShipType.allShipIDs = table.copy(ShipType.shipIDs)
+
+function ShipType:setAllowedShips(allowedList, showPrices)
+	local sourceIDs = allowedList or self.allShipIDs
+	self.shipIDs = {}
+	self.shipNames = {}
+	self.idMap = {}
+	for _, id in ipairs(sourceIDs) do
+		local def = ShipDef[id]
+		if def and def.tag == 'SHIP' then
+			table.insert(self.shipIDs, id)
+			self.idMap[id] = true
+			if showPrices then
+				table.insert(self.shipNames, string.format("%s (%s)", ls[def.i18n_key], ui.Format.Money(def.basePrice or 0, false)))
+			else
+				table.insert(self.shipNames, ls[def.i18n_key])
+			end
+		end
+	end
+	local index = utils.indexOf(self.shipIDs, self.value)
+	if index then
+		self.selected = index - 1
+	elseif #self.shipIDs > 0 then
+		self:setShipID(self.shipIDs[1])
+	end
+end
 
 for _, id in ipairs(ShipType.shipIDs) do
 	table.insert(ShipType.shipNames, ls[ShipDef[id].i18n_key])
@@ -60,7 +87,11 @@ function ShipType:draw()
 		local changed, ret = Widgets.combo(self.lock, "##shipNames", self.selected, self.shipNames)
 		if changed then
 			ShipModel.value.pattern = 1
-			self:setShipID(self.shipIDs[ret + 1])
+			local newShipID = self.shipIDs[ret + 1]
+			if ShipEquip.budgetTotal then
+				ShipEquip:resetForShip(newShipID)
+			end
+			self:setShipID(newShipID)
 		end
 	end)
 end
@@ -434,7 +465,7 @@ ShipCargo.reader = Helpers.versioned {{
 --
 -- ship equipment
 --
-local ShipEquip = GameParam.New(lui.EQUIPMENT, "ship.equipment")
+ShipEquip = GameParam.New(lui.EQUIPMENT, "ship.equipment")
 
 -- tree
 --    string (slot id) -> string (installed equipment id),
@@ -475,6 +506,8 @@ ShipEquip.editDialog = {}
 ShipEquip.summaryList = {}
 ShipEquip.mass = 0
 ShipEquip.volume = 0
+ShipEquip.totalCost = 0
+ShipEquip.budgetTotal = false
 ShipEquip.hyperDriveClass = 0
 ShipEquip.thrusterUpgradeLevel = 0
 
@@ -482,6 +515,35 @@ ShipEquip.indent = '   '
 ShipEquip.warningSign = '⚠'
 -- TODO: localize "S" symbol?
 ShipEquip.sizeLetter = 'S'
+
+function ShipEquip:resetForShip(shipID)
+	local config = HullConfig.GetHullConfig(shipID)
+	local eq = {}
+	if config and config.slots then
+		local computerSlot = nil
+		local computerSlots = {}
+		for slotID, slot in pairs(config.slots) do
+			if slot.default
+				and not EquipSet.SlotTypeMatches(slot.type, "missile_bay")
+				and not EquipSet.SlotTypeMatches(slot.type, "pylon")
+			then
+				eq[slotID] = slot.default
+			end
+			if EquipSet.SlotTypeMatches(slot.type, "computer") then
+				table.insert(computerSlots, slotID)
+			end
+		end
+		table.sort(computerSlots)
+		computerSlot = computerSlots[1]
+		if computerSlot then
+			eq[computerSlot] = "misc.autopilot"
+		end
+		if config.slots.sensor then
+			eq.sensor = "sensor.radar"
+		end
+	end
+	self.value = eq
+end
 
 function ShipEquip:removeItem(path)
 
@@ -860,7 +922,7 @@ function ShipEquip:getEquipParams(itemID)
 	local obj = Equipment.Get(itemID)
 	if not obj then return { name = itemName } end
 
-	return { name = itemName, mass = obj.mass or 0.0, volume = obj.volume or 0.0 }
+	return { name = itemName, mass = obj.mass or 0.0, volume = obj.volume or 0.0, price = obj.price or 0.0 }
 end
 
 -- return path or nil
@@ -1133,6 +1195,7 @@ function ShipEquip:update()
 	self.valid = true
 	self.volume = 0
 	self.mass = 0
+	self.totalCost = 0
 
 	for _, item in ipairs(self.viewData) do
 		if item.errorString then
@@ -1147,6 +1210,9 @@ function ShipEquip:update()
 
 		local eq = Equipment.Get(item.itemID)
 		local slot = self:slotObjectByPath(item.path)
+		if eq then
+			self.totalCost = self.totalCost + (eq.price or 0) * (slot and slot.count or 1)
+		end
 		local isThruster = slot and slot.type and EquipSet.SlotTypeMatches(slot.type, "thruster")
 		local isHyperDrive = slot and slot.type and EquipSet.SlotTypeMatches(slot.type, "hyperdrive")
 
@@ -1157,6 +1223,11 @@ function ShipEquip:update()
 		elseif eq then
 			addToList(self.summaryList, eq, 1)
 		end
+	end
+
+	if self.budgetTotal then
+		local shipPrice = (ShipDef[ShipType.value] and ShipDef[ShipType.value].basePrice) or 0
+		Crew.Player.Money.value = math.floor(self.budgetTotal - shipPrice - self.totalCost)
 	end
 
 	ShipSummary:prepareAndValidateParamList()
@@ -1225,8 +1296,18 @@ ShipEquip.editDialog = ModalWindow.New('ShipEquipEditDialog', function(self)
 		property(leq.STAT_VOLUME, self.selectedItemProperties.volume, ui.Format.Volume)
 		ui.sameLine()
 		property(lc.MASS, self.selectedItemProperties.mass, function(v) return ui.Format.Mass(v * 1000, 0) end)
+		if ShipEquip.budgetTotal then
+			ui.sameLine()
+			property((lc.PRICE or "Price") .. ":", self.selectedItemProperties.price, function(v) return ui.Format.Money(v or 0, false) end)
+		end
 	else
 		ui.text("")
+	end
+	if ShipEquip.budgetTotal then
+		local rem = Crew.Player.Money.value
+		ui.withStyleColors(rem < 0 and { Text = ui.theme.colors.alertRed } or {}, function()
+			ui.text("Budget Remaining: " .. ui.Format.Money(rem, false))
+		end)
 	end
 
 	if ui.button(self.rightPanel.switchLabel) then
@@ -1326,11 +1407,41 @@ function (_, drawPopupFn)
 	ui.withFont(Defs.mainFont, drawPopupFn)
 end)
 
+local CUSTOM_START_RESTRICTED = {
+	["misc.warrant_scanner"] = true,
+	["misc.wake_tracer"] = true,
+	["misc.autopilot_mk3"] = true,
+	["misc.autopilot_mk4"] = true,
+	["misc.fsd_interdictor_2"] = true,
+	["misc.fsd_interdictor_3"] = true,
+	["sensor.sublight_array_2"] = true,
+	["sensor.sublight_array_3"] = true,
+	["misc.shield_energy_booster"] = true,
+	["laser.small_plasma_accelerator"] = true,
+	["laser.large_plasma_accelerator"] = true,
+}
+
+local function isCustomStartItemAllowed(id, obj)
+	if not obj or obj.purchasable == false then return false end
+	if CUSTOM_START_RESTRICTED[id] then return false end
+	if obj.tech_level == "MILITARY" then return false end
+	if obj.lawlessness and obj.lawlessness > 0 then return false end
+	if obj.slot and obj.slot.type and EquipSet.SlotTypeMatches(obj.slot.type, "hyperdrive.military") then
+		return false
+	end
+	if id:match("^hyperspace%.hyperdrive_%d+_[ab]$") then
+		return false
+	end
+	return true
+end
+
 function ShipEquip.editDialog:updateData(host)
 
 	self.items = {}
 	for id, localized in pairs(host.equipNames) do
-		if host:compatibleWithShip(id, host.slots) then
+		local obj = Equipment.Get(id)
+		local allowed = (not host.budgetTotal) or isCustomStartItemAllowed(id, obj)
+		if allowed and host:compatibleWithShip(id, host.slots) then
 			table.insert(self.items, { id = id, localized = localized })
 		end
 	end
@@ -1878,6 +1989,14 @@ function ShipSummary:prepareAndValidateParamList()
 		{ lui.CARGO_SPACE .. ":", cargoStr, color = nil },
 		{ (lui.CREW_CABINS or "Living Space") .. ":", crewStr, color = nil },
 	}
+	if ShipEquip.budgetTotal then
+		local rem = Crew.Player.Money.value
+		table.insert(paramList, 1, {
+			"Budget Remaining:",
+			ui.Format.Money(rem, false),
+			color = (rem < 0) and ui.theme.colors.alertRed or nil,
+		})
+	end
 	self.cargo.valid = self.cargo.valid and eq_n_cargo.valid
 	self.equip.valid = self.equip.valid and eq_n_cargo.valid
 	return paramList

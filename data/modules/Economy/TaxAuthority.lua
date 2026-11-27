@@ -304,7 +304,7 @@ function TaxAuthority.GetResidencyInfo()
 	local canChange = true
 	local progress = 1.0
 
-	if state.isResident and state.residencyTimestamp > 0 then
+	if state.isResident and state.residencyTimestamp ~= nil then
 		local elapsed = curTime - state.residencyTimestamp
 		local termSeconds = RESIDENCY_TERM_DAYS * SECONDS_PER_DAY
 		if elapsed < termSeconds then
@@ -349,17 +349,7 @@ function TaxAuthority.CanChangeResidency()
 	return info.canChange, info.remainingDays
 end
 
-function TaxAuthority.RegisterResidency(station)
-	if not station then return false, "No station specified." end
-	local okPenal, PenalSystem = pcall(require, 'modules.Penal.PenalSystem')
-	if okPenal and PenalSystem and PenalSystem.IsPrisonStation(station) then
-		return false, "Civil residency and home-port registration are prohibited at penal facilities."
-	end
-	local canChange, remainingDays = TaxAuthority.CanChangeResidency()
-	if not canChange then
-		return false, string.format("Current residency term active. %d days remaining before re-registration permitted.", remainingDays)
-	end
-
+local function applyResidencyState(station, timestamp)
 	local sys = Game.system
 	local factionName = (sys and sys.faction and sys.faction.name) or "Independent Systems"
 	local sysName = (sys and sys.name) or "Unknown System"
@@ -372,11 +362,59 @@ function TaxAuthority.RegisterResidency(station)
 	state.homeStationPath = station.path and tostring(station.path) or nil
 	state.homeStationSystemPath = station.path
 	state.homeSystemPath = station.path and station.path:SystemOnly() or (sys and sys.path and sys.path:SystemOnly()) or nil
-	state.residencyTimestamp = Game.time or 0
+	state.residencyTimestamp = timestamp
+
+	return stationName, sysName, factionName
+end
+
+function TaxAuthority.RegisterResidency(station)
+	if not station then return false, "No station specified." end
+	local okPenal, PenalSystem = pcall(require, 'modules.Penal.PenalSystem')
+	if okPenal and PenalSystem and PenalSystem.IsPrisonStation(station) then
+		return false, "Civil residency and home-port registration are prohibited at penal facilities."
+	end
+	local canChange, remainingDays = TaxAuthority.CanChangeResidency()
+	if not canChange then
+		return false, string.format("Current residency term active. %d days remaining before re-registration permitted.", remainingDays)
+	end
+
+	local sys = Game.system
+	local targetFaction = (sys and sys.faction and sys.faction.name) or "Independent Systems"
+
+	local okRoles, FactionRoles = pcall(require, 'FactionRoles')
+	if okRoles and FactionRoles and FactionRoles.CanChangeResidencyToFaction then
+		local canMove, lockReason = FactionRoles.CanChangeResidencyToFaction(targetFaction)
+		if not canMove then
+			return false, lockReason
+		end
+	end
+
+	local stationName, sysName, factionName = applyResidencyState(station, Game.time or 0)
+
+	if okRoles and FactionRoles and FactionRoles.OnResidencyChanged then
+		FactionRoles.OnResidencyChanged(factionName)
+	end
 
 	TaxAuthority.SyncHomeBookmark()
 	Event.Queue("onResidencyRegistered", stationName, sysName, factionName)
 	return true, string.format("Successfully registered residency at %s (%s, %s). Term: 90 days.", stationName, sysName, factionName)
+end
+
+function TaxAuthority.SetInitialResidency(station, remainingDays)
+	if not station then return false, "No station specified." end
+	local okPenal, PenalSystem = pcall(require, 'modules.Penal.PenalSystem')
+	if okPenal and PenalSystem and PenalSystem.IsPrisonStation(station) then
+		return false, "Civil residency and home-port registration are prohibited at penal facilities."
+	end
+
+	local remaining = math.clamp(tonumber(remainingDays) or RESIDENCY_TERM_DAYS, 0, RESIDENCY_TERM_DAYS)
+	local elapsedDays = RESIDENCY_TERM_DAYS - remaining
+	local ts = (Game.time or 0) - (elapsedDays * SECONDS_PER_DAY)
+	local stationName, sysName, factionName = applyResidencyState(station, ts)
+
+	TaxAuthority.SyncHomeBookmark()
+	Event.Queue("onResidencyRegistered", stationName, sysName, factionName)
+	return true
 end
 
 function TaxAuthority.GetInsuranceDiscount()
@@ -1236,17 +1274,18 @@ function TaxAuthority.SyncHomeBookmark()
 		return
 	end
 
+	local homeNote = string.format("Home Port: %s — %s (%s)", state.homeStationName or "Station", state.homeSystemName or "Home", state.homeFaction or "Independent")
 	if matchingRegularId then
 		local b = bookmarks[matchingRegularId]
 		b.isHome = true
 		if not b.note or b.note == "" then
-			b.note = string.format("Registered Home Station — %s (%s)", state.homeSystemName or "Home", state.homeFaction or "Independent")
+			b.note = homeNote
 		end
 		PlayerState.UpdateBookmark(matchingRegularId, b)
 	else
 		PlayerState.AddBookmark(targetPath, {
 			isHome = true,
-			note = string.format("Registered Home Station — %s (%s)", state.homeSystemName or "Home", state.homeFaction or "Independent"),
+			note = homeNote,
 		})
 	end
 end

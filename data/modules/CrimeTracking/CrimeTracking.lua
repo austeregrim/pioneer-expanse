@@ -108,8 +108,20 @@ local onJettison = function(ship, cargo)
 end
 
 
+local function isCombatZoneHostile(ship)
+	if not ship then return false end
+	local okCZ, FrontlineCZ = pcall(require, 'modules.FrontlineSupport.FrontlineCombatZones')
+	return (okCZ and FrontlineCZ and FrontlineCZ.IsHostileTarget and FrontlineCZ.IsHostileTarget(ship)) or false
+end
+
 local onShipHit = function(ship, attacker)
 	if attacker and attacker:IsPlayer() then
+		if isCombatZoneHostile(ship) then
+			return
+		end
+		if Legal.CanDeputyExecuteWarrant and Legal.CanDeputyExecuteWarrant(attacker, ship, Game.system) then
+			return
+		end
 		Legal:notifyOfCrime(attacker,"PIRACY")
 	end
 end
@@ -121,18 +133,29 @@ local onShipInterdicted = function(ship, attacker)
 	if policeId and attacker.shipId == policeId then
 		return
 	end
-	if attacker:IsPlayer() and not (ship.IsWanted and ship:IsWanted()) then
-		if sys and sys.population > 0 and sys.lawlessness < 0.85 then
-			local _, fineBefore = PlayerState.GetCrimeOutstanding()
-			Legal:notifyOfCrime(attacker, "PIRACY")
-			local _, fineAfter = PlayerState.GetCrimeOutstanding()
-			if fineAfter == fineBefore then
-				local newFine = Legal:fine("PIRACY", sys.lawlessness)
-				PlayerState.AddCrime("PIRACY", newFine)
-				fineAfter = fineBefore + newFine
-			end
-			if Game.player and Game.player.SetWanted then
-				Game.player:SetWanted(fineAfter > maxFineTolerated, fineAfter)
+	if attacker:IsPlayer() then
+		if isCombatZoneHostile(ship) then
+			return
+		end
+		if Legal.CanDeputyExecuteWarrant and Legal.CanDeputyExecuteWarrant(attacker, ship, sys) then
+			return
+		end
+		if not (ship.IsWanted and ship:IsWanted()) then
+			if sys and sys.population > 0 and sys.lawlessness < 0.85 then
+				local _, fineBefore = PlayerState.GetCrimeOutstanding()
+				Legal:notifyOfCrime(attacker, "PIRACY")
+				local _, fineAfter = PlayerState.GetCrimeOutstanding()
+				if fineAfter == fineBefore then
+					local newFine = Legal:fine("PIRACY", sys.lawlessness)
+					PlayerState.AddCrime("PIRACY", newFine)
+					fineAfter = fineBefore + newFine
+					if Legal.OnCrimeRecorded then
+						Legal.OnCrimeRecorded(attacker, "PIRACY", sys)
+					end
+				end
+				if Game.player and Game.player.SetWanted then
+					Game.player:SetWanted(fineAfter > maxFineTolerated, fineAfter)
+				end
 			end
 		end
 	end
@@ -143,6 +166,12 @@ local onShipDestroyed = function(ship, attacker)
 	-- Note: crash issue #887, this _should_ no longer trigger crash.
 	-- Also, attacker can be a body, which does not have an IsPlayer()
 	if attacker and attacker:isa("Ship") and attacker:IsPlayer() then
+		if isCombatZoneHostile(ship) then
+			return
+		end
+		if Legal.CanDeputyExecuteWarrant and Legal.CanDeputyExecuteWarrant(attacker, ship, Game.system) then
+			return
+		end
 		Legal:notifyOfCrime(attacker,"MURDER")
 	end
 end

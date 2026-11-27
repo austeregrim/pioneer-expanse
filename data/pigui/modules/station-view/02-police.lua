@@ -8,6 +8,7 @@ local StationView = require 'pigui.views.station-view'
 local Lang = require 'Lang'
 local Legal = require "Legal"
 local FactionRoles = require "FactionRoles"
+local FactionStanding = require "FactionStanding"
 local Event = require 'Event'
 local utils = require "utils"
 local PiGuiFace = require 'pigui.libs.face'
@@ -21,6 +22,9 @@ local l = Lang.GetResource("ui-core")
 local ModalWindow = require 'pigui.libs.modal-win'
 
 local rescaleVector = ui.rescaleUI(Vector2(1, 1), Vector2(1920, 1080), true)
+local uniformScale = math.min(rescaleVector.x, rescaleVector.y)
+local colors = ui.theme.colors
+local icons = ui.theme.icons
 
 local pionillium = ui.fonts.pionillium
 local orbiteer = ui.fonts.orbiteer
@@ -38,6 +42,9 @@ local function refreshStatusIcon()
 	view.icon = fine > 0 and ui.theme.icons.police_tab_fined or ui.theme.icons.police_tab_normal
 end
 
+local militaryStatusBanner = nil
+local militaryBannerColor = Color(100, 225, 165, 255)
+
 local popup = ModalWindow.New('policePopup', function(self)
 	ui.text(l.YOU_NOT_ENOUGH_MONEY .. ".")
 	ui.dummy(Vector2((ui.getContentRegion().x - 100*rescaleVector.x) / 2, 0))
@@ -46,6 +53,36 @@ local popup = ModalWindow.New('policePopup', function(self)
 		self:close()
 	end
 end)
+
+local resignMilitaryModal = ModalWindow.New('resignMilitaryModal', function(self)
+	local active = FactionRoles.GetActiveEnlistment() or "your faction"
+	ui.withFont(orbiteer.heading, function()
+		ui.textColored(colors.alertRed, "RESIGN MILITARY COMMISSION")
+	end)
+	ui.separator()
+	ui.spacing()
+	ui.withFont(pionillium.body, function()
+		ui.textWrapped(string.format(
+			"Resigning from %s military service will incur a -5 standing penalty and a 14-day re-enlistment cooldown. Your earned rank and XP remain preserved, and permanent rival faction enlistment lockouts remain in effect.",
+			active
+		))
+	end)
+	ui.spacing()
+	local btnW = 150 * rescaleVector.x
+	if ui.button("Confirm Resign", Vector2(btnW, 0)) then
+		local ok, msg = FactionRoles.ResignMilitary(false)
+		militaryStatusBanner = msg
+		militaryBannerColor = ok and Color(255, 185, 55, 255) or colors.alertRed
+		if ok then ui.playSfx("OK") end
+		self:close()
+	end
+	ui.sameLine()
+	if ui.button("Cancel", Vector2(btnW, 0)) then
+		self:close()
+	end
+end)
+resignMilitaryModal.centered = true
+resignMilitaryModal.size = Vector2(540 * rescaleVector.x, 0)
 
 local widgetSizes = ui.rescaleUI({
 	itemSpacing = Vector2(4, 7),
@@ -353,6 +390,231 @@ local policeTabs = {
 				end)
 			end
 		end
+	},
+	{
+		name = "Military & Deputy",
+		draw = function()
+			local sys = Game.system
+			local faction = sys and sys.faction
+			local factionName = (faction and faction.name) or "Independent"
+			local milName = (faction and faction.militaryName and faction.militaryName ~= "" and faction.militaryName)
+				or (factionName .. " Navy")
+			local station = Game.player and Game.player:GetDockedWith()
+			local okPenal, PenalSystem = pcall(require, 'modules.Penal.PenalSystem')
+			local isPrison = station and okPenal and PenalSystem and PenalSystem.IsPrisonStation(station)
+			local isStateless = FactionRoles.IsStatelessFaction(factionName)
+
+			local cit = FactionRoles.GetCitizenship()
+			local hasCitizenship = (not isStateless) and cit ~= nil and cit.factionName == factionName
+			local milInfo = FactionRoles.GetMilitaryInfo(factionName)
+			local canEnlist, enlistReason = FactionRoles.CanEnlist(factionName)
+			local green = Color(100, 225, 165, 255)
+			local amber = Color(255, 185, 55, 255)
+
+			-- Section 1: Military Enlistment
+			ui.withFont(orbiteer.heading, function()
+				ui.text("Military Service — " .. milName)
+			end)
+			ui.spacing()
+
+			if isPrison or isStateless then
+				ui.withStyleColors({ Text = colors.fontDim }, function()
+					ui.textWrapped(isPrison
+						and "Military enlistment and Deputy charters are unavailable at penal facilities."
+						or "Independent and uncontrolled systems do not maintain a regular faction military or Deputy charter.")
+				end)
+			else
+				local citStatusText = hasCitizenship
+					and string.format("Verified (%s Citizen)", factionName)
+					or (cit and string.format("Not Held Here (Citizen of %s)", cit.factionName) or "Stateless (Claim Citizenship in Lobby)")
+				ui.withStyleColors({ Text = hasCitizenship and green or amber }, function()
+					ui.text("Citizenship Status: " .. citStatusText)
+				end)
+
+				local enlistStatusText
+				local enlistStatusColor = colors.fontDim
+				if milInfo.enlisted then
+					enlistStatusText = string.format("ACTIVE COMMISSION — %s (Rank %d)", milInfo.rankTitle, milInfo.rank)
+					enlistStatusColor = green
+				elseif milInfo.blacklisted then
+					enlistStatusText = string.format("PERMANENTLY BARRED: Prior service with rival %s", milInfo.rivalFaction or "faction")
+					enlistStatusColor = colors.alertRed
+				elseif milInfo.activeFaction then
+					enlistStatusText = string.format("Enlisted Elsewhere (%s)", milInfo.activeFaction)
+					enlistStatusColor = amber
+				elseif (milInfo.reenlistCooldownDays or 0) > 0 then
+					enlistStatusText = string.format("Re-enlistment Cooldown (%d days remaining)", milInfo.reenlistCooldownDays)
+					enlistStatusColor = amber
+				else
+					enlistStatusText = "Not Enlisted"
+				end
+				ui.withStyleColors({ Text = enlistStatusColor }, function()
+					ui.text("Service Status: " .. enlistStatusText)
+				end)
+
+				ui.text(string.format("Rank: %s (%d/%s XP)   |   Hazard Bonus: +%d%%   |   Service Discount: %d%%   |   Commendations: %d",
+					milInfo.rankTitle,
+					milInfo.xp or 0,
+					milInfo.nextRankXP and tostring(milInfo.nextRankXP) or "MAX",
+					math.floor((milInfo.hazardBonus or 0) * 100),
+					math.floor((milInfo.serviceDiscount or 0) * 100),
+					milInfo.commendations or 0
+				))
+
+				-- Rank XP Progress Gauge
+				local prevMinXP = 0
+				for _, r in ipairs(FactionRoles.MILITARY_RANKS) do
+					if r.rank == milInfo.rank then
+						prevMinXP = r.minXP
+						break
+					end
+				end
+				local pct = 100
+				if milInfo.nextRankXP and milInfo.nextRankXP > prevMinXP then
+					pct = math.max(0, math.min(100, ((milInfo.xp - prevMinXP) / (milInfo.nextRankXP - prevMinXP)) * 100))
+				end
+				local gaugeHeight = math.max(math.ceil(18 * uniformScale), pionillium.details.size + 6)
+				local gaugeWidth = math.min(ui.getContentRegion().x, 420 * rescaleVector.x)
+				local gaugePos = ui.getCursorScreenPos()
+				gaugePos.y = gaugePos.y + gaugeHeight * 0.5
+				ui.dummy(Vector2(gaugeWidth, gaugeHeight))
+				ui.gauge(gaugePos, pct, '', milInfo.nextRankXP and "%d%% to Next Rank" or "Maximum Rank Achieved",
+					0, 100, icons.shield or icons.info, false, colors.gaugeEquipmentMarket, '',
+					gaugeWidth, gaugeHeight, pionillium.details)
+
+				ui.spacing()
+				if milInfo.enlisted then
+					if ui.button("Resign Commission##polResign", nil) then
+						resignMilitaryModal:open()
+					end
+				elseif canEnlist then
+					if ui.button("Enlist in " .. milName .. "##polEnlist", nil) then
+						local ok, msg = FactionRoles.Enlist(factionName)
+						militaryStatusBanner = msg
+						militaryBannerColor = ok and green or colors.alertRed
+						if ok then ui.playSfx("OK") end
+					end
+				else
+					ui.withStyleColors({ Button = ui.theme.buttonColors.disabled.normal, Text = colors.fontDim }, function()
+						ui.button("Enlistment Unavailable##polEnlistDis", nil)
+					end)
+					if enlistReason then
+						ui.sameLine()
+						ui.withStyleColors({ Text = milInfo.blacklisted and colors.alertRed or amber }, function()
+							ui.textWrapped(enlistReason)
+						end)
+					end
+				end
+
+				ui.spacing()
+				ui.separator()
+				ui.spacing()
+
+				-- Section 2: Faction Deputy Charter
+				ui.withFont(orbiteer.heading, function()
+					ui.text("Faction Deputy Charter — " .. factionName)
+				end)
+				ui.spacing()
+				ui.textWrapped("Deputized pilots receive perpetual waiver of faction bounty licence fees, faction-wide warrant access, and legal authority to interdict and engage faction-wanted targets within " .. factionName .. " jurisdiction.")
+				ui.spacing()
+
+				local elig = FactionRoles.GetDeputyEligibility(factionName)
+				local function drawCheckRow(ok, label)
+					ui.withStyleColors({ Text = ok and green or colors.alertRed }, function()
+						ui.text((ok and "[PASS] " or "[FAIL] ") .. label)
+					end)
+				end
+
+				drawCheckRow(elig.citizenshipOk, string.format("Citizenship in %s", factionName))
+				drawCheckRow(elig.standingOk, string.format("Allied Standing >= 75 (Current: %d)", elig.standing or 0))
+				drawCheckRow(elig.cleanRecordOk, string.format("Clean Criminal Record (Fine: %s)", Format.Money(elig.fine or 0)))
+				drawCheckRow(elig.credentialOk, string.format("Bounty Licence, Active Military, or 3+ Commendations (Current: %d)", elig.commendations or 0))
+				if not elig.cooldownOk then
+					drawCheckRow(false, string.format("Revocation Cooldown Expired (%d days remaining)", elig.cooldownRemDays or 0))
+				end
+
+				ui.spacing()
+				if elig.isDeputy then
+					ui.withStyleColors({ Text = green }, function()
+						ui.text("Status: ACTIVE — DEPUTIZED (PERPETUAL)")
+					end)
+				elseif elig.eligible then
+					if ui.button("Claim Deputy Charter##polDeputy", nil) then
+						local ok, msg = FactionRoles.ClaimDeputyCharter(factionName)
+						militaryStatusBanner = msg
+						militaryBannerColor = ok and green or colors.alertRed
+						if ok then ui.playSfx("OK") end
+					end
+				else
+					ui.withStyleColors({ Button = ui.theme.buttonColors.disabled.normal, Text = colors.fontDim }, function()
+						ui.button("Claim Deputy Charter (Requirements Unmet)##polDeputyDis", nil)
+					end)
+					if ui.isItemHovered() and #elig.reasons > 0 then
+						ui.setTooltip(table.concat(elig.reasons, "\n"))
+					end
+				end
+			end
+
+			-- Section 3: Naval Combat Bonds
+			local okCZ, FrontlineCZ = pcall(require, 'modules.FrontlineSupport.FrontlineCombatZones')
+			if okCZ and FrontlineCZ and FrontlineCZ.GetAllPendingBonds then
+				ui.spacing()
+				ui.separator()
+				ui.spacing()
+				ui.withFont(orbiteer.heading, function()
+					ui.text("Naval Combat Bonds")
+				end)
+				ui.spacing()
+
+				if not isPrison and not isStateless then
+					local localBonds = FrontlineCZ.GetPendingBonds(factionName)
+					if localBonds > 0 then
+						ui.withStyleColors({ Text = green }, function()
+							ui.text(string.format("Pending %s Combat Bonds: %s", factionName, Format.Money(localBonds, false)))
+						end)
+						if ui.button(string.format("Redeem Combat Bonds (%s)##polRedeemBonds", Format.Money(localBonds, false)), nil) then
+							local paid, err = FrontlineCZ.RedeemBonds(factionName)
+							if paid and paid > 0 then
+								militaryStatusBanner = string.format("Redeemed %s in %s Combat Bonds.", Format.Money(paid, false), factionName)
+								militaryBannerColor = green
+								ui.playSfx("OK")
+							elseif err then
+								militaryStatusBanner = err
+								militaryBannerColor = colors.alertRed
+							end
+						end
+					else
+						ui.withStyleColors({ Text = colors.fontDim }, function()
+							ui.text("No pending Combat Bonds for " .. factionName .. ".")
+						end)
+					end
+				end
+
+				local allBonds = FrontlineCZ.GetAllPendingBonds()
+				local otherBonds = {}
+				for _, b in ipairs(allBonds) do
+					if isPrison or isStateless or b.factionName ~= factionName then
+						table.insert(otherBonds, b)
+					end
+				end
+				if #otherBonds > 0 then
+					ui.spacing()
+					ui.withStyleColors({ Text = colors.fontDim }, function()
+						ui.text("Unredeemed Bonds Held for Other Factions:")
+					end)
+					for _, b in ipairs(otherBonds) do
+						ui.text(string.format("  • %s: %s", b.factionName, Format.Money(b.amount, false)))
+					end
+				end
+			end
+
+			if militaryStatusBanner then
+				ui.spacing()
+				ui.withStyleColors({ Text = militaryBannerColor }, function()
+					ui.textWrapped(militaryStatusBanner)
+				end)
+			end
+		end
 	}
 }
 
@@ -391,6 +653,7 @@ view = StationView:registerView({
 	showView = true,
 	draw = drawPolice,
 	refresh = function(self)
+		militaryStatusBanner = nil
 		local station = Game.player:GetDockedWith()
 		if (station) then
 			if (stationSeed ~= station.seed) then

@@ -95,6 +95,95 @@ function Legal.LookupWarrant(target, observer)
 	return (isWanted and "WANTED" or "CLEAN"), bounty, factionName
 end
 
+-- Returns true if `ship` is the player operating inside a faction system where they hold active Deputy status.
+function Legal.IsAuthorizedDeputy(ship, system)
+	if not ship or not (ship.IsPlayer and ship:IsPlayer()) then
+		return false
+	end
+	local sys = system or Game.system
+	local factionName = sys and sys.faction and sys.faction.name
+	if not factionName or FactionRoles.IsStatelessFaction(factionName) then
+		return false
+	end
+	return FactionRoles.HasActiveRole(factionName, "deputy")
+end
+
+-- Returns true if an authorized Deputy may legally interdict/engage `target` under `system`'s faction warrant.
+function Legal.CanDeputyExecuteWarrant(attacker, target, system)
+	local sys = system or Game.system
+	if not Legal.IsAuthorizedDeputy(attacker, sys) then
+		return false
+	end
+	if not target or (target.exists and not target:exists()) or not (target.IsWanted and target:IsWanted()) then
+		return false
+	end
+	if Game.system and sys ~= Game.system then
+		local curFactionName = Game.system.faction and Game.system.faction.name
+		if not curFactionName or not sys.faction or curFactionName ~= sys.faction.name then
+			return false
+		end
+	end
+	if target.GetWantedFaction then
+		local ok, wantedFaction = pcall(function() return target:GetWantedFaction() end)
+		if ok and wantedFaction and sys and sys.faction and wantedFaction ~= sys.faction.name then
+			return false
+		end
+	elseif type(target.wantedFaction) == "string" then
+		if sys and sys.faction and target.wantedFaction ~= sys.faction.name then
+			return false
+		end
+	else
+		local _, _, warrantFaction = Legal.LookupWarrant(target, attacker)
+		if warrantFaction and sys and sys.faction and warrantFaction ~= sys.faction.name then
+			return false
+		end
+	end
+	return true
+end
+
+local function handleDeputyAndMilitaryCrimeConsequences(ship, crime, system)
+	if not ship or not (ship.IsPlayer and ship:IsPlayer()) then return end
+	local sys = system or Game.system
+	local factionName = sys and sys.faction and sys.faction.name
+	if not factionName or FactionRoles.IsStatelessFaction(factionName) then
+		return
+	end
+
+	local okFine, _, totalFine = pcall(PlayerState.GetCrimeOutstanding)
+	totalFine = (okFine and type(totalFine) == "number") and totalFine or 0
+	local isWanted = (ship.IsWanted and ship:IsWanted()) or (totalFine > 5500)
+	local isSevere = (crime == "MURDER" or crime == "PIRACY")
+
+	if FactionRoles.HasActiveRole(factionName, "deputy") then
+		if isSevere or crime == "TRADING_ILLEGAL_GOODS" or isWanted then
+			local reason = string.format("Criminal offence in jurisdiction (%s)", crime or "OFFENCE")
+			if FactionRoles.RevokeDeputyCharter(factionName, reason, true) then
+				Comms.ImportantMessage(
+					string.format("%s Authority: Your Deputy Charter has been REVOKED due to %s in jurisdiction.", factionName, crime or "criminal conduct"),
+					factionName .. " Authority"
+				)
+			end
+		end
+	end
+
+	if FactionRoles.IsEnlisted(factionName) then
+		if isSevere or isWanted then
+			local reason = string.format("Criminal offence in faction jurisdiction (%s)", crime or "OFFENCE")
+			local okDis, msg = FactionRoles.ResignMilitary(true, reason)
+			if okDis then
+				Comms.ImportantMessage(
+					string.format("%s Military Command: %s", factionName, msg),
+					factionName .. " Command"
+				)
+			end
+		end
+	end
+end
+
+function Legal.OnCrimeRecorded(ship, crime, system)
+	handleDeputyAndMilitaryCrimeConsequences(ship, crime, system)
+end
+
 -- Records a police-witnessed crime citation anywhere in a policed system (including open space).
 function Legal:recordPoliceCitation(ship, crime, fineOverride, sourceLabel)
 	if not ship or not ship:IsPlayer() then return 0 end
@@ -110,6 +199,7 @@ function Legal:recordPoliceCitation(ship, crime, fineOverride, sourceLabel)
 	if Game.player and Game.player.SetWanted then
 		Game.player:SetWanted(totalFine > 5500, totalFine)
 	end
+	handleDeputyAndMilitaryCrimeConsequences(ship, crime, sys)
 	return fine
 end
 
@@ -143,6 +233,7 @@ function Legal:notifyOfCrime (ship, crime)
 	-- don't keep compounding fines, except for murder
 	if crime ~= "MURDER" and newFine < outstandingfines then newFine = 0 end
 	PlayerState.AddCrime(crime, newFine)
+	handleDeputyAndMilitaryCrimeConsequences(ship, crime, Game.system)
 end
 
 

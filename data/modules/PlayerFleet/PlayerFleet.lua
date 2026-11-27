@@ -908,6 +908,21 @@ function PlayerFleet.GetShipCombatScore(entry)
 	return weapons * 25 + shields * 15 + math.floor(captainSkill * 20)
 end
 
+function PlayerFleet.GetPassengerCap(entry)
+	if not entry then return 0 end
+	if entry.liveShip and entry.liveShip:exists() then
+		return math.max(0, (entry.liveShip["cabin_cap"] or 0) - (entry.liveShip["cabin_occupied_cap"] or 0))
+	end
+	local total = 0
+	for _, eq in ipairs(entry.equip or {}) do
+		local proto = Equipment.Get(eq.id)
+		if proto and proto.capabilities and proto.capabilities.cabin then
+			total = total + (proto.capabilities.cabin or 0)
+		end
+	end
+	return total
+end
+
 -- ============================================================================
 -- Serialization / Packing between Live Ships & Fleet Entries
 -- ============================================================================
@@ -5076,6 +5091,8 @@ local SUPPORTED_MISSION_TYPES = {
 	Combat = true,
 	Scout = true,
 	Assassination = true,
+	FrontlineSupply = true,
+	FrontlineExtraction = true,
 }
 
 function PlayerFleet.IsMissionDelegatable(mission)
@@ -5088,6 +5105,9 @@ function PlayerFleet.IsMissionDelegatable(mission)
 	end
 	if mission.status == "FAILED" or mission.status == "COMPLETED" then
 		return false, "Mission is no longer active."
+	end
+	if mission.type == "FrontlineExtraction" and mission.pickupDone then
+		return false, "Evacuees are already embarked on the Flagship."
 	end
 	return true
 end
@@ -5106,19 +5126,27 @@ function PlayerFleet.GetEligibleShipsForMission(mission)
 		if entry.captain and entry.order ~= "MISSION" and entry.status ~= "DESTROYED" then
 			local eligible = true
 			local note = "Ready"
-			if mission.type == "CargoRun" then
+			if mission.type == "CargoRun" or mission.type == "FrontlineSupply" then
 				local needed = mission.amount or 0
 				local held = (mission.cargotype and entry.cargo and entry.cargo[mission.cargotype.name]) or 0
 				local pHeld = 0
 				if mission.cargotype and Game.player then
 					pHeld = Game.player:GetComponent('CargoManager'):CountCommodity(mission.cargotype)
 				end
-				if not mission.pickup and (held + pHeld) < needed then
+				local needsPickup = (mission.pickup == true) and (not mission.cargo_picked_up)
+				if not needsPickup and (held + pHeld) < needed then
 					eligible = false
 					note = string.format("Needs %dt %s", needed, mission.cargotype and mission.cargotype:GetName() or "cargo")
 				elseif (held + PlayerFleet.GetCargoFree(entry)) < needed then
 					eligible = false
 					note = string.format("Cargo cap too small (%dt needed)", needed)
+				end
+			elseif mission.type == "FrontlineExtraction" then
+				local neededBerths = mission.passengers or 1
+				local cap = PlayerFleet.GetPassengerCap(entry)
+				if cap < neededBerths then
+					eligible = false
+					note = string.format("Needs %d passenger berths (%d installed)", neededBerths, cap)
 				end
 			elseif (mission.type == "Combat" or mission.type == "Assassination") then
 				if PlayerFleet.GetShipCombatScore(entry) < 20 then
@@ -5141,20 +5169,57 @@ function PlayerFleet.AssignMission(uid, mission)
 	local ok, reason = PlayerFleet.IsMissionDelegatable(mission)
 	if not ok then return false, reason end
 
-	local destPath = (type(mission.location) == "userdata" and mission.location)
-		or (type(mission.destination) == "userdata" and mission.destination)
-		or entry.locationPath
-	if destPath and (not destPath:IsBodyPath()) and (mission.type == "Delivery" or mission.type == "CargoRun" or mission.type == "Assassination") then
-		destPath = findNearestStationPath(destPath) or destPath
+	local destPath = nil
+	local retPath = nil
+
+	if mission.type == "FrontlineExtraction" then
+		destPath = (type(mission.originStation) == "userdata" and mission.originStation)
+			or (type(mission.destination) == "userdata" and mission.destination)
+			or entry.locationPath
+		retPath = (type(mission.location) == "userdata" and mission.location)
+			or (type(mission.domicile) == "userdata" and mission.domicile)
+			or entry.locationPath
+	elseif mission.type == "FrontlineSupply" then
+		local needsPickup = (mission.pickup == true) and (not mission.cargo_picked_up)
+		if needsPickup then
+			destPath = (type(mission.location) == "userdata" and mission.location) or entry.locationPath
+			retPath = (type(mission.domicile) == "userdata" and mission.domicile)
+				or (type(mission.station) == "userdata" and mission.station)
+				or entry.locationPath
+		else
+			destPath = (mission.pickup and type(mission.domicile) == "userdata" and mission.domicile)
+				or (type(mission.location) == "userdata" and mission.location)
+				or (type(mission.destination) == "userdata" and mission.destination)
+				or entry.locationPath
+			retPath = nil
+		end
+	else
+		destPath = (type(mission.location) == "userdata" and mission.location)
+			or (type(mission.destination) == "userdata" and mission.destination)
+			or entry.locationPath
+		if mission.type == "Scout" or mission.type == "Combat" or (mission.type == "CargoRun" and mission.pickup) then
+			retPath = (type(mission.backstation) == "userdata" and mission.backstation)
+				or (type(mission.station) == "userdata" and mission.station)
+				or (type(mission.domicile) == "userdata" and mission.domicile)
+				or entry.locationPath
+		end
 	end
 
-	local crossSys = not sameSystem(entry.locationPath, destPath)
+	if destPath and (not destPath:IsBodyPath()) and (mission.type == "Delivery" or mission.type == "CargoRun" or mission.type == "Assassination" or mission.type == "FrontlineSupply" or mission.type == "FrontlineExtraction") then
+		destPath = findNearestStationPath(destPath) or destPath
+	end
+	if retPath and not retPath:IsBodyPath() then
+		retPath = findNearestStationPath(retPath) or retPath
+	end
+
+	local crossSys = (not sameSystem(entry.locationPath, destPath))
+		or (retPath ~= nil and not sameSystem(destPath, retPath))
 	if crossSys and not PlayerFleet.HasHyperdrive(entry) then
 		return false, "Vessel has no hyperdrive installed for cross-system missions."
 	end
 
-	-- Transfer CargoRun cargo from Game.player if already aboard Flagship and not pickup
-	if mission.type == "CargoRun" and mission.cargotype and not mission.pickup then
+	-- Transfer CargoRun / FrontlineSupply cargo from Game.player if already aboard Flagship and not awaiting pickup
+	if (mission.type == "CargoRun" or mission.type == "FrontlineSupply") and mission.cargotype and not (mission.pickup and not mission.cargo_picked_up) then
 		local needed = mission.amount or 0
 		local held = (entry.cargo and entry.cargo[mission.cargotype.name]) or 0
 		if held < needed then
@@ -5171,17 +5236,6 @@ function PlayerFleet.AssignMission(uid, mission)
 			if entry.liveShip and entry.liveShip:exists() then
 				applyCargoToShip(entry.liveShip, entry.cargo)
 			end
-		end
-	end
-
-	local retPath = nil
-	if mission.type == "Scout" or mission.type == "Combat" or (mission.type == "CargoRun" and mission.pickup) then
-		retPath = (type(mission.backstation) == "userdata" and mission.backstation)
-			or (type(mission.station) == "userdata" and mission.station)
-			or (type(mission.domicile) == "userdata" and mission.domicile)
-			or entry.locationPath
-		if retPath and not retPath:IsBodyPath() then
-			retPath = findNearestStationPath(retPath) or retPath
 		end
 	end
 
@@ -5234,7 +5288,7 @@ local function completeFleetMission(entry, simNow, silentComms)
 	entry.orderEta = 0
 	entry.missionRef = nil
 
-	if not stillActive or mission.status == "FAILED" then
+	if not stillActive or mission.status == "FAILED" or mission.status == "COMPLETED" then
 		entry.orderPhase = "Docked (contract expired before completion)"
 		addLog(entry.shipName, "Mission contract expired before completion.", 0, now)
 		if dockedPath then maintainFleetShipAtStation(entry, dockedPath, now, silentComms) end
@@ -5253,8 +5307,8 @@ local function completeFleetMission(entry, simNow, silentComms)
 		return
 	end
 
-	-- Handle cargo consumption if CargoRun
-	if mission.type == "CargoRun" and mission.cargotype then
+	-- Handle cargo consumption if CargoRun or FrontlineSupply
+	if (mission.type == "CargoRun" or mission.type == "FrontlineSupply") and mission.cargotype then
 		local cname = mission.cargotype.name
 		local held = entry.cargo[cname] or 0
 		local take = math.min(held, mission.amount or 0)
@@ -5290,7 +5344,22 @@ local function completeFleetMission(entry, simNow, silentComms)
 	Character.persistent.player.reputation = oldRep + 1.5
 	Event.Queue("onReputationChanged", oldRep, Character.persistent.player.killcount, Character.persistent.player.reputation, Character.persistent.player.killcount)
 
-	if mission.factionName then
+	if mission.type == "FrontlineSupply" or mission.type == "FrontlineExtraction" then
+		local okFC, FrontlineCommon = pcall(require, 'modules.FrontlineSupport.FrontlineCommon')
+		if okFC and FrontlineCommon and FrontlineCommon.RecordFrontlineContribution then
+			local mTypeLabel = (mission.type == "FrontlineSupply") and "frontline supply" or "frontline extraction"
+			FrontlineCommon.RecordFrontlineContribution({
+				systemName    = mission.crisisSystemName,
+				factionName   = mission.factionName,
+				crisisDelta   = mission.crisisDelta,
+				militaryXP    = math.floor((mission.militaryXP or 30) * 0.65 + 0.5),
+				commendations = 1,
+				standingDelta = 3,
+				reason        = "Fleet autonomous " .. mTypeLabel .. " completed",
+				reward        = 0,
+			})
+		end
+	elseif mission.factionName then
 		pcall(function()
 			FactionStanding.ApplyMissionOutcome(mission.factionName, 2, mission.destFactionName, "Fleet autonomous contract completed")
 		end)
@@ -5302,6 +5371,7 @@ local function completeFleetMission(entry, simNow, silentComms)
 	mission.complete = false
 	mission.due = now + 1e12
 	mission.location = farOff
+	if mission.originStation then mission.originStation = farOff end
 	if mission.domicile then mission.domicile = farOff end
 	if mission.station then mission.station = farOff end
 	if mission.backstation then mission.backstation = farOff end
@@ -5429,6 +5499,52 @@ function PlayerFleet.StepBackgroundScans(budgetMs)
 				updateScanProgressDisplay(entry, scan)
 			end
 		end
+	end
+end
+
+local function recordFleetFrontlineActivity(entry, sysPath, activityType, simTime, silentComms)
+	if not entry or not sysPath then return end
+	local now = simTime or Game.time or 0
+	local cooldown = (activityType == "PATROL") and 600 or 900
+	if (now - (entry.lastFrontlineTickTime or 0)) < cooldown then return end
+
+	local okSys, sys = pcall(function() return sysPath:GetStarSystem() end)
+	if not okSys or not sys or not sys.name then return end
+
+	local okFC, FrontlineCommon = pcall(require, 'modules.FrontlineSupport.FrontlineCommon')
+	if not (okFC and FrontlineCommon and FrontlineCommon.GetCrisisForSystem and FrontlineCommon.RecordFrontlineContribution) then
+		return
+	end
+
+	local crisis = FrontlineCommon.GetCrisisForSystem(sys.name)
+	if not crisis then return end
+
+	entry.lastFrontlineTickTime = now
+	local sysFaction = (sys.faction and sys.faction.name) or nil
+	if activityType == "PATROL" then
+		FrontlineCommon.RecordFrontlineContribution({
+			systemName    = sys.name,
+			factionName   = sysFaction,
+			crisisDelta   = 1.5,
+			militaryXP    = 10,
+			commendations = 0,
+			standingDelta = 1,
+			reason        = "Fleet frontline security patrol",
+			reward        = 0,
+		})
+		addLog(entry.shipName, string.format("Frontline security patrol stabilized %s (+1.5%% warfront relief).", sys.name), 0, now)
+	else
+		FrontlineCommon.RecordFrontlineContribution({
+			systemName    = sys.name,
+			factionName   = sysFaction,
+			crisisDelta   = 1.0,
+			militaryXP    = 5,
+			commendations = 0,
+			standingDelta = 1,
+			reason        = "Fleet frontline supply relief",
+			reward        = 0,
+		})
+		addLog(entry.shipName, string.format("Frontline trade delivery relieved %s (+1.0%% warfront relief).", sys.name), 0, now)
 	end
 end
 
@@ -5576,6 +5692,7 @@ tickAutoTrade = function(entry, simNow, isCatchUp, silentComms)
 					Comms.Message(string.format("%s completed trade at %s (Net profit: %s)", entry.shipName, tr.sellPathName, Format.Money(legNet, false)), entry.captain and entry.captain.name or "Fleet Trade")
 				end
 				PlayerFleet.AwardCaptainXP(entry, "navigation")
+				recordFleetFrontlineActivity(entry, tr.sellPath, "AUTO_TRADE", now, silentComms)
 			else
 				entry.locationPath = tr.sellPath
 				entry.locationName = tr.sellPathName
@@ -5862,6 +5979,7 @@ tickPatrol = function(entry, simNow, isCatchUp, silentComms)
 		local hullChip = math.max(0, Engine.rand:Integer(0, 6) - math.floor(combat / 25))
 		entry.hullPercent = math.max(30, (entry.hullPercent or 100) - hullChip)
 		applyOperationalFlightWear(entry, entry.locationPath, "COMBAT")
+		recordFleetFrontlineActivity(entry, entry.locationPath, "PATROL", sweepEnd, silentComms)
 	else
 		entry.hullPercent = math.max(30, (entry.hullPercent or 100) - Engine.rand:Integer(2, 5))
 		applyOperationalFlightWear(entry, entry.locationPath, "TRANSIT")
@@ -5937,13 +6055,16 @@ tickMissionOrder = function(entry, simNow, isCatchUp, silentComms)
 
 		local m = entry.missionRef
 		local retPath = p.missionReturnPath
-		if m and retPath and (m.type == "Scout" or m.type == "Combat" or (m.type == "CargoRun" and m.pickup)) then
-			if m.type == "CargoRun" and m.pickup and m.cargotype and (m.amount or 0) > 0 then
+		if m and retPath and (m.type == "Scout" or m.type == "Combat" or ((m.type == "CargoRun" or m.type == "FrontlineSupply") and m.pickup and not m.cargo_picked_up) or m.type == "FrontlineExtraction") then
+			if (m.type == "CargoRun" or m.type == "FrontlineSupply") and m.pickup and not m.cargo_picked_up and m.cargotype and (m.amount or 0) > 0 then
 				local cname = m.cargotype.name
 				entry.cargo[cname] = (entry.cargo[cname] or 0) + (m.amount or 0)
 				if (not isCatchUp) and entry.liveShip and entry.liveShip:exists() then
 					applyCargoToShip(entry.liveShip, entry.cargo)
 				end
+				m.cargo_picked_up = true
+			elseif m.type == "FrontlineExtraction" then
+				m.pickupDone = true
 			end
 			local siteDur = 60
 			p.missionStage = "ON_SITE"

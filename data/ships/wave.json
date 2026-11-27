@@ -14,7 +14,7 @@
 	"armor_mass": 24.2,
 	"volume": 434,
 	"atmospheric_pressure_limit": 14,
-	"capacity": 22,
+	"capacity": 36,
 	"cargo": 6,
 
 	"equipment_slots": {

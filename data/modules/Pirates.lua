@@ -15,7 +15,46 @@ local MissionUtils = require 'modules.MissionUtils'
 local ShipBuilder  = require 'modules.MissionUtils.ShipBuilder'
 local ShipRegistry = require 'modules.ShipRegistry.ShipRegistry'
 
+local Character = require 'Character'
 local Comms = require 'Comms'
+
+local function hasActiveFrontlineConvoyInSystem()
+	if not Game.system or not Game.system.name then return false end
+	local p = Character.persistent and Character.persistent.player
+	local missions = p and p.missions
+	if not missions then return false end
+	local sysLower = string.lower(Game.system.name)
+	for _, m in pairs(missions) do
+		if m.type == "FrontlineSupply" and m.status == "ACTIVE" and not m.fleetAssignedUid then
+			if m.crisisSystemName and string.lower(m.crisisSystemName) == sysLower then
+				return true
+			end
+			if m.destination and m.destination.IsSameSystem and Game.system.path and m.destination:IsSameSystem(Game.system.path) then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+local function getFrontlineInterdictionBonus()
+	if not Game.system or not Game.system.name then return 0, false end
+	local bonus = 0
+	local okMacro, MacroEngine = pcall(require, 'modules.MacroGalaxy.MacroGalaxyEngine')
+	if okMacro and MacroEngine and MacroEngine.GetCrisisForSystem then
+		local crisis = MacroEngine.GetCrisisForSystem(Game.system.name)
+		local piracyFx = (crisis and MacroEngine.GetPiracyEffectForCrisis) and MacroEngine.GetPiracyEffectForCrisis(crisis) or nil
+		if (crisis and crisis.category == "FRONTLINE") or piracyFx ~= nil then
+			local delta = (piracyFx and piracyFx.threatDeltaPct) and (piracyFx.threatDeltaPct / 100.0) or 0
+			bonus = bonus + math.max(0.10, delta)
+		end
+	end
+	local hasConvoy = hasActiveFrontlineConvoyInSystem()
+	if hasConvoy then
+		bonus = bonus + 0.15
+	end
+	return math.min(0.25, bonus), hasConvoy
+end
 
 local LIGHT_SPEED = 299792458.0
 local MAX_PLAYER_ATTACKERS = 2
@@ -135,13 +174,16 @@ local pirateIsInterested = function (player)
 	if systemBeyondInhabited then return false end
 	local lawlessness = (Game.system and Game.system.lawlessness) or 0.0
 	local cargoTons = player.usedCargo or 0
+	local flBonus, hasConvoy = getFrontlineInterdictionBonus()
 	if lawlessness < 0.15 then
-		if cargoTons <= 0 then return false end
-		return Engine.rand:Number(1) <= (lawlessness * 0.4 + math.min(0.08, cargoTons * 0.002))
+		if cargoTons <= 0 and flBonus <= 0 then return false end
+		local cap = (cargoTons <= 0 and not hasConvoy) and 0.15 or 0.30
+		local prob = lawlessness * 0.4 + math.min(0.08, cargoTons * 0.002) + flBonus
+		return Engine.rand:Number(1) <= math.min(cap, prob)
 	end
 	local baseProb = (lawlessness - 0.10) * 0.65
 	local cargoBonus = math.min(0.25, cargoTons * 0.008)
-	return Engine.rand:Number(1) <= math.min(0.75, baseProb + cargoBonus)
+	return Engine.rand:Number(1) <= math.min(0.85, baseProb + cargoBonus + flBonus)
 end
 
 local shouldInterdictPlayerInSC = function (player)
@@ -149,16 +191,18 @@ local shouldInterdictPlayerInSC = function (player)
 	if systemBeyondInhabited then return false end
 	local lawlessness = (Game.system and Game.system.lawlessness) or 0.0
 	local cargoTons = player.usedCargo or 0
+	local flBonus, hasConvoy = getFrontlineInterdictionBonus()
 	if lawlessness < 0.15 then
-		if cargoTons <= 0 then return false end
-		local prob = math.min(0.06, lawlessness * 0.25 + math.min(0.04, cargoTons * 0.002))
+		if cargoTons <= 0 and flBonus <= 0 then return false end
+		local cap = (flBonus <= 0) and 0.06 or ((cargoTons <= 0 and not hasConvoy) and 0.12 or 0.25)
+		local prob = math.min(cap, lawlessness * 0.25 + math.min(0.04, cargoTons * 0.002) + flBonus)
 		return Engine.rand:Number(1) <= prob
 	elseif lawlessness < 0.40 then
-		local prob = 0.03 + (lawlessness - 0.15) * 0.35 + math.min(0.12, cargoTons * 0.005)
-		return Engine.rand:Number(1) <= math.min(0.25, prob)
+		local prob = 0.03 + (lawlessness - 0.15) * 0.35 + math.min(0.12, cargoTons * 0.005) + flBonus
+		return Engine.rand:Number(1) <= math.min(0.40, prob)
 	else
-		local prob = 0.14 + (lawlessness - 0.40) * 0.65 + math.min(0.25, cargoTons * 0.008)
-		return Engine.rand:Number(1) <= math.min(0.65, prob)
+		local prob = 0.14 + (lawlessness - 0.40) * 0.65 + math.min(0.25, cargoTons * 0.008) + flBonus
+		return Engine.rand:Number(1) <= math.min(0.75, prob)
 	end
 end
 
